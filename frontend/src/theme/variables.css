@@ -1,0 +1,2684 @@
+/* For information on how to create your own theme, please see:
+http://ionicframework.com/docs/theming/ */
+
+/* iOS26 Theme - kann durch Entfernen dieser Imports deaktiviert werden */
+@import '@rdlabo/ionic-theme-ios26/dist/css/default-variables.css';
+@import '@rdlabo/ionic-theme-ios26/dist/css/ionic-theme-ios26.css';
+@import '@rdlabo/ionic-theme-ios26/dist/css/md-remove-ios-class-effect.css';
+
+/* Material Design 3 Theme - fuer Android */
+@import '@rdlabo/ionic-theme-md3/dist/css/default-variables.css';
+@import '@rdlabo/ionic-theme-md3/dist/css/ionic-theme-md3.css';
+
+/* Headline-Schrift: Plus Jakarta Sans (wie Landing-Page) */
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+
+/* Globale Headline-Typografie (Plus Jakarta Sans) */
+.app-header-banner__title,
+.app-header-banner__subtitle,
+ion-list-header ion-label,
+.app-stats-row__value,
+.app-list-item__title,
+.app-dashboard-greeting,
+.app-dashboard-section__bg-label,
+.app-dashboard-section__title,
+.app-dashboard-glass-card h1,
+.app-dashboard-glass-card h2,
+.app-dashboard-glass-card h3,
+.app-text-main,
+.app-headline {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+}
+.app-header-banner__title {
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+ion-list-header ion-label {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.app-stats-row__value {
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+.app-list-item__title,
+.app-dashboard-glass-card h1,
+.app-dashboard-glass-card h2,
+.app-dashboard-glass-card h3 {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.app-text-main {
+  font-weight: 700;
+}
+
+/* iOS26 Required Color Brightness Variables */
+:root {
+  /* ============================================
+     APP COLOR TOKENS (Single Source of Truth)
+     ============================================ */
+  /* Domain-Farben - hier aendern wirkt ueberall */
+  --app-color-events: #dc2626;
+  --app-color-events-rgb: 220, 38, 38;
+  --app-color-activities: #047857;
+  --app-color-activities-rgb: 4, 120, 87;
+  --app-color-konfis: #5b21b6;
+  --app-color-konfis-rgb: 91, 33, 182;
+  --app-color-teamer: #be185d;
+  --app-color-teamer-rgb: 190, 24, 93;
+  --app-color-users: #667eea;
+  --app-color-users-rgb: 102, 126, 234;
+  --app-color-badges: #f59e0b;
+  --app-color-badges-rgb: 245, 158, 11;
+  --app-color-bonus: #f97316;
+  --app-color-bonus-rgb: 249, 115, 22;
+  --app-color-jahrgang: #007aff;
+  --app-color-jahrgang-rgb: 0, 122, 255;
+  --app-color-categories: #0ea5e9;
+  --app-color-categories-rgb: 14, 165, 233;
+  --app-color-material: #d97706;
+  --app-color-material-rgb: 217, 119, 6;
+  --app-color-chat: #06b6d4;
+  --app-color-chat-rgb: 6, 182, 212;
+  --app-color-level: #ec4899;
+  --app-color-level-rgb: 236, 72, 153;
+  --app-color-group: #f97316;
+  --app-color-group-rgb: 249, 115, 22;
+  /* Punkte-Typen */
+  --app-color-gottesdienst: #3b82f6;
+  --app-color-gottesdienst-rgb: 59, 130, 246;
+  --app-color-gemeinde: #059669;
+  --app-color-gemeinde-rgb: 5, 150, 105;
+  /* Status */
+  --app-color-success: #34c759;
+  --app-color-success-rgb: 52, 199, 89;
+  --app-color-warning: #ff9500;
+  --app-color-warning-rgb: 255, 149, 0;
+  --app-color-danger: #dc3545;
+  --app-color-danger-rgb: 220, 53, 69;
+  --app-color-info: #007aff;
+  --app-color-info-rgb: 0, 122, 255;
+
+  --ion-color-primary-brightness: #96FEFF;
+  --ion-color-primary-brightness-rgb: 150, 254, 255;
+  --ion-color-secondary-brightness: #a0e7ff;
+  --ion-color-secondary-brightness-rgb: 160, 231, 255;
+  --ion-color-tertiary-brightness: #96FEFF;
+  --ion-color-tertiary-brightness-rgb: 150, 254, 255;
+  --ion-color-success-brightness: #7aff90;
+  --ion-color-success-brightness-rgb: 122, 255, 144;
+  --ion-color-warning-brightness: #ffe066;
+  --ion-color-warning-brightness-rgb: 255, 224, 102;
+  --ion-color-danger-brightness: #ff7a7a;
+  --ion-color-danger-brightness-rgb: 255, 122, 122;
+  --ion-color-light-brightness: #ffffff;
+  --ion-color-light-brightness-rgb: 255, 255, 255;
+  --ion-color-medium-brightness: #b0b0b0;
+  --ion-color-medium-brightness-rgb: 176, 176, 176;
+  --ion-color-dark-brightness: #666666;
+  --ion-color-dark-brightness-rgb: 102, 102, 102;
+
+  --app-description-font-size: 0.85rem;
+
+  /* Generische Textfarben — Single source of truth fuer Inline-Style colors */
+  --app-text-primary: #333;
+  --app-text-secondary: #666;
+  --app-text-tertiary: #888;
+  --app-text-muted: #999;
+  --app-text-system: #8e8e93;
+}
+
+/* Custom App Styles */
+.app-gradient-background {
+  --background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+}
+
+/* App Card Styling - zentrale Klasse fuer alle Cards */
+ion-card.app-card {
+  --background: white;
+  box-shadow: none;
+  overflow: hidden;
+  margin: 0;
+}
+
+ion-card.app-card ion-card-content {
+  padding: 16px;
+}
+
+ion-card.app-card ion-card-content ion-list {
+  padding: 0;
+  margin: 0;
+}
+
+/* IonItems in app-card: Linien nicht durchgehend */
+ion-card.app-card ion-item {
+  --padding-start: 0;
+  --inner-padding-end: 0;
+}
+
+/* Kleinere Texte in app-card IonItems für kompakteres Layout */
+ion-card.app-card ion-item ion-label p {
+  font-size: 0.75rem;
+  color: #8e8e93;
+  margin-bottom: 2px;
+}
+
+ion-card.app-card ion-item ion-label h2 {
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+/* ============================================
+   WIEDERVERWENDBARE APP KOMPONENTEN
+   ============================================ */
+
+/* === List Items === */
+/* App List Item - Basis-Klasse fuer alle Listenelemente mit farbiger Border */
+.app-list-item {
+  border-top: 1px solid rgba(0,0,0,0.06);
+  border-right: 1px solid rgba(0,0,0,0.06);
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  border-left-width: 3px;
+  border-left-style: solid;
+  border-radius: 10px;
+  padding: 12px 16px;
+  background: white;
+  margin-bottom: 8px;
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+/* IonItem mit app-list-item - Klick-Feedback auf ganze Zeile */
+ion-item.app-list-item {
+  --background: white;
+  --background-activated: rgba(0, 0, 0, 0.08);
+  --background-focused: rgba(0, 0, 0, 0.06);
+  --background-hover: rgba(0, 0, 0, 0.04);
+  --ripple-color: transparent;
+  border-top: 1px solid rgba(0,0,0,0.06);
+  border-right: 1px solid rgba(0,0,0,0.06);
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  border-left-width: 3px;
+  border-left-style: solid;
+  border-radius: 10px;
+  margin-bottom: 8px;
+  overflow: hidden;
+}
+ion-item.app-list-item::part(native) {
+  padding: 12px 16px;
+  border-radius: 10px;
+}
+/* Abstände: IonItemSliding Wrapper bekommt auch margin-bottom */
+ion-item-sliding:has(.app-list-item) {
+  margin-bottom: 8px;
+}
+ion-item-sliding:has(.app-list-item) .app-list-item,
+ion-item-sliding:has(.app-list-item) ion-item.app-list-item {
+  margin-bottom: 0;
+}
+
+/* Letztes Element: kein margin-bottom */
+.app-list-item:last-child,
+ion-item.app-list-item:last-child,
+ion-item-sliding:last-child {
+  margin-bottom: 0;
+}
+
+/* Farbvarianten fuer List Items - linke Border */
+.app-list-item--events, ion-item.app-list-item--events { border-left-color: var(--app-color-events); }
+.app-list-item--chat, ion-item.app-list-item--chat { border-left-color: var(--app-color-chat); }
+.app-list-item--success, ion-item.app-list-item--success { border-left-color: var(--app-color-success); }
+.app-list-item--warning, ion-item.app-list-item--warning { border-left-color: var(--app-color-warning); }
+.app-list-item--danger, ion-item.app-list-item--danger { border-left-color: var(--app-color-danger); }
+.app-list-item--info, ion-item.app-list-item--info { border-left-color: var(--app-color-info); }
+.app-list-item--purple, ion-item.app-list-item--purple { border-left-color: var(--app-color-konfis); }
+.app-list-item--purple.app-list-item--selected { border-left-color: var(--app-color-konfis); background: rgba(var(--app-color-konfis-rgb), 0.08); }
+.app-list-item--booked, ion-item.app-list-item--booked { border-left-color: var(--app-color-info); }
+.app-list-item--primary, ion-item.app-list-item--primary { border-left-color: var(--app-color-konfis); }
+.app-list-item--bonus, ion-item.app-list-item--bonus { border-left-color: var(--app-color-bonus); }
+.app-list-item--activities, ion-item.app-list-item--activities { border-left-color: var(--app-color-activities); }
+.app-list-item--teamer, ion-item.app-list-item--teamer { border-left-color: var(--app-color-teamer); }
+.app-list-item--team, ion-item.app-list-item--team { border-left-color: var(--app-color-teamer); }
+.app-list-item--users, ion-item.app-list-item--users { border-left-color: var(--app-color-users); }
+.app-list-item--level, ion-item.app-list-item--level { border-left-color: var(--app-color-level); }
+.app-list-item--organizations, ion-item.app-list-item--organizations { border-left-color: var(--app-color-users); }
+.app-list-item--badges, ion-item.app-list-item--badges { border-left-color: var(--app-color-badges); }
+.app-list-item--categories, ion-item.app-list-item--categories { border-left-color: var(--app-color-categories); }
+.app-list-item--material, ion-item.app-list-item--material { border-left-color: var(--app-color-material); }
+.app-list-item--requests, ion-item.app-list-item--requests { border-left-color: var(--app-color-activities); }
+.app-list-item--jahrgang, ion-item.app-list-item--jahrgang { border-left-color: var(--app-color-jahrgang); }
+
+/* Chat-Raumtyp-Farben */
+/* (verschoben — siehe app-list-item--teamer Block) */
+.app-list-item--chat-jahrgang, ion-item.app-list-item--chat-jahrgang { border-left-color: var(--app-color-chat); }
+.app-list-item--konfi, ion-item.app-list-item--konfi { border-left-color: var(--app-color-konfis); }
+.app-list-item--group, ion-item.app-list-item--group { border-left-color: var(--app-color-group); }
+.app-list-item--gemeinde, ion-item.app-list-item--gemeinde { border-left-color: var(--app-color-gemeinde); }
+.app-list-item--gottesdienst, ion-item.app-list-item--gottesdienst { border-left-color: var(--app-color-gottesdienst); }
+
+/* Selected State — nur Hintergrundfarbe, KEIN extra border-color (linker Strich kommt aus Farbvariante) */
+.app-list-item--selected { background: rgba(var(--app-color-konfis-rgb), 0.08); }
+.app-list-item--events.app-list-item--selected { background: rgba(var(--app-color-events-rgb), 0.08); }
+.app-list-item--chat.app-list-item--selected { background: rgba(var(--app-color-chat-rgb), 0.08); }
+.app-list-item--team.app-list-item--selected { background: rgba(var(--app-color-teamer-rgb), 0.08); }
+.app-list-item--teamer.app-list-item--selected { background: rgba(var(--app-color-teamer-rgb), 0.08); }
+.app-list-item--warning.app-list-item--selected { background: rgba(var(--app-color-warning-rgb), 0.08); }
+.app-list-item--primary.app-list-item--selected { background: rgba(var(--app-color-konfis-rgb), 0.08); }
+.app-list-item--purple.app-list-item--selected { background: rgba(var(--app-color-konfis-rgb), 0.08); }
+.app-list-item--bonus.app-list-item--selected { background: rgba(var(--app-color-bonus-rgb), 0.08); }
+.app-list-item--activities.app-list-item--selected { background: rgba(var(--app-color-activities-rgb), 0.08); }
+.app-list-item--users.app-list-item--selected { background: rgba(var(--app-color-users-rgb), 0.08); }
+.app-list-item--level.app-list-item--selected { background: rgba(var(--app-color-level-rgb), 0.08); }
+.app-list-item--organizations.app-list-item--selected { background: rgba(var(--app-color-users-rgb), 0.08); }
+.app-list-item--info.app-list-item--selected { background: rgba(var(--app-color-info-rgb), 0.08); }
+.app-list-item--success.app-list-item--selected { background: rgba(var(--app-color-success-rgb), 0.08); }
+.app-list-item--konfi.app-list-item--selected { background: rgba(var(--app-color-konfis-rgb), 0.08); }
+.app-list-item--gemeinde.app-list-item--selected { background: rgba(var(--app-color-gemeinde-rgb), 0.08); }
+.app-list-item--gottesdienst.app-list-item--selected { background: rgba(var(--app-color-gottesdienst-rgb), 0.08); }
+.app-list-item--categories.app-list-item--selected { background: rgba(var(--app-color-categories-rgb), 0.08); }
+.app-list-item--jahrgang.app-list-item--selected { background: rgba(var(--app-color-jahrgang-rgb), 0.08); }
+
+/* === Reason Boxes === */
+/* App Reason Box - fuer Abmeldungen, Ablehnungen, etc. */
+/* Kein eigener linker Farbbalken: Reason-Boxen sitzen in app-list-item,
+   das bereits einen farbigen border-left hat (sonst Doppelung) */
+.app-reason-box {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+.app-reason-box--danger {
+  background-color: rgba(220, 53, 69, 0.08);
+  color: #666;
+}
+.app-reason-box--warning {
+  background-color: rgba(255, 149, 0, 0.08);
+  color: #666;
+}
+.app-reason-box--info {
+  background-color: rgba(0, 122, 255, 0.08);
+  color: #666;
+}
+.app-reason-box__label {
+  font-weight: 600;
+}
+.app-reason-box--danger .app-reason-box__label { color: #dc3545; }
+.app-reason-box--warning .app-reason-box__label { color: #ff9500; }
+.app-reason-box--info .app-reason-box__label { color: #007aff; }
+
+/* === Status Chips === */
+/* App Status Chip - fuer Status-Anzeigen */
+.app-chip {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.app-chip--events {
+  background-color: rgba(220, 38, 38, 0.15);
+  color: #dc2626;
+}
+.app-chip--success {
+  background-color: rgba(52, 199, 89, 0.15);
+  color: #34c759;
+}
+.app-chip--warning {
+  background-color: rgba(255, 149, 0, 0.15);
+  color: #ff9500;
+}
+.app-chip--danger {
+  background-color: rgba(220, 53, 69, 0.15);
+  color: #dc3545;
+}
+.app-chip--info {
+  background-color: rgba(0, 122, 255, 0.15);
+  color: #007aff;
+}
+.app-chip--chat {
+  background-color: rgba(6, 182, 212, 0.15);
+  color: #06b6d4;
+}
+.app-chip--purple {
+  background-color: rgba(91, 33, 182, 0.15);
+  color: #5b21b6;
+}
+
+/* === Corner Badges === */
+/* Flex-Container fuer mehrere Badges nebeneinander (oben rechts) */
+.app-corner-badges {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  flex-direction: row;
+  z-index: 10;
+}
+/* Trenner zwischen Badges (2px weiss) */
+.app-corner-badges__separator {
+  width: 2px;
+  background: white;
+  align-self: stretch;
+}
+/* Einzelner Badge (ohne Positionierung — Container uebernimmt) */
+.app-corner-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  color: white;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+/* Badge-Rundung innerhalb des Containers */
+.app-corner-badges .app-corner-badge {
+  border-radius: 0 0 10px 10px;
+}
+.app-corner-badges .app-corner-badge:last-child {
+  border-radius: 0 10px 0 10px;
+}
+.app-corner-badges .app-corner-badge:only-child {
+  border-radius: 0 10px 0 10px;
+}
+/* Bestehende Farb-Varianten */
+.app-corner-badge--events { background-color: var(--app-color-events); }
+.app-corner-badge--success { background-color: var(--app-color-success); }
+.app-corner-badge--warning { background-color: var(--app-color-warning); }
+.app-corner-badge--danger { background-color: var(--app-color-danger); }
+.app-corner-badge--info { background-color: var(--app-color-info); }
+.app-corner-badge--activities { background-color: var(--app-color-activities); }
+.app-corner-badge--gottesdienst { background-color: var(--app-color-gottesdienst); }
+.app-corner-badge--gemeinde { background-color: var(--app-color-gemeinde); }
+.app-corner-badge--chat { background-color: var(--app-color-chat); }
+.app-corner-badge--purple { background-color: var(--app-color-konfis); }
+/* Chat-Raumtyp-Farben */
+.app-corner-badge--team { background-color: var(--app-color-teamer); }
+.app-corner-badge--teamer { background-color: var(--app-color-teamer); }
+.app-corner-badge--chat-jahrgang { background-color: var(--app-color-chat); }
+.app-corner-badge--konfi { background-color: var(--app-color-konfis); }
+.app-corner-badge--group { background-color: var(--app-color-group); }
+/* Queue-Badge (orange, Icon-only, schmaler Padding) */
+.app-corner-badge--queue {
+  background-color: #ff9500;
+  padding: 4px 6px;
+}
+.app-corner-badge--queue ion-icon {
+  font-size: 0.75rem;
+}
+/* Fehler-Badge (rot, Icon-only, klickbar) */
+.app-corner-badge--error {
+  background-color: #dc3545;
+  padding: 4px 6px;
+  cursor: pointer;
+}
+.app-corner-badge--error ion-icon {
+  font-size: 0.75rem;
+}
+
+/* === Section Header Icons === */
+/* App Section Header Icon - runder farbiger Icon-Container */
+.app-section-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 8px;
+}
+.app-section-icon--events { background-color: var(--app-color-events); }
+.app-section-icon--chat { background-color: var(--app-color-chat); }
+.app-section-icon--success { background-color: var(--app-color-activities); }
+.app-section-icon--warning { background-color: var(--app-color-warning); }
+.app-section-icon--danger { background-color: var(--app-color-danger); }
+.app-section-icon--material { background-color: var(--app-color-material); }
+.app-section-icon--info { background-color: var(--app-color-info); }
+.app-section-icon--purple { background-color: var(--app-color-konfis); }
+.app-section-icon--konfis { background-color: var(--app-color-konfis); }
+.app-section-icon--primary { background-color: var(--app-color-konfis); }
+.app-section-icon--bonus { background-color: var(--app-color-bonus); }
+.app-section-icon--activities { background-color: var(--app-color-activities); }
+.app-section-icon--users { background-color: var(--app-color-users); }
+.app-section-icon--level { background-color: var(--app-color-level); }
+.app-section-icon--organizations { background-color: var(--app-color-users); }
+.app-section-icon--badges { background-color: var(--app-color-badges); }
+.app-section-icon--categories { background-color: var(--app-color-categories); }
+.app-section-icon--requests { background-color: var(--app-color-activities); }
+.app-section-icon--jahrgang { background-color: var(--app-color-jahrgang); }
+.app-section-icon--settings { background-color: var(--app-color-users); }
+.app-section-icon--teamer { background-color: var(--app-color-teamer); }
+.app-section-icon ion-icon {
+  color: white;
+  font-size: 0.8rem;
+}
+
+/* IonListHeader in inset IonList: Einrueckung reduzieren */
+ion-list[inset] ion-list-header {
+  --padding-start: 0;
+  padding-inline-start: 16px;
+}
+
+/* === Info Rows === */
+/* App Info Row - fuer Info-Zeilen mit Icon */
+.app-info-row {
+  display: flex;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+.app-info-row:last-child {
+  margin-bottom: 0;
+}
+.app-info-row__icon {
+  margin-right: 12px;
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+.app-info-row__content {
+  font-size: 1rem;
+  color: #333;
+}
+.app-info-row__sublabel {
+  font-size: 0.9rem;
+  color: #666;
+}
+
+/* === Icon Circles === */
+/* App Icon Circle - runder Icon-Container fuer Listen-Items */
+.app-icon-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+.app-icon-circle--lg {
+  width: 32px;
+  height: 32px;
+}
+.app-icon-circle--events { background-color: var(--app-color-events); }
+.app-icon-circle--chat { background-color: var(--app-color-chat); }
+.app-icon-circle--success { background-color: var(--app-color-success); }
+.app-icon-circle--warning { background-color: var(--app-color-warning); }
+.app-icon-circle--danger { background-color: var(--app-color-danger); }
+.app-icon-circle--info { background-color: var(--app-color-info); }
+.app-icon-circle--purple { background-color: var(--app-color-konfis); }
+.app-icon-circle--trophy { background-color: var(--app-color-warning); }
+.app-icon-circle--primary { background-color: var(--app-color-konfis); }
+.app-icon-circle--bonus { background-color: var(--app-color-bonus); }
+.app-icon-circle--activities { background-color: var(--app-color-activities); }
+.app-icon-circle--teamer { background-color: var(--app-color-teamer); }
+.app-icon-circle--team { background-color: var(--app-color-teamer); }
+.app-icon-circle--users { background-color: var(--app-color-users); }
+.app-icon-circle--level { background-color: var(--app-color-level); }
+.app-icon-circle--organizations { background-color: var(--app-color-users); }
+.app-icon-circle--badges { background-color: var(--app-color-badges); }
+.app-icon-circle--categories { background-color: var(--app-color-categories); }
+/* Chat-Raumtyp-Farben */
+/* (verschoben — siehe app-icon-circle--teamer Block) */
+.app-icon-circle--chat-jahrgang { background-color: var(--app-color-chat); }
+.app-icon-circle--konfi { background-color: #5b21b6; }
+.app-icon-circle--group { background-color: #f97316; }
+.app-icon-circle--material { background-color: #d97706; }
+.app-icon-circle--jahrgang { background-color: #007aff; }
+.app-icon-circle ion-icon {
+  color: white;
+  font-size: 0.9rem;
+}
+.app-icon-circle--lg ion-icon {
+  font-size: 1rem;
+}
+
+/* === Tags === */
+/* App Tag - kleine Kategorie/Label Tags */
+.app-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 4px 10px;
+  border-radius: 12px;
+  margin-right: 6px;
+  margin-bottom: 6px;
+}
+.app-tag--events {
+  background-color: rgba(220, 38, 38, 0.12);
+  color: #dc2626;
+}
+.app-tag--chat {
+  background-color: rgba(6, 182, 212, 0.12);
+  color: #06b6d4;
+}
+.app-tag--purple {
+  background-color: rgba(91, 33, 182, 0.12);
+  color: #5b21b6;
+}
+.app-tag--info {
+  background-color: rgba(0, 122, 255, 0.12);
+  color: #007aff;
+}
+.app-tag--success {
+  background-color: rgba(52, 199, 89, 0.12);
+  color: #34c759;
+}
+.app-tag--warning {
+  background-color: rgba(255, 149, 0, 0.12);
+  color: #ff9500;
+}
+
+/* === List Item Layout === */
+/* App List Item Layout - mit Chip rechts */
+.app-list-item__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+.app-list-item__main {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.app-list-item__main--centered {
+  align-items: center;
+}
+.app-list-item__content {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.app-list-item__title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-top: 4px;
+}
+/* Event-Titel duerfen bis ans Zeilenende laufen und bei Bedarf auf 2 Zeilen
+   umbrechen (statt frueh mit "..." gekuerzt zu werden, v.a. auf iOS wegen des
+   Badge-padding-right). */
+.app-list-item__title--events {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app-list-item__subtitle {
+  font-size: 0.8rem;
+  color: #666;
+  margin-top: 2px;
+}
+.app-list-item__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: #666;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+.app-list-item__meta-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.app-list-item__meta-item ion-icon {
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+/* Multiline-Variante: Icon oben buendig statt mittig (fuer lange Texte wie "Mitbringen") */
+.app-list-item__meta-item--multiline {
+  align-items: flex-start;
+}
+.app-list-item__meta-item--multiline ion-icon {
+  margin-top: 2px;
+}
+
+/* === App Farbvariablen === */
+:root {
+  --app-color-events: #dc2626;
+  --app-color-events-rgb: 220, 38, 38;
+  --app-color-chat: #06b6d4;
+  --app-color-chat-rgb: 6, 182, 212;
+  --app-color-success: #34c759;
+  --app-color-success-rgb: 52, 199, 89;
+  --app-color-warning: #ff9500;
+  --app-color-warning-rgb: 255, 149, 0;
+  --app-color-danger: #dc3545;
+  --app-color-danger-rgb: 220, 53, 69;
+  --app-color-info: #007aff;
+  --app-color-info-rgb: 0, 122, 255;
+  --app-color-purple: #5b21b6;
+  --app-color-purple-rgb: 91, 33, 182;
+  --app-color-trophy: #ff9500;
+  --app-color-activities: #047857;
+  --app-color-activities-rgb: 4, 120, 87;
+  --app-color-users: #667eea;
+  --app-color-users-rgb: 102, 126, 234;
+  --app-color-organizations: #667eea;
+  --app-color-organizations-rgb: 102, 126, 234;
+  --app-color-badges: #f59e0b;
+  --app-color-badges-rgb: 245, 158, 11;
+  --app-color-requests: #5b21b6;
+  --app-color-requests-rgb: 91, 33, 182;
+  --app-color-jahrgang: #007aff;
+  --app-color-jahrgang-rgb: 0, 122, 255;
+  --app-color-konfis: #5b21b6;
+  --app-color-konfis-rgb: 91, 33, 182;
+  --app-color-bonus: #f97316;
+  --app-color-bonus-rgb: 249, 115, 22;
+}
+
+/* iOS 26 TabBar: Verstärkter Blur-Effekt (näher am nativen iOS 26 Look) */
+/* Die Library setzt blur(2px) saturate(360%) -- wir erhöhen für realistischeren Glass-Effekt */
+ion-tab-bar.ios:not(.ios26-disabled) {
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* Android (MD): Tab-Bar muss die System-Gesten-/Navigationsleiste respektieren.
+   Ab Capacitor 8 ist Edge-to-Edge aktiv und env(safe-area-inset-bottom) liefert
+   den ECHTEN Inset der Gesten-/Navigationsleiste (z.B. 63px). Der frueher noetige
+   Mindest-Fallback max(env, 24px) wuerde nun zum echten Inset NOCH den alten
+   Mindestwert verrechnen und doppelten Abstand erzeugen — daher nur noch der
+   reine env-Wert (mit 0px-Fallback fuer Geraete ganz ohne Gesten-Bar).
+   !important gegen das global geladene iOS26-Theme-CSS. */
+ion-tab-bar.md {
+  padding-bottom: env(safe-area-inset-bottom, 0px) !important;
+  height: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
+  box-sizing: content-box !important;
+}
+
+/* Aeussere Tab-Buttons leicht einruecken, damit lange Labels (Aktivitaeten)
+   nicht am Bildschirmrand abgeschnitten werden. */
+ion-tab-bar.md ion-tab-button {
+  padding-left: 1px !important;
+  padding-right: 1px !important;
+}
+
+ion-tab-bar.md ion-tab-button ion-label,
+ion-tab-bar.md ion-tab-button .tab-button-text {
+  font-size: 0.6rem !important;
+  white-space: nowrap !important;
+  overflow: visible !important;
+}
+
+/* iOS26-Library Content-Gradient komplett neutralisieren */
+/* Die Library setzt ::before/::after Pseudo-Elemente fuer einen weissen Bottom-Gradient. */
+/* Stoert auf allen Plattformen — weg damit. */
+ion-content::part(background)::before,
+ion-content::part(background)::after {
+  content: none !important;
+}
+
+/* Solideres Popover Styling für IonSelect */
+ion-popover {
+  --background: #ffffff;
+  --backdrop-opacity: 0.3;
+  --box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25);
+}
+
+ion-popover::part(backdrop) {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+ion-popover::part(content) {
+  border-radius: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #ffffff;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
+}
+
+ion-popover ion-list {
+  background: #ffffff;
+}
+
+ion-popover ion-item {
+  --background: #ffffff;
+}
+
+ion-popover ion-select-popover ion-item {
+  --background: #ffffff;
+  --background-hover: rgba(6, 182, 212, 0.08);
+  --background-activated: rgba(6, 182, 212, 0.12);
+}
+
+/* === Fokus/Auswahl-Rahmen global entfernt (GUI-02) === */
+ion-checkbox {
+  --checkbox-background-checked: var(--ion-color-primary, #3880ff);
+  --border-color-checked: var(--ion-color-primary, #3880ff);
+}
+ion-checkbox::part(container) {
+  border-radius: 4px;
+}
+/* Fokus-Outline bei Items und Checkboxen entfernen */
+ion-item::part(native):focus,
+ion-item::part(native):focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+ion-checkbox:focus,
+ion-checkbox:focus-visible,
+ion-radio:focus,
+ion-radio:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+/* iOS/Android Highlight-Farbe bei focused Items neutralisieren */
+ion-item {
+  --highlight-color-focused: transparent;
+  --highlight-color-valid: transparent;
+  --highlight-color-invalid: transparent;
+}
+
+/* === Header Banner === */
+.app-header-banner {
+  border-radius: 20px;
+  padding: 24px;
+  margin: 16px;
+  margin-bottom: 16px;
+  position: relative;
+  overflow: hidden;
+}
+
+.app-header-banner__circle-top {
+  position: absolute;
+  top: -30px;
+  right: -30px;
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.app-header-banner__circle-bottom {
+  position: absolute;
+  bottom: -20px;
+  left: -20px;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.app-header-banner__info-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.22);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.app-header-banner__info-btn ion-icon {
+  font-size: 1.35rem;
+  color: white;
+}
+
+.app-header-banner__info-btn:active {
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.app-header-banner__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  position: relative;
+  z-index: 1;
+}
+
+.app-header-banner__icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.app-header-banner__icon ion-icon {
+  font-size: 1.6rem;
+  color: white;
+}
+
+.app-header-banner__title {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: white;
+}
+
+.app-header-banner__subtitle {
+  margin: 2px 0 0 0;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* === Teamer Domain Color === */
+.app-header-banner--teamer {
+  background: linear-gradient(135deg, var(--app-color-teamer) 0%, #be123c 100%);
+}
+
+/* === Stats Row === */
+.app-stats-row {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  position: relative;
+  z-index: 1;
+  flex-wrap: wrap;
+}
+
+.app-stats-row__item {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  padding: 10px 12px;
+  text-align: center;
+  flex: 1 1 0;
+  min-width: 80px;
+  max-width: 100px;
+}
+
+/* Grid-Variante fuer 5+ Stats (z.B. Profil mit 6 Stats) */
+.app-stats-row--grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  padding: 0 16px;
+}
+
+.app-stats-row--grid .app-stats-row__item {
+  min-width: unset;
+  max-width: unset;
+  flex: unset;
+}
+
+.app-stats-row__value {
+  font-size: 1.3rem;
+  font-weight: 800;
+  color: white;
+}
+
+.app-stats-row__label {
+  font-size: 0.65rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+/* === Empty States === */
+.app-empty-state {
+  text-align: center;
+  padding: 32px;
+}
+
+.app-empty-state__icon {
+  font-size: 3rem;
+  margin-bottom: 16px;
+  display: block;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.app-empty-state__title {
+  color: #666;
+  margin: 0 0 8px 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+.app-empty-state__text {
+  color: #999;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+/* === Status Chips === */
+.app-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.app-status-chip--success { background: rgba(52, 199, 89, 0.15); color: #34c759; }
+.app-status-chip--warning { background: rgba(255, 149, 0, 0.15); color: #ff9500; }
+.app-status-chip--danger { background: rgba(220, 53, 69, 0.15); color: #dc3545; }
+.app-status-chip--info { background: rgba(0, 122, 255, 0.15); color: #007aff; }
+.app-status-chip--purple { background: rgba(91, 33, 182, 0.15); color: #5b21b6; }
+.app-status-chip--neutral { background: rgba(142, 142, 147, 0.15); color: #8e8e93; }
+
+/* === Search Bar === */
+.app-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+}
+.app-search-bar__icon {
+  color: #8e8e93;
+  font-size: 1.2rem;
+  flex-shrink: 0;
+}
+
+/* === Settings Items === */
+.app-settings-item {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.app-settings-item__title {
+  font-weight: 500;
+  font-size: 0.95rem;
+  margin: 0;
+  color: #333;
+}
+.app-settings-item__subtitle {
+  font-size: 0.75rem;
+  color: #8e8e93;
+  margin: 2px 0 0 0;
+}
+
+/* === Segment Tabs === */
+.app-segment-wrapper {
+  margin: 16px;
+}
+
+/* === Info Box === */
+.app-info-box {
+  padding: 16px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+  margin: 0;
+}
+.app-info-box--blue {
+  background: rgba(0, 122, 255, 0.08);
+  border: 1px solid rgba(0, 122, 255, 0.2);
+  color: #007aff;
+}
+.app-info-box--neutral {
+  background: rgba(142, 142, 147, 0.08);
+  border: 1px solid rgba(142, 142, 147, 0.2);
+  color: #8e8e93;
+}
+.app-info-box--purple {
+  background: rgba(91, 33, 182, 0.08);
+  border: 1px solid rgba(91, 33, 182, 0.2);
+  color: #5b21b6;
+}
+.app-info-box--teamer {
+  background: rgba(var(--app-color-teamer-rgb), 0.08);
+  border: 1px solid rgba(var(--app-color-teamer-rgb), 0.2);
+  color: var(--app-color-teamer);
+}
+
+/* === Progress Bars === */
+.app-progress-bar {
+  height: 4px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+.app-progress-bar--thick {
+  height: 6px;
+  border-radius: 3px;
+}
+.app-progress-bar__track {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+.app-progress-bar__fill {
+  height: 100%;
+  border-radius: inherit;
+  transition: width 0.3s ease;
+}
+
+/* === Points Display === */
+.app-points-display {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  min-width: 50px;
+}
+.app-points-display__value {
+  font-size: 1.4rem;
+  font-weight: 800;
+}
+.app-points-display__target {
+  font-size: 0.7rem;
+  color: #999;
+}
+
+/* === Detail Header === */
+.app-detail-header {
+  border-radius: 24px;
+  padding: 0;
+  margin: 16px;
+  margin-bottom: 16px;
+  position: relative;
+  overflow: hidden;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+.app-detail-header__content {
+  position: relative;
+  z-index: 2;
+  padding: 24px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+.app-detail-header__title {
+  margin: 0 0 8px 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: white;
+}
+.app-detail-header__subtitle {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.9rem;
+}
+.app-detail-header__info-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.app-detail-header__info-chip {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.95);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* === Transparentes IonItem Wrapper === */
+/* IonItem das nur als Container fuer app-list-item dient */
+ion-item.app-item-transparent {
+  --background: transparent;
+  --padding-start: 0;
+  --padding-end: 0;
+  --inner-padding-end: 0;
+  --inner-border-width: 0;
+  --border-style: none;
+  --min-height: auto;
+}
+
+/* === Swipe-Actions (global) ===
+ * Einzige Quelle der Wahrheit fuer Swipe-Buttons (Groesse, Form, Farbe, Abstaende).
+ * Views setzen NUR die Klassen .app-swipe-actions / .app-swipe-action und je einen
+ * Farb-Modifier (--danger/--warning/...) am inneren .app-icon-circle.
+ * KEINE Inline-Styles fuer Groesse/Farbe/Abstand mehr — hier zentral aendern.
+ */
+ion-item-options.app-swipe-actions {
+  --ion-item-background: transparent;
+  border: none;
+  border-style: none;
+  gap: 0;
+}
+ion-item-option.app-swipe-action {
+  --background: transparent;
+  --background-activated: transparent;
+  --background-focused: transparent;
+  --background-hover: transparent;
+  --color: transparent;
+  --ripple-color: transparent;
+  --border-width: 0;
+  --border-style: none;
+  /* ion-item-option hat ein inneres native-Padding (Default ~0.7em je Seite),
+   * das ueber die CSS-Variablen --padding-* gesteuert wird. Bei zwei Buttons
+   * nebeneinander wuerde sich rechtes + linkes Padding verdoppeln, daher
+   * NUR links Abstand (10px), rechts 0 -> exakt 10px zwischen den Icons. */
+  --padding-start: 10px;
+  --padding-end: 0;
+  --padding-top: 0;
+  --padding-bottom: 0;
+  padding: 0;
+  min-width: auto;
+}
+/* Sicherung: inneren native-Part direkt auf das enge Padding zwingen
+ * (falls die --padding-Variablen vom Theme ueberschrieben werden). */
+ion-item-option.app-swipe-action::part(native) {
+  padding-left: 10px;
+  padding-right: 0;
+}
+/* Innerer Icon-Kreis im Swipe-Button: einheitliche Groesse/Form ueberall.
+ * Ueberschreibt das margin-top der Listen-Variante, damit der Kreis mittig sitzt. */
+.app-swipe-action .app-icon-circle {
+  width: 40px;
+  height: 40px;
+  margin-top: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18), inset 0 1px 2px rgba(255, 255, 255, 0.25);
+}
+.app-swipe-action .app-icon-circle ion-icon {
+  font-size: 1.2rem;
+}
+
+/* === List-Item Title mit Corner-Badge Platz === */
+.app-list-item__title--badge-space {
+  padding-right: 50px;
+}
+.app-list-item__title--badge-space-md {
+  padding-right: 60px;
+}
+.app-list-item__title--badge-space-lg {
+  padding-right: 80px;
+}
+
+/* === Info-Row Modifier === */
+.app-info-row--top {
+  align-items: flex-start;
+}
+
+/* === Section-Inset (margin: 16px fuer IonList inset) === */
+ion-list.app-section-inset {
+  margin: 16px;
+}
+ion-card-content.app-card-content {
+  padding: 16px;
+}
+
+/* === Globale Text-Klassen (ueberall wiederverwendbar) === */
+
+/* Haupttext — Titel, Labels, primaere Info (1rem, fett) */
+.app-text-main {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #333;
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* Subtext — sekundaere Info, Zeitangaben, Kategorien (0.85rem) */
+.app-text-sub {
+  font-size: 0.85rem;
+  color: #666;
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* Detail-Info-Row: Label klein CAPS oben, Wert gross fett unten */
+.app-info-row__label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #8e8e93;
+  line-height: 1.3;
+  margin: 0 0 2px 0;
+}
+.app-info-row__value {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #333;
+  line-height: 1.35;
+  margin: 0;
+}
+.app-info-row__value--multi > div {
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #333;
+  line-height: 1.35;
+}
+
+/* Beschreibung — Fliesstext, Details, laengere Texte (1rem, normal weight) */
+.app-description-text {
+  font-size: var(--app-description-font-size, 1rem);
+  line-height: 1.5;
+  color: #374151;
+  white-space: pre-wrap;
+  margin: 0;
+  padding: 0 4px;
+}
+
+/* === Titel mit Corner-Badge Platz (paddingRight fuer app-corner-badge) === */
+.app-list-item__title--with-badge {
+  padding-right: 70px;
+}
+.app-list-item__title--with-dual-badge {
+  padding-right: 120px;
+}
+
+/* === Condense-Toolbar (transparenter Large-Title Header) === */
+ion-toolbar.app-condense-toolbar {
+  --background: transparent;
+  --color: black;
+}
+ion-toolbar.app-condense-toolbar ion-title {
+  color: black;
+}
+
+/* === Innere IonList (transparent, kein Padding) === */
+ion-list.app-list-inner {
+  background: transparent;
+  padding: 0;
+  margin: 0;
+}
+
+/* === Action-Button (48px, abgerundet, fett) === */
+ion-button.app-action-button {
+  height: 48px;
+  --border-radius: 12px;
+  font-weight: 600;
+}
+
+/* === Range-Slider Wrapper (Min-Label, Slider, Wert) === */
+/* Nutzung:
+   <div class="app-range-row">
+     <span class="app-range-row__min">1</span>
+     <IonRange class="app-range app-range--events" ... />
+     <span class="app-range-row__value">{value}</span>
+   </div>
+*/
+.app-range-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.app-range-row__min {
+  font-size: 0.75rem;
+  color: #8e8e93;
+  min-width: 24px;
+  text-align: center;
+}
+.app-range-row__value {
+  font-size: 0.85rem;
+  font-weight: 600;
+  min-width: 28px;
+  text-align: center;
+}
+ion-range.app-range {
+  flex: 1;
+  padding: 8px 0;
+}
+/* Farb-Varianten via CSS-Token (gleiches Konzept = gleiche Farbe) */
+ion-range.app-range--events {
+  --bar-background: rgba(var(--app-color-events-rgb), 0.2);
+  --bar-background-active: var(--app-color-events);
+  --knob-background: var(--app-color-events);
+  --pin-background: var(--app-color-events);
+  --pin-color: #fff;
+}
+ion-range.app-range--events + .app-range-row__value,
+.app-range-row .app-range--events ~ .app-range-row__value {
+  color: var(--app-color-events);
+}
+/* Toggle in Events-Rot fuer Konsistenz */
+ion-toggle.app-toggle--events {
+  --track-background-checked: var(--app-color-events);
+  --handle-background-checked: #fff;
+}
+
+/* === Popover-Select breit (alle Optionen lesbar, keine Truncation) === */
+.app-select-popover--wide {
+  --width: min(92vw, 320px);
+  --max-width: 92vw;
+}
+.app-select-popover--wide ion-select-popover ion-label {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+/* === Button-Reihe (flex, gleiche Breite) === */
+.app-button-row {
+  display: flex;
+  gap: 8px;
+}
+.app-button-row ion-button {
+  flex: 1;
+}
+
+/* === Flex-Fill (flex: 1) === */
+.app-flex-fill {
+  flex: 1;
+}
+
+/* === Icon-Farb-Klassen === */
+/* Gleiches Konzept = gleiches Icon = gleiche Farbe ueberall */
+.app-icon-color--events { color: var(--app-color-events); }
+.app-icon-color--participants { color: var(--app-color-success); }
+.app-icon-color--users { color: var(--app-color-users); }
+.app-icon-color--warning { color: var(--app-color-warning); }
+.app-icon-color--badges { color: var(--app-color-warning); }
+.app-icon-color--category { color: var(--app-color-categories); }
+.app-icon-color--gottesdienst { color: var(--app-color-gottesdienst); }
+.app-icon-color--gemeinde { color: var(--app-color-gemeinde); }
+.app-icon-color--activities { color: var(--app-color-activities); }
+.app-icon-color--organizations { color: var(--app-color-users); }
+.app-icon-color--jahrgang { color: var(--app-color-jahrgang); }
+.app-icon-color--success { color: var(--app-color-success); }
+.app-icon-color--danger { color: var(--app-color-danger); }
+/* Semantische Aliase fuer Events-Listen */
+.app-icon-color--team { color: var(--app-color-konfis); }
+.app-icon-color--waitlist { color: var(--app-color-bonus); }
+.app-icon-color--points { color: var(--app-color-warning); }
+.app-icon-color--time { color: var(--app-color-bonus); }
+.app-icon-color--location { color: var(--app-color-events); }
+.app-icon-color--bring { color: var(--app-color-konfis); }
+.app-icon-color--material { color: var(--app-color-material); }
+.app-icon-color--muted { color: #999; }
+.app-icon-color--teamer { color: var(--app-color-teamer); }
+.app-icon-color--konfis { color: var(--app-color-konfis); }
+.app-icon-color--system { color: var(--app-text-system); }
+.app-icon-color--text-primary { color: var(--app-text-primary); }
+.app-icon-color--text-secondary { color: var(--app-text-secondary); }
+.app-icon-color--text-muted { color: var(--app-text-muted); }
+
+/* === Status-Box (Erfolg/Fehler/Warnung in Detail-Action-Bereichen) === */
+/* Nutzung: <div class="app-status-box app-status-box--success"> */
+.app-status-box {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border-width: 1px;
+  border-style: solid;
+}
+.app-status-box ion-icon {
+  font-size: 1.2rem;
+}
+.app-status-box--success {
+  background-color: rgba(var(--app-color-success-rgb), 0.12);
+  color: var(--app-color-success);
+  border-color: rgba(var(--app-color-success-rgb), 0.3);
+}
+.app-status-box--danger {
+  background-color: rgba(var(--app-color-danger-rgb), 0.12);
+  color: var(--app-color-danger);
+  border-color: rgba(var(--app-color-danger-rgb), 0.3);
+}
+.app-status-box--bonus {
+  background-color: rgba(var(--app-color-bonus-rgb), 0.12);
+  color: var(--app-color-bonus);
+  border-color: rgba(var(--app-color-bonus-rgb), 0.3);
+}
+.app-status-box--info {
+  background-color: rgba(var(--app-color-info-rgb), 0.12);
+  color: var(--app-color-info);
+  border-color: rgba(var(--app-color-info-rgb), 0.3);
+}
+.app-status-box--events {
+  background-color: rgba(var(--app-color-events-rgb), 0.12);
+  color: var(--app-color-events);
+  border-color: rgba(var(--app-color-events-rgb), 0.3);
+}
+
+/* === EventDetailView Helper-Klassen === */
+/* Icon mit leichtem Top-Offset fuer vertikale Ausrichtung */
+.app-event-detail__icon--align-top { margin-top: 4px; }
+.app-event-detail__icon--align-top-sm { margin-top: 2px; }
+
+/* Flex-Container fuer Zeitslot-Spalte */
+.app-event-detail__timeslot-list { flex: 1; }
+
+/* Zeitslot-Eintrag Abstand */
+.app-event-detail__timeslot-entry { margin-bottom: 4px; }
+.app-event-detail__timeslot-entry:last-child { margin-bottom: 0; }
+
+/* Hervorgehobener gebuchter Zeitslot */
+.app-event-detail__booked-slot {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-top: 8px;
+}
+
+/* Klickbarer Ort-Link */
+.app-event-detail__location-link {
+  color: #007aff;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+/* Beschreibung-Sektion mit Trennlinie */
+.app-event-detail__description-divider {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #e0e0e0;
+}
+
+/* Timeslot-Gruppe Abstand */
+.app-event-detail__slot-group { margin-bottom: 20px; }
+.app-event-detail__slot-group:last-child { margin-bottom: 0; }
+
+/* Eingerueckte Teilnehmer-Liste (unter Timeslots) */
+.app-event-detail__slot-participants {
+  margin-left: 16px;
+  margin-top: 8px;
+}
+
+/* Item-Sliding Reset (kein Border, nur Spacing) */
+.app-event-detail__sliding-item {
+  margin-bottom: 8px;
+  --border-width: 0;
+  --inner-border-width: 0;
+}
+.app-event-detail__sliding-item:last-child { margin-bottom: 0; }
+
+/* List-Item ohne Bottom-Margin (innerhalb Sliding) */
+.app-event-detail__list-item-flush { margin-bottom: 0; }
+
+/* Klickbarer Serien-Eintrag */
+.app-event-detail__series-link { cursor: pointer; }
+
+/* Icon mit rechtem Abstand (z.B. vor Button-Text) */
+.app-event-detail__icon-gap { margin-right: 8px; }
+
+/* Button-Abstand oben (z.B. TN-hinzufuegen unter Liste) */
+/* Button-Wrapper: gleicht Ionic ion-button margin (7px) aus */
+.app-event-detail__add-button-wrapper { margin-top: 12px; margin-bottom: -7px; }
+
+/* Icon etwas groesser (z.B. Abmeldungs-Icon) */
+.app-event-detail__icon-lg { font-size: 1.2rem; }
+
+/* Reason-Box Einrueckung */
+.app-event-detail__reason-indent { margin-left: 32px; }
+
+/* Action-Buttons Bereich */
+.app-event-detail__action-area {
+  padding: 16px;
+  padding-bottom: 32px;
+}
+
+/* === Stepper === */
+/* Plus/Minus-Stepper fuer Punkte-Eingabe */
+.app-stepper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 8px 0;
+}
+.app-stepper__value {
+  font-size: 2.5rem;
+  font-weight: 700;
+  color: #333;
+  min-width: 80px;
+  text-align: center;
+}
+.app-stepper__button {
+  width: 48px;
+  height: 48px;
+}
+.app-stepper__button ion-icon {
+  font-size: 1.5rem;
+}
+
+/* === Avatar Initialen === */
+/* Runder Kreis mit Initialen-Buchstaben */
+.app-avatar-initials {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: white;
+  flex-shrink: 0;
+}
+.app-avatar-initials--sm { width: 32px; height: 32px; font-size: 0.9rem; }
+.app-avatar-initials--lg { width: 48px; height: 48px; font-size: 1.3rem; }
+
+/* ============================================
+   MODAL KOMPONENTEN
+   ============================================ */
+
+/* === Modal Section === */
+/* Container fuer eine Formular-Sektion in einem Modal */
+.app-modal-section {
+  margin: 16px;
+}
+
+/* === Modal Section Header === */
+/* Flexbox-Container fuer Section-Header in Modals */
+.app-modal-section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px;
+  margin-bottom: 8px;
+}
+.app-modal-section-header h3 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #333;
+}
+
+/* === Modal Footer === */
+/* Footer-Bereich fuer Modal-Buttons */
+.app-modal-footer {
+  padding: 16px;
+  background: var(--ion-background-color, #f4f5f8);
+}
+.app-modal-footer ion-button {
+  --border-radius: 12px;
+  font-weight: 600;
+}
+
+/* === Modal Close Button === */
+/* Einheitlicher X-Button Style */
+ion-button.app-modal-close-btn {
+  --background: #f8f9fa;
+  --background-hover: #e9ecef;
+  --color: #6c757d;
+  --border-radius: 8px;
+}
+
+/* === Modal Submit Button === */
+/* Basis-Submit-Button (Farbe wird per Variante gesetzt) */
+ion-button.app-modal-submit-btn {
+  --color: white;
+  --border-radius: 8px;
+}
+/* Farb-Varianten passend zu Domain-Farben */
+ion-button.app-modal-submit-btn--events {
+  --background: var(--app-color-events);
+  --background-hover: #b91c1c;
+}
+ion-button.app-modal-submit-btn--activities {
+  --background: var(--app-color-activities);
+  --background-hover: #065f46;
+}
+ion-button.app-modal-submit-btn--badges {
+  --background: var(--app-color-badges);
+  --background-hover: #d97706;
+}
+ion-button.app-modal-submit-btn--konfi {
+  --background: var(--app-color-konfis);
+  --background-hover: #4c1d95;
+}
+ion-button.app-modal-submit-btn--settings {
+  --background: var(--app-color-users);
+  --background-hover: #5a6fd6;
+}
+ion-button.app-modal-submit-btn--teamer {
+  --background: var(--app-color-teamer);
+  --background-hover: #831843;
+}
+ion-button.app-modal-submit-btn--level {
+  --background: var(--app-color-level);
+  --background-hover: #db2777;
+}
+ion-button.app-modal-submit-btn--chat {
+  --background: var(--app-color-chat);
+  --background-hover: #0891b2;
+}
+ion-button.app-modal-submit-btn--bonus {
+  --background: var(--app-color-bonus);
+  --background-hover: #ea580c;
+}
+
+/* === Modal Info Text === */
+/* Info-Text innerhalb von Modal-Sektionen */
+.app-modal-info-text {
+  font-size: 0.85rem;
+  color: #666;
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* ===== Auth Pages (Login, Register, ForgotPassword, ResetPassword) ===== */
+
+.app-auth-background {
+  --background:
+    radial-gradient(circle at 15% 8%, rgba(255, 255, 255, 0.30) 0%, transparent 45%),
+    radial-gradient(circle at 92% 100%, rgba(34, 211, 238, 0.80) 0%, transparent 52%),
+    linear-gradient(150deg, #8b5cf6 0%, #7c5cf0 32%, #5b8def 62%, #22d3ee 120%);
+  --overflow: auto;
+  position: relative;
+}
+.app-auth-background::part(scroll) {
+  min-height: 100%;
+}
+
+
+/* Freigestelltes Logo (Lutherrose+Herz) als grosses, angedeutetes
+   Wasserzeichen oben rechts — bricht aus dem Rahmen, einfarbig weiss. */
+.app-auth-ghost-icon {
+  position: absolute;
+  top: -10vh;
+  right: -22vw;
+  left: auto;
+  transform: rotate(-10deg);
+  width: 95vw;
+  height: 95vw;
+  max-width: none;
+  object-fit: contain;
+  opacity: 0.16;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Dekorative Bubbles im Hintergrund — hell/luftig, asymmetrisch verstreut */
+.app-auth-bubble {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.10);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.app-auth-bubble--soft {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Sterne ausgeschaltet (Cosmic-Variante deaktiviert) */
+.app-auth-star {
+  display: none;
+}
+
+/* Legacy: alte Floating Deko-Kreise (Register-Page) */
+.app-auth-bg-circle {
+  position: fixed;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.app-auth-container {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 100%;
+  padding: 20px;
+  padding-bottom: env(safe-area-inset-bottom, 20px);
+  position: relative;
+  z-index: 1;
+}
+
+.app-auth-hero {
+  text-align: center;
+  margin-bottom: 32px;
+  color: white;
+}
+
+/* App-Icon als Hero (Legacy fuer Register) */
+.app-auth-hero__logo {
+  width: 112px;
+  height: 112px;
+  border-radius: 28px;
+  display: block;
+  margin: 0 auto 24px auto;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.1);
+}
+
+/* Hero-Title — weiss auf dem Verlauf-BG */
+.app-auth-hero__title--cosmic {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 5.8rem;
+  line-height: 0.9;
+  letter-spacing: 6px;
+  margin: 0 0 12px 0;
+  color: #ffffff;
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+}
+
+/* Divider mit lila Akzent */
+.app-auth-hero__divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin: 16px auto 14px;
+  width: 60%;
+}
+.app-auth-hero__divider::before,
+.app-auth-hero__divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.6) 50%, transparent 100%);
+}
+.app-auth-hero__divider-icon {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  background: #ffffff;
+  transform: rotate(45deg);
+  border-radius: 1px;
+}
+
+.app-auth-hero__subtitle--cosmic {
+  font-size: 0.85rem;
+  opacity: 0.9;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: #ffffff;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+/* Legacy: bunte Icons-Reihe (für Register-Page noch in Nutzung) */
+.app-auth-hero__icons {
+  font-size: 4rem;
+  margin-bottom: 16px;
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+
+.app-auth-hero__icons--small {
+  font-size: 3.5rem;
+  margin-bottom: 12px;
+}
+
+.app-auth-hero__title {
+  font-size: 3rem;
+  font-family: 'Bebas Neue', sans-serif;
+  font-weight: 400;
+  margin: 0 0 8px 0;
+  text-shadow: 0 2px 12px rgba(0,0,0,0.25);
+  letter-spacing: 4px;
+}
+
+.app-auth-hero__title--small {
+  font-size: 3rem;
+}
+
+.app-auth-hero__subtitle {
+  font-size: 1rem;
+  opacity: 0.85;
+  margin: 0;
+  text-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  letter-spacing: 0.3px;
+}
+
+.app-auth-hero__subtitle--small {
+  font-size: 1rem;
+}
+
+.app-auth-hero__circle {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 20px auto;
+}
+
+.app-auth-hero__circle-icon {
+  font-size: 2.5rem;
+  color: white;
+}
+
+.app-auth-card {
+  width: 100%;
+  max-width: 420px;
+  border-radius: 20px;
+  overflow: hidden;
+  /* Solider App-Card-Stil (keine Glasoptik) — passend zum Rest der App */
+  background: #ffffff;
+  border: none;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --background: #ffffff;
+  --color: #1c1c1e;
+}
+
+.app-auth-card--error {
+  border-color: rgba(220, 38, 38, 0.35);
+  box-shadow:
+    0 24px 60px rgba(220, 38, 38, 0.18),
+    0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+.app-auth-card--narrow {
+  max-width: 400px;
+}
+
+.app-auth-card__content {
+  padding: 28px 24px 22px 24px;
+}
+
+.app-auth-card__content--compact {
+  padding: 24px;
+}
+
+.app-auth-card__heading {
+  text-align: center;
+  margin-bottom: 22px;
+}
+
+.app-auth-card__heading h2 {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.7rem;
+  font-weight: 400;
+  letter-spacing: 3px;
+  margin: 0;
+  color: #5b21b6;
+}
+
+.app-auth-card__heading p {
+  color: rgba(0, 0, 0, 0.65);
+  margin: 8px 0 0 0;
+  font-size: 0.85rem;
+}
+
+.app-auth-input {
+  --background: #f2f2f7;
+  --color: #1f2937;
+  --placeholder-color: #9ca3af;
+  --placeholder-opacity: 1;
+  --highlight-color-focused: transparent;
+  --inner-border-width: 0;
+  --padding-start: 14px;
+  --padding-end: 14px;
+  background: #f2f2f7;
+  border: 1px solid #e5e5ea;
+  border-radius: 14px;
+  margin-bottom: 14px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.app-auth-input.item-has-focus,
+.app-auth-input:focus-within {
+  border-color: var(--ion-color-primary, #7c3aed);
+  box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15);
+}
+
+.app-auth-input--compact {
+  margin-bottom: 12px;
+}
+
+.app-auth-input__label {
+  color: #5b21b6;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  font-size: 0.75rem;
+}
+
+.app-auth-input__value {
+  --color: #1f2937;
+  --placeholder-color: #9ca3af;
+  --placeholder-opacity: 1;
+}
+
+.app-auth-input__toggle {
+  cursor: pointer;
+  font-size: 1.2rem;
+  color: #7c3aed;
+  margin-top: 20px;
+}
+/* Eye-Toggle sitzt auf dem hellen Input -> lila bleibt lesbar */
+
+.app-auth-button {
+  /* Dashboard-Backdrop-Verlauf — knallt auf der weissen Card, klare Haupt-Aktion */
+  --background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 50%, #4c1d95 100%);
+  --background-hover: linear-gradient(135deg, #8b4ff5 0%, #6b2bc7 50%, #5a23a8 100%);
+  --background-activated: linear-gradient(135deg, #6d28d9 0%, #4c1d95 100%);
+  --color: #ffffff;
+  --border-radius: 16px;
+  --box-shadow: 0 10px 28px rgba(91, 33, 182, 0.4);
+  height: 52px;
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.3rem;
+  font-weight: 400;
+  letter-spacing: 4px;
+  margin: 0;
+}
+
+.app-auth-error {
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.app-auth-error__icon {
+  font-size: 1.2rem;
+  color: #dc2626;
+  flex-shrink: 0;
+}
+
+.app-auth-error__text {
+  font-size: 0.85rem;
+  color: #991b1b;
+  flex: 1;
+}
+
+.app-auth-error__close {
+  font-size: 1.1rem;
+  color: #b91c1c;
+  cursor: pointer;
+}
+
+.app-auth-error--with-badge {
+  margin-top: 16px;
+}
+
+.app-auth-error__badge {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #dc2626 0%, #b91c1c 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(220, 38, 38, 0.3);
+}
+
+.app-auth-error__badge-icon {
+  font-size: 1.3rem;
+  color: white;
+}
+
+.app-auth-error__title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #991b1b;
+  margin-bottom: 2px;
+}
+
+.app-auth-error__detail {
+  font-size: 0.8rem;
+  color: #b91c1c;
+}
+
+.app-auth-link {
+  /* Links liegen auf der weissen Card -> Lila statt Weiss (sonst unsichtbar) */
+  color: #5b21b6;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.app-auth-link--muted {
+  color: rgba(91, 33, 182, 0.7);
+  font-size: 0.8rem;
+}
+
+.app-auth-link--strong {
+  font-weight: 700;
+}
+
+.app-auth-footer {
+  text-align: center;
+  margin-top: 16px;
+}
+
+.app-auth-footer--separator {
+  padding-top: 16px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+/* === Badge Popover auto-width === */
+.badge-popover-auto-width,
+.badge-detail-popover {
+  --width: auto;
+  --max-width: min(320px, 85vw);
+  --min-width: 200px;
+}
+
+.app-auth-invite-info {
+  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 100%);
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 20px;
+  color: white;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(91, 33, 182, 0.28);
+}
+
+.app-auth-invite-info__icon {
+  font-size: 2rem;
+  margin-bottom: 8px;
+  color: #fff;
+}
+
+.app-auth-invite-info__title {
+  font-family: 'Bebas Neue', sans-serif;
+  font-size: 1.3rem;
+  font-weight: 400;
+  letter-spacing: 2px;
+}
+
+.app-auth-invite-info__subtitle {
+  font-size: 0.85rem;
+  opacity: 0.9;
+}
+
+.app-auth-password-checks {
+  background: #f8f9fa;
+  border-radius: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  font-size: 0.8rem;
+}
+
+.app-auth-password-checks__grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.app-auth-password-match-error {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  font-size: 0.85rem;
+  color: #991b1b;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.app-auth-username-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 0.8rem;
+  margin-bottom: 12px;
+  border: 1px solid transparent;
+}
+
+.app-auth-username-status--available {
+  background: #ecfdf5;
+  border-color: #a7f3d0;
+  color: #065f46;
+}
+
+.app-auth-username-status--taken {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #991b1b;
+}
+
+.app-auth-username-status--checking {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #92400e;
+}
+
+.app-auth-retry-button {
+  --background: transparent;
+  --color: #7c3aed;
+  --border-color: rgba(124, 58, 237, 0.4);
+  --border-radius: 10px;
+  --border-width: 1px;
+  --border-style: solid;
+  height: 38px;
+  font-size: 0.85rem;
+  margin-top: 8px;
+}
+
+/* Lila Glass-Circle fuer Auth-Header-Icons (z.B. Mail/Lock) */
+.app-auth-hero__cosmic-circle {
+  width: 84px;
+  height: 84px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 20px auto;
+  box-shadow: 0 12px 28px rgba(91, 33, 182, 0.35);
+}
+
+.app-auth-hero__cosmic-circle-icon {
+  font-size: 2.4rem;
+  color: #fff;
+}
+
+.app-auth-success-circle {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 24px auto;
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.35);
+}
+
+.app-auth-success-circle--small {
+  width: 72px;
+  height: 72px;
+  border-radius: 22px;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  margin-bottom: 20px;
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.3);
+}
+
+.app-auth-success-circle__icon {
+  font-size: 3.5rem;
+  color: white;
+}
+
+.app-auth-success-circle__icon--small {
+  font-size: 2rem;
+}
+
+/* Shake Animation fuer Auth-Seiten */
+@keyframes app-auth-shake {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
+  20%, 40%, 60%, 80% { transform: translateX(5px); }
+}
+
+.app-auth-card--shaking {
+  animation: app-auth-shake 0.6s ease-in-out;
+}
+
+.app-auth-konfi-hint {
+  background: #f0f9ff;
+  border: 1px solid #bae6fd;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 0.8rem;
+  color: #0369a1;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 16px;
+  line-height: 1.4;
+}
+
+.app-auth-konfi-hint ion-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: #0284c7;
+}
+
+/* === Dashboard Sektionen === */
+/* Gemeinsame Sektion-Basis */
+.app-dashboard-section {
+  border-radius: 20px;
+  padding: 0;
+  margin-bottom: 16px;
+  position: relative;
+  overflow: hidden;
+  min-height: 160px;
+}
+
+/* Sektion Background-Text (grosse Schrift im Hintergrund) */
+.app-dashboard-section__bg-text {
+  position: absolute;
+  top: -5px;
+  left: 10px;
+  z-index: 1;
+}
+
+.app-dashboard-section__bg-label {
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  font-size: 2.9rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.08);
+  margin: 0;
+  line-height: 0.9;
+  letter-spacing: -2px;
+}
+
+/* Sektion Inhalt */
+.app-dashboard-section__content {
+  position: relative;
+  z-index: 2;
+  padding: 60px 24px 24px 24px;
+}
+
+.app-dashboard-section__content--compact {
+  padding: 60px 20px 20px 20px;
+}
+
+/* Sektion-Farben als Box-Shadow */
+.app-dashboard-section--konfirmation {
+  background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+  box-shadow: 0 8px 32px rgba(30, 58, 138, 0.25);
+}
+
+.app-dashboard-section--events {
+  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+  box-shadow: 0 8px 32px rgba(220, 38, 38, 0.25);
+  min-height: 180px;
+}
+
+.app-dashboard-section--konfispruch {
+  background: linear-gradient(135deg, #6d28d9 0%, #4338ca 100%);
+  box-shadow: 0 8px 32px rgba(109, 40, 217, 0.25);
+}
+
+.app-dashboard-section--tageslosung {
+  background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
+  box-shadow: 0 8px 32px rgba(6, 182, 212, 0.25);
+}
+
+.app-dashboard-section--badges {
+  background: linear-gradient(135deg, #f59e0b 0%, #e63946 100%);
+  box-shadow: 0 8px 32px rgba(245, 158, 11, 0.25);
+}
+
+.app-dashboard-section--zertifikate {
+  background: linear-gradient(135deg, var(--app-color-teamer) 0%, #831843 100%);
+  box-shadow: 0 8px 32px rgba(var(--app-color-teamer-rgb), 0.25);
+}
+
+.app-dashboard-section--ranking {
+  background: linear-gradient(135deg, #28a745 0%, #155724 100%);
+  box-shadow: 0 8px 32px rgba(40, 167, 69, 0.25);
+  min-height: 180px;
+}
+
+/* Dashboard Header Card */
+.app-dashboard-header {
+  background: linear-gradient(135deg, #7c3aed 0%, #5b21b6 50%, #4c1d95 100%);
+  border-radius: 24px;
+  padding: 24px;
+  margin-bottom: 16px;
+  box-shadow: 0 10px 40px rgba(91, 33, 182, 0.35);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Dekorative Kreise im Header */
+.app-dashboard-header__circle {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Dashboard Begruessing */
+.app-dashboard-greeting {
+  font-size: 1.8rem;
+  font-weight: 800;
+  margin: 0 0 4px 0;
+  color: white;
+  text-align: center;
+}
+
+.app-dashboard-subtitle {
+  font-size: 1rem;
+  margin: 0 0 20px 0;
+  color: rgba(255, 255, 255, 0.8);
+  text-align: center;
+}
+
+/* Glass-Chip (Level-Badge, Event-Count) */
+.app-dashboard-glass-chip {
+  display: inline-block;
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  border-radius: 8px;
+  padding: 6px 16px;
+  font-size: 0.9rem;
+  color: white;
+  font-weight: 600;
+}
+
+/* Glass-Card fuer innere Elemente (Ranking-Header, Event-Items) */
+.app-dashboard-glass-card {
+  background: rgba(255, 255, 255, 0.15);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+
+/* Tageslosung Zitat */
+.app-dashboard-quote {
+  font-size: 1.25rem;
+  line-height: 1.5;
+  font-style: normal;
+  color: white;
+  font-weight: 500;
+  margin: 0 0 16px 0;
+  font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+  padding-left: 16px;
+  border-left: 3px solid rgba(255, 255, 255, 0.5);
+}
+
+.app-dashboard-cite {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.85);
+  font-weight: 500;
+  display: block;
+  font-style: normal;
+  padding-left: 16px;
+}
+
+/* Kleiner Hinweis auf die gewaehlte Bibeluebersetzung (klickbar -> Auswahl) */
+.app-dashboard-translation-hint {
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.6);
+  font-weight: 500;
+  margin-top: 10px;
+  padding-left: 16px;
+}
+
+/* Meta-Info Zeile (Datum, Ort, Zeit) */
+.app-dashboard-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.app-dashboard-meta--light {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+/* Detail-Punkt (dunkle Punkte als Design-Element) */
+.app-dashboard-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+  display: inline-block;
+  margin: 0 6px;
+}
+
+/* Tab-Badge Overflow Fix */
+ion-tab-button {
+  overflow: visible;
+}
+ion-tab-button ion-badge {
+  position: absolute;
+  top: 4px;
+  right: calc(50% - 24px);
+  z-index: 10;
+  font-size: 0.65rem;
+  min-width: 16px;
+  height: 16px;
+  line-height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+}
+
+/* === Zertifikat-Karten === */
+/* Zertifikat-Karten: Gleiche Mindesthoehe */
+.app-cert-card {
+  min-height: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+/* === Badge-Grid === */
+/* Badge-Grid: Feste Breite, Name mit Ellipsis */
+.app-badge-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.app-badge-grid__item {
+  min-width: 0;  /* Verhindert Grid-Overflow durch langen Text */
+}
+
+.app-badge-grid__name {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* === Accordion Toggle-Icon: schmaler als Default === */
+ion-accordion ion-icon[slot="toggle-icon"],
+ion-accordion .ion-accordion-toggle-icon {
+  font-size: 18px;
+  color: var(--ion-color-medium, #92949c);
+  opacity: 0.7;
+}
+
+/* Dashboard-Settings: IonItem mit Toggle ganz rechts buendig */
+ion-item.app-dashboard-settings-item {
+  --background: transparent !important;
+  --padding-end: 0 !important;
+  --inner-padding-end: 0 !important;
+}
+/* Shadow DOM parts auf 0 */
+ion-item.app-dashboard-settings-item::part(native) {
+  padding-inline-end: 0 !important;
+  --padding-end: 0 !important;
+  --inner-padding-end: 0 !important;
+}
+/* Globales Toggle-Pattern: Switch in Page-Hauptfarbe.
+   iOS26 nutzt --track-background-checked plus --ion-color-base bei .ion-color */
+ion-toggle.app-toggle--users { --background-checked: var(--app-color-users) !important; --track-background-checked: var(--app-color-users) !important; --ion-color-base: var(--app-color-users) !important; --handle-background-checked: #fff !important; }
+ion-toggle.app-toggle--konfis { --background-checked: var(--app-color-konfis) !important; --track-background-checked: var(--app-color-konfis) !important; --ion-color-base: var(--app-color-konfis) !important; --handle-background-checked: #fff !important; }
+ion-toggle.app-toggle--teamer { --background-checked: var(--app-color-teamer) !important; --track-background-checked: var(--app-color-teamer) !important; --ion-color-base: var(--app-color-teamer) !important; --handle-background-checked: #fff !important; }
+ion-toggle.app-toggle--events { --background-checked: var(--app-color-events) !important; --track-background-checked: var(--app-color-events) !important; --ion-color-base: var(--app-color-events) !important; --handle-background-checked: #fff !important; }
+ion-toggle.app-toggle--badges { --background-checked: var(--app-color-badges) !important; --track-background-checked: var(--app-color-badges) !important; --ion-color-base: var(--app-color-badges) !important; --handle-background-checked: #fff !important; }
+ion-toggle.app-toggle--chat { --background-checked: var(--app-color-chat) !important; --track-background-checked: var(--app-color-chat) !important; --ion-color-base: var(--app-color-chat) !important; --handle-background-checked: #fff !important; }
+ion-toggle.app-toggle--jahrgang { --background-checked: var(--app-color-jahrgang) !important; --track-background-checked: var(--app-color-jahrgang) !important; --ion-color-base: var(--app-color-jahrgang) !important; --handle-background-checked: #fff !important; }
+ion-toggle.app-toggle--info { --background-checked: var(--app-color-info) !important; --track-background-checked: var(--app-color-info) !important; --ion-color-base: var(--app-color-info) !important; --handle-background-checked: #fff !important; }
+
+/* === Anwesenheits-Matrix (AttendanceMatrixModal) === */
+.attendance-matrix {
+  /* Nicht stauchen: Tabelle waechst mit dem Inhalt, Container scrollt horizontal */
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+.attendance-matrix th,
+.attendance-matrix td {
+  padding: 8px 6px;
+  text-align: center;
+  border-bottom: 1px solid #eee;
+  vertical-align: middle;
+}
+/* Einheitliche Zeilenhöhe in beiden Ansichten (Anwesenheit + Sprüche):
+   EXAKT gleiche Höhe erzwingen, damit beim Umschalten kein Sprung entsteht.
+   Ursache der Differenz war NICHT der Dot, sondern der line-box-Overhang des
+   Zellinhalts, der die Zelle über die height-Vorgabe wachsen liess (height auf
+   td wirkt nur als Minimum). Lösung: height + max-height fixieren die Zelle hart
+   auf 40px (max-height deckelt den Overhang), vertikales Padding raus, Inhalt
+   wird über line-height/vertical-align mittig gehalten. Beide Tabellen teilen
+   diese Regel -> identische Zeilenhöhe. Einzige erlaubte Abweichung: die
+   Spaltenbreiten rechts vom Sticky-Namen. */
+.attendance-matrix tbody td {
+  height: 40px;
+  max-height: 40px;
+  line-height: 24px;
+  padding-top: 0;
+  padding-bottom: 0;
+  box-sizing: border-box;
+}
+/* Einheitliche Header-Höhe in beiden Ansichten: der Event-Header (mit __event-date)
+   und der Sprüche-Header sollen exakt gleich hoch sein -> Kopfzeile springt nicht */
+.attendance-matrix thead th {
+  position: sticky;
+  top: 0;
+  background: #fafafa;
+  font-weight: 600;
+  color: #555;
+  border-bottom: 2px solid #ddd;
+  z-index: 1;
+  height: 44px;
+  box-sizing: border-box;
+}
+/* Feste Breite der Konfi-Spalte (statt nur min-width), damit die fixierte linke
+   Spalte beim Umschalten Anwesenheit <-> Sprüche exakt gleich breit bleibt */
+.attendance-matrix__th-konfi,
+.attendance-matrix__td-konfi {
+  text-align: left;
+  position: sticky;
+  left: 0;
+  background: #fff;
+  z-index: 2;
+  width: 140px;
+  min-width: 140px;
+  max-width: 140px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding-left: 12px;
+  /* fixierte Konfi-Spalte: rechte Trennkante beim horizontalen Scrollen */
+  box-shadow: 1px 0 0 #eee;
+}
+.attendance-matrix thead .attendance-matrix__th-konfi {
+  background: #fafafa;
+  z-index: 3;
+}
+.attendance-matrix__th-event {
+  min-width: 56px;
+  max-width: 80px;
+  cursor: pointer;
+}
+/* Konfispruch-Liste: jede Zelle in einer Zeile, nicht stauchen/umbrechen
+   (nur die Sprueche-Tabelle; in der Anwesenheitsmatrix bleiben die Status-Dots zentriert) */
+.attendance-matrix--sprueche .attendance-matrix__th-cell,
+.attendance-matrix--sprueche .attendance-matrix__td-cell {
+  text-align: left;
+  white-space: nowrap;
+  padding-right: 16px;
+}
+.attendance-matrix__event-date {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #333;
+  white-space: nowrap;
+}
+.attendance-matrix__th-summary,
+.attendance-matrix__td-summary {
+  min-width: 50px;
+  font-weight: 600;
+  background: #fafafa;
+}
+.attendance-matrix__summary-text {
+  font-size: 0.8rem;
+  color: #333;
+}
+.attendance-matrix__dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: 1.25rem;
+  /* vertical-align middle verhindert die Baseline-Lücke, die ein inline-flex
+     in der Tabellenzelle sonst erzeugt (sonst ist die Anwesenheits-Zeile ein
+     paar px höher als die reine Text-Zeile der Sprüche). */
+  vertical-align: middle;
+}
+.attendance-matrix__dot ion-icon {
+  font-size: 1.25rem;
+}
+.attendance-matrix__dot--present {
+  color: #22c55e;
+}
+.attendance-matrix__dot--absent {
+  color: #ef4444;
+}
+.attendance-matrix__dot--open {
+  color: #9ca3af;
+}
+.attendance-matrix__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: center;
+}
+.attendance-matrix__legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #555;
+}
+
+/* Dark Mode Support - DISABLED
+@media (prefers-color-scheme: dark) {
+  body {
+    --background: #1a1a1a;
+  }
+
+  .app-gradient-background {
+    --background: linear-gradient(135deg, #1a1a1a 0%, #2d2d2d 100%);
+  }
+}
+*/
+
+/* ============================================
+   Org-Switcher Button (Multi-Org, oben links im Header)
+   Icon + aktiver Org-Name. Standard-Toolbar-Farbe (kein Override),
+   Name kompakt + bei Bedarf abgeschnitten, damit der Seitentitel Platz behaelt.
+   ============================================ */
+.app-org-switcher-btn {
+  --padding-start: 6px;
+  --padding-end: 6px;
+}
+.app-org-switcher-btn::part(native) {
+  text-transform: none;
+}
+.app-org-switcher-btn .app-org-switcher-btn__name {
+  font-size: 0.85rem;
+  font-weight: 600;
+  margin-left: 4px;
+  white-space: nowrap;
+}
+
+/* Chat-Eingabefeld: max. ~5 Zeilen, danach scrollt der Inhalt IM Feld. Bei
+   autoGrow setzt Ionic die Hoehe des inneren <textarea> per inline-style auf
+   scrollHeight -> das !important deckelt das und macht es scrollbar (sonst kommt
+   man nicht mehr an bereits geschriebenen Text oberhalb heran). */
+.chat-message-textarea::part(native) {
+  /* Hoehe + overflow steuert resizeTextarea() (MessageInput) manuell.
+     Hier nur Touch-Scrolling im Feld erlauben. */
+  touch-action: pan-y;
+}

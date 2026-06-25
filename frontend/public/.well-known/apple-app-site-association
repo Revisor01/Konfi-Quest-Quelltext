@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "TEAMID.de.godsapp.konfiquest",
+        "paths": ["/register*", "/login*", "/konfi/*", "/admin/*"]
+      }
+    ]
+  },
+  "webcredentials": {
+    "apps": ["TEAMID.de.godsapp.konfiquest"]
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "name": "konfipoints-clean",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "react-vite"
+}

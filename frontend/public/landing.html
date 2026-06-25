@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Konfi Quest – Die Konfi-Zeit als Abenteuer</title>
+<meta name="description" content="Schluss mit Zetteln und Unterschriften. Konfi Quest macht moderne Konfi-Arbeit, die bei Jugendlichen ankommt: Punkte, Badges, Events, Chat – pädagogisch durchdacht, kirchlich sicher.">
+<meta property="og:title" content="Konfi Quest – Die Konfi-Zeit als Abenteuer">
+<meta property="og:description" content="Schluss mit Zetteln. Moderne Konfi-Arbeit für Konfis, Teamer:innen und die ganze Gemeinde.">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/png" href="/favicon.png">
+<!-- Hero-Mock: erste sichtbare Screenshots vorladen (kein Flackern beim Slide-Wechsel) -->
+<link rel="preload" as="image" href="/hero-ios-1.png">
+<link rel="preload" as="image" href="/hero-and-1.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+ --purple:#5b21b6;--purple7:#6d28d9;--violet:#7c3aed;
+ --cyan:#06b6d4;--cyan6:#0891b2;--accent:#22d3ee;
+ --ink:#0f172a;--ink-soft:#475569;--line:#e9edf3;
+ --bg:#fff;--bg-soft:#f6f8fc;
+ --grad:linear-gradient(120deg,#5b21b6,#7c3aed 45%,#06b6d4);
+ --display:'Plus Jakarta Sans','Inter',sans-serif;
+ --body:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+ --c-konfi:#7c3aed;--c-teamer:#0891b2;--c-leitung:#5b21b6;
+ /* App-Kategorie-Farben (wie in der App) */
+ --cat-gottesdienst:#3b82f6;--cat-gemeinde:#059669;--cat-events:#dc2626;
+ --cat-badges:#f59e0b;--cat-chat:#06b6d4;--cat-material:#d97706;
+ --cat-konfis:#5b21b6;--cat-level:#ec4899;--cat-bonus:#f97316;--cat-teamer:#be185d;
+}
+html{scroll-behavior:smooth;overflow-x:hidden;max-width:100%}
+body{font-family:var(--body);color:var(--ink);line-height:1.6;overflow-x:hidden;max-width:100vw;background:var(--bg);-webkit-font-smoothing:antialiased}
+.hero,section,header,.final{overflow-x:clip}
+a{text-decoration:none;color:inherit}
+.wrap{max-width:1180px;margin:0 auto;padding:0 1.5rem}
+
+/* reveal on scroll — nur aktiv wenn JS die .js-anim-Klasse setzt (sonst alles sichtbar) */
+.js-anim .reveal{opacity:0;transform:translateY(34px);transition:opacity .7s cubic-bezier(.16,1,.3,1),transform .7s cubic-bezier(.16,1,.3,1)}
+.js-anim .reveal.in{opacity:1;transform:none}
+.reveal.d1{transition-delay:.08s}.reveal.d2{transition-delay:.16s}.reveal.d3{transition-delay:.24s}.reveal.d4{transition-delay:.32s}
+@media(prefers-reduced-motion:reduce){.js-anim .reveal{opacity:1;transform:none;transition:none}}
+
+/* NAV */
+nav{position:fixed;inset:0 0 auto 0;z-index:100;background:rgba(255,255,255,.8);backdrop-filter:blur(16px);border-bottom:1px solid rgba(15,23,42,.06);transition:box-shadow .3s}
+.nav-in{max-width:1180px;margin:0 auto;padding:.8rem 1.5rem;display:flex;align-items:center;justify-content:space-between}
+.brand{display:flex;align-items:center;gap:.55rem;font-family:var(--display);font-weight:800;font-size:1.25rem}
+.brand img{width:34px;height:34px}
+.nav-links{display:flex;gap:2rem;align-items:center}
+.nav-links a{font-weight:500;color:var(--ink-soft);transition:color .2s}
+.nav-links a:hover{color:var(--purple)}
+.nav-cta{background:var(--grad);color:#fff!important;padding:.6rem 1.3rem;border-radius:999px;font-weight:600;transition:transform .2s,box-shadow .2s;background-size:160% 160%}
+.nav-cta:hover{transform:translateY(-2px);box-shadow:0 12px 28px rgba(91,33,182,.32)}
+/* Oben rechts: Store-Icons + Web-App — bleiben auch mobil sichtbar */
+.nav-right{display:flex;align-items:center;gap:1.6rem}
+.nav-actions{display:flex;align-items:center;gap:.55rem}
+.nav-store{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:11px;border:1px solid rgba(15,23,42,.12);color:var(--ink-soft);transition:color .2s,border-color .2s,transform .2s}
+.nav-store:hover{color:var(--purple);border-color:var(--purple);transform:translateY(-1px)}
+.nav-app{display:flex;align-items:center;gap:.45rem;border:1.5px solid var(--purple);color:var(--purple)!important;padding:.5rem 1.05rem;border-radius:999px;font-weight:600;transition:background .2s,color .2s,transform .2s}
+.nav-app:hover{background:var(--purple);color:#fff!important;transform:translateY(-1px)}
+@media(max-width:480px){.nav-app span{display:none}.nav-app{width:36px;height:36px;padding:0;justify-content:center;border-radius:11px}}
+
+/* HERO */
+.hero{position:relative;background:radial-gradient(125% 125% at 78% -5%,#7c3aed,#5b21b6 38%,#3b1382 68%,#1c0a48 100%);color:#fff;overflow:hidden;padding:8.5rem 0 8rem}
+.glow{position:absolute;border-radius:50%;pointer-events:none}
+.glow.a{top:-16%;left:-8%;width:48%;height:64%;background:radial-gradient(circle,rgba(255,255,255,.15),transparent 64%)}
+.glow.b{bottom:-34%;right:-14%;width:66%;height:100%;background:radial-gradient(circle,rgba(34,211,238,.36),transparent 60%);animation:drift 14s ease-in-out infinite}
+.glow.c{top:24%;left:36%;width:30%;height:40%;background:radial-gradient(circle,rgba(124,58,237,.4),transparent 62%);animation:drift 18s ease-in-out 2s infinite reverse}
+@keyframes drift{0%,100%{transform:translate(0,0)}50%{transform:translate(-26px,30px)}}
+.grid-bg{position:absolute;inset:0;background-image:linear-gradient(rgba(255,255,255,.045) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.045) 1px,transparent 1px);background-size:56px 56px;mask-image:radial-gradient(120% 80% at 50% 0%,#000,transparent 72%)}
+.hero-in{position:relative;z-index:3;display:grid;grid-template-columns:1.08fr .92fr;gap:3.2rem;align-items:center}
+/* Logo als grosses Hintergrund-Wasserzeichen (wie Social Studio): bricht oben-rechts aus, weiss, niedrige Deckkraft, leicht gedreht */
+.hero-watermark{position:absolute;top:-22%;right:-14%;width:62%;max-width:760px;opacity:.12;transform:rotate(-10deg);z-index:1;pointer-events:none;animation:floaty 9s ease-in-out infinite}
+@keyframes floaty{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
+.eyebrow{display:inline-flex;align-items:center;gap:.5rem;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);padding:.4rem 1rem;border-radius:999px;font-size:.82rem;font-weight:600;margin-bottom:1.3rem}
+.eyebrow .pip{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 0 rgba(34,211,238,.5);animation:pulse 2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(34,211,238,.5)}70%{box-shadow:0 0 0 8px rgba(34,211,238,0)}100%{box-shadow:0 0 0 0 rgba(34,211,238,0)}}
+h1.hh{font-family:var(--display);font-weight:800;font-size:clamp(2.7rem,5.6vw,4.4rem);line-height:1.03;letter-spacing:-.022em;margin-bottom:1.3rem}
+.rot{display:inline-block;background:linear-gradient(90deg,#22d3ee,#a5f3fc);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;transition:opacity .25s}
+.hclaim{font-family:var(--display);font-weight:700;font-size:clamp(1.3rem,2.6vw,1.7rem);color:rgba(255,255,255,.95);margin:-.4rem 0 1.1rem;letter-spacing:-.01em}
+.hclaim-accent{background:linear-gradient(90deg,#22d3ee,#a5f3fc);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.hsub{font-size:1.2rem;color:rgba(255,255,255,.86);max-width:34ch;margin-bottom:2rem}
+.hcta{display:flex;gap:.9rem;flex-wrap:wrap;margin-bottom:2rem}
+.btn{display:inline-flex;align-items:center;gap:.5rem;padding:.95rem 1.7rem;border-radius:999px;font-weight:600;font-size:1rem;transition:transform .2s,box-shadow .2s;cursor:pointer;border:none}
+.btn-light{background:#fff;color:var(--purple)}
+.btn-light:hover{transform:translateY(-3px);box-shadow:0 18px 42px rgba(0,0,0,.3)}
+.btn-ghost{background:rgba(255,255,255,.12);color:#fff;border:1.5px solid rgba(255,255,255,.32)}
+.btn-ghost:hover{background:rgba(255,255,255,.2);transform:translateY(-3px)}
+.htrust{display:flex;gap:1.5rem;flex-wrap:wrap;font-size:.86rem;color:rgba(255,255,255,.72)}
+.htrust span{display:inline-flex;align-items:center;gap:.45rem}
+.hero-art{position:relative;display:flex;justify-content:center;align-items:center;perspective:1600px}
+.device{position:relative;width:252px;height:520px;background:linear-gradient(160deg,#1e293b,#0f172a);border-radius:44px;padding:11px;box-shadow:0 44px 90px -22px rgba(0,0,0,.65),0 0 0 1px rgba(255,255,255,.06) inset;transition:transform .6s}
+.screen{position:relative;width:100%;height:100%;border-radius:33px;overflow:hidden;background:transparent}
+/* EIN einzelner zentrierter Mock. Frame UND Screen rotieren synchron: iOS-Frame
+   zeigt iOS-Screen, Android-Frame zeigt Android-Screen. KEIN CSS-Notch — die
+   Screenshots haben Statusbar (Dynamic Island bzw. Punch-Hole) eingebrannt. */
+.device{transform:translateY(8px) rotate(-1deg)}
+.device:hover{transform:translateY(-4px) rotate(0deg) scale(1.04)}
+/* Frame-Radius pro OS getrennt, abgestimmt auf die im Screenshot eingebrannte
+   Ecke: iOS ist randlos. Android (Pixel 9) hat eine schwarze Ecke mit ~12.6%
+   Radius eingebrannt (gemessen: ~136px bei 1080px Bildbreite) -> Screen-Radius
+   muss exakt darauf liegen, sonst bleibt schwarzer Rest. Frame = Screen + 11px. */
+.device--ios{border-radius:44px}
+.device--ios .screen{border-radius:33px}
+.device--android{border-radius:41px}
+.device--android .screen{border-radius:30px}
+/* Carousel-Swipe: inaktive Bilder sind nach rechts geparkt, das aktive sitzt
+   mittig. Beim Wechsel gleitet das alte nach links raus (.out), das neue von
+   rechts rein (.on). Slide + sanftes Fade. */
+.screen img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:top;border-radius:inherit;opacity:0;transform:translateX(100%);transition:transform .6s cubic-bezier(.45,.05,.3,1),opacity .6s}
+.screen img.on{opacity:1;transform:translateX(0)}
+.screen img.out{opacity:0;transform:translateX(-100%);transition:transform .6s cubic-bezier(.45,.05,.3,1),opacity .6s}
+.fbadge{position:absolute;background:rgba(255,255,255,.97);color:var(--ink);border-radius:16px;padding:.7rem .9rem;box-shadow:0 18px 40px rgba(0,0,0,.24);display:flex;align-items:center;gap:.6rem;font-size:.82rem;font-weight:600;z-index:4}
+.fbadge .ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:#fff;flex-shrink:0}
+.fb1{top:13%;left:-10%;animation:bob 4s ease-in-out infinite}
+.fb2{bottom:18%;right:-12%;animation:bob 4s ease-in-out .9s infinite}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-11px)}}
+.wave{position:absolute;left:0;bottom:-1px;display:block;width:100%;height:70px;z-index:2}
+
+/* PROBLEM (Zettel-Story) */
+.problem{background:var(--bg-soft);position:relative}
+.split{display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;align-items:stretch;max-width:980px;margin:0 auto}
+.scard{border-radius:24px;padding:2.4rem;position:relative;overflow:hidden}
+.scard.old{background:#fff;border:1px solid var(--line)}
+.scard.old .tag{color:#b91c1c}
+.scard.new{background:var(--ink);color:#fff;border:1px solid transparent}
+.scard.new::after{content:'';position:absolute;bottom:-40%;right:-10%;width:60%;height:120%;background:radial-gradient(circle,rgba(34,211,238,.25),transparent 60%)}
+.scard .tag{font-weight:700;font-size:.8rem;letter-spacing:.07em;text-transform:uppercase;margin-bottom:1rem;display:inline-flex;align-items:center;gap:.5rem;position:relative;z-index:1}
+.scard.new .tag{color:var(--accent)}
+.scard h3{font-family:var(--display);font-size:1.5rem;font-weight:800;margin-bottom:1.1rem;line-height:1.2;position:relative;z-index:1}
+.scard ul{list-style:none;position:relative;z-index:1}
+.scard li{padding-left:1.9rem;position:relative;margin-bottom:.7rem;font-size:.98rem}
+.scard.old li{color:var(--ink-soft)}
+.scard.new li{color:rgba(255,255,255,.82)}
+.scard li .mk{position:absolute;left:0;top:.1em;width:22px;height:22px;border-radius:50%;display:grid;place-items:center}
+.scard.old li .mk{background:#fee2e2;color:#b91c1c}
+.scard.new li .mk{background:rgba(34,211,238,.18);color:var(--accent)}
+.arrow-mid{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:54px;height:54px;border-radius:50%;background:var(--grad);display:grid;place-items:center;box-shadow:0 12px 30px rgba(91,33,182,.4);z-index:5}
+@media(max-width:760px){.arrow-mid{display:none}}
+
+/* SECTION SHELL */
+section.block{padding:6rem 0}
+.kicker{font-weight:700;font-size:.8rem;letter-spacing:.09em;text-transform:uppercase;background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;text-align:center;margin-bottom:.7rem}
+.sec-h{font-family:var(--display);font-weight:800;font-size:clamp(1.9rem,3.5vw,2.7rem);letter-spacing:-.02em;text-align:center;line-height:1.12;margin-bottom:1rem}
+.sec-p{text-align:center;color:var(--ink-soft);font-size:1.14rem;max-width:60ch;margin:0 auto 3.4rem}
+
+/* LUTHERROSE-Sektion (dunkel) */
+.rose{background:#0f172a;color:#fff;position:relative;overflow:hidden}
+.rose-glow{position:absolute;inset:0;background:radial-gradient(70% 110% at 22% 30%,rgba(124,58,237,.45),transparent 58%),radial-gradient(60% 100% at 88% 80%,rgba(6,182,212,.4),transparent 60%);pointer-events:none}
+.rose-in{position:relative;z-index:1;display:grid;grid-template-columns:.85fr 1.15fr;gap:3.5rem;align-items:center}
+.rose-art{position:relative;display:flex;justify-content:center;align-items:center}
+.rose-ring{position:absolute;width:340px;height:340px;border-radius:50%;background:radial-gradient(circle,rgba(124,58,237,.35),transparent 68%);pointer-events:none}
+.rose-logo{position:relative;width:220px;height:220px;
+ /* weisses logo-mark in Verlauffarbe einfaerben via mask */
+ background:linear-gradient(135deg,#a78bfa,#22d3ee);
+ -webkit-mask:url(/assets/icon/logo-mark.png) center/contain no-repeat;
+ mask:url(/assets/icon/logo-mark.png) center/contain no-repeat;
+ filter:drop-shadow(0 16px 40px rgba(34,211,238,.35));animation:floaty 7s ease-in-out infinite}
+.rose-kicker{font-weight:700;font-size:.8rem;letter-spacing:.09em;text-transform:uppercase;background:linear-gradient(90deg,#a78bfa,#22d3ee);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:.7rem}
+.rose-h{font-family:var(--display);font-weight:800;font-size:clamp(1.7rem,3.2vw,2.5rem);letter-spacing:-.02em;line-height:1.15;margin-bottom:1rem}
+.rose-p{color:rgba(255,255,255,.8);font-size:1.1rem;max-width:60ch}
+.rose-p b{color:#fff}
+
+/* PROMISE */
+.promise-h{font-family:var(--display);font-weight:800;font-size:clamp(1.8rem,3.6vw,2.7rem);letter-spacing:-.02em;text-align:center;max-width:20ch;margin:0 auto 1.4rem;line-height:1.16}
+.promise-h em{font-style:normal;background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.promise-body{max-width:62ch;margin:0 auto;text-align:center;color:var(--ink-soft);font-size:1.15rem}
+.promise-body b{color:var(--ink)}
+
+/* FEATURE-KARTEN (Feature × Rollen) */
+.legend{display:flex;gap:1.5rem;justify-content:center;flex-wrap:wrap;margin-bottom:3rem;font-size:.88rem;font-weight:600}
+.legend span{display:inline-flex;align-items:center;gap:.45rem;color:var(--ink-soft)}
+.legend .dot{width:11px;height:11px;border-radius:50%}
+.fgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.3rem}
+.fcard{--fc:#5b21b6;background:linear-gradient(165deg,color-mix(in srgb,var(--fc) 8%,#fff),#fff 62%);border:1px solid color-mix(in srgb,var(--fc) 18%,var(--line));border-radius:22px;padding:1.7rem;transition:transform .25s,box-shadow .25s,border-color .25s;position:relative;overflow:hidden}
+.fcard::before{content:'';position:absolute;inset:0 0 auto 0;height:5px;background:linear-gradient(90deg,var(--fc),color-mix(in srgb,var(--fc) 55%,#fff))}
+.fcard:hover{transform:translateY(-6px);box-shadow:0 24px 56px color-mix(in srgb,var(--fc) 26%,transparent);border-color:color-mix(in srgb,var(--fc) 38%,transparent)}
+.fcard-head{display:flex;align-items:center;gap:.8rem;margin-bottom:1.3rem}
+.fcard-head .fic{width:50px;height:50px;border-radius:14px;background:linear-gradient(145deg,var(--fc),color-mix(in srgb,var(--fc) 65%,#000 8%));display:grid;place-items:center;flex-shrink:0;box-shadow:0 10px 22px color-mix(in srgb,var(--fc) 38%,transparent)}
+.fcard-head h3{font-family:var(--display);font-size:1.25rem;font-weight:800;color:color-mix(in srgb,var(--fc) 78%,#0f172a)}
+.rrow{display:flex;gap:.7rem;padding:.6rem 0;border-top:1px solid color-mix(in srgb,var(--fc) 12%,var(--line))}
+.rrow .rlabel{flex-shrink:0;width:74px;font-size:.74rem;font-weight:700;text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:flex-start;gap:.35rem;padding-top:.1rem;color:var(--fc)}
+.rrow .rlabel .dot{width:8px;height:8px;border-radius:50%;margin-top:.42em;flex-shrink:0;background:var(--fc)!important}
+.rrow .rtext{font-size:.92rem;color:var(--ink-soft)}
+.rrow.empty .rtext{color:#cbd5e1;font-style:italic}
+.badge-explain{margin-top:1.3rem;background:linear-gradient(120deg,#fff,#f6f8fc);border:1px solid var(--line);border-radius:22px;padding:2.2rem;grid-column:1/-1}
+.be-head{display:flex;gap:1.1rem;align-items:flex-start;margin-bottom:1.5rem}
+.be-ic{width:54px;height:54px;border-radius:15px;background:var(--grad);display:grid;place-items:center;flex-shrink:0}
+.be-head h3{font-family:var(--display);font-size:1.4rem;font-weight:800;margin-bottom:.4rem}
+.be-head p{color:var(--ink-soft);font-size:1.02rem;max-width:68ch}
+.be-head p b{color:var(--ink)}
+.be-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.9rem}
+.be-item{background:#fff;border:1px solid var(--line);border-radius:14px;padding:.9rem 1.1rem;display:flex;flex-direction:column}
+.be-item b{font-family:var(--display);font-size:1rem;font-weight:700}
+.be-item span{color:var(--ink-soft);font-size:.86rem}
+.be-item.secret{background:linear-gradient(120deg,rgba(91,33,182,.08),rgba(6,182,212,.08));border-color:transparent}
+.more{margin-top:2.5rem;text-align:center}
+.more .more-h{font-family:var(--display);font-weight:700;font-size:1.1rem;color:var(--ink-soft);margin-bottom:1.2rem}
+.more-grid{display:flex;flex-wrap:wrap;gap:.7rem;justify-content:center}
+.more-chip{display:inline-flex;align-items:center;gap:.5rem;background:#fff;border:1px solid var(--line);border-radius:999px;padding:.55rem 1.1rem;font-size:.92rem;font-weight:500;color:var(--ink)}
+.more-chip svg{color:var(--cyan6);flex-shrink:0}
+
+/* SECURITY */
+.sec-banner{background:var(--ink);color:#fff;border-radius:28px;padding:3rem;display:grid;grid-template-columns:auto 1fr;gap:2rem;align-items:center;position:relative;overflow:hidden}
+.sec-banner::after{content:'';position:absolute;bottom:-40%;right:-8%;width:50%;height:120%;background:radial-gradient(circle,rgba(34,211,238,.22),transparent 60%)}
+.shield{width:84px;height:84px;border-radius:22px;background:var(--grad);display:grid;place-items:center;flex-shrink:0;position:relative;z-index:1}
+.sec-banner h3{font-family:var(--display);font-size:1.6rem;font-weight:800;margin-bottom:.6rem;position:relative;z-index:1}
+.sec-banner p{color:rgba(255,255,255,.82);max-width:62ch;position:relative;z-index:1}
+.sec-banner b{color:#fff}
+
+/* WHY */
+.why-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.4rem}
+.wcard{background:#fff;border:1px solid var(--line);border-radius:20px;padding:1.8rem;transition:transform .2s,box-shadow .2s}
+.wcard:hover{transform:translateY(-5px);box-shadow:0 16px 40px rgba(15,23,42,.07)}
+.wcard .wic{width:46px;height:46px;border-radius:13px;background:var(--grad);display:grid;place-items:center;margin-bottom:1rem}
+.wcard h4{font-family:var(--display);font-size:1.12rem;font-weight:700;margin-bottom:.45rem}
+.wcard p{color:var(--ink-soft);font-size:.95rem}
+
+/* PRICING */
+.price-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:1rem;margin-bottom:2rem}
+.pc{background:#fff;border:2px solid var(--line);border-radius:20px;padding:1.7rem 1.1rem;text-align:center;transition:transform .2s,border-color .2s,box-shadow .2s}
+.pc:hover{transform:translateY(-6px);border-color:var(--cyan);box-shadow:0 18px 44px rgba(6,182,212,.13)}
+.pc.feat{border-color:var(--purple);position:relative}
+.pc.feat::after{content:'Beliebt';position:absolute;top:-12px;left:50%;transform:translateX(-50%);background:var(--grad);color:#fff;font-size:.72rem;font-weight:700;padding:.25rem .9rem;border-radius:999px}
+.pc .tier{font-family:var(--display);font-weight:700;font-size:1.05rem}
+.pc .scope{color:var(--ink-soft);font-size:.84rem;margin:.3rem 0 1rem;min-height:2.4em}
+.pc .amt{font-family:var(--display);font-size:2rem;font-weight:800;background:var(--grad);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.pc .per{color:var(--ink-soft);font-size:.78rem}
+.trial{max-width:760px;margin:0 auto;background:linear-gradient(120deg,rgba(91,33,182,.06),rgba(6,182,212,.06));border:1px solid var(--line);border-radius:20px;padding:1.8rem 2rem;text-align:center}
+.trial h4{font-family:var(--display);font-size:1.25rem;font-weight:800;margin-bottom:.5rem}
+.trial p{color:var(--ink-soft)}
+.trial .pills{display:flex;gap:.6rem;justify-content:center;flex-wrap:wrap;margin-top:1rem}
+.pill{background:#fff;border:1px solid var(--line);border-radius:999px;padding:.4rem 1rem;font-weight:600;font-size:.9rem}
+.pill b{color:var(--purple)}
+
+/* STEPS */
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:1.5rem}
+.step{text-align:center;position:relative}
+.step .num{width:56px;height:56px;border-radius:50%;background:var(--grad);color:#fff;font-family:var(--display);font-weight:800;font-size:1.35rem;display:grid;place-items:center;margin:0 auto 1.1rem}
+.step h4{font-family:var(--display);font-weight:700;font-size:1.12rem;margin-bottom:.35rem}
+.step p{color:var(--ink-soft);font-size:.94rem}
+
+/* FINAL */
+.final{background:radial-gradient(125% 130% at 50% 0,#7c3aed,#5b21b6 44%,#1c0a48);color:#fff;text-align:center;position:relative;overflow:hidden}
+.final-h{font-family:var(--display);font-weight:800;font-size:clamp(2rem,4vw,3rem);letter-spacing:-.02em;margin-bottom:1rem;position:relative;z-index:1}
+.final p{font-size:1.2rem;color:rgba(255,255,255,.86);max-width:52ch;margin:0 auto 2.2rem;position:relative;z-index:1}
+.final .btn-light{position:relative;z-index:1}
+
+/* FOOTER */
+footer{background:#0b1220;color:#fff;padding:4rem 0 2rem}
+.foot-grid{display:grid;grid-template-columns:1.5fr 1fr 1.2fr 1fr;gap:2.5rem;margin-bottom:2.5rem}
+.foot-brand{display:flex;align-items:center;gap:.5rem;font-family:var(--display);font-weight:800;font-size:1.2rem;margin-bottom:.8rem}
+.foot-brand img{width:30px;height:30px}
+footer h4{font-size:.95rem;color:var(--accent);margin-bottom:.9rem;font-weight:700}
+footer a{display:block;color:rgba(255,255,255,.66);margin-bottom:.5rem;transition:color .2s;font-size:.95rem}
+footer a:hover{color:#fff}
+.foot-note{color:rgba(255,255,255,.6);font-size:.95rem}
+.foot-bottom{border-top:1px solid rgba(255,255,255,.1);padding-top:1.6rem;text-align:center;color:rgba(255,255,255,.5);font-size:.88rem}
+.spirit{margin-top:.4rem;font-style:italic;color:rgba(255,255,255,.4);font-size:.84rem;display:inline-flex;align-items:center;gap:.25rem;justify-content:center;flex-wrap:wrap}
+.spirit .bird{vertical-align:middle;transform:translateY(0);object-fit:contain}
+
+@media(max-width:980px){
+ /* minmax(0,1fr) statt 1fr: erlaubt der Spalte, schmaler als ihr Inhalt zu
+    werden. Sonst blaeht ein breites Kind (Phone-Mock) die Spalte ueber den
+    Viewport, die Headline laeuft rechts raus. */
+ .hero-in{grid-template-columns:minmax(0,1fr);text-align:center;gap:2.5rem}
+ .hsub{max-width:none;margin-left:auto;margin-right:auto}.hcta,.htrust{justify-content:center}
+ .hero-watermark{top:-8%;right:-30%;width:90%;opacity:.09}
+ /* Reihenfolge: Headline ZUERST, Phone darunter */
+ .hero-copy{order:0}.hero-art{order:1;margin-top:.5rem}
+ /* Nur noch EIN zentrierter Mock -> darf auf Mobil groesser sein, kein Quetschen mehr.
+    Leichter Schwebe-Effekt (bob) auch auf Mobil statt komplett statisch. */
+ .fbadge{display:none}.device{width:270px;height:556px;animation:bob 5s ease-in-out infinite}
+ .split{grid-template-columns:1fr}.fgrid,.why-grid{grid-template-columns:1fr}.be-grid{grid-template-columns:1fr 1fr}
+ .price-grid{grid-template-columns:repeat(2,1fr)}.steps{grid-template-columns:repeat(2,1fr)}
+ .rose-in{grid-template-columns:1fr;text-align:center;gap:2rem}.rose-art{order:-1}.rose-p{margin-left:auto;margin-right:auto}.rose-ring{width:220px;height:220px}.rose-logo{width:160px;height:160px}
+ .sec-banner{grid-template-columns:1fr;text-align:center;justify-items:center}
+ .foot-grid{grid-template-columns:1fr 1fr}.nav-links{display:none}
+}
+/* Smartphone: Feature-Karten-Zeilen umbrechen, kein Overflow */
+@media(max-width:640px){
+ .hero{padding:7rem 0 5rem}
+ /* Headline darf auf schmalen Screens umbrechen statt rechts auszulaufen.
+    Das &nbsp; vor dem rotierenden Wort wuerde den Umbruch sonst blockieren. */
+ h1.hh{font-size:clamp(1.9rem,8.2vw,2.6rem);overflow-wrap:break-word;word-break:break-word;hyphens:auto}
+ .hclaim{font-size:clamp(1.1rem,4.6vw,1.4rem)}
+ .hsub{font-size:1.05rem}
+ .rrow{flex-direction:column;gap:.15rem}
+ .rrow .rlabel{width:auto;padding-top:0}
+ .rrow .rtext{font-size:.95rem}
+ .be-grid{grid-template-columns:1fr}
+ .be-head{flex-direction:column;text-align:left}
+ .fcard{padding:1.4rem}
+ .more-grid{gap:.5rem}.more-chip{font-size:.85rem;padding:.45rem .9rem}
+}
+@media(max-width:520px){.price-grid,.steps,.foot-grid{grid-template-columns:1fr}section.block{padding:4rem 0}}
+</style>
+</head>
+<body>
+<nav>
+ <div class="nav-in">
+  <a href="#top" class="brand"><img src="/assets/icon/logo-mark.png" alt="">Konfi&nbsp;Quest</a>
+  <div class="nav-right">
+   <div class="nav-links">
+    <a href="#problem">Warum</a><a href="#features">Funktionen</a><a href="#sicherheit">Sicherheit</a><a href="#faq">FAQ</a><a href="#preise">Preise</a>
+    <a href="#kontakt" class="nav-cta">Kostenlos testen</a>
+   </div>
+   <div class="nav-actions">
+    <a href="https://apps.apple.com/de/app/id6748016619" target="_blank" rel="noopener" class="nav-store" title="Im App Store laden" aria-label="Im App Store laden">
+     <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M18.71,19.5C17.88,20.74 17,21.95 15.66,21.97C14.32,22 13.89,21.18 12.37,21.18C10.84,21.18 10.37,21.95 9.1,22C7.79,22.05 6.8,20.68 5.96,19.47C4.25,17 2.94,12.45 4.7,9.39C5.57,7.87 7.13,6.91 8.82,6.88C10.1,6.86 11.32,7.75 12.11,7.75C12.89,7.75 14.37,6.68 15.92,6.84C16.57,6.87 18.39,7.1 19.56,8.82C19.47,8.88 17.39,10.1 17.41,12.63C17.44,15.65 20.06,16.66 20.09,16.67C20.06,16.74 19.67,18.11 18.71,19.5M13,3.5C13.73,2.67 14.94,2.04 15.94,2C16.07,3.17 15.6,4.35 14.9,5.19C14.21,6.04 13.07,6.7 11.95,6.61C11.8,5.46 12.36,4.26 13,3.5Z"/></svg>
+    </a>
+    <a href="https://play.google.com/store/apps/details?id=de.godsapp.konfiquest" target="_blank" rel="noopener" class="nav-store" title="Bei Google Play laden" aria-label="Bei Google Play laden">
+     <svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor" aria-hidden="true"><path d="M3,20.5V3.5C3,2.91 3.34,2.39 3.84,2.15L13.69,12L3.84,21.85C3.34,21.6 3,21.09 3,20.5M16.81,15.12L6.05,21.34L14.54,12.85L16.81,15.12M20.16,10.81C20.5,11.08 20.75,11.5 20.75,12C20.75,12.5 20.53,12.9 20.18,13.18L17.89,14.5L15.39,12L17.89,9.5L20.16,10.81M6.05,2.66L16.81,8.88L14.54,11.15L6.05,2.66Z"/></svg>
+    </a>
+    <a href="/login" class="nav-app" title="Konfi Quest im Browser öffnen">
+     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+     <span>App öffnen</span>
+    </a>
+   </div>
+  </div>
+ </div>
+</nav>
+
+<!-- HERO -->
+<header class="hero" id="top">
+ <div class="glow a"></div><div class="glow b"></div><div class="glow c"></div><div class="grid-bg"></div>
+ <img src="/assets/icon/logo-mark.png" alt="" class="hero-watermark">
+ <div class="wrap hero-in">
+  <div>
+   <span class="eyebrow"><span class="pip"></span>Moderne Konfi-Arbeit, die ankommt</span>
+   <h1 class="hh">Die Konfi-Zeit als <span class="rot" id="rot">Abenteuer</span>.</h1>
+   <p class="hclaim">Glaube entdecken, <span class="hclaim-accent">Level für Level</span></p>
+   <p class="hsub">Schluss mit Zetteln und Unterschriften. Eine App, die Jugendliche wirklich öffnen – und die euch als Team den Rücken freihält.</p>
+   <div class="hcta">
+    <a href="#kontakt" class="btn btn-light">30 Tage kostenlos testen</a>
+    <a href="#problem" class="btn btn-ghost">Wie das funktioniert</a>
+   </div>
+   <div class="htrust">
+    <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Datenschutz nach DSG-EKD</span>
+    <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Auch offline nutzbar</span>
+    <span><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22d3ee" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>iOS &amp; Android</span>
+   </div>
+  </div>
+  <div class="hero-art">
+   <div class="device device--ios" id="heroDevice"><div class="screen">
+    <img src="/hero-ios-1.png" class="on" data-os="ios" alt="Konfi Quest auf dem Smartphone">
+    <img src="/hero-and-1.png" data-os="android" alt="">
+    <img src="/hero-ios-2.png" data-os="ios" alt="">
+    <img src="/hero-and-2.png" data-os="android" alt="">
+    <img src="/hero-ios-3.png" data-os="ios" alt="">
+    <img src="/hero-and-3.png" data-os="android" alt="">
+    <img src="/hero-ios-4.png" data-os="ios" alt="">
+    <img src="/hero-and-4.png" data-os="android" alt="">
+   </div></div>
+  </div>
+ </div>
+ <svg class="wave" viewBox="0 0 1440 70" preserveAspectRatio="none"><path fill="#f6f8fc" d="M0,46 C320,8 1120,78 1440,32 L1440,70 L0,70 Z"/></svg>
+</header>
+
+<!-- PROBLEM: Zettel-Story -->
+<section class="block problem" id="problem">
+ <div class="wrap">
+  <p class="kicker reveal">Mal ehrlich</p>
+  <h2 class="sec-h reveal d1">Noch immer Zettel und Unterschriften?</h2>
+  <p class="sec-p reveal d2">Konfis rennen mit Laufzetteln herum, auf denen Pastor:innen jeden Gottesdienstbesuch abzeichnen. Zettel gehen verloren, niemand hat den Überblick. Das geht 2026 wirklich besser.</p>
+  <div class="split">
+   <div class="scard old reveal d1">
+    <span class="tag"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>Vorher</span>
+    <h3>Der Zettel-Marathon</h3>
+    <ul>
+     <li><span class="mk"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>Laufzettel, die Konfis verlieren</li>
+     <li><span class="mk"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>Unterschriften nach jedem Gottesdienst</li>
+     <li><span class="mk"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>Excel-Listen, die niemand pflegt</li>
+     <li><span class="mk"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>„Warst du eigentlich da?" – keiner weiß es</li>
+     <li><span class="mk"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>Pflichttermine ohne Überblick</li>
+    </ul>
+   </div>
+   <div class="arrow-mid"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg></div>
+   <div class="scard new reveal d2">
+    <span class="tag"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>Mit Konfi Quest</span>
+    <h3>Ein Tipp – fertig</h3>
+    <ul>
+     <li><span class="mk"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg></span>Konfi reicht ein, ihr bestätigt mit einem Tipp</li>
+     <li><span class="mk"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg></span>Foto-Beleg statt Unterschrift</li>
+     <li><span class="mk"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg></span>Punktestand live, immer aktuell</li>
+     <li><span class="mk"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg></span>QR-Check-in bei jedem Event</li>
+     <li><span class="mk"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5"><polyline points="20 6 9 17 4 12"/></svg></span>Pflichttermine auf einen Blick ausgewertet</li>
+    </ul>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- LUTHERROSE -->
+<section class="block rose">
+ <div class="rose-glow"></div>
+ <div class="wrap rose-in">
+  <div class="rose-art">
+   <span class="rose-ring"></span>
+   <img src="/assets/icon/logo-mark.png" alt="Konfi Quest – Lutherrose mit Herz" class="rose-logo">
+  </div>
+  <div class="rose-copy">
+   <p class="rose-kicker">Das Zeichen dahinter</p>
+   <h2 class="rose-h">Eine Lutherrose – mit einem Herz darin</h2>
+   <p class="rose-p">Unser Logo greift die <b>Lutherrose</b> auf, das Glaubenszeichen Martin Luthers: ein schwarzes Kreuz in einem roten Herzen – „der Glaube ans Kreuz macht selig". Bei Konfi Quest rückt das <b>Herz in den Mittelpunkt</b>: Es geht um die jungen Menschen, ihre Gemeinschaft und ihren eigenen Weg im Glauben. Tradition und Aufbruch in einem Zeichen – genau das ist moderne Konfi-Arbeit.</p>
+  </div>
+ </div>
+</section>
+
+<!-- PROMISE -->
+<section class="block">
+ <div class="wrap">
+  <p class="kicker reveal">Warum es funktioniert</p>
+  <h2 class="promise-h reveal d1">Konfis erreicht man nicht mit dem <em>Hefter von 1995</em>.</h2>
+  <p class="promise-body reveal d2">Jugendliche leben auf dem Smartphone – genau dort holt Konfi Quest sie ab. Was Konfis ohnehin tun, wird sichtbar, belohnt und gefeiert.<br><br><b>Das ist moderne Konfi-Arbeit:</b> Punkte für echtes Engagement statt Anwesenheitspflicht. Badges und Level statt Abhaken. Ein Jahresrückblick, der bleibt – damit für euch Zeit bleibt für das Eigentliche: die Beziehung zu den Jugendlichen.</p>
+ </div>
+</section>
+
+<!-- PERSPECTIVES -->
+<section class="block" id="features" style="background:var(--bg-soft)">
+ <div class="wrap">
+  <p class="kicker reveal">Eine App, drei Blickwinkel</p>
+  <h2 class="sec-h reveal d1">Dasselbe Feature – für jede Rolle das Richtige</h2>
+  <p class="sec-p reveal d2">Konfis erleben ein Spiel, Teamer:innen ein Werkzeug, die Leitung den Überblick. Hier seht ihr, was jede Rolle in jedem Feature tut.</p>
+  <div class="fgrid">
+   <!-- PUNKTE -->
+   <div class="fcard reveal d1" style="--fc:var(--cat-gottesdienst)">
+    <div class="fcard-head"><span class="fic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12h8M12 8v8"/></svg></span><h3>Punkte</h3></div>
+    <div class="rrow konfi"><span class="rlabel"><span class="dot" style="background:#7c3aed"></span>Konfi</span><span class="rtext">Sammelt für Gottesdienst und Gemeinde</span></div>
+    <div class="rrow teamer"><span class="rlabel"><span class="dot" style="background:#0891b2"></span>Teamer</span><span class="rtext">Behält die eigenen Punkte im Blick</span></div>
+    <div class="rrow leitung"><span class="rlabel"><span class="dot" style="background:#5b21b6"></span>Leitung</span><span class="rtext">Vergibt Punkte, legt Ziele und Typen fest</span></div>
+   </div>
+   <!-- PUNKTE-VERLAUF -->
+   <div class="fcard reveal d2" style="--fc:var(--cat-gemeinde)">
+    <div class="fcard-head"><span class="fic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 8v4l3 2"/><circle cx="12" cy="12" r="9"/></svg></span><h3>Punkte-Verlauf</h3></div>
+    <div class="rrow konfi"><span class="rlabel"><span class="dot" style="background:#7c3aed"></span>Konfi</span><span class="rtext">Sieht jeden Punkt mit Datum und Grund</span></div>
+    <div class="rrow teamer"><span class="rlabel"><span class="dot" style="background:#0891b2"></span>Teamer</span><span class="rtext">Ruft die eigene Historie jederzeit ab</span></div>
+    <div class="rrow leitung"><span class="rlabel"><span class="dot" style="background:#5b21b6"></span>Leitung</span><span class="rtext">Hat den vollen Verlauf pro Konfi</span></div>
+   </div>
+   <!-- AKTIVITÄTEN -->
+   <div class="fcard reveal d3" style="--fc:var(--cat-konfis)">
+    <div class="fcard-head"><span class="fic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 15l2 2 4-4"/></svg></span><h3>Aktivitäten</h3></div>
+    <div class="rrow konfi"><span class="rlabel"><span class="dot" style="background:#7c3aed"></span>Konfi</span><span class="rtext">Reicht Erlebtes mit Foto-Beleg ein</span></div>
+    <div class="rrow teamer"><span class="rlabel"><span class="dot" style="background:#0891b2"></span>Teamer</span><span class="rtext">Reicht eigene Aktivitäten ein</span></div>
+    <div class="rrow leitung"><span class="rlabel"><span class="dot" style="background:#5b21b6"></span>Leitung</span><span class="rtext">Prüft Anträge und vergibt die Punkte</span></div>
+   </div>
+   <!-- EVENTS -->
+   <div class="fcard reveal d1" style="--fc:var(--cat-events)">
+    <div class="fcard-head"><span class="fic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></span><h3>Events</h3></div>
+    <div class="rrow konfi"><span class="rlabel"><span class="dot" style="background:#7c3aed"></span>Konfi</span><span class="rtext">Meldet sich an oder ab, mit automatischer Warteliste</span></div>
+    <div class="rrow teamer"><span class="rlabel"><span class="dot" style="background:#0891b2"></span>Teamer</span><span class="rtext">Sagt zu, wo Hilfe gebraucht wird</span></div>
+    <div class="rrow leitung"><span class="rlabel"><span class="dot" style="background:#5b21b6"></span>Leitung</span><span class="rtext">Plant Einzeltermine, Reihen und Pflichtevents mit Zeitfenstern</span></div>
+   </div>
+   <!-- EVENT-CHAT -->
+   <div class="fcard reveal d2" style="--fc:var(--cat-chat)">
+    <div class="fcard-head"><span class="fic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span><h3>Chat</h3></div>
+    <div class="rrow konfi"><span class="rlabel"><span class="dot" style="background:#7c3aed"></span>Konfi</span><span class="rtext">Schreibt im Jahrgang oder direkt ans Team</span></div>
+    <div class="rrow teamer"><span class="rlabel"><span class="dot" style="background:#0891b2"></span>Teamer</span><span class="rtext">Nutzt Team- und Event-Chats</span></div>
+    <div class="rrow leitung"><span class="rlabel"><span class="dot" style="background:#5b21b6"></span>Leitung</span><span class="rtext">Eröffnet zu jedem Event einen Chat, startet Umfragen</span></div>
+   </div>
+   <!-- ANWESENHEIT -->
+   <div class="fcard reveal d3" style="--fc:var(--cat-teamer)">
+    <div class="fcard-head"><span class="fic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 17h7"/></svg></span><h3>Anwesenheit</h3></div>
+    <div class="rrow konfi"><span class="rlabel"><span class="dot" style="background:#7c3aed"></span>Konfi</span><span class="rtext">Checkt sich per QR-Code beim Event ein</span></div>
+    <div class="rrow teamer"><span class="rlabel"><span class="dot" style="background:#0891b2"></span>Teamer</span><span class="rtext">Checkt sich selbst per QR ein</span></div>
+    <div class="rrow leitung"><span class="rlabel"><span class="dot" style="background:#5b21b6"></span>Leitung</span><span class="rtext">Wertet Pflichttermine in der Matrix aus</span></div>
+   </div>
+   <!-- JAHRGÄNGE -->
+   <div class="fcard reveal d1" style="--fc:var(--cat-material)">
+    <div class="fcard-head"><span class="fic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/></svg></span><h3>Jahrgänge</h3></div>
+    <div class="rrow konfi"><span class="rlabel"><span class="dot" style="background:#7c3aed"></span>Konfi</span><span class="rtext">Ist im eigenen Jahrgang unterwegs</span></div>
+    <div class="rrow teamer"><span class="rlabel"><span class="dot" style="background:#0891b2"></span>Teamer</span><span class="rtext">Betreut mehrere Jahrgänge gleichzeitig</span></div>
+    <div class="rrow leitung"><span class="rlabel"><span class="dot" style="background:#5b21b6"></span>Leitung</span><span class="rtext">Verwaltet beliebig viele Jahrgänge parallel</span></div>
+   </div>
+   <!-- BADGES -->
+   <div class="fcard reveal d2" style="--fc:var(--cat-badges)">
+    <div class="fcard-head"><span class="fic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><polygon points="12 2 15 9 22 9 17 14 18 21 12 17 6 21 7 14 2 9 9 9"/></svg></span><h3>Badges &amp; Level</h3></div>
+    <div class="rrow konfi"><span class="rlabel"><span class="dot" style="background:#7c3aed"></span>Konfi</span><span class="rtext">Schaltet Auszeichnungen und neue Level frei</span></div>
+    <div class="rrow teamer"><span class="rlabel"><span class="dot" style="background:#0891b2"></span>Teamer</span><span class="rtext">Sammelt eigene Teamer-Badges</span></div>
+    <div class="rrow leitung"><span class="rlabel"><span class="dot" style="background:#5b21b6"></span>Leitung</span><span class="rtext">Erstellt eigene Badges und Level</span></div>
+   </div>
+   <!-- ZERTIFIKATE -->
+   <div class="fcard reveal d3" style="--fc:var(--cat-level)">
+    <div class="fcard-head"><span class="fic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><circle cx="12" cy="8" r="6"/><path d="M8.5 14l-1 7 4.5-3 4.5 3-1-7"/></svg></span><h3>Zertifikate</h3></div>
+    <div class="rrow konfi empty"><span class="rlabel"><span class="dot" style="background:#7c3aed"></span>Konfi</span><span class="rtext">Für Konfis nicht relevant</span></div>
+    <div class="rrow teamer"><span class="rlabel"><span class="dot" style="background:#0891b2"></span>Teamer</span><span class="rtext">Hinterlegt Juleica, Erste Hilfe, Rettungsschwimmer</span></div>
+    <div class="rrow leitung"><span class="rlabel"><span class="dot" style="background:#5b21b6"></span>Leitung</span><span class="rtext">Vergibt Zertifikate samt Ablaufdatum</span></div>
+   </div>
+   <!-- BADGE-ERKLÄRBOX -->
+   <div class="badge-explain reveal">
+    <div class="be-head">
+     <span class="be-ic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><polygon points="12 2 15 9 22 9 17 14 18 21 12 17 6 21 7 14 2 9 9 9"/></svg></span>
+     <div><h3>Was bringen Badges?</h3><p>Jede:r kennt das von Schrittzähler-Apps oder Spielen: Man tut etwas – und bekommt sichtbar etwas dafür. Genauso funktionieren Badges. Geht ein Konfi zum ersten Mal in den Gottesdienst, erscheint <b>„Gottesdienst-Neuling"</b>. Wer mehrere Wochen dranbleibt, wird zum <b>„Dranbleiber:in"</b>. Manche Badges sind versteckt und tauchen überraschend auf. So werden aus Pflichtterminen kleine Erfolgserlebnisse – und genau das motiviert, dabeizubleiben.</p></div>
+    </div>
+    <div class="be-grid">
+     <div class="be-item"><b>Gottesdienst-Neuling</b><span>Für den ersten Gottesdienstbesuch</span></div>
+     <div class="be-item"><b>Dranbleiber:in</b><span>Mehrere Wochen ohne Pause aktiv</span></div>
+     <div class="be-item"><b>Ausgewogen</b><span>Punkte in beiden Kategorien gesammelt</span></div>
+     <div class="be-item"><b>Turbo-Konfi</b><span>Besonders früh besonders aktiv</span></div>
+     <div class="be-item"><b>1 Jahr Teamer:in</b><span>Ein Jahr Treue im Ehrenamt</span></div>
+     <div class="be-item secret"><b>Geheime Badges</b><span>Erscheinen überraschend, z.&nbsp;B. zu Ostern</span></div>
+    </div>
+   </div>
+  </div>
+
+  <!-- Und außerdem -->
+  <div class="more reveal">
+   <p class="more-h">Und außerdem in jeder Konfi Quest:</p>
+   <div class="more-grid">
+    <span class="more-chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Jahrgangsranking</span>
+    <span class="more-chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Konfirmationstermin buchen</span>
+    <span class="more-chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Tageslosung</span>
+    <span class="more-chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Konfi &amp; Teamer Wrapped</span>
+    <span class="more-chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Bonuspunkte mit Begründung</span>
+    <span class="more-chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Material für Team &amp; Leitung</span>
+    <span class="more-chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Einladungslinks pro Jahrgang</span>
+    <span class="more-chip"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>Rollennamen anpassbar</span>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- SECURITY -->
+<section class="block" id="sicherheit">
+ <div class="wrap">
+  <div class="sec-banner reveal">
+   <div class="shield"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M9 12l2 2 4-4"/></svg></div>
+   <div>
+    <h3>Ein geschützter Raum – beruhigend für die Eltern</h3>
+    <p>Konfis können sich <b>nicht gegenseitig privat anschreiben</b>. Direktnachrichten gehen ausschließlich an Teamer:innen und die Leitung. Niemand von außen hat Zugang: Beigetreten wird nur über den <b>Einladungslink der Gemeinde</b>. Keine Werbung, kein Tracking, kein Datenverkauf. Datenschutz nach dem <b>Datenschutzgesetz der EKD (DSG-EKD)</b>, jede Gemeinde streng getrennt.</p>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- WHY -->
+<section class="block" style="background:var(--bg-soft)">
+ <div class="wrap">
+  <p class="kicker reveal">Mehr als eine App</p>
+  <h2 class="sec-h reveal d1">Warum Gemeinden Konfi Quest wählen</h2>
+  <p class="sec-p reveal d2">Pädagogisch durchdacht, technisch solide, kirchlich sicher.</p>
+  <div class="why-grid">
+   <div class="wcard reveal d1"><div class="wic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg></div><h4>Pädagogisch durchdacht</h4><p>Gamification ist kein Selbstzweck. Punkte und Badges würdigen genau das Engagement, das ihr euch wünscht – statt es nur zu kontrollieren.</p></div>
+   <div class="wcard reveal d2"><div class="wic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="3"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg></div><h4>Trifft die Lebenswelt</h4><p>Fühlt sich an wie die Apps, die Konfis sowieso nutzen – mit Streaks, Rückblicken und Chat.</p></div>
+   <div class="wcard reveal d3"><div class="wic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11l-3 3-2-2"/></svg></div><h4>Vom Konfi zum Ehrenamt</h4><p>Der Übergang zum Teamer ist eingebaut – mit Juleica-Verwaltung. Nachwuchsgewinnung fürs Ehrenamt, by design.</p></div>
+   <div class="wcard reveal d1"><div class="wic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><h4>Datenschutz nach DSG-EKD</h4><p>Nach kirchlichem Datenschutzrecht entwickelt. Jede Gemeinde streng getrennt. Server in Deutschland.</p></div>
+   <div class="wcard reveal d2"><div class="wic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg></div><h4>Funktioniert ohne Netz</h4><p>Im Gemeindehaus kein Empfang? Eingaben werden gespeichert und synchronisiert, sobald wieder Netz da ist.</p></div>
+   <div class="wcard reveal d3"><div class="wic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg></div><h4>Skaliert mit euch</h4><p>Von der Einzelgemeinde über mehrere Jahrgänge bis zum Kirchenkreis – sauber getrennt pro Organisation.</p></div>
+  </div>
+ </div>
+</section>
+
+<!-- FAQ -->
+<section class="block" id="faq" style="background:var(--bg-soft)">
+ <div class="wrap">
+  <p class="kicker reveal">Gut zu wissen</p>
+  <h2 class="sec-h reveal d1">Häufige Fragen</h2>
+  <p class="sec-p reveal d2">Was die App kann, wie sie gedacht ist – und wie ihr sie an eure Gemeinde anpasst.</p>
+  <div class="faq reveal d1" style="max-width:820px;margin:2.5rem auto 0;display:flex;flex-direction:column;gap:.8rem">
+
+   <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
+    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Wie funktioniert das Punktesystem?</summary>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Konfi Quest führt zwei getrennte Punktekonten: Gottesdienst-Punkte und Gemeinde-Punkte. Jede Aktivität und jedes Event zahlt auf genau eine der beiden Kategorien ein. Beide werden getrennt angezeigt und ausgewertet – mit eigenen Zielwerten.</p>
+   </details>
+
+   <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
+    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Können wir eine der beiden Punktekategorien weglassen?</summary>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Ja. Pro Jahrgang lässt sich jede Kategorie einzeln ein- oder ausschalten und mit einem eigenen Zielwert versehen. Wenn ihr nur mit Gottesdienst-Punkten oder nur mit Gemeinde-Punkten arbeiten wollt, ist das problemlos möglich – und kann sich von Jahrgang zu Jahrgang unterscheiden.</p>
+   </details>
+
+   <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
+    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Können wir mehrere Jahrgänge verwalten?</summary>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Ja, beliebig viele. Jeder Jahrgang hat einen eigenen Namen und eigene Punkte-Einstellungen. Jahrgänge lassen sich anlegen, bearbeiten und – wenn keine Konfis mehr zugeordnet sind – wieder löschen.</p>
+   </details>
+
+   <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
+    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Wie tragen wir die Konfirmation ein – auch bei mehreren Terminen?</summary>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Ihr legt die Konfirmation als Event an und markiert es als Konfirmations-Termin. Gibt es mehrere Konfirmationen, erstellt ihr einfach mehrere solcher Konfirmations-Events – jedes mit eigenem Datum. Das Dashboard der Konfis zeigt dann automatisch den nächsten anstehenden Konfirmationstermin aus diesen Events an.</p>
+   </details>
+
+   <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
+    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Können Konfis ihren Konfirmationsspruch hinterlegen?</summary>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Ja. Konfis können ihren Konfispruch direkt in der App hinterlegen – entweder aus einer kuratierten Spruch-Liste auswählen oder einen eigenen Spruch mit Stellenangabe selbst eintragen. Die Auswahl wird pro Jahrgang vom Admin freigeschaltet: So entscheidet eure Gemeinde, ab wann Konfis ihren Spruch hinterlegen können – passend zum Konfirmations-Termin, der als Konfirmations-Event angelegt ist.</p>
+   </details>
+
+   <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
+    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Können Konfis später Teamer:innen oder Admins werden?</summary>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Ja. In der Benutzerverwaltung kann die Rolle einer Person jederzeit geändert werden – zum Beispiel von Konfi zu Teamer:in. Die bisherigen Punkte bleiben dabei als Historie erhalten. Auch neue Personen lassen sich direkt mit jeder Rolle anlegen. Benutzer und Rollen verwaltet ausschließlich die Organisations-Leitung.</p>
+   </details>
+
+   <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
+    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Worin unterscheiden sich Organisations-Admin und Admin?</summary>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Der Organisations-Admin hat alle Rechte in eurer Gemeinde – inklusive der Benutzerverwaltung: Personen anlegen, Rollen ändern, Jahrgänge zuweisen. Ein normaler Admin verwaltet alle Inhalte wie Konfis, Events, Aktivitäten, Badges und Level, aber keine Benutzer und Rollen. Teamer:innen wiederum arbeiten nur in den ihnen zugewiesenen Jahrgängen.</p>
+   </details>
+
+   <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
+    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Können Konfis untereinander chatten?</summary>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Private Einzelchats zwischen zwei Konfis sind nicht möglich – Konfis können von sich aus nur Admins und Teamer:innen direkt anschreiben. Untereinander schreiben Konfis ausschließlich im gemeinsamen Jahrgangs-Gruppenchat, der von der Gemeinde moderiert werden kann.</p>
+   </details>
+
+   <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
+    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Können wir eigene Badges erstellen?</summary>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Ja. Jede Gemeinde kann eigene Auszeichnungen frei anlegen – mit Name, Symbol, Farbe und Beschreibung. Zur Auswahl stehen viele verschiedene Bedingungen, etwa Gesamtpunkte, Punkte einer Kategorie, Anzahl besuchter Events oder Aktivitäten, Pflicht-Anwesenheit oder Serien. Manche Badges könnt ihr auch geheim halten.</p>
+   </details>
+
+   <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
+    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Lassen sich Level anpassen?</summary>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Ja. Ihr könnt eigene Level mit Namen, Titel, benötigter Punktzahl, Symbol und Farbe anlegen und so euren eigenen Aufstiegsweg gestalten.</p>
+   </details>
+
+   <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
+    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Können wir Aktivitäten und deren Punkte selbst festlegen?</summary>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Ja. Aktivitäten legt ihr frei an – jeweils mit eigener Punktzahl und der Zuordnung zu Gottesdienst- oder Gemeinde-Punkten. So passt ihr die App genau an eure Konfi-Arbeit an.</p>
+   </details>
+
+   <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
+    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Können wir Termine als Serie anlegen?</summary>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Ja. Beim Anlegen eines Events gibt es eine Serien-Option: Ihr gebt eine Anzahl Termine und einen Abstand an – täglich, wöchentlich, alle zwei Wochen oder monatlich – und die ganze Terminreihe wird automatisch erstellt.</p>
+   </details>
+
+   <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
+    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Wir haben einen Fehler gefunden oder Feedback – wohin?</summary>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Schreibt uns einfach an <a href="mailto:team@konfi-quest.de" style="color:var(--purple);font-weight:600">team@konfi-quest.de</a>. Wir freuen uns über jede Rückmeldung und helfen schnell weiter.</p>
+   </details>
+
+  </div>
+ </div>
+</section>
+
+<!-- PRICING -->
+<section class="block" id="preise">
+ <div class="wrap">
+  <p class="kicker reveal">Faire Preise</p>
+  <h2 class="sec-h reveal d1">Eine Jahreslizenz. Keine Überraschungen.</h2>
+  <p class="sec-p reveal d2">Kein Abo-Kleingedrucktes, keine versteckten Kosten.</p>
+  <div class="price-grid reveal d1">
+   <div class="pc"><div class="tier">Klein</div><div class="scope">bis 15 Konfis</div><div class="amt">49&nbsp;€</div><div class="per">pro Jahr</div></div>
+   <div class="pc"><div class="tier">Standard</div><div class="scope">bis 50 Konfis</div><div class="amt">99&nbsp;€</div><div class="per">pro Jahr</div></div>
+   <div class="pc feat"><div class="tier">Plus</div><div class="scope">bis 75 Konfis</div><div class="amt">139&nbsp;€</div><div class="per">pro Jahr</div></div>
+   <div class="pc"><div class="tier">Groß</div><div class="scope">bis 100 Konfis</div><div class="amt">179&nbsp;€</div><div class="per">pro Jahr</div></div>
+   <div class="pc"><div class="tier">Organisation</div><div class="scope">bis 4 Gemeinden</div><div class="amt">390&nbsp;€</div><div class="per">pro Jahr</div></div>
+  </div>
+  <div class="trial reveal d2">
+   <h4>30 Tage kostenlos testen</h4>
+   <p>Unverbindlich ausprobieren – mit einem echten Jahrgang:</p>
+   <div class="pills"><span class="pill"><b>30</b>&nbsp;Tage</span><span class="pill"><b>5</b>&nbsp;Konfis</span><span class="pill">ohne Risiko</span></div>
+   <p style="margin-top:1rem;font-size:.92rem">Ihr seid ein ganzer Kirchenkreis (ab 5 Gemeinden)? <a href="#kontakt" style="color:var(--purple);font-weight:600">Meldet euch</a> – wir rechnen euch ein Angebot durch.</p>
+  </div>
+ </div>
+</section>
+
+<!-- STEPS -->
+<section class="block" style="background:var(--bg-soft)">
+ <div class="wrap">
+  <p class="kicker reveal">In Minuten startklar</p>
+  <h2 class="sec-h reveal d1">So einfach geht's los</h2>
+  <p class="sec-p reveal d2">Von der Anfrage bis zum ersten Punkt – ohne IT-Abteilung.</p>
+  <div class="steps">
+   <div class="step reveal d1"><div class="num">1</div><h4>Kontakt aufnehmen</h4><p>Schreibt uns – wir richten eure Organisation ein.</p></div>
+   <div class="step reveal d2"><div class="num">2</div><h4>Team einladen</h4><p>Teamer:innen und Leitung einladen, Jahrgänge anlegen.</p></div>
+   <div class="step reveal d3"><div class="num">3</div><h4>Konfis einladen</h4><p>Pro Jahrgang ein Einladungslink – Konfis treten bei.</p></div>
+   <div class="step reveal d4"><div class="num">4</div><h4>Loslegen</h4><p>Events planen, Punkte vergeben – das Abenteuer beginnt.</p></div>
+  </div>
+ </div>
+</section>
+
+<!-- FINAL -->
+<section class="block final" id="kontakt">
+ <div class="glow b" style="bottom:-50%;right:-5%;width:55%;height:130%"></div>
+ <div class="wrap">
+  <h2 class="final-h reveal">Bereit für moderne Konfi-Arbeit?</h2>
+  <p class="reveal d1">Probiert Konfi Quest mit eurem nächsten Jahrgang. Ihr werdet sehen, wie anders Konfis reagieren, wenn sich ihre Konfi-Zeit anfühlt wie etwas, das ihnen gehört.</p>
+  <a href="mailto:team@konfi-quest.de?subject=Konfi%20Quest%20f%C3%BCr%20unsere%20Gemeinde" class="btn btn-light reveal d2">Jetzt kostenlos starten</a>
+ </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+ <div class="wrap">
+  <div class="foot-grid">
+   <div>
+    <div class="foot-brand"><img src="/assets/icon/logo-mark.png" alt="">Konfi&nbsp;Quest</div>
+    <p class="foot-note">Moderne Konfi-Arbeit, die bei den Jugendlichen ankommt – für Konfis, Teamer:innen und die ganze Gemeinde.</p>
+   </div>
+   <div><h4>Produkt</h4><a href="#problem">Warum</a><a href="#features">Funktionen</a><a href="#sicherheit">Sicherheit</a><a href="#preise">Preise</a><a href="/login">Zur App</a></div>
+   <div><h4>Kontakt</h4><p class="foot-note">Pastor Simon Luthe<br>Marktstraße 2<br>25764 Wesselburen<br><a href="mailto:team@konfi-quest.de" style="display:inline">team@konfi-quest.de</a></p></div>
+   <div><h4>Rechtliches</h4><a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a><a href="/konto-loeschen">Konto löschen</a></div>
+  </div>
+  <div class="foot-bottom">
+   <p>&copy; 2026 Konfi Quest</p>
+   <p class="spirit">Made with <img class="bird" src="/assets/branding/bird.png" width="14" height="14" alt="" aria-hidden="true"> in Hennstedt · Friede. Schalom. Salam.</p>
+  </div>
+ </div>
+</footer>
+
+<script>
+// Wort-Rotator
+const words=['Abenteuer','Erlebnis','Gemeinschaft','Quest'];let wi=0;const rot=document.getElementById('rot');
+setInterval(()=>{wi=(wi+1)%words.length;rot.style.opacity='0';setTimeout(()=>{rot.textContent=words[wi];rot.style.opacity='1';},250);},2600);
+// Screenshot-Carousel: EIN Mock, Frame + Screen rotieren synchron.
+// Bilder wechseln iOS/Android ab (data-os) -> der Geraeterahmen passt sich mit an.
+(function(){
+  const dev=document.getElementById('heroDevice');if(!dev)return;
+  const imgs=dev.querySelectorAll('.screen img');if(imgs.length<2)return;
+  // Alle Screenshots vorab in den Cache laden -> kein Flackern beim Wechsel.
+  imgs.forEach(im=>{const p=new Image();p.src=im.src;});
+  let i=0;
+  setInterval(()=>{
+    const prev=imgs[i];
+    prev.classList.remove('on');
+    prev.classList.add('out');           // altes Bild gleitet nach links raus
+    i=(i+1)%imgs.length;
+    const cur=imgs[i];
+    cur.classList.remove('out');         // sicherstellen: startet rechts (translateX 100%)
+    // Reflow erzwingen, damit der Slide-Start-Zustand greift bevor .on kommt
+    void cur.offsetWidth;
+    cur.classList.add('on');             // neues Bild gleitet von rechts rein
+    // nach der Transition die .out-Klasse vom Vorgaenger entfernen (zurueck nach rechts parken)
+    setTimeout(()=>prev.classList.remove('out'),650);
+    // Geraeterahmen an das aktuelle Bild anpassen (iOS oder Android).
+    const os=cur.dataset.os;
+    dev.classList.toggle('device--ios',os==='ios');
+    dev.classList.toggle('device--android',os==='android');
+  },4500);
+})();
+// Nav-Schatten
+const navEl=document.querySelector('nav');addEventListener('scroll',()=>{navEl.style.boxShadow=scrollY>10?'0 4px 24px rgba(15,23,42,.07)':'none';});
+// Scroll-Reveal (Progressive Enhancement: erst JS schaltet Animation scharf)
+document.body.classList.add('js-anim');
+const io=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target);}});},{threshold:.14,rootMargin:'0px 0px -8% 0px'});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+// Count-up
+const cio=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){const el=e.target,to=+el.dataset.count;let n=0;const t=setInterval(()=>{n++;el.textContent=n;if(n>=to)clearInterval(t);},180);cio.unobserve(el);}});},{threshold:.5});
+document.querySelectorAll('[data-count]').forEach(el=>cio.observe(el));
+</script>
+</body>
+</html>

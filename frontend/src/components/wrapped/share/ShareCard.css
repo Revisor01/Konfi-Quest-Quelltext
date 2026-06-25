@@ -1,0 +1,137 @@
+/* ========================================
+   Share Card - Hidden 1080x1920 Renderer
+   fuer html-to-image Export
+   ======================================== */
+
+.share-card-container {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  pointer-events: none;
+  z-index: -1;
+}
+
+.share-card {
+  width: 1080px;
+  height: 1920px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: #fff;
+  overflow: hidden;
+  position: relative;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+/* ========================================
+   Wasserzeichen
+   ======================================== */
+
+.share-card-watermark {
+  position: absolute;
+  bottom: 40px;
+  width: 100%;
+  text-align: center;
+  font-size: 24px;
+  color: rgba(255, 255, 255, 0.3);
+  font-weight: 500;
+  letter-spacing: 0.05em;
+}
+
+/* ========================================
+   Typografie-Klassen
+   ======================================== */
+
+.share-big-number {
+  font-size: 160px;
+  font-weight: 800;
+  line-height: 1.1;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.share-subtitle {
+  font-size: 48px;
+  font-weight: 400;
+  color: rgba(255, 255, 255, 0.8);
+  margin: 12px 0 0 0;
+}
+
+.share-label {
+  font-size: 36px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.6);
+  margin: 0 0 16px 0;
+}
+
+/* ========================================
+   Konfi Hintergruende (lila)
+   ======================================== */
+
+.share-card--intro {
+  background: linear-gradient(135deg, #2d1065 0%, #0a0a0a 60%);
+}
+
+.share-card--punkte {
+  background: linear-gradient(135deg, #1a0533 0%, #0a0a0a 50%, #1a0533 100%);
+}
+
+.share-card--events {
+  background: linear-gradient(135deg, #1a0533 0%, #0a0a0a 50%, #1a0533 100%);
+}
+
+.share-card--badges {
+  background: linear-gradient(135deg, #1a0533 0%, #0a0a0a 50%, #1a0533 100%);
+}
+
+.share-card--aktivster-monat {
+  background: linear-gradient(135deg, #1e1b4b 0%, #0a0a0a 60%);
+}
+
+.share-card--chat {
+  background: linear-gradient(135deg, #312e81 0%, #0a0a0a 60%);
+}
+
+.share-card--endspurt {
+  background: linear-gradient(135deg, #3b0764 0%, #0a0a0a 60%);
+}
+
+.share-card--abschluss {
+  background: linear-gradient(135deg, #2d1065 0%, #0a0a0a 60%);
+}
+
+/* ========================================
+   Teamer Hintergruende (rosa)
+   ======================================== */
+
+.share-card--teamer.share-card--teamer-intro {
+  background: linear-gradient(135deg, #4c0519 0%, #0a0a0a 60%);
+}
+
+.share-card--teamer.share-card--teamer-events {
+  background: linear-gradient(135deg, #4c0519 0%, #0a0a0a 60%);
+}
+
+.share-card--teamer.share-card--teamer-konfis {
+  background: linear-gradient(135deg, #4c0519 0%, #0a0a0a 60%);
+}
+
+.share-card--teamer.share-card--teamer-badges {
+  background: linear-gradient(135deg, #4c0519 0%, #0a0a0a 60%);
+}
+
+.share-card--teamer.share-card--teamer-zertifikate {
+  background: linear-gradient(135deg, #831843 0%, #0a0a0a 60%);
+}
+
+.share-card--teamer.share-card--teamer-jahre {
+  background: linear-gradient(135deg, #881337 0%, #0a0a0a 60%);
+}
+
+.share-card--teamer.share-card--teamer-abschluss {
+  background: linear-gradient(135deg, #4c0519 0%, #0a0a0a 60%);
+}

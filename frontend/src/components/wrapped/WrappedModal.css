@@ -1,0 +1,696 @@
+/* ========================================
+   Wrapped Modal - Ionic Modal Fullscreen
+   ======================================== */
+
+ion-modal.wrapped-modal-fullscreen {
+  --width: 100%;
+  --height: 100%;
+  --border-radius: 0;
+}
+
+/* ========================================
+   Wrapped Modal - Fullscreen Overlay
+   ======================================== */
+
+.wrapped-overlay {
+  position: fixed;
+  inset: 0;
+  background: #000;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ========================================
+   Header: Pagination-Dots + Close-Button
+   ======================================== */
+
+.wrapped-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  padding: 12px 16px;
+  padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
+}
+
+.wrapped-pagination {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.wrapped-close-btn {
+  position: absolute;
+  right: 16px;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #fff;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  cursor: pointer;
+  z-index: 11;
+  -webkit-tap-highlight-color: transparent;
+  backdrop-filter: blur(8px);
+}
+
+.wrapped-close-btn:active {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+/* ========================================
+   Share Button
+   ======================================== */
+
+.wrapped-share-btn {
+  position: absolute;
+  right: 60px;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: #fff;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  cursor: pointer;
+  z-index: 11;
+  -webkit-tap-highlight-color: transparent;
+  backdrop-filter: blur(8px);
+}
+
+.wrapped-share-btn:active {
+  background: rgba(255, 255, 255, 0.4);
+}
+
+.wrapped-share-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ========================================
+   Swiper Container
+   ======================================== */
+
+.wrapped-swiper {
+  width: 100%;
+  height: 100%;
+}
+
+.wrapped-swiper .swiper-slide {
+  height: auto;
+}
+
+/* ========================================
+   Pagination Dots (Swiper Override)
+   ======================================== */
+
+.wrapped-pagination .swiper-pagination-bullet {
+  background: rgba(255, 255, 255, 0.4);
+  opacity: 1;
+  width: 8px;
+  height: 8px;
+  border-radius: 4px;
+  transition: width 0.3s ease, background 0.3s ease;
+}
+
+.wrapped-pagination .swiper-pagination-bullet-active {
+  background: #fff;
+  width: 24px;
+  border-radius: 4px;
+}
+
+/* ========================================
+   Slide Base Layout
+   ======================================== */
+
+.wrapped-slide {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 80px 32px 40px;
+  text-align: left;
+  color: #fff;
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
+}
+
+/* ========================================
+   Dekorative Elemente
+   ======================================== */
+
+.wrapped-slide-decoration--bottom {
+  top: auto;
+  right: auto;
+  bottom: -80px;
+  left: -60px;
+  width: 250px;
+  height: 250px;
+}
+
+/* ========================================
+   Typographie
+   ======================================== */
+
+.wrapped-big-number {
+  font-size: clamp(4rem, 15vw, 8rem);
+  font-weight: 900;
+  line-height: 1.1;
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+.wrapped-label {
+  font-size: clamp(1rem, 3.5vw, 1.2rem);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(255, 255, 255, 0.7);
+  margin: 0 0 8px 0;
+}
+
+.wrapped-subtitle {
+  font-size: clamp(1.2rem, 5vw, 2rem);
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 8px 0 0 0;
+  line-height: 1.4;
+}
+
+/* ========================================
+   CSS Animationen
+   ======================================== */
+
+@keyframes wrapped-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes wrapped-scale-in {
+  from {
+    opacity: 0;
+    transform: scale(0.5);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes wrapped-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(40px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Hero Text - Massive Typography */
+.wrapped-hero-text {
+  font-size: clamp(2.5rem, 10vw, 5rem);
+  font-weight: 900;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+/* Slide Decoration - Visual Flair Circles */
+.wrapped-slide-decoration {
+  position: absolute;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  pointer-events: none;
+}
+.wrapped-slide-decoration--1 {
+  width: 200px; height: 200px;
+  top: -40px; right: -60px;
+}
+.wrapped-slide-decoration--2 {
+  width: 120px; height: 120px;
+  bottom: 80px; left: -30px;
+}
+.wrapped-slide-decoration--3 {
+  width: 80px; height: 80px;
+  bottom: 160px; right: 20px;
+}
+
+@keyframes wrapped-bounce-in {
+  0% { transform: scale(0); opacity: 0; }
+  50% { transform: scale(1.2); }
+  70% { transform: scale(0.9); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes wrapped-fly-in-left {
+  from { transform: translateX(-100px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes wrapped-fly-in-right {
+  from { transform: translateX(100px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes wrapped-number-pop {
+  0% { transform: scale(0.3); opacity: 0; }
+  60% { transform: scale(1.15); }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes wrapped-shine {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+/* Initial-State: unsichtbar bis Animation startet */
+.wrapped-anim-fade,
+.wrapped-anim-scale,
+.wrapped-anim-slide-up,
+.wrapped-anim-bounce,
+.wrapped-anim-fly-left,
+.wrapped-anim-fly-right,
+.wrapped-anim-number-pop {
+  opacity: 0;
+}
+
+/* Animation-Trigger: nur wenn Slide aktiv */
+.wrapped-slide--active .wrapped-anim-fade {
+  animation: wrapped-fade-in 0.6s ease-out forwards;
+}
+
+.wrapped-slide--active .wrapped-anim-scale {
+  animation: wrapped-scale-in 0.5s ease-out forwards;
+}
+
+.wrapped-slide--active .wrapped-anim-slide-up {
+  animation: wrapped-slide-up 0.7s ease-out forwards;
+}
+
+.wrapped-slide--active .wrapped-anim-bounce {
+  animation: wrapped-bounce-in 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+.wrapped-slide--active .wrapped-anim-fly-left {
+  animation: wrapped-fly-in-left 0.6s ease-out forwards;
+}
+
+.wrapped-slide--active .wrapped-anim-fly-right {
+  animation: wrapped-fly-in-right 0.6s ease-out forwards;
+}
+
+.wrapped-slide--active .wrapped-anim-number-pop {
+  animation: wrapped-number-pop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Animation-Delays fuer gestaffeltes Einblenden */
+.wrapped-slide--active .wrapped-anim-delay-1 {
+  animation-delay: 0.2s;
+}
+
+.wrapped-slide--active .wrapped-anim-delay-2 {
+  animation-delay: 0.4s;
+}
+
+.wrapped-slide--active .wrapped-anim-delay-3 {
+  animation-delay: 0.6s;
+}
+
+/* ========================================
+   Loading + Error States
+   ======================================== */
+
+.wrapped-loading,
+.wrapped-error {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 1.1rem;
+}
+
+.wrapped-loading ion-spinner {
+  --color: #a78bfa;
+  width: 48px;
+  height: 48px;
+}
+
+/* ========================================
+   Responsive Anpassungen
+   ======================================== */
+
+/* ========================================
+   Intro Slide
+   ======================================== */
+
+.intro-slide {
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%);
+}
+
+/* ========================================
+   Punkte Slide - Split-Anzeige
+   ======================================== */
+
+.punkte-split {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  margin-top: 24px;
+}
+
+.punkte-split-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.punkte-split-value {
+  font-size: clamp(1.5rem, 6vw, 2.5rem);
+  font-weight: 700;
+  color: #fff;
+}
+
+.punkte-split-label {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.7);
+  margin-top: 4px;
+}
+
+.punkte-split-divider {
+  width: 1px;
+  height: 40px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* ========================================
+   Events Slide - Highlight-Box
+   ======================================== */
+
+.events-highlight {
+  margin-top: 32px;
+  padding: 16px 24px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+}
+
+/* ========================================
+   Badges Slide - Icon-Grid
+   ======================================== */
+
+.badges-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 24px;
+  max-width: 280px;
+}
+
+.badge-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.badge-icon {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  color: #fff;
+}
+
+.badge-name {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.8);
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ========================================
+   AktivsterMonat Slide - Hintergrund + Balken
+   ======================================== */
+
+.monat-slide { background: linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%); }
+
+.monat-bar-container { width: 100%; max-width: 300px; margin-top: 32px; }
+.monat-bar { height: 8px; background: rgba(255,255,255,0.25); border-radius: 4px; overflow: hidden; }
+.monat-bar-fill {
+  height: 100%;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 4px;
+  transition: width 1.5s ease-out;
+}
+
+/* ========================================
+   Chat Slide
+   ======================================== */
+
+.chat-slide { background: linear-gradient(135deg, #06b6d4 0%, #0891b2 50%, #0e7490 100%); }
+
+/* ========================================
+   Endspurt Slide - Progress-Bar
+   ======================================== */
+
+.endspurt-slide { background: linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%); }
+
+.endspurt-progress { width: 100%; max-width: 300px; margin-top: 24px; }
+.endspurt-progress-bar { height: 12px; background: rgba(255,255,255,0.25); border-radius: 6px; overflow: hidden; }
+.endspurt-progress-fill {
+  height: 100%;
+  background: rgba(255, 255, 255, 0.9);
+  border-radius: 6px;
+  transition: width 2s ease-out;
+}
+
+/* ========================================
+   Abschluss Slide - Zusammenfassung
+   ======================================== */
+
+.abschluss-slide { background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%); }
+
+.abschluss-summary {
+  display: flex;
+  gap: 24px;
+  margin-top: 32px;
+  padding: 20px 24px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+}
+.abschluss-stat { display: flex; flex-direction: column; align-items: flex-start; flex: 1; }
+.abschluss-stat-value { font-size: 1.5rem; font-weight: 700; color: #fff; }
+.abschluss-stat-label { font-size: 0.75rem; color: rgba(255,255,255,0.7); margin-top: 4px; }
+.abschluss-cta { margin-top: 32px; text-align: left; }
+
+/* ========================================
+   Responsive Anpassungen
+   ======================================== */
+
+@media (max-height: 600px) {
+  .wrapped-slide {
+    padding: 60px 16px 24px;
+  }
+
+  .wrapped-big-number {
+    font-size: clamp(3rem, 12vw, 5rem);
+  }
+}
+
+/* ========================================
+   Teamer Slides - Rosa Farbschema
+   ======================================== */
+
+.teamer-intro-slide { background: linear-gradient(135deg, #e11d48 0%, #be123c 50%, #9f1239 100%); }
+.teamer-konfis-slide { background: linear-gradient(135deg, #e11d48 0%, #be123c 50%, #9f1239 100%); }
+.teamer-zertifikate-slide { background: linear-gradient(135deg, #db2777 0%, #be185d 50%, #9d174d 100%); }
+.teamer-jahre-slide { background: linear-gradient(135deg, #f43f5e 0%, #e11d48 50%, #be123c 100%); }
+.teamer-abschluss-slide { background: linear-gradient(135deg, #e11d48 0%, #be123c 50%, #9f1239 100%); }
+
+/* Teamer Abschluss Summary */
+.teamer-abschluss-summary {
+  display: flex;
+  gap: 24px;
+  margin-top: 32px;
+  padding: 20px 24px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+}
+.teamer-abschluss-stat-value { font-size: 1.5rem; font-weight: 700; color: #fff; }
+
+/* Teamer Konfis Tags */
+.teamer-konfis-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; justify-content: flex-start; }
+.teamer-konfis-tag {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  padding: 4px 12px;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Teamer Zertifikate Liste */
+.teamer-zertifikat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 24px;
+  width: 100%;
+  max-width: 300px;
+}
+.teamer-zertifikat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+.teamer-zertifikat-name {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.9);
+}
+.teamer-zertifikat-date {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+/* Teamer Pagination */
+.wrapped-overlay--teamer .wrapped-pagination .swiper-pagination-bullet-active {
+  background: #fff;
+}
+.wrapped-overlay--teamer .wrapped-loading ion-spinner {
+  --color: #e11d48;
+}
+
+/* ========================================
+   Kategorie Slide - Balkendiagramm
+   ======================================== */
+
+.kategorie-slide { background: linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%); }
+.kategorie-bars { width: 100%; max-width: 340px; margin-top: 24px; display: flex; flex-direction: column; gap: 12px; }
+.kategorie-bar-row { display: flex; align-items: center; gap: 8px; }
+.kategorie-bar-name { font-size: 0.85rem; color: rgba(255,255,255,0.8); min-width: 80px; text-align: left; }
+.kategorie-bar-track { flex: 1; height: 8px; background: rgba(255,255,255,0.25); border-radius: 4px; overflow: hidden; }
+.kategorie-bar-fill { height: 100%; background: rgba(255, 255, 255, 0.9); border-radius: 4px; transition: width 1.5s ease-out; }
+.kategorie-bar-count { font-size: 0.85rem; color: rgba(255,255,255,0.7); min-width: 30px; }
+
+/* ========================================
+   Gottesdienst Slide
+   ======================================== */
+
+.gottesdienst-slide { background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%); }
+
+/* ========================================
+   Ueber-das-Ziel Slide - Gold + Konfetti
+   ======================================== */
+
+.ueber-das-ziel-slide {
+  background: linear-gradient(135deg, #f59e0b 0%, #eab308 50%, #ca8a04 100%);
+  position: relative;
+  overflow: hidden;
+}
+.ueber-das-ziel-slide .wrapped-big-number { color: #fff; }
+.ueber-das-ziel-slide .wrapped-label { color: rgba(255, 255, 255, 0.85); }
+.ueber-das-ziel-slide .wrapped-subtitle { color: rgba(255, 255, 255, 0.9); }
+
+/* Konfetti-Container (wiederverwendbar) */
+.konfetti-container,
+.wrapped-konfetti-container {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.konfetti-piece {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  top: -10px;
+  animation: konfetti-fall linear infinite;
+}
+@keyframes konfetti-fall {
+  0% { transform: translateY(-10px) rotate(0deg); opacity: 1; }
+  100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+}
+
+/* Konfetti-Variationen (30 Stueck, groessere Teile, hellere Farben) */
+.konfetti-piece:nth-child(1) { left: 3%; width: 12px; height: 12px; animation-duration: 3.2s; animation-delay: 0s; background: #fbbf24; }
+.konfetti-piece:nth-child(2) { left: 8%; width: 10px; height: 10px; animation-duration: 4.1s; animation-delay: 0.3s; background: #ec4899; }
+.konfetti-piece:nth-child(3) { left: 13%; width: 14px; height: 14px; animation-duration: 3.7s; animation-delay: 1.1s; background: #3b82f6; }
+.konfetti-piece:nth-child(4) { left: 18%; width: 11px; height: 11px; animation-duration: 5.0s; animation-delay: 0.7s; background: #a78bfa; }
+.konfetti-piece:nth-child(5) { left: 23%; width: 13px; height: 13px; animation-duration: 3.5s; animation-delay: 2.0s; background: #10b981; }
+.konfetti-piece:nth-child(6) { left: 27%; width: 10px; height: 10px; animation-duration: 4.3s; animation-delay: 0.5s; background: #f472b6; }
+.konfetti-piece:nth-child(7) { left: 31%; width: 12px; height: 12px; animation-duration: 3.9s; animation-delay: 1.5s; background: #fbbf24; }
+.konfetti-piece:nth-child(8) { left: 35%; width: 14px; height: 14px; animation-duration: 5.2s; animation-delay: 0.2s; background: #ec4899; }
+.konfetti-piece:nth-child(9) { left: 39%; width: 11px; height: 11px; animation-duration: 3.4s; animation-delay: 2.5s; background: #3b82f6; }
+.konfetti-piece:nth-child(10) { left: 43%; width: 13px; height: 13px; animation-duration: 4.6s; animation-delay: 1.0s; background: #10b981; }
+.konfetti-piece:nth-child(11) { left: 47%; width: 10px; height: 10px; animation-duration: 3.8s; animation-delay: 3.0s; background: #a78bfa; }
+.konfetti-piece:nth-child(12) { left: 51%; width: 12px; height: 12px; animation-duration: 5.5s; animation-delay: 0.8s; background: #fbbf24; }
+.konfetti-piece:nth-child(13) { left: 54%; width: 14px; height: 14px; animation-duration: 3.3s; animation-delay: 1.8s; background: #ec4899; }
+.konfetti-piece:nth-child(14) { left: 57%; width: 11px; height: 11px; animation-duration: 4.8s; animation-delay: 3.5s; background: #3b82f6; }
+.konfetti-piece:nth-child(15) { left: 60%; width: 13px; height: 13px; animation-duration: 3.6s; animation-delay: 0.4s; background: #10b981; }
+.konfetti-piece:nth-child(16) { left: 64%; width: 10px; height: 10px; animation-duration: 5.1s; animation-delay: 2.2s; background: #f472b6; }
+.konfetti-piece:nth-child(17) { left: 68%; width: 12px; height: 12px; animation-duration: 4.0s; animation-delay: 1.3s; background: #fbbf24; }
+.konfetti-piece:nth-child(18) { left: 72%; width: 14px; height: 14px; animation-duration: 3.1s; animation-delay: 3.8s; background: #ec4899; }
+.konfetti-piece:nth-child(19) { left: 76%; width: 11px; height: 11px; animation-duration: 4.5s; animation-delay: 0.9s; background: #a78bfa; }
+.konfetti-piece:nth-child(20) { left: 80%; width: 13px; height: 13px; animation-duration: 5.3s; animation-delay: 2.7s; background: #3b82f6; }
+.konfetti-piece:nth-child(21) { left: 83%; width: 10px; height: 10px; animation-duration: 3.5s; animation-delay: 0.6s; background: #10b981; }
+.konfetti-piece:nth-child(22) { left: 86%; width: 12px; height: 12px; animation-duration: 4.2s; animation-delay: 1.9s; background: #fbbf24; }
+.konfetti-piece:nth-child(23) { left: 88%; width: 14px; height: 14px; animation-duration: 3.8s; animation-delay: 3.2s; background: #ec4899; }
+.konfetti-piece:nth-child(24) { left: 90%; width: 11px; height: 11px; animation-duration: 5.0s; animation-delay: 0.1s; background: #f472b6; }
+.konfetti-piece:nth-child(25) { left: 92%; width: 13px; height: 13px; animation-duration: 3.3s; animation-delay: 2.4s; background: #3b82f6; }
+.konfetti-piece:nth-child(26) { left: 94%; width: 10px; height: 10px; animation-duration: 4.7s; animation-delay: 1.6s; background: #a78bfa; }
+.konfetti-piece:nth-child(27) { left: 95%; width: 12px; height: 12px; animation-duration: 3.6s; animation-delay: 3.9s; background: #10b981; }
+.konfetti-piece:nth-child(28) { left: 96%; width: 14px; height: 14px; animation-duration: 5.4s; animation-delay: 0.3s; background: #fbbf24; }
+.konfetti-piece:nth-child(29) { left: 97%; width: 11px; height: 11px; animation-duration: 4.1s; animation-delay: 2.1s; background: #ec4899; }
+.konfetti-piece:nth-child(30) { left: 98%; width: 13px; height: 13px; animation-duration: 3.4s; animation-delay: 1.4s; background: #f472b6; }
+
+/* Events + Badges Slide Hintergr. */
+.events-slide { background: linear-gradient(135deg, #2563eb 0%, #3b82f6 50%, #60a5fa 100%); }
+.badges-slide { background: linear-gradient(135deg, #d946ef 0%, #a855f7 50%, #7c3aed 100%); }
+
+/* Neue Slide Backgrounds */
+.konfirmation-slide { background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #d946ef 100%); }
+.pflicht-slide { background: linear-gradient(135deg, #2563eb 0%, #3b82f6 50%, #60a5fa 100%); }
+.rank-slide { background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%); position: relative; overflow: hidden; }
