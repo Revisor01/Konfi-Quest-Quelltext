@@ -5,6 +5,8 @@ const { handleValidationErrors, commonValidations, getPointField } = require('..
 const { checkPointTypeEnabled } = require('../utils/pointTypeGuard');
 const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
+const { decryptBuffer } = require('../utils/photoCrypto');
+const { deletePhotoFile } = require('../utils/photoStorage');
 
 // Aktivitäten: Teamer darf ansehen und Punkte vergeben, Admin darf bearbeiten
 // Requests: NUR Admin (Datenschutz!)
@@ -388,10 +390,14 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
             );
           }
 
-          // Foto-Referenz in DB entfernen (innerhalb Transaktion)
-          if (request.photo_filename) {
-            await client.query("UPDATE activity_requests SET photo_filename = NULL WHERE id = $1", [requestId]);
-          }
+          // VORUEBERGEHEND DEAKTIVIERT: Foto-Referenz NICHT entfernen.
+          // Grund: Admins muessen genehmigte Antrags-Fotos weiter sehen koennen,
+          // sonst reichen Konfis dasselbe Foto doppelt ein (festgestellt in der
+          // Praxis). Datensparsamkeit bleibt das Ziel — Loeschung erfolgt spaeter
+          // (z.B. zeitversetzt per Cron), aber NICHT sofort bei Genehmigung.
+          // if (request.photo_filename) {
+          //   await client.query("UPDATE activity_requests SET photo_filename = NULL WHERE id = $1", [requestId]);
+          // }
         }
 
         await client.query('COMMIT');
@@ -413,18 +419,22 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
           console.error('Level-up check failed:', levelErr);
         }
 
-        // Datenschutz: Foto-Datei löschen nach Genehmigung (nicht-kritisch, nach COMMIT)
-        if (request.photo_filename) {
-          const fs = require('fs');
-          const path = require('path');
-          const photoPath = path.join(__dirname, '../uploads/requests', request.photo_filename);
-
-          fs.unlink(photoPath, (err) => {
-            if (err) {
- console.error('Error deleting photo:', err);
-            }
-          });
-        }
+        // VORUEBERGEHEND DEAKTIVIERT: Foto-Datei NICHT sofort loeschen.
+        // Grund: Admins muessen genehmigte Antrags-Fotos weiter sehen koennen,
+        // sonst reichen Konfis dasselbe Foto doppelt ein. Datensparsamkeit bleibt
+        // das Ziel — physische Loeschung erfolgt spaeter (z.B. zeitversetzt per
+        // Cron), aber NICHT sofort bei Genehmigung.
+        // if (request.photo_filename) {
+        //   const fs = require('fs');
+        //   const path = require('path');
+        //   const photoPath = path.join(__dirname, '../uploads/requests', request.photo_filename);
+        //
+        //   fs.unlink(photoPath, (err) => {
+        //     if (err) {
+        //       console.error('Error deleting photo:', err);
+        //     }
+        //   });
+        // }
       }
 
       // Send push notification to konfi
@@ -620,12 +630,66 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
         return res.status(404).json({ error: 'Foto-Datei nicht gefunden' });
       }
 
-      // Set correct content type for images
+      // Datei lesen und (falls verschluesselt) entschluesseln, dann senden.
+      // Admins sehen das Foto unabhaengig vom Status (auch verbucht/abgelehnt).
+      const fileBuffer = await fs.promises.readFile(photoPath);
+      let imageBuffer;
+      try {
+        imageBuffer = decryptBuffer(fileBuffer);
+      } catch (decErr) {
+        console.error('Error decrypting activity request photo:', decErr);
+        return res.status(500).json({ error: 'Foto konnte nicht entschlüsselt werden' });
+      }
+
       res.setHeader('Content-Type', 'image/jpeg');
-      res.sendFile(photoPath);
+      res.send(imageBuffer);
     } catch (err) {
  console.error('Error serving activity request photo:', err);
       res.status(500).json({ error: 'Fehler beim Laden des Fotos' });
+    }
+  });
+
+  // Nachweisfoto eines Antrags manuell loeschen (Admin/Org-Admin).
+  // Setzt photo_filename = NULL und entfernt die Datei vom Dateisystem.
+  // Der Antrag selbst bleibt erhalten (nur das Foto wird entfernt).
+  router.delete('/requests/:id/photo', rbacVerifier, async (req, res) => {
+    try {
+      const requestId = parseInt(req.params.id);
+
+      if (!['admin', 'org_admin'].includes(req.user.role_name)) {
+        return res.status(403).json({ error: 'Keine Berechtigung' });
+      }
+
+      const { rows: [request] } = await db.query(
+        `SELECT ar.photo_filename, u.organization_id
+         FROM activity_requests ar
+         JOIN users u ON ar.user_id = u.id
+         WHERE ar.id = $1`,
+        [requestId]
+      );
+
+      if (!request) {
+        return res.status(404).json({ error: 'Antrag nicht gefunden' });
+      }
+
+      if (request.organization_id !== req.user.organization_id) {
+        return res.status(403).json({ error: 'Keine Berechtigung für diese Organisation' });
+      }
+
+      if (!request.photo_filename) {
+        return res.status(404).json({ error: 'Kein Foto vorhanden' });
+      }
+
+      // Erst DB-Referenz entfernen, dann Datei loeschen
+      await db.query("UPDATE activity_requests SET photo_filename = NULL WHERE id = $1", [requestId]);
+      await deletePhotoFile(request.photo_filename);
+
+      res.json({ message: 'Foto erfolgreich gelöscht' });
+
+      liveUpdate.sendToOrgAdmins(req.user.organization_id, 'requests', 'update');
+    } catch (err) {
+ console.error('Error deleting activity request photo:', err);
+      res.status(500).json({ error: 'Fehler beim Löschen des Fotos' });
     }
   });
 

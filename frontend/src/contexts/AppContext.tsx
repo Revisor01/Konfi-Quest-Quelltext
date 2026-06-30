@@ -7,6 +7,7 @@ import { networkMonitor } from '../services/networkMonitor';
 import { ensureSocketConnected } from '../services/websocket';
 import { App } from '@capacitor/app';
 import { PushNotifications } from '@capacitor/push-notifications';
+import { removeDeliveredById, removeAllDelivered } from '../services/notifications';
 import { writeQueue } from '../services/writeQueue';
 import { offlineCache } from '../services/offlineCache';
 import { logout as performLogout } from '../services/auth';
@@ -505,6 +506,13 @@ useEffect(() => {
       stateChangeListener = await App.addListener('appStateChange', async ({ isActive }) => {
         if (isActive) {
           handleAppActive();
+
+          // Admins bekommen ohnehin laufend Erinnerungen -> beim Aktiv-werden
+          // global aufraeumen. Konfis/Teamer NICHT (dort gezielt pro Bereich/
+          // beim Antippen, damit ungelesene Erinnerungen nicht verschwinden).
+          if (user?.type === 'admin') {
+            removeAllDelivered();
+          }
           // Koordinierte Resume-Sequenz: flush -> invalidate -> badges
           writeQueue.flush().then(async (result) => {
             if (result.failed.length > 0) {
@@ -566,6 +574,10 @@ useEffect(() => {
         PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
           // Counts aktualisieren (BadgeContext lauscht auf push:received)
           window.dispatchEvent(new CustomEvent('push:received'));
+
+          // Angetippte Notification aus dem Mitteilungszentrum entfernen
+          // (bewusst geoeffnet -> wie bei den meisten Apps verschwindet sie).
+          removeDeliveredById(action.notification.id);
 
           const notificationType = action.notification.data?.type;
           const userType = user?.type || 'konfi';

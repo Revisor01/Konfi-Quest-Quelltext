@@ -32,7 +32,7 @@ import {
   filterOutline,
   infinite
 } from 'ionicons/icons';
-import { SectionHeader, ListSection, StatusBadge, EventLegendModal } from '../../shared';
+import { SectionHeader, ListSection, StatusBadge, EventLegendModal, EventCornerBadges, formatEventDate as formatDate, formatEventTime as formatTime } from '../../shared';
 import { getStatusIcon } from '../../shared/StatusBadge';
 import { Event } from '../../../types/event';
 
@@ -44,6 +44,8 @@ interface EventsViewProps {
   onUpdate: () => void;
   // Fuer Card-Modal-Optik (Sheet ueber der Seite statt Vollbild).
   presentingElement?: HTMLElement | null;
+  // Im iPad-Split-View aktuell rechts geoeffnetes Event (fuer Highlighting).
+  selectedEventId?: number | null;
 }
 
 const EventsView: React.FC<EventsViewProps> = ({
@@ -52,7 +54,8 @@ const EventsView: React.FC<EventsViewProps> = ({
   onTabChange,
   onSelectEvent,
   onUpdate,
-  presentingElement
+  presentingElement,
+  selectedEventId
 }) => {
   const [searchText, setSearchText] = useState('');
 
@@ -60,21 +63,6 @@ const EventsView: React.FC<EventsViewProps> = ({
     variant: 'konfi',
     onClose: () => dismissLegend(),
   });
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('de-DE', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-  };
-
-  const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString('de-DE', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
 
   const konfirmationEvents = useMemo(() =>
     events.filter(e => e.is_konfirmation),
@@ -335,7 +323,7 @@ const EventsView: React.FC<EventsViewProps> = ({
                 }}
               >
                 <div
-                  className="app-list-item app-list-item--events"
+                  className={`app-list-item app-list-item--events${selectedEventId === event.id ? ' app-list-item--selected' : ''}`}
                   style={{
                     width: '100%',
                     borderLeftColor: statusColor,
@@ -344,37 +332,16 @@ const EventsView: React.FC<EventsViewProps> = ({
                     overflow: 'hidden'
                   }}
                 >
-                  {/* Eselsohr-Style Corner Badges - Konfirmation/Pflicht, Status in der Ecke.
+                  {/* Eselsohr-Style Corner Badges (shared) - Konfirmation/Pflicht, Status.
                       KEIN Team-Badge: Konfis geht "Teamer gesucht" nichts an. */}
-                  {(showBadge || event.mandatory || isKonfirmationEvent) && (
-                    <div className="app-corner-badges" style={{ opacity: shouldGrayOut ? 0.5 : 1 }}>
-                      {isKonfirmationEvent && (
-                        <>
-                          <div
-                            className="app-corner-badge"
-                            style={{ backgroundColor: 'var(--app-color-konfis)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
-                            title="Konfirmation"
-                          >
-                            <IonIcon icon={flame} style={{ color: '#fff', fontSize: '0.85rem' }} />
-                          </div>
-                          {(event.mandatory || showBadge) && <div className="app-corner-badges__separator" />}
-                        </>
-                      )}
-                      {event.mandatory && (
-                        <>
-                          <div
-                            className="app-corner-badge"
-                            style={{ backgroundColor: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
-                            title="Pflichtveranstaltung"
-                          >
-                            <IonIcon icon={shieldCheckmark} style={{ color: '#fff', fontSize: '0.85rem' }} />
-                          </div>
-                          {showBadge && <div className="app-corner-badges__separator" />}
-                        </>
-                      )}
-                      {showBadge && <StatusBadge statusText={statusText} statusColor={statusColor} />}
-                    </div>
-                  )}
+                  <EventCornerBadges
+                    event={event}
+                    statusText={statusText}
+                    statusColor={statusColor}
+                    showStatus={showBadge}
+                    grayOut={shouldGrayOut}
+                    hideTeam
+                  />
 
                   <div className="app-list-item__row">
                     <div className="app-list-item__main">

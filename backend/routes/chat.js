@@ -7,7 +7,7 @@ const jwt = require('jsonwebtoken');
 const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const PushService = require('../services/pushService');
-const { validateMagicBytes } = require('../middleware/uploadValidation');
+const { encryptBuffer, decryptBuffer } = require('../utils/photoCrypto');
 const { syncJahrgangChat } = require('../utils/jahrgangChat');
 const { syncTeamChat } = require('../utils/teamChat');
 
@@ -563,7 +563,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
   });
   
   // Send message
-  router.post('/rooms/:roomId/messages', verifyTokenRBAC, chatUpload.single('file'), validateMagicBytes, validateSendMessage, async (req, res) => {
+  router.post('/rooms/:roomId/messages', verifyTokenRBAC, chatUpload.single('file'), validateSendMessage, async (req, res) => {
     try {
       const roomId = req.params.roomId;
       const { content, message_type = 'text', reply_to, client_id } = req.body;
@@ -607,7 +607,37 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       let filePath = null, fileName = null, fileSize = null;
       let actualMessageType = message_type;
       if (req.file) {
-        filePath = req.file.filename;
+        if (!req.file.buffer) {
+          return res.status(400).json({ error: 'Datei konnte nicht gelesen werden' });
+        }
+
+        // Magic-Bytes-Pruefung direkt auf dem Buffer (echte Dateitypen erzwingen).
+        // Text-Formate (txt/csv) haben keine Magic Bytes -> Header vertrauen.
+        const textMimes = ['text/plain', 'text/csv'];
+        if (!textMimes.includes(req.file.mimetype)) {
+          const { fileTypeFromBuffer } = await import('file-type');
+          const detected = await fileTypeFromBuffer(req.file.buffer);
+          const allowedPrefixes = [
+            'image/', 'video/', 'audio/', 'application/pdf',
+            'application/vnd.openxmlformats', 'application/msword',
+            'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
+            'application/zip', 'application/x-cfb'
+          ];
+          if (!detected || !allowedPrefixes.some(p => detected.mime.startsWith(p))) {
+            return res.status(415).json({ error: 'Dateityp konnte nicht verifiziert werden' });
+          }
+        }
+
+        const crypto = require('crypto');
+        // Zufaelliger Hex-Dateiname (die Abruf-Route akzeptiert nur [a-f0-9]+)
+        const filename = crypto.randomBytes(32).toString('hex');
+        const chatDir = path.join(uploadsDir, 'chat');
+        const chatFilePath = path.join(chatDir, filename);
+        await fs.promises.mkdir(chatDir, { recursive: true });
+        const encrypted = encryptBuffer(req.file.buffer);
+        await fs.promises.writeFile(chatFilePath, encrypted);
+
+        filePath = filename;
         fileName = req.file.originalname;
         fileSize = req.file.size;
         const ext = path.extname(fileName).toLowerCase();
@@ -1054,7 +1084,18 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
           }
         }
 
-        res.sendFile(filePath);
+        // Datei lesen und (falls verschluesselt) entschluesseln, dann senden.
+        // Alte Klartext-Dateien werden vom decryptBuffer unveraendert
+        // durchgereicht (Abwaertskompatibilitaet bis zur Migration).
+        const fileBuffer = await fs.promises.readFile(filePath);
+        let mediaBuffer;
+        try {
+          mediaBuffer = decryptBuffer(fileBuffer);
+        } catch (decErr) {
+          console.error('Error decrypting chat file:', decErr);
+          return res.status(500).json({ error: 'Datei konnte nicht entschlüsselt werden' });
+        }
+        res.send(mediaBuffer);
       } else {
         res.status(404).json({ error: 'Datei nicht auf dem Server gefunden' });
       }

@@ -36,9 +36,12 @@ import { triggerPullHaptic } from '../../../utils/haptics';
 interface KonfiDetailViewProps {
   konfiId: number;
   onBack: () => void;
+  // Im iPad-Split-View ist die Liste links dauerhaft sichtbar -> kein
+  // Zurueck-Button noetig.
+  hideBackButton?: boolean;
 }
 
-const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack }) => {
+const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hideBackButton }) => {
   const { setSuccess, setError, isOnline } = useApp();
   const { triggerRefresh } = useLiveUpdate();
   const [presentAlert] = useIonAlert();
@@ -482,11 +485,13 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack }) =>
     <IonPage ref={pageRef}>
       <IonHeader translucent={true}>
         <IonToolbar>
-          <IonButtons slot="start">
-            <IonButton onClick={onBack}>
-              <IonIcon icon={arrowBack} />
-            </IonButton>
-          </IonButtons>
+          {!hideBackButton && (
+            <IonButtons slot="start">
+              <IonButton onClick={onBack}>
+                <IonIcon icon={arrowBack} />
+              </IonButton>
+            </IonButtons>
+          )}
           <IonTitle>{currentKonfi?.name || (isTeamer ? 'Teamer:in Details' : 'Konfi Details')}</IonTitle>
           <IonButtons slot="end">
             <IonButton disabled={!isOnline} onClick={handlePasswordAction}>

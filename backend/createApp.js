@@ -7,7 +7,6 @@ const helmet = require('helmet');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
-const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 
 /**
@@ -89,16 +88,10 @@ function createApp(db, options = {}) {
   });
 
   // Chat Upload Config (verschluesselte Dateinamen)
+  // memoryStorage: Chat-Datei landet als Buffer in req.file.buffer und wird im
+  // Route-Handler (chat.js) verschluesselt auf die Platte geschrieben.
   const chatUpload = multer({
-    storage: multer.diskStorage({
-      destination: (req, file, cb) => {
-        cb(null, chatDir);
-      },
-      filename: (req, file, cb) => {
-        const hash = crypto.createHash('sha256').update(Date.now() + file.originalname + Math.random().toString()).digest('hex');
-        cb(null, hash);
-      }
-    }),
+    storage: multer.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
       const allowedMimes = [
@@ -124,16 +117,10 @@ function createApp(db, options = {}) {
   });
 
   // Material Upload Config (20MB Limit)
+  // memoryStorage: Datei landet als Buffer in req.file.buffer und wird im
+  // Route-Handler (material.js) verschluesselt auf die Platte geschrieben.
   const materialUpload = multer({
-    storage: multer.diskStorage({
-      destination: (req, file, cb) => {
-        cb(null, materialDir);
-      },
-      filename: (req, file, cb) => {
-        const hash = crypto.createHash('sha256').update(Date.now() + file.originalname + Math.random().toString()).digest('hex');
-        cb(null, hash);
-      }
-    }),
+    storage: multer.memoryStorage(),
     limits: { fileSize: 20 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
       const allowedMimes = [
@@ -164,16 +151,11 @@ function createApp(db, options = {}) {
   });
 
   // Request Upload Config (nur Bilder, 5MB)
+  // memoryStorage: Foto landet als Buffer in req.file.buffer und wird im
+  // Route-Handler (konfi.js /upload-photo) verschluesselt auf die Platte
+  // geschrieben. Der Dateiname wird dort nach erfolgreicher Validierung erzeugt.
   const requestUpload = multer({
-    storage: multer.diskStorage({
-      destination: (req, file, cb) => {
-        cb(null, requestsDir);
-      },
-      filename: (req, file, cb) => {
-        const hash = crypto.createHash('sha256').update(Date.now() + file.originalname + Math.random().toString()).digest('hex');
-        cb(null, hash);
-      }
-    }),
+    storage: multer.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 },
     fileFilter: (req, file, cb) => {
       if (file.mimetype.startsWith('image/')) {

@@ -210,16 +210,21 @@ const TeamerMaterialPage: React.FC = () => {
   };
 
   // === INLINE DETAIL VIEW ===
-  if (selectedMaterial) {
+  // Detail-Ansicht als render-Funktion (statt frueher early-return), damit sie
+  // im iPad-Split-View NEBEN der Liste gerendert werden kann.
+  const renderDetail = (hideBackButton?: boolean) => {
+    if (!selectedMaterial) return null;
     return (
       <IonPage>
         <IonHeader translucent={true}>
           <IonToolbar>
-            <IonButtons slot="start">
-              <IonButton onClick={() => setSelectedMaterial(null)}>
-                <IonIcon icon={arrowBack} slot="icon-only" />
-              </IonButton>
-            </IonButtons>
+            {!hideBackButton && (
+              <IonButtons slot="start">
+                <IonButton onClick={() => setSelectedMaterial(null)}>
+                  <IonIcon icon={arrowBack} slot="icon-only" />
+                </IonButton>
+              </IonButtons>
+            )}
             <IonTitle>{selectedMaterial.title}</IonTitle>
           </IonToolbar>
         </IonHeader>
@@ -380,10 +385,10 @@ const TeamerMaterialPage: React.FC = () => {
         </IonContent>
       </IonPage>
     );
-  }
+  };
 
   // === MATERIAL LIST VIEW ===
-  return (
+  const renderList = () => (
     <IonPage>
       <IonHeader translucent={true}>
         <IonToolbar>
@@ -555,6 +560,9 @@ const TeamerMaterialPage: React.FC = () => {
       </IonContent>
     </IonPage>
   );
+
+  // Detail ersetzt die Liste (selectedMaterial-State steuert die Ansicht).
+  return selectedMaterial ? renderDetail() : renderList();
 };
 
 export default TeamerMaterialPage;

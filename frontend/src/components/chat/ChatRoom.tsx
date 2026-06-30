@@ -1004,7 +1004,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   if (!room) {
     return (
       <>
-        <IonHeader translucent={true}>
+        <IonHeader>
           <IonToolbar>
             <IonButtons slot="start">
               <IonButton onClick={onBack}>

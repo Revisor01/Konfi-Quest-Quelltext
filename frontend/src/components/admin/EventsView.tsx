@@ -40,7 +40,7 @@ import {
 import { useApp } from '../../contexts/AppContext';
 import { filterBySearchTerm } from '../../utils/helpers';
 import { parseLocalTime, getLocalNow } from '../../utils/dateUtils';
-import { SectionHeader, ListSection, StatusBadge, EventLegendModal } from '../shared';
+import { SectionHeader, ListSection, StatusBadge, EventLegendModal, EventCornerBadges, formatEventDate as formatDate, formatEventTime as formatTime } from '../shared';
 import { getStatusIcon } from '../shared/StatusBadge';
 import { Event } from '../../types/event';
 
@@ -66,6 +66,8 @@ interface EventsViewProps {
   onSearchChange?: (text: string) => void;
   // Fuer Card-Modal-Optik (Sheet ueber der Seite statt Vollbild).
   presentingElement?: HTMLElement | null;
+  // Im iPad-Split-View aktuell rechts geoeffnetes Event (fuer Highlighting).
+  selectedEventId?: number | null;
 }
 
 const EventsView: React.FC<EventsViewProps> = ({
@@ -84,7 +86,8 @@ const EventsView: React.FC<EventsViewProps> = ({
   onJahrgangChange,
   searchText,
   onSearchChange,
-  presentingElement
+  presentingElement,
+  selectedEventId
 }) => {
   const slidingRefs = useRef<Map<number, HTMLIonItemSlidingElement>>(new Map());
 
@@ -115,21 +118,6 @@ const EventsView: React.FC<EventsViewProps> = ({
 
   const getTotalPoints = () => {
     return events.reduce((sum, event) => sum + event.points, 0);
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('de-DE', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-  };
-
-  const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString('de-DE', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
   };
 
   const calculateRegistrationStatus = (event: Event): 'upcoming' | 'open' | 'closed' | 'cancelled' | 'mandatory' => {
@@ -343,7 +331,7 @@ const EventsView: React.FC<EventsViewProps> = ({
                   }}
                 >
                   <div
-                    className="app-list-item app-list-item--events"
+                    className={`app-list-item app-list-item--events${selectedEventId === event.id ? ' app-list-item--selected' : ''}`}
                     style={{
                       width: '100%',
                       borderLeftColor: statusColor,
@@ -352,46 +340,13 @@ const EventsView: React.FC<EventsViewProps> = ({
                       overflow: 'hidden'
                     }}
                   >
-                    {/* Eselsohr-Style Corner Badges - Team links innen, Konfirmation/Pflicht, Status in der Ecke */}
-                    <div className="app-corner-badges" style={{ opacity: shouldGrayOut ? 0.5 : 1 }}>
-                      {(event.teamer_only || event.teamer_needed) && (
-                        <>
-                          <div
-                            className="app-corner-badge"
-                            style={{ backgroundColor: 'var(--app-color-teamer)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
-                            title={event.teamer_only ? 'Nur Team' : 'Team gesucht'}
-                          >
-                            <IonIcon icon={people} style={{ color: '#fff', fontSize: '0.85rem' }} />
-                          </div>
-                          <div className="app-corner-badges__separator" />
-                        </>
-                      )}
-                      {isKonfirmationEvent && (
-                        <>
-                          <div
-                            className="app-corner-badge"
-                            style={{ backgroundColor: 'var(--app-color-konfis)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
-                            title="Konfirmation"
-                          >
-                            <IonIcon icon={flame} style={{ color: '#fff', fontSize: '0.85rem' }} />
-                          </div>
-                          <div className="app-corner-badges__separator" />
-                        </>
-                      )}
-                      {event.mandatory && (
-                        <>
-                          <div
-                            className="app-corner-badge"
-                            style={{ backgroundColor: '#dc2626', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
-                            title="Pflichtveranstaltung"
-                          >
-                            <IonIcon icon={shieldCheckmark} style={{ color: '#fff', fontSize: '0.85rem' }} />
-                          </div>
-                          <div className="app-corner-badges__separator" />
-                        </>
-                      )}
-                      <StatusBadge statusText={statusText} statusColor={statusColor} />
-                    </div>
+                    {/* Eselsohr-Style Corner Badges (shared) - Team, Konfirmation, Pflicht, Status */}
+                    <EventCornerBadges
+                      event={event}
+                      statusText={statusText}
+                      statusColor={statusColor}
+                      grayOut={shouldGrayOut}
+                    />
                     <div className="app-list-item__row">
                       <div className="app-list-item__main">
                         {/* Icon */}

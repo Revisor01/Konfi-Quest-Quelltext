@@ -20,16 +20,12 @@ import {
 } from '@ionic/react';
 import {
   closeOutline,
-  documentTextOutline,
-  imageOutline,
+  documentText,
+  camera,
   checkmarkCircle,
   checkmarkOutline,
   closeCircle,
-  personOutline,
-  trophyOutline,
-  calendarOutline,
-  timeOutline,
-  chatbubbleOutline
+  trash
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
@@ -78,6 +74,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
   const [adminComment, setAdminComment] = useState('');
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [selectedAction, setSelectedAction] = useState<'approve' | 'reject' | null>(null);
+  const [deletingPhoto, setDeletingPhoto] = useState(false);
 
   useEffect(() => {
     if (requestId) {
@@ -98,7 +95,8 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
         setRequest(foundRequest);
         setAdminComment(foundRequest.admin_comment || '');
 
-        if (foundRequest.photo_filename && foundRequest.status === 'pending') {
+        // Admins sehen das Nachweisfoto in jedem Status (auch verbucht/abgelehnt)
+        if (foundRequest.photo_filename) {
           loadPhoto(foundRequest.id);
         }
       } else {
@@ -121,6 +119,25 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
       setPhotoUrl(url);
     } catch (err) {
  console.error('Error loading photo:', err);
+    }
+  };
+
+  const handleDeletePhoto = async () => {
+    if (!request) return;
+    setDeletingPhoto(true);
+    try {
+      await api.delete(`/admin/activities/requests/${request.id}/photo`);
+      if (photoUrl) {
+        URL.revokeObjectURL(photoUrl);
+      }
+      setPhotoUrl(null);
+      setRequest({ ...request, photo_filename: undefined });
+      setSuccess('Foto erfolgreich gelöscht');
+    } catch (err) {
+      setError('Fehler beim Löschen des Fotos');
+ console.error('Error deleting photo:', err);
+    } finally {
+      setDeletingPhoto(false);
     }
   };
 
@@ -237,7 +254,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--requests">
-              <IonIcon icon={documentTextOutline} />
+              <IonIcon icon={documentText} />
             </div>
             <IonLabel>Antragsdaten</IonLabel>
           </IonListHeader>
@@ -246,7 +263,6 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
               <IonList>
                 {/* Konfi */}
                 <IonItem lines="inset">
-                  <IonIcon icon={personOutline} slot="start" style={{ color: 'var(--app-color-konfis)', fontSize: '1.2rem' }} />
                   <IonLabel>
                     <p>Konfi</p>
                     <h2>
@@ -262,7 +278,6 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
 
                 {/* Aktivität — bei Teamer-Antraegen kein Punkte-Typ (reiner Nachweis) */}
                 <IonItem lines="inset">
-                  <IonIcon icon={documentTextOutline} slot="start" style={{ color: '#047857', fontSize: '1.2rem' }} />
                   <IonLabel>
                     <p>{request.activity_target_role === 'teamer'
                       ? 'Aktivität (Team)'
@@ -274,7 +289,6 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                 {/* Punkte — nur fuer Konfi-Antraege; Teamer-Aktivitaeten geben keine Punkte */}
                 {request.activity_target_role !== 'teamer' && request.activity_points && (
                   <IonItem lines="inset">
-                    <IonIcon icon={trophyOutline} slot="start" style={{ color: 'var(--app-color-badges)', fontSize: '1.2rem' }} />
                     <IonLabel>
                       <p>Punkte</p>
                       <h2>{request.activity_points} {request.activity_points === 1 ? 'Punkt' : 'Punkte'}</h2>
@@ -284,7 +298,6 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
 
                 {/* Teilnahmedatum */}
                 <IonItem lines="inset">
-                  <IonIcon icon={calendarOutline} slot="start" style={{ color: '#007aff', fontSize: '1.2rem' }} />
                   <IonLabel>
                     <p>Teilnahmedatum</p>
                     <h2>{formatDate(request.requested_date)}</h2>
@@ -293,7 +306,6 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
 
                 {/* Eingereicht */}
                 <IonItem lines="inset">
-                  <IonIcon icon={timeOutline} slot="start" style={{ color: '#8e8e93', fontSize: '1.2rem' }} />
                   <IonLabel>
                     <p>Eingereicht</p>
                     <h2>{formatDateTime(request.created_at)}</h2>
@@ -303,7 +315,6 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                 {/* Kommentar */}
                 {request.comment && (
                   <IonItem lines="none">
-                    <IonIcon icon={chatbubbleOutline} slot="start" style={{ color: '#06b6d4', fontSize: '1.2rem' }} />
                     <IonLabel className="ion-text-wrap">
                       <p>Kommentar vom Konfi</p>
                       <h2 style={{ whiteSpace: 'pre-wrap' }}>{request.comment}</h2>
@@ -315,12 +326,12 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
           </IonCard>
         </IonList>
 
-        {/* SEKTION: Foto - nur bei pending anzeigen */}
-        {isPending && (
+        {/* SEKTION: Foto - sobald ein Foto vorhanden ist (auch verbucht/abgelehnt) */}
+        {request.photo_filename && (
           <IonList inset={true} className="app-modal-section">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--requests">
-                <IonIcon icon={imageOutline} />
+                <IonIcon icon={camera} />
               </div>
               <IonLabel>Nachweis-Foto</IonLabel>
             </IonListHeader>
@@ -337,7 +348,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                       display: 'block'
                     }}
                   />
-                ) : request.photo_filename ? (
+                ) : (
                   <div style={{
                     background: '#f5f5f5',
                     borderRadius: '12px',
@@ -349,22 +360,24 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                       Lade Foto...
                     </p>
                   </div>
-                ) : (
-                  <div style={{
-                    background: '#f5f5f5',
-                    borderRadius: '12px',
-                    padding: '24px 16px',
-                    textAlign: 'center'
-                  }}>
-                    <IonIcon
-                      icon={imageOutline}
-                      style={{ fontSize: '2.5rem', color: '#999', marginBottom: '12px', display: 'block' }}
-                    />
-                    <p style={{ margin: '0', fontSize: '0.9rem', color: '#666' }}>
-                      Kein Foto hochgeladen
-                    </p>
-                  </div>
                 )}
+
+                <IonButton
+                  expand="block"
+                  fill="outline"
+                  onClick={handleDeletePhoto}
+                  disabled={deletingPhoto}
+                  style={{
+                    marginTop: '16px',
+                    '--border-color': '#dc3545',
+                    '--color': '#dc3545',
+                    '--border-width': '2px',
+                    fontWeight: '600'
+                  }}
+                >
+                  <IonIcon icon={trash} slot="start" />
+                  {deletingPhoto ? 'Lösche...' : 'Foto löschen'}
+                </IonButton>
               </IonCardContent>
             </IonCard>
           </IonList>
@@ -389,7 +402,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                     <IonLabel className="ion-text-wrap">
                       <p>Status</p>
                       <h2 style={{ color: isApproved ? '#059669' : '#dc3545' }}>
-                        {isApproved ? 'Genehmigt' : 'Abgelehnt'} {request.approved_by_name ? `von ${request.approved_by_name}` : ''} am {formatDateTime(request.updated_at)}
+                        {isApproved ? 'Verbucht' : 'Abgelehnt'} {request.approved_by_name ? `von ${request.approved_by_name}` : ''} am {formatDateTime(request.updated_at)}
                       </h2>
                     </IonLabel>
                   </IonItem>

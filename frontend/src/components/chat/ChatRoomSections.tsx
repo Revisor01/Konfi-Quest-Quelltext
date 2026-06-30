@@ -48,33 +48,21 @@ interface ChatHeaderProps {
   partnerType?: 'admin' | 'konfi' | null;
 }
 
-const getHeaderColor = (roomType: string, eventId?: number | null, partnerType?: 'admin' | 'konfi' | null): string => {
-  if (eventId) return 'var(--app-color-events)';
-  if (roomType === 'jahrgang') return 'var(--app-color-chat)';
-  if (roomType === 'group') return 'var(--app-color-group)';
-  if (roomType === 'admin') return 'var(--app-color-teamer)';
-  if (roomType === 'direct') {
-    return partnerType === 'admin' ? 'var(--app-color-teamer)' : 'var(--app-color-konfis)';
-  }
-  return 'var(--app-color-konfis)';
-};
-
 export const ChatHeader = React.memo<ChatHeaderProps>(({
   roomName,
-  roomType,
   isAdmin,
   canLeave,
   isOnline,
   onBack,
   onOpenMembers,
   onOpenPoll,
-  onLeaveChat,
-  eventId,
-  partnerType
+  onLeaveChat
 }) => {
-  const headerColor = getHeaderColor(roomType, eventId, partnerType);
   return (
-    <IonHeader translucent={true}>
+    // translucent bewusst AUS: Der Chat-Content ist nicht fullscreen (Footer mit
+    // Eingabefeld), daher wuerde ein translucent-Header die Safe-Area oben falsch
+    // behandeln -> Header sitzt unter Notch/Statusbar. Opaker Header sitzt korrekt.
+    <IonHeader>
       <IonToolbar>
         <IonButtons slot="start">
           <IonButton onClick={onBack}>

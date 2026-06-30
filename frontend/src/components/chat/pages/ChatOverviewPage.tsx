@@ -14,21 +14,34 @@ interface ChatRoomData {
   type: 'group' | 'direct' | 'jahrgang' | 'admin';
 }
 
-const ChatOverviewPage: React.FC = () => {
+interface ChatOverviewPageProps {
+  // Im iPad-Split-View setzt der Master die Auswahl als State (statt zu
+  // navigieren). Fehlt der Callback (iPhone/Portrait), wird wie bisher per
+  // Route auf die Raum-Ansicht navigiert.
+  onSelectRoom?: (roomId: number) => void;
+  selectedRoomId?: number | null;
+}
+
+const ChatOverviewPage: React.FC<ChatOverviewPageProps> = ({ onSelectRoom, selectedRoomId }) => {
   const { user } = useApp();
   const router = useIonRouter();
   const overviewRef = useRef<ChatOverviewRef>(null);
 
   const handleSelectRoom = (room: ChatRoomData) => {
-    // Navigate to room view with proper routing
-    const basePath = user?.type === 'admin' ? '/admin' : user?.type === 'teamer' ? '/teamer' : '/konfi';
-    router.push(`${basePath}/chat/room/${room.id}`);
+    if (onSelectRoom) {
+      onSelectRoom(room.id);
+    } else {
+      // Navigate to room view with proper routing
+      const basePath = user?.type === 'admin' ? '/admin' : user?.type === 'teamer' ? '/teamer' : '/konfi';
+      router.push(`${basePath}/chat/room/${room.id}`);
+    }
   };
 
   return (
-    <ChatOverview 
+    <ChatOverview
       ref={overviewRef}
       onSelectRoom={handleSelectRoom}
+      selectedRoomId={selectedRoomId}
     />
   );
 };

@@ -17,7 +17,8 @@ import {
   IonCard,
   IonCardContent,
   useIonModal,
-  useIonRouter
+  useIonRouter,
+  useIonViewWillEnter
 } from '@ionic/react';
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
 import { qrCodeOutline, searchOutline } from 'ionicons/icons';
@@ -26,6 +27,7 @@ import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../../services/offlineCache';
+import { removeDeliveredForEvents } from '../../../services/notifications';
 import api from '../../../services/api';
 import EventsView from '../views/EventsView';
 import QRScannerModal from '../modals/QRScannerModal';
@@ -33,7 +35,15 @@ import LoadingSpinner from '../../common/LoadingSpinner';
 import { Event } from '../../../types/event';
 import { triggerPullHaptic } from '../../../utils/haptics';
 
-const KonfiEventsPage: React.FC = () => {
+interface KonfiEventsPageProps {
+  // Im iPad-Split-View setzt der Master die Auswahl als State statt zu
+  // navigieren. Fehlt der Callback (iPhone/Portrait), wird wie bisher per
+  // Route auf die Event-Detail-Seite navigiert.
+  onSelectEvent?: (eventId: number) => void;
+  selectedEventId?: number | null;
+}
+
+const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, selectedEventId }) => {
   const { user, setSuccess, setError } = useApp();
   const { pageRef, presentingElement } = useModalPage('konfi-events');
   const router = useIonRouter();
@@ -44,6 +54,12 @@ const KonfiEventsPage: React.FC = () => {
     () => api.get('/konfi/events').then(r => r.data),
     { ttl: CACHE_TTL.EVENTS }
   );
+
+  // Beim Oeffnen der Events-Seite die zugestellten Event-Notifications aus dem
+  // Mitteilungszentrum entfernen (Bereich wurde geoeffnet/gesehen).
+  useIonViewWillEnter(() => {
+    removeDeliveredForEvents();
+  });
 
   const [presentScannerModal, dismissScannerModal] = useIonModal(QRScannerModal, {
     onClose: () => dismissScannerModal(),
@@ -121,8 +137,13 @@ const KonfiEventsPage: React.FC = () => {
   };
 
   const handleSelectEvent = (event: Event) => {
-    // Navigate to event detail page using React Router
-    router.push(`/konfi/events/${event.id}`);
+    // Split-View (iPad): Auswahl an den Wrapper melden, KEINE Navigation.
+    // Sonst (iPhone/Portrait): wie bisher zur Detail-Route navigieren.
+    if (onSelectEvent) {
+      onSelectEvent(event.id);
+    } else {
+      router.push(`/konfi/events/${event.id}`);
+    }
   };
 
   return (
@@ -161,6 +182,7 @@ const KonfiEventsPage: React.FC = () => {
             activeTab={activeTab}
             onTabChange={setActiveTab}
             onSelectEvent={handleSelectEvent}
+            selectedEventId={selectedEventId}
             onUpdate={refresh}
             presentingElement={presentingElement}
           />

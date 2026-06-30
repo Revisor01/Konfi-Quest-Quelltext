@@ -40,7 +40,7 @@ import {
   bagHandle,
   qrCodeOutline,
   cloudOfflineOutline,
-  lockOpenOutline,
+  lockOpen,
   infinite
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
@@ -49,7 +49,7 @@ import api from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import LoadingSpinner from '../../common/LoadingSpinner';
-import { SectionHeader } from '../../shared';
+import { SectionHeader, formatEventDateLong as formatDate, formatEventTime as formatTime } from '../../shared';
 import UnregisterModal from '../modals/UnregisterModal';
 import QRScannerModal from '../modals/QRScannerModal';
 import { Event, Category } from '../../../types/event';
@@ -60,6 +60,9 @@ import { safeUUID } from '../../../utils/uuid';
 interface EventDetailViewProps {
   eventId: number;
   onBack: () => void;
+  // Im iPad-Split-View ist die Liste links dauerhaft sichtbar -> kein
+  // Zurueck-Button noetig.
+  hideBackButton?: boolean;
 }
 
 // Timeslot importiert aus types/event, lokaler Alias mit registered_count
@@ -76,7 +79,7 @@ interface Participant {
   display_name: string;
 }
 
-const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack }) => {
+const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hideBackButton }) => {
   const pageRef = useRef<HTMLElement>(null);
   const { setSuccess, setError, isOnline } = useApp();
   const { triggerRefresh } = useLiveUpdate();
@@ -220,22 +223,6 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack }) =>
     };
     loadDetails();
   }, [eventData?.id]);
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('de-DE', {
-      weekday: 'long',
-      day: '2-digit',
-      month: 'long',
-      year: 'numeric'
-    });
-  };
-
-  const formatTime = (dateString: string) => {
-    return new Date(dateString).toLocaleTimeString('de-DE', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
 
   const canUnregister = (event: Event) => {
     if (!event.is_registered) return false;
@@ -393,11 +380,13 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack }) =>
       <IonPage ref={pageRef}>
         <IonHeader translucent>
           <IonToolbar>
-            <IonButtons slot="start">
-              <IonButton onClick={onBack}>
-                <IonIcon icon={arrowBack} />
-              </IonButton>
-            </IonButtons>
+            {!hideBackButton && (
+              <IonButtons slot="start">
+                <IonButton onClick={onBack}>
+                  <IonIcon icon={arrowBack} />
+                </IonButton>
+              </IonButtons>
+            )}
             <IonTitle>Event Details</IonTitle>
           </IonToolbar>
         </IonHeader>
@@ -413,11 +402,13 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack }) =>
       <IonPage ref={pageRef}>
         <IonHeader translucent>
           <IonToolbar>
-            <IonButtons slot="start">
-              <IonButton onClick={onBack}>
-                <IonIcon icon={arrowBack} />
-              </IonButton>
-            </IonButtons>
+            {!hideBackButton && (
+              <IonButtons slot="start">
+                <IonButton onClick={onBack}>
+                  <IonIcon icon={arrowBack} />
+                </IonButton>
+              </IonButtons>
+            )}
             <IonTitle>Event nicht gefunden</IonTitle>
           </IonToolbar>
         </IonHeader>
@@ -432,11 +423,13 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack }) =>
     <IonPage ref={pageRef}>
       <IonHeader translucent>
         <IonToolbar>
-          <IonButtons slot="start">
-            <IonButton onClick={onBack}>
-              <IonIcon icon={arrowBack} />
-            </IonButton>
-          </IonButtons>
+          {!hideBackButton && (
+            <IonButtons slot="start">
+              <IonButton onClick={onBack}>
+                <IonIcon icon={arrowBack} />
+              </IonButton>
+            </IonButtons>
+          )}
           <IonTitle>{eventData.name}</IonTitle>
         </IonToolbar>
       </IonHeader>
@@ -478,6 +471,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack }) =>
           <div style={{ padding: '0 16px', marginBottom: '8px' }}>
             <IonButton
               expand="block"
+              fill="outline"
               color="primary"
               onClick={() => presentScannerModal({
                 presentingElement: pageRef.current || undefined
@@ -538,7 +532,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack }) =>
               {/* Anmeldezeitraum — wie Zeitfenster aufgebaut, nicht bei Pflicht-Events */}
               {!eventData.mandatory && (
                 <div className="app-info-row app-info-row--top">
-                  <IonIcon icon={lockOpenOutline} className="app-info-row__icon app-icon-color--events app-event-detail__icon--align-top" />
+                  <IonIcon icon={lockOpen} className="app-info-row__icon app-icon-color--events app-event-detail__icon--align-top" />
                   <div>
                     <div className="app-info-row__label">Anmeldung</div>
                     {eventData.registration_opens_at ? (
@@ -741,6 +735,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack }) =>
                     <IonButton
                       className="app-action-button"
                       expand="block"
+                      fill="outline"
                       color="success"
                       onClick={handleOptIn}
                     >
@@ -826,6 +821,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack }) =>
             <IonButton
               className="app-action-button"
               expand="block"
+              fill="outline"
               color="success"
               disabled={!isOnline}
               onClick={handleRegister}
@@ -837,6 +833,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack }) =>
             <IonButton
               className="app-action-button"
               expand="block"
+              fill="outline"
               color="warning"
               disabled={!isOnline}
               onClick={handleRegister}

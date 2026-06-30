@@ -4,6 +4,8 @@
 // und Auto-Delete (Plan 05) genutzt, damit die Loesch-Pfade nicht
 // auseinanderlaufen.
 
+const { deletePhotoFile } = require('./photoStorage');
+
 /**
  * Loescht einen Konfi und alle 16 abhaengigen Tabellen in der korrekten
  * FK-Reihenfolge (Kind-Tabellen zuerst, users zuletzt).
@@ -27,6 +29,12 @@ async function deleteKonfiCascade(client, userId, organizationId) {
   await client.query("DELETE FROM event_points WHERE konfi_id = $1 AND organization_id = $2", [userId, organizationId]);
   await client.query("DELETE FROM event_bookings WHERE user_id = $1 AND organization_id = $2", [userId, organizationId]);
   await client.query("DELETE FROM user_badges WHERE user_id = $1", [userId]);
+  // Nachweisfotos der Antraege dieses Konfis vor dem DB-Delete einsammeln,
+  // damit die Dateien anschliessend vom Dateisystem entfernt werden koennen.
+  const { rows: photoRows } = await client.query(
+    "SELECT photo_filename FROM activity_requests WHERE user_id = $1 AND organization_id = $2 AND photo_filename IS NOT NULL",
+    [userId, organizationId]
+  );
   await client.query("DELETE FROM activity_requests WHERE user_id = $1 AND organization_id = $2", [userId, organizationId]);
   await client.query("DELETE FROM chat_participants WHERE user_id = $1 AND user_type = 'konfi'", [userId]);
   await client.query("DELETE FROM chat_read_status WHERE user_id = $1", [userId]);
@@ -50,6 +58,12 @@ async function deleteKonfiCascade(client, userId, organizationId) {
   // der Konfi selbst wurde oben schon aus chat_participants entfernt.
   await client.query("UPDATE chat_rooms SET created_by = NULL WHERE created_by = $1", [userId]);
   await client.query("DELETE FROM users WHERE id = $1", [userId]);
+
+  // Nachweisfotos vom Dateisystem entfernen (nach dem DB-Delete, nicht
+  // blockierend — ein fehlendes File darf die Loeschung nicht scheitern lassen).
+  for (const row of photoRows) {
+    await deletePhotoFile(row.photo_filename);
+  }
 }
 
 module.exports = { deleteKonfiCascade };

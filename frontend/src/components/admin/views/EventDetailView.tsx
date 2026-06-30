@@ -15,7 +15,7 @@ import {
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
 import { parseLocalTime, getLocalNow } from '../../../utils/dateUtils';
-import { SectionHeader } from '../../shared';
+import { SectionHeader, formatEventDateLong as formatDate, formatEventTime as formatTime } from '../../shared';
 import { getStatusIcon } from '../../shared/StatusBadge';
 import EventModal from '../modals/EventModal';
 import ParticipantManagementModal from '../modals/ParticipantManagementModal';
@@ -86,9 +86,12 @@ interface Timeslot {
 interface EventDetailViewProps {
   eventId: number;
   onBack: () => void;
+  // Im iPad-Split-View ist die Liste links dauerhaft sichtbar -> kein
+  // Zurueck-Button noetig.
+  hideBackButton?: boolean;
 }
 
-const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack }) => {
+const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hideBackButton }) => {
   const pageRef = useRef<HTMLElement>(null);
   const slidingRefs = useRef<Map<number, HTMLIonItemSlidingElement>>(new Map());
   const { setSuccess, setError, isOnline } = useApp();
@@ -221,19 +224,6 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack }) =>
   const handleRefresh = async (event: CustomEvent) => {
     await loadEventData();
     (event.target as HTMLIonRefresherElement).complete();
-  };
-
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('de-DE', {
-      weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'
-    });
-  };
-
-  const formatTime = (dateString: string) => {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return '';
-    return date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
   };
 
   const calculateRegistrationStatus = (event: Event): 'upcoming' | 'open' | 'closed' => {
@@ -581,9 +571,11 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack }) =>
     <IonPage ref={pageRef}>
       <IonHeader translucent={true}>
         <IonToolbar>
-          <IonButtons slot="start">
-            <IonButton onClick={onBack}><IonIcon icon={arrowBack} /></IonButton>
-          </IonButtons>
+          {!hideBackButton && (
+            <IonButtons slot="start">
+              <IonButton onClick={onBack}><IonIcon icon={arrowBack} /></IonButton>
+            </IonButtons>
+          )}
           <IonTitle>{eventData?.name || 'Event Details'}</IonTitle>
           <IonButtons slot="end">
             <IonButton onClick={handleChatButtonClick}>

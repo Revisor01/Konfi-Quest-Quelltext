@@ -32,7 +32,7 @@ import {
   document as documentIcon,
   attachOutline,
   cloudOfflineOutline,
-  lockOpenOutline
+  lockOpen
 } from 'ionicons/icons';
 import { getStatusIcon } from '../../shared/StatusBadge';
 
@@ -163,7 +163,7 @@ export const EventInfoCard = React.memo<EventInfoCardProps>(({
         {/* Anmeldezeitraum — wie Zeitfenster aufgebaut, nicht bei Pflicht-Events */}
         {!eventData.mandatory && (
           <div className="app-info-row app-info-row--top">
-            <IonIcon icon={lockOpenOutline} className="app-info-row__icon app-icon-color--events app-event-detail__icon--align-top" />
+            <IonIcon icon={lockOpen} className="app-info-row__icon app-icon-color--events app-event-detail__icon--align-top" />
             <div>
               <div className="app-info-row__label">Anmeldung</div>
               {eventData.registration_opens_at ? (

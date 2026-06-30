@@ -30,7 +30,15 @@ import EventModal from '../modals/EventModal';
 import { Event } from '../../../types/event';
 import { triggerPullHaptic } from '../../../utils/haptics';
 
-const AdminEventsPage: React.FC = () => {
+interface AdminEventsPageProps {
+  // Im iPad-Split-View setzt der Master die Auswahl als State statt zu
+  // navigieren. Fehlt der Callback (iPhone/Portrait), wird wie bisher per
+  // Route auf die Event-Detail-Seite navigiert.
+  onSelectEvent?: (eventId: number) => void;
+  selectedEventId?: number | null;
+}
+
+const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, selectedEventId }) => {
   const { user, setSuccess, setError, isOnline } = useApp();
   const { pageRef, presentingElement } = useModalPage('admin-events');
   const router = useIonRouter();
@@ -347,8 +355,13 @@ const AdminEventsPage: React.FC = () => {
   };
 
   const handleSelectEvent = (event: Event) => {
-    // Anstatt den State zu ändern, navigieren wir zur neuen Route
-    router.push(`/admin/events/${event.id}`);
+    // Split-View (iPad): Auswahl an den Wrapper melden, KEINE Navigation.
+    // Sonst (iPhone/Portrait): wie bisher zur Detail-Route navigieren.
+    if (onSelectEvent) {
+      onSelectEvent(event.id);
+    } else {
+      router.push(`/admin/events/${event.id}`);
+    }
   };
 
   const presentEventModal = (eventType: 'single' | 'series' = 'single') => {
@@ -441,6 +454,7 @@ const AdminEventsPage: React.FC = () => {
             onUpdate={refreshEvents}
             onAddEventClick={handleAddEventClick}
             onSelectEvent={handleSelectEvent}
+            selectedEventId={selectedEventId}
             onDeleteEvent={canDelete ? handleDeleteEvent : undefined}
             onCopyEvent={canCopy ? handleCopyEvent : undefined}
             onCancelEvent={canCancel ? handleCancelEvent : undefined}

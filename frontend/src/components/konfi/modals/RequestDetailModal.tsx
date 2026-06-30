@@ -18,19 +18,12 @@ import {
 } from '@ionic/react';
 import {
   closeOutline,
-  calendar,
   documentTextOutline,
-  imageOutline,
-  chatbubbleEllipsesOutline,
-  timeOutline,
-  home,
-  people,
+  camera,
   checkmarkCircle,
   closeCircle,
   hourglass,
-  trophyOutline,
-  trashOutline,
-  alertCircleOutline
+  trashOutline
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
@@ -162,11 +155,6 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
               <IonList>
                 {/* Aktivität */}
                 <IonItem lines="inset">
-                  <IonIcon
-                    icon={request.activity_type === 'gottesdienst' ? home : people}
-                    slot="start"
-                    style={{ color: '#8e8e93', fontSize: '1rem' }}
-                  />
                   <IonLabel>
                     <p>Aktivität ({request.activity_type === 'gottesdienst' ? 'Gottesdienst' : 'Gemeinde'})</p>
                     <h2>{request.activity_name}</h2>
@@ -175,7 +163,6 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
 
                 {/* Punkte */}
                 <IonItem lines="inset">
-                  <IonIcon icon={trophyOutline} slot="start" style={{ color: '#8e8e93', fontSize: '1rem' }} />
                   <IonLabel>
                     <p>Punkte</p>
                     <h2>{request.activity_points} {request.activity_points === 1 ? 'Punkt' : 'Punkte'}</h2>
@@ -184,7 +171,6 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
 
                 {/* Teilnahmedatum */}
                 <IonItem lines="inset">
-                  <IonIcon icon={calendar} slot="start" style={{ color: '#8e8e93', fontSize: '1rem' }} />
                   <IonLabel>
                     <p>Teilnahmedatum</p>
                     <h2>{formatDate(request.requested_date)}</h2>
@@ -193,7 +179,6 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
 
                 {/* Eingereicht */}
                 <IonItem lines="inset">
-                  <IonIcon icon={timeOutline} slot="start" style={{ color: '#8e8e93', fontSize: '1rem' }} />
                   <IonLabel>
                     <p>Eingereicht</p>
                     <h2>{formatDateTime(request.created_at)}</h2>
@@ -203,7 +188,6 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                 {/* Kommentar */}
                 {request.comment && (
                   <IonItem lines="none">
-                    <IonIcon icon={chatbubbleEllipsesOutline} slot="start" style={{ color: '#8e8e93', fontSize: '1rem' }} />
                     <IonLabel className="ion-text-wrap">
                       <p>Deine Anmerkung</p>
                       <h2 style={{ whiteSpace: 'pre-wrap' }}>{request.comment}</h2>
@@ -220,7 +204,7 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
           <IonList inset={true} className="app-modal-section">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--requests">
-                <IonIcon icon={imageOutline} />
+                <IonIcon icon={camera} />
               </div>
               <IonLabel>Nachweis-Foto</IonLabel>
             </IonListHeader>
@@ -257,7 +241,7 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                     textAlign: 'center'
                   }}>
                     <IonIcon
-                      icon={imageOutline}
+                      icon={camera}
                       style={{ fontSize: '2.5rem', color: '#999', marginBottom: '12px', display: 'block' }}
                     />
                     <p style={{ margin: '0', fontSize: '0.9rem', color: '#666' }}>
@@ -287,14 +271,6 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
             <IonCardContent>
               <IonList>
                 <IonItem lines="inset">
-                  <IonIcon
-                    icon={isPending ? hourglass : isApproved ? checkmarkCircle : closeCircle}
-                    slot="start"
-                    style={{
-                      color: isPending ? '#ff9500' : isApproved ? '#059669' : '#dc3545',
-                      fontSize: '1rem'
-                    }}
-                  />
                   <IonLabel>
                     <p>Bearbeitungsstatus</p>
                     <h2 style={{ color: isPending ? '#ff9500' : isApproved ? '#059669' : '#dc3545' }}>
@@ -306,7 +282,6 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                 {/* Ablehnungsgrund */}
                 {isRejected && request.admin_comment && (
                   <IonItem lines="none">
-                    <IonIcon icon={alertCircleOutline} slot="start" style={{ color: '#dc3545', fontSize: '1rem' }} />
                     <IonLabel className="ion-text-wrap">
                       <p>Grund der Ablehnung</p>
                       <h2 style={{ color: '#dc3545', whiteSpace: 'pre-wrap' }}>{request.admin_comment}</h2>

@@ -4,7 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
-const { validateMagicBytes } = require('../middleware/uploadValidation');
+const { encryptBuffer, decryptBuffer } = require('../utils/photoCrypto');
 
 module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
   const { requireTeamer, requireAdmin } = roleHelpers;
@@ -522,8 +522,8 @@ module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
   // DATEI ENDPOINTS
   // ====================================================================
 
-  // POST /:id/files - Dateien zu Material hochladen
-  router.post('/:id/files', rbacVerifier, requireAdmin, materialUpload.array('files', 10), validateMagicBytes, async (req, res) => {
+  // POST /:id/files - Dateien zu Material hochladen (AES-256-GCM verschluesselt)
+  router.post('/:id/files', rbacVerifier, requireAdmin, materialUpload.array('files', 10), async (req, res) => {
     try {
       const orgId = req.user.organization_id;
       const materialId = req.params.id;
@@ -542,13 +542,43 @@ module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
         return res.status(400).json({ error: 'Keine Dateien hochgeladen' });
       }
 
+      // Magic-Bytes-Validierung auf den Buffern (echte Dateitypen erzwingen).
+      const { fileTypeFromBuffer } = await import('file-type');
+      const textMimes = ['text/plain', 'text/csv'];
+      const allowedPrefixes = [
+        'image/', 'video/', 'audio/', 'application/pdf',
+        'application/vnd.openxmlformats', 'application/msword',
+        'application/vnd.ms-excel', 'application/vnd.ms-powerpoint',
+        'application/vnd.oasis.opendocument',
+        'application/zip', 'application/x-cfb'
+      ];
+      for (const file of req.files) {
+        if (!file.buffer) {
+          return res.status(400).json({ error: 'Datei konnte nicht gelesen werden' });
+        }
+        if (textMimes.includes(file.mimetype)) { continue; }
+        const detected = await fileTypeFromBuffer(file.buffer);
+        if (!detected || !allowedPrefixes.some(p => detected.mime.startsWith(p))) {
+          return res.status(415).json({ error: `Dateityp nicht verifizierbar: ${file.originalname}` });
+        }
+      }
+
+      const crypto = require('crypto');
+      const materialDir = path.join(__dirname, '..', 'uploads', 'material');
+      await fs.promises.mkdir(materialDir, { recursive: true });
+
       const insertedFiles = [];
       for (const file of req.files) {
+        // Zufaelliger Hex-Dateiname; verschluesselt schreiben
+        const storedName = crypto.randomBytes(32).toString('hex');
+        const storedPath = path.join(materialDir, storedName);
+        await fs.promises.writeFile(storedPath, encryptBuffer(file.buffer));
+
         const { rows: [inserted] } = await db.query(
           `INSERT INTO material_files (material_id, original_name, stored_name, mime_type, file_size)
            VALUES ($1, $2, $3, $4, $5)
            RETURNING id, original_name, mime_type, file_size, created_at`,
-          [materialId, file.originalname, file.filename, file.mimetype, file.size]
+          [materialId, file.originalname, storedName, file.mimetype, file.size]
         );
         insertedFiles.push(inserted);
       }
@@ -568,8 +598,9 @@ module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
     try {
       const filename = path.basename(req.params.filename);
 
-      // Path-Traversal-Schutz: Nur Hex-Hashes akzeptieren
-      if (!/^[a-f0-9]{32}$/.test(filename)) {
+      // Path-Traversal-Schutz: Nur Hex-Namen akzeptieren (randomBytes(32) = 64 Hex).
+      // Aeltere SHA-256-Namen sind ebenfalls 64 Hex -> selbe Regel.
+      if (!/^[a-f0-9]{64}$/.test(filename)) {
         return res.status(400).json({ error: 'Ungültiger Dateiname' });
       }
 
@@ -597,7 +628,17 @@ module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
         res.setHeader('Content-Type', fileRecord.mime_type);
       }
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileRecord.original_name)}"`);
-      res.sendFile(filePath);
+
+      // Datei lesen und (falls verschluesselt) entschluesseln, dann senden.
+      const fileBuffer = await fs.promises.readFile(filePath);
+      let dataBuffer;
+      try {
+        dataBuffer = decryptBuffer(fileBuffer);
+      } catch (decErr) {
+        console.error('Error decrypting material file:', decErr);
+        return res.status(500).json({ error: 'Datei konnte nicht entschlüsselt werden' });
+      }
+      res.send(dataBuffer);
     } catch (err) {
       console.error('Fehler beim Herunterladen der Datei:', err.message);
       res.status(500).json({ error: 'Fehler beim Herunterladen der Datei' });

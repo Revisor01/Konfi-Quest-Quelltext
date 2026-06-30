@@ -6,6 +6,7 @@ import { writeQueue } from '../services/writeQueue';
 import { networkMonitor } from '../services/networkMonitor';
 import { initializeWebSocket, getSocket } from '../services/websocket';
 import { getToken } from '../services/tokenStore';
+import { removeDeliveredForChatRoom } from '../services/notifications';
 import { useApp } from './AppContext';
 import { useLiveRefresh, LiveUpdateType } from './LiveUpdateContext';
 
@@ -99,6 +100,10 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
 
   // markRoomAsRead: Optimistisch + API Call
   const markRoomAsRead = useCallback((roomId: number) => {
+    // Zugestellte Chat-Notifications dieses Raums aus dem Mitteilungszentrum
+    // entfernen (Bereich wurde geoeffnet/gelesen). Fire-and-forget.
+    removeDeliveredForChatRoom(roomId);
+
     setChatUnreadByRoom(prev => {
       const currentUnread = prev[roomId] || 0;
       if (currentUnread === 0) return prev;

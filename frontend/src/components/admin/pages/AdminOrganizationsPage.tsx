@@ -11,16 +11,11 @@ import {
   IonButton,
   IonIcon,
   useIonModal,
-  useIonAlert,
-  useIonRouter,
-  useIonActionSheet
+  useIonAlert
 } from '@ionic/react';
 import {
-  logOutOutline,
   add,
-  arrowBack,
-  pulseOutline,
-  ellipsisHorizontal
+  arrowBack
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { useModalPage } from '../../../contexts/ModalContext';
@@ -51,7 +46,7 @@ interface Organization {
 }
 
 const AdminOrganizationsPage: React.FC = () => {
-  const { setError, isOnline, refreshUser, signOut } = useApp();
+  const { setError, isOnline, refreshUser } = useApp();
   const { pageRef, presentingElement } = useModalPage('admin-organizations');
   
   // SWR-Cache für Organisationen
@@ -71,38 +66,6 @@ const AdminOrganizationsPage: React.FC = () => {
 
   // Alert Hook für Bestätigungsdialoge
   const [presentAlert] = useIonAlert();
-  const router = useIonRouter();
-  const [presentMoreSheet] = useIonActionSheet();
-
-  // "Mehr"-Menue oben rechts (Super-Admin): Performance-Dashboard + Abmelden.
-  const openMoreMenu = () => {
-    presentMoreSheet({
-      header: 'Mehr',
-      buttons: [
-        { text: 'Performance', icon: pulseOutline, handler: () => router.push('/admin/metrics') },
-        { text: 'Abmelden', icon: logOutOutline, role: 'destructive', handler: handleLogout },
-        { text: 'Abbrechen', role: 'cancel' },
-      ],
-    });
-  };
-
-  const handleLogout = () => {
-    presentAlert({
-      header: 'Abmelden',
-      message: 'Möchtest du dich wirklich abmelden?',
-      buttons: [
-        { text: 'Abbrechen', role: 'cancel' },
-        {
-          text: 'Abmelden',
-          role: 'destructive',
-          handler: async () => {
-            await signOut();
-          }
-        }
-      ]
-    });
-  };
-
   // Modal mit useIonModal Hook
   const [presentOrganizationModalHook, dismissOrganizationModalHook] = useIonModal(OrganizationManagementModal, {
     organizationId: modalOrganizationId,
@@ -183,9 +146,6 @@ const AdminOrganizationsPage: React.FC = () => {
           <IonButtons slot="end">
             <IonButton onClick={presentOrganizationModal}>
               <IonIcon icon={add} />
-            </IonButton>
-            <IonButton onClick={openMoreMenu} title="Mehr">
-              <IonIcon icon={ellipsisHorizontal} />
             </IonButton>
           </IonButtons>
         </IonToolbar>

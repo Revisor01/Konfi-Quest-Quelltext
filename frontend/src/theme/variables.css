@@ -1274,6 +1274,18 @@ ion-card-content.app-card-content {
   padding-right: 120px;
 }
 
+/* === Toolbar-Grundfarbe gegen System-Dark-Mode festnageln ===
+   Die App hat KEIN eigenes Dark-Theme (Ionic-Dark-Palettes in App.tsx alle
+   auskommentiert). Im System-Dark-Mode setzt Ionic --ion-toolbar-background aber
+   trotzdem dunkel -> dunkler/schwarzer Header. Wir nageln NUR diese eine
+   Variable auf die hellen iOS-Standardwerte (#f7f7f7) fest. Bewusst MINIMAL:
+   kein --background-Override, kein ::part, damit Safe-Area + Standardverhalten
+   der Toolbar unangetastet bleiben. */
+:root {
+  --ion-toolbar-background: #f7f7f7;
+  --ion-toolbar-color: #000000;
+}
+
 /* === Condense-Toolbar (transparenter Large-Title Header) === */
 ion-toolbar.app-condense-toolbar {
   --background: transparent;
@@ -2682,3 +2694,4 @@ ion-toggle.app-toggle--info { --background-checked: var(--app-color-info) !impor
      Hier nur Touch-Scrolling im Feld erlauben. */
   touch-action: pan-y;
 }
+

@@ -75,6 +75,8 @@ interface KonfisViewProps {
   onSelectKonfi: (konfi: Konfi) => void;
   onDeleteKonfi: (konfi: Konfi) => void;
   onDeleteTeamer: (teamer: any) => void;
+  // Im iPad-Split-View aktuell rechts geoeffneter Konfi (fuer Highlighting).
+  selectedKonfiId?: number | null;
 }
 
 const KonfisView: React.FC<KonfisViewProps> = ({
@@ -85,7 +87,8 @@ const KonfisView: React.FC<KonfisViewProps> = ({
   onAddKonfiClick,
   onSelectKonfi,
   onDeleteKonfi,
-  onDeleteTeamer
+  onDeleteTeamer,
+  selectedKonfiId
 }) => {
   const { user } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
@@ -427,7 +430,7 @@ const KonfisView: React.FC<KonfisViewProps> = ({
                         }}
                       >
                         <div
-                          className="app-list-item app-list-item--primary"
+                          className={`app-list-item app-list-item--primary${selectedKonfiId === konfi.id ? ' app-list-item--selected' : ''}`}
                           style={{
                             width: '100%',
                             borderLeftColor: statusColor,

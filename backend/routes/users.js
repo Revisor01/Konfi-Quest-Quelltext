@@ -7,6 +7,7 @@ const { checkUserHierarchy, filterUsersByHierarchy } = require('../utils/roleHie
 const { validatePassword } = require('../utils/passwordUtils');
 const { invalidateUserCache } = require('../middleware/rbac');
 const { syncJahrgangChat } = require('../utils/jahrgangChat');
+const { deletePhotoFile } = require('../utils/photoStorage');
 
 // User management routes
 // WICHTIGER HINWEIS: Das übergebene 'db'-Objekt ist eine PostgreSQL Pool-Instanz.
@@ -370,6 +371,21 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
       await client.query("DELETE FROM push_tokens WHERE user_id = $1", [id]);
       await client.query("DELETE FROM password_resets WHERE user_id = $1", [id]);
 
+      // Nachweisfotos der Antraege dieses Users vor dem Delete einsammeln,
+      // damit die Dateien nach erfolgreichem COMMIT entfernt werden koennen
+      // (greift, falls ein Konfi ueber die Benutzerverwaltung geloescht wird).
+      let photoFilenames = [];
+      try {
+        const { rows } = await client.query(
+          "SELECT photo_filename FROM activity_requests WHERE user_id = $1 AND photo_filename IS NOT NULL",
+          [id]
+        );
+        photoFilenames = rows.map(r => r.photo_filename);
+      } catch (photoErr) {
+        // activity_requests evtl. nicht vorhanden (Schema-Varianz) — nicht kippen
+        if (photoErr.code !== '42703' && photoErr.code !== '42P01') throw photoErr;
+      }
+
       // Delete user
       const deleteUserResult = await client.query("DELETE FROM users WHERE id = $1 AND organization_id = $2", [id, organizationId]);
 
@@ -381,6 +397,12 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
 
       await client.query('COMMIT');
       client.release();
+
+      // Foto-Dateien nach COMMIT vom Dateisystem entfernen (nicht blockierend)
+      for (const filename of photoFilenames) {
+        await deletePhotoFile(filename);
+      }
+
       res.json({ message: 'Benutzer erfolgreich gelöscht' });
 
     } catch (err) {

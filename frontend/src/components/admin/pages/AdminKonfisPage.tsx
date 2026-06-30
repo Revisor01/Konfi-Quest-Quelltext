@@ -60,7 +60,16 @@ interface Settings {
 }
 
 
-const AdminKonfisPage: React.FC = () => {
+interface AdminKonfisPageProps {
+  // Im iPad-Split-View setzt der Master die Auswahl als State (statt zu
+  // navigieren). Fehlt der Callback (iPhone/Portrait), wird wie bisher
+  // per Route auf die Detail-Seite navigiert.
+  onSelectKonfi?: (konfiId: number) => void;
+  // Aktuell ausgewaehlter Konfi (fuer Highlighting im Split-View).
+  selectedKonfiId?: number | null;
+}
+
+const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, selectedKonfiId }) => {
   const { setSuccess, setError, user, isOnline } = useApp();
   const router = useIonRouter();
   const { pageRef, presentingElement, cleanupModals } = useModalPage('admin-konfis');
@@ -168,7 +177,13 @@ const AdminKonfisPage: React.FC = () => {
   };
 
   const handleSelectKonfi = (konfi: Konfi) => {
-    router.push(`/admin/konfis/${konfi.id}`);
+    // Split-View (iPad): Auswahl an den Wrapper melden, KEINE Navigation.
+    // Sonst (iPhone/Portrait): wie bisher zur Detail-Route navigieren.
+    if (onSelectKonfi) {
+      onSelectKonfi(konfi.id);
+    } else {
+      router.push(`/admin/konfis/${konfi.id}`);
+    }
   };
 
   const presentKonfiModal = () => {
@@ -334,6 +349,7 @@ const AdminKonfisPage: React.FC = () => {
             onSelectKonfi={handleSelectKonfi}
             onDeleteKonfi={handleDeleteKonfi}
             onDeleteTeamer={handleDeleteTeamer}
+            selectedKonfiId={selectedKonfiId}
           />
         )}
       </IonContent>

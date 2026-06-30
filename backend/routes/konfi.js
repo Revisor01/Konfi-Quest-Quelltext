@@ -7,7 +7,8 @@ const { handleValidationErrors } = require('../middleware/validation');
 const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
 const { fetchTageslosung } = require('../services/losungService');
-const { validateMagicBytes } = require('../middleware/uploadValidation');
+const { encryptBuffer, decryptBuffer } = require('../utils/photoCrypto');
+const { deletePhotoFile } = require('../utils/photoStorage');
 const { checkExistingBooking, getEventWithCounts, validateRegistrationWindow, determineBookingStatus, promoteFromWaitlist } = require('../utils/bookingUtils');
 const { computeCurrentStreak } = require('../utils/streakCalculation');
 // Single Source of Truth: welche Events zaehlen fuer Konfi-Badges (kein Pflicht/Konfirmation).
@@ -808,20 +809,43 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
     }
   });
 
-  // Upload photo for activity request (encrypted storage)
-  router.post('/upload-photo', verifyTokenRBAC, requestUpload.single('photo'), validateMagicBytes, async (req, res) => {
+  // Upload photo for activity request (AES-256-GCM verschluesselt at-rest)
+  // memoryStorage liefert req.file.buffer; wir validieren die Magic Bytes auf
+  // dem Buffer, verschluesseln und schreiben dann erst auf die Platte.
+  router.post('/upload-photo', verifyTokenRBAC, requestUpload.single('photo'), async (req, res) => {
     if (req.user.type !== 'konfi' && req.user.type !== 'teamer') {
       return res.status(403).json({ error: 'Konfi- oder Teamer-Zugriff erforderlich' });
     }
-    
+
     try {
-      if (!req.file) {
+      if (!req.file || !req.file.buffer) {
         return res.status(400).json({ error: 'Kein Foto hochgeladen' });
       }
-      
-      res.json({ 
-        filename: req.file.filename,
-        message: 'Foto erfolgreich hochgeladen' 
+
+      // Magic-Bytes-Pruefung direkt auf dem Buffer (nur echte Bilder zulassen)
+      const { fileTypeFromBuffer } = await import('file-type');
+      const detected = await fileTypeFromBuffer(req.file.buffer);
+      if (!detected || !detected.mime.startsWith('image/')) {
+        return res.status(415).json({ error: 'Dateityp konnte nicht als Bild verifiziert werden' });
+      }
+
+      const crypto = require('crypto');
+      const fs = require('fs');
+      const path = require('path');
+
+      // Zufaelliger, nicht erratbarer Dateiname (keine Inhaltsableitung)
+      const filename = crypto.randomBytes(32).toString('hex');
+      const requestsDir = path.join(__dirname, '../uploads/requests');
+      const photoPath = path.join(requestsDir, filename);
+
+      // Verschluesselt schreiben (Zielverzeichnis bei Bedarf anlegen)
+      await fs.promises.mkdir(requestsDir, { recursive: true });
+      const encrypted = encryptBuffer(req.file.buffer);
+      await fs.promises.writeFile(photoPath, encrypted);
+
+      res.json({
+        filename: filename,
+        message: 'Foto erfolgreich hochgeladen'
       });
     } catch (err) {
  console.error('Error uploading photo:', err);
@@ -833,21 +857,21 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
   router.get('/activity-requests/:id/photo', verifyTokenRBAC, async (req, res) => {
     try {
       const requestId = parseInt(req.params.id);
-      
-      // Get request with photo filename
+
+      // Get request with photo filename + status
       const { rows: [request] } = await db.query(
-        'SELECT photo_filename, user_id FROM activity_requests WHERE id = $1 AND organization_id = $2',
+        'SELECT photo_filename, user_id, status FROM activity_requests WHERE id = $1 AND organization_id = $2',
         [requestId, req.user.organization_id]
       );
-      
+
       if (!request) {
         return res.status(404).json({ error: 'Antrag nicht gefunden' });
       }
-      
+
       if (!request.photo_filename) {
         return res.status(404).json({ error: 'Kein Foto gefunden' });
       }
-      
+
       // Check permissions: Admin can see all, Konfi/Teamer can only see own
       const isAdmin = req.user.type === 'admin';
       const isOwnRequest = (req.user.type === 'konfi' || req.user.type === 'teamer') && req.user.id === request.user_id;
@@ -855,18 +879,34 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
       if (!isAdmin && !isOwnRequest) {
         return res.status(403).json({ error: 'Zugriff verweigert' });
       }
-      
+
+      // Status-Gate: Konfi/Teamer (Eigentuemer) sehen das Nachweisfoto NUR
+      // solange der Antrag offen ist. Nach Bearbeitung (verbucht/abgelehnt)
+      // bleibt das Foto allein fuer Admins sichtbar (eigene Admin-Route).
+      if (!isAdmin && request.status !== 'pending') {
+        return res.status(403).json({ error: 'Foto nach Bearbeitung nicht mehr verfügbar' });
+      }
+
       const fs = require('fs');
       const path = require('path');
       const photoPath = path.join(__dirname, '../uploads/requests', request.photo_filename);
-      
+
       if (!fs.existsSync(photoPath)) {
         return res.status(404).json({ error: 'Foto-Datei nicht gefunden' });
       }
-      
-      // Set correct content type for images
+
+      // Datei lesen und (falls verschluesselt) entschluesseln, dann senden
+      const fileBuffer = await fs.promises.readFile(photoPath);
+      let imageBuffer;
+      try {
+        imageBuffer = decryptBuffer(fileBuffer);
+      } catch (decErr) {
+        console.error('Error decrypting photo:', decErr);
+        return res.status(500).json({ error: 'Foto konnte nicht entschlüsselt werden' });
+      }
+
       res.setHeader('Content-Type', 'image/jpeg');
-      res.sendFile(photoPath);
+      res.send(imageBuffer);
     } catch (err) {
  console.error('Error serving photo:', err);
       res.status(500).json({ error: 'Serverfehler' });
@@ -896,13 +936,19 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
       if (request.status !== 'pending') {
         return res.status(400).json({ error: 'Nur wartende Anträge können gelöscht werden' });
       }
-      
+
       // Delete the request
       await db.query(
         "DELETE FROM activity_requests WHERE id = $1 AND user_id = $2 AND organization_id = $3",
         [requestId, konfiId, req.user.organization_id]
       );
-      
+
+      // Nachweisfoto vom Dateisystem entfernen (kein Orphan, Datensparsamkeit).
+      // Bewusst NACH dem DB-Delete und nicht blockierend.
+      if (request.photo_filename) {
+        await deletePhotoFile(request.photo_filename);
+      }
+
       res.json({ message: 'Antrag erfolgreich gelöscht' });
 
       // Live-Update an alle Admins senden

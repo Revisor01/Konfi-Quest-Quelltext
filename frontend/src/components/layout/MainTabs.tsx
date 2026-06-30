@@ -48,7 +48,7 @@ import AdminCertificatesPage from '../admin/pages/AdminCertificatesPage';
 import AdminDashboardSettingsPage from '../admin/pages/AdminDashboardSettingsPage';
 import AdminLevelsPage from '../admin/pages/AdminLevelsPage';
 import AdminInvitePage from '../admin/pages/AdminInvitePage';
-import ChatOverviewPage from '../chat/pages/ChatOverviewPage'; // Diese bleibt!
+import ChatOverviewPage from '../chat/pages/ChatOverviewPage';
 import ChatRoomView from '../chat/views/ChatRoomView'; // Diese bleibt!
 import PushNotificationSettings from '../common/PushNotificationSettings';
 import ChatPermissionsSettings from '../admin/settings/ChatPermissionsSettings';

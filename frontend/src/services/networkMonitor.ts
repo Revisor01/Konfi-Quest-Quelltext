@@ -14,11 +14,15 @@ function notifyListeners() {
 }
 
 // Robuste Online-Auswertung: Manche Plattformen (v.a. Android-Emulatoren,
-// teils auch echte Geraete) melden connected=false bei connectionType='unknown',
-// obwohl Netz vorhanden ist. In diesem Fall optimistisch online bleiben — sonst
-// blockt die App den Login VOR dem ersten Request ("Keine Verbindung").
+// teils auch echte Geraete + die Google-Play-Review-Umgebung) melden
+// connected=false bei connectionType='unknown' ODER 'none', obwohl Netz
+// vorhanden ist (Ping/HTTP funktionieren). In diesen Faellen optimistisch
+// online bleiben — sonst blockt die App den Login VOR dem ersten Request
+// ("Keine Verbindung"), was zu Google-Play-Rejections (Login fehlgeschlagen)
+// gefuehrt hat. Ein echter fehlgeschlagener Request faellt ohnehin in den
+// Fehler-Handler; lieber den Request versuchen als ihn faelschlich zu blocken.
 function evaluateOnline(status: { connected: boolean; connectionType?: string }): boolean {
-  if (status.connectionType === 'unknown') return true;
+  if (status.connectionType === 'unknown' || status.connectionType === 'none') return true;
   return status.connected;
 }
 

@@ -57,13 +57,15 @@ import { triggerPullHaptic } from '../../utils/haptics';
 
 interface ChatOverviewProps {
   onSelectRoom: (room: ChatRoomOverview) => void;
+  // Im iPad-Split-View aktuell rechts geoeffneter Raum (fuer Highlighting).
+  selectedRoomId?: number | null;
 }
 
 interface ChatOverviewRef {
   loadChatRooms: () => void;
 }
 
-const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onSelectRoom }, ref) => {
+const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onSelectRoom, selectedRoomId }, ref) => {
   const { user, setError, isOnline } = useApp();
   const [presentAlert] = useIonAlert();
   const { chatUnreadByRoom, refreshAllCounts } = useBadge();
@@ -474,7 +476,7 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
                           }}
                         >
                           <div
-                            className={`app-list-item app-list-item--${colorClass}`}
+                            className={`app-list-item app-list-item--${colorClass}${selectedRoomId === room.id ? ' app-list-item--selected' : ''}`}
                             style={{
                               width: '100%',
                               position: 'relative',
