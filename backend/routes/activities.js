@@ -207,15 +207,24 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
         return res.status(409).json({ error: `Aktivität kann nicht gelöscht werden: ${usage.count} Zuordnung(en) zu Konfis vorhanden.` });
       }
 
-      // Pending Anträge prüfen
-      const { rows: [pendingCheck] } = await db.query(
-        `SELECT COUNT(*)::int as count FROM activity_requests ar
-         WHERE ar.activity_id = $1 AND ar.status = 'pending' AND ar.organization_id = $2`,
+      // ALLE Anträge prüfen, nicht nur pending: Der
+      // NO-ACTION-FK activity_requests.activity_id blockt das Löschen auch bei
+      // abgelehnten/historischen Anträgen — ohne diesen Check gab es dann statt
+      // einer verständlichen Meldung einen 500 "Datenbankfehler" (gleiche
+      // Fehlerklasse wie der Teamer-Lösch-Bug vom 02.07.).
+      const { rows: [requestCheck] } = await db.query(
+        `SELECT COUNT(*)::int as count,
+                COUNT(*) FILTER (WHERE ar.status = 'pending')::int as pending
+         FROM activity_requests ar
+         WHERE ar.activity_id = $1 AND ar.organization_id = $2`,
         [activityId, req.user.organization_id]
       );
-      if (pendingCheck.count > 0) {
+      if (requestCheck.count > 0) {
+        const detail = requestCheck.pending > 0
+          ? `${requestCheck.pending} offene(r) Antrag/Anträge`
+          : `${requestCheck.count} abgeschlossene(r) Antrag/Anträge (Antragshistorie)`;
         return res.status(409).json({
-          error: `Aktivität kann nicht gelöscht werden: ${pendingCheck.count} offene Anträge vorhanden.`
+          error: `Aktivität kann nicht gelöscht werden: ${detail} vorhanden.`
         });
       }
 
@@ -329,6 +338,17 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
       }
 
       res.json({ message: 'Antrag auf ausstehend zurückgesetzt', oldStatus });
+
+      // Live-Updates analog zum Genehmigungs-Handler (Z.492ff). Antragsliste an
+      // Admins/Org-Admins/Teamer:innen der Org; Antragsteller:in (Konfi ODER
+      // Teamer:in) ueber den korrekten Socket-Raum per Rolle.
+      liveUpdate.sendToOrgAdmins(req.user.organization_id, 'requests', 'update');
+      liveUpdate.sendToUserByRole(request.user_id, 'requests', 'update');
+      // Wurde ein genehmigter Antrag zurueckgesetzt, wurden Punkte entzogen
+      // (nur bei Konfi-Activities) -> Punkte-/Dashboard-Ansicht aktualisieren.
+      if (oldStatus === 'approved' && !isTeamerActivity) {
+        liveUpdate.sendToUserByRole(request.user_id, 'points', 'update');
+      }
 
     } catch (err) {
  console.error(`Database error in PUT /api/activities/requests/${requestId}/reset:`, err);
@@ -481,22 +501,20 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
         // Don't fail the request if notification fails
       }
 
-      // Live-Update an ALLE Admins broadcasten: Konfi-Punkte + Antragsliste
-      // aendern sich -> jeder sieht es sofort, ohne manuelles Refresh, und es
-      // verhindert Doppel-Genehmigungen durch parallele Admins.
-      try {
-        io.emit('konfisUpdate', { organization_id: req.user.organization_id });
-        io.emit('requestsUpdate', { organization_id: req.user.organization_id });
-      } catch (emitErr) {
-        console.error('Socket-Emit nach Genehmigung fehlgeschlagen:', emitErr.message);
-      }
-
       res.json({ message: 'Antragsstatus aktualisiert', newBadges });
 
-      // Live-Update für Anträge und Konfi-Punkte senden
+      // Live-Update fuer Antragsliste an alle Admins/Org-Admins/Teamer:innen der
+      // Org (sendToOrgAdmins adressiert seit dem Raum-Fix auch Teamer:innen). Der
+      // frueher hier stehende globale io.emit('konfisUpdate'/'requestsUpdate') war
+      // ein Broadcast an ALLE Orgs (Isolation-Verletzung) und ist redundant: die
+      // Legacy-Listener in LiveUpdateContext bekommen dieselbe Aktualisierung nun
+      // ueber das reguläre 'liveUpdate'-Event (type 'requests') dieser Sendung.
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'requests', 'update');
-      liveUpdate.sendToKonfi(request.user_id, 'points', 'update');
-      liveUpdate.sendToKonfi(request.user_id, 'requests', 'update');
+      // Antragsteller:in kann Konfi ODER Teamer:in sein (target_role='teamer'):
+      // sendToUserByRole trifft den korrekten Socket-Raum, sendToKonfi wuerde bei
+      // Teamer-Antraegen in den leeren Konfi-Raum senden.
+      liveUpdate.sendToUserByRole(request.user_id, 'points', 'update');
+      liveUpdate.sendToUserByRole(request.user_id, 'requests', 'update');
     } catch (err) {
  console.error(`Database error in PUT /api/activities/requests/${requestId}:`, err);
       res.status(500).json({ error: 'Datenbankfehler' });

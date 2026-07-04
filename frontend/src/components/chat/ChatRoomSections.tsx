@@ -372,7 +372,18 @@ export const MessageInput = React.memo<MessageInputProps>(({
           shape="round"
           size="small"
           disabled={(!messageText.trim() && !selectedFile) || uploading}
-          onClick={onSend}
+          // preventDefault auf pointerdown: Der Button soll dem Textfeld den
+          // Fokus moeglichst gar nicht erst stehlen.
+          onPointerDown={(e) => e.preventDefault()}
+          // Fokus SYNCHRON in der Klick-Geste zuruecksetzen: Nach dem Senden
+          // wird der Button disabled (Text leer) und der Browser wirft den
+          // Fokus sonst auf BODY -> iOS schliesst die Tastatur. Innerhalb der
+          // User-Geste haelt setFocus die Tastatur offen (verifiziert im Web:
+          // activeElement war BODY nach Senden).
+          onClick={() => {
+            onSend();
+            textareaRef.current?.setFocus();
+          }}
           style={{
             '--background': '#06b6d4',
             '--background-activated': '#0891b2',

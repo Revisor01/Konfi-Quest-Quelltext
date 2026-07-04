@@ -7,7 +7,10 @@ const { checkUserHierarchy, filterUsersByHierarchy } = require('../utils/roleHie
 const { validatePassword } = require('../utils/passwordUtils');
 const { invalidateUserCache } = require('../middleware/rbac');
 const { syncJahrgangChat } = require('../utils/jahrgangChat');
+const { syncTeamChat } = require('../utils/teamChat');
+const chatSyncCache = require('../utils/chatSyncCache');
 const { deletePhotoFile } = require('../utils/photoStorage');
+const liveUpdate = require('../utils/liveUpdate');
 
 // User management routes
 // WICHTIGER HINWEIS: Das übergebene 'db'-Objekt ist eine PostgreSQL Pool-Instanz.
@@ -151,8 +154,8 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
     }
 
     try {
-      // Verify role exists in organization
-      const roleCheckQuery = "SELECT id FROM roles WHERE id = $1 AND organization_id = $2";
+      // Verify role exists in organization (name wird unten fuer den Chat-Sync gebraucht)
+      const roleCheckQuery = "SELECT id, name FROM roles WHERE id = $1 AND organization_id = $2";
       const { rows: [role] } = await db.query(roleCheckQuery, [role_id, organizationId]);
 
       if (!role) {
@@ -193,6 +196,29 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
         username,
         display_name
       });
+
+      // Live-Update NACH der Response: neuer Benutzer in der Benutzer-Liste.
+      liveUpdate.sendToOrgAdmins(organizationId, 'users', 'create', { userId: newUser.id });
+
+      // Chat-Mitgliedschaft INLINE pflegen (der TTL-Sync-Cache verlaesst sich
+      // darauf, dass Mutations-Handler das tun — sonst erscheinen neue
+      // Teamer:innen/Admins erst nach bis zu 10 Minuten im Team-Chat).
+      if (['org_admin', 'admin', 'teamer'].includes(role.name)) {
+        try {
+          await syncTeamChat(db, organizationId, req.user.id);
+          // Org-Admins sind ausserdem in ALLEN Jahrgangs-Chats der Org.
+          if (role.name === 'org_admin') {
+            const { rows: jgs } = await db.query(
+              'SELECT id FROM jahrgaenge WHERE organization_id = $1', [organizationId]
+            );
+            for (const jg of jgs) {
+              await syncJahrgangChat(db, jg.id, organizationId, req.user.id);
+            }
+          }
+        } catch (syncErr) {
+          console.error('Chat-Sync nach Benutzer-Anlage fehlgeschlagen:', syncErr.message);
+        }
+      }
 
     } catch (err) {
       // '23505' is the code for unique_violation in PostgreSQL
@@ -266,9 +292,38 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
 
       res.json({ message: 'Benutzer erfolgreich aktualisiert' });
 
+      // Live-Update NACH der Response: geaenderter Benutzer in der Benutzer-Liste.
+      liveUpdate.sendToOrgAdmins(organizationId, 'users', 'update', { userId: parseInt(id) });
+
       // Cache invalidieren damit neues Token sofort wirkt
       if (role_id !== undefined) {
         invalidateUserCache(parseInt(id));
+      }
+
+      // Rollen- oder Aktiv-Status-Wechsel aendert die Soll-Mitgliedschaft in
+      // Team-/Jahrgangs-Chats -> INLINE syncen (TTL-Cache verlaesst sich darauf)
+      // und den Sync-Cache des Users invalidieren.
+      if (role_id !== undefined || is_active !== undefined) {
+        try {
+          chatSyncCache.invalidate(organizationId, parseInt(id));
+          await syncTeamChat(db, organizationId, req.user.id);
+          const { rows: assigned } = await db.query(
+            'SELECT jahrgang_id FROM user_jahrgang_assignments WHERE user_id = $1',
+            [id]
+          );
+          for (const a of assigned) {
+            await syncJahrgangChat(db, a.jahrgang_id, organizationId, req.user.id);
+          }
+        } catch (syncErr) {
+          console.error('Chat-Sync nach Benutzer-Aenderung fehlgeschlagen:', syncErr.message);
+        }
+      }
+
+      // Deaktivierung (is_active=false): Aktive Sockets trennen, damit ein noch
+      // verbundener Client mit deaktiviertem Konto nicht weiter Live-Updates
+      // mitliest. Deckt alle drei Raum-Typen ab (konfi/teamer/admin).
+      if (is_active === false) {
+        liveUpdate.disconnectUserSockets(parseInt(id));
       }
 
       // Bei Rollenänderung: Socket.io-Verbindungen des Users trennen
@@ -367,13 +422,18 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
       await client.query("DELETE FROM chat_participants WHERE user_id = $1", [id]);
       await client.query("DELETE FROM chat_read_status WHERE user_id = $1", [id]);
       await client.query("DELETE FROM chat_messages WHERE user_id = $1", [id]);
+      await client.query(`
+        DELETE FROM chat_rooms r
+        WHERE r.type = 'direct'
+        AND NOT EXISTS (SELECT 1 FROM chat_participants p WHERE p.room_id = r.id)
+      `);
       await client.query("DELETE FROM notifications WHERE user_id = $1", [id]);
       await client.query("DELETE FROM push_tokens WHERE user_id = $1", [id]);
       await client.query("DELETE FROM password_resets WHERE user_id = $1", [id]);
 
-      // Nachweisfotos der Antraege dieses Users vor dem Delete einsammeln,
-      // damit die Dateien nach erfolgreichem COMMIT entfernt werden koennen
-      // (greift, falls ein Konfi ueber die Benutzerverwaltung geloescht wird).
+      // Nachweisfotos der Antraege dieses Users einsammeln, BEVOR activity_requests
+      // im Purge unten geloescht wird — sonst blieben die Dateien als Leichen liegen.
+      // Entfernt werden sie erst nach erfolgreichem COMMIT.
       let photoFilenames = [];
       try {
         const { rows } = await client.query(
@@ -384,6 +444,33 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
       } catch (photoErr) {
         // activity_requests evtl. nicht vorhanden (Schema-Varianz) — nicht kippen
         if (photoErr.code !== '42703' && photoErr.code !== '42P01') throw photoErr;
+      }
+
+      // Konfi-History DIESES Users mitloeschen. Wichtig: Diese Tabellen tragen
+      // (aus der SQLite-Altlast) einen zweiten NO-ACTION-FK auf users(id) neben
+      // dem CASCADE-FK — NO ACTION gewinnt und wuerde den User-Delete sonst mit
+      // "violates foreign key constraint" (500) blocken. Der NO-ACTION-Schutz ist
+      // gewollt fuer den JAHRGANG-Delete (dort bleibt der User bestehen und behaelt
+      // seine History). Wird der USER selbst geloescht, gehoert seine History mit weg.
+      // Fehlertolerant (Schema-Varianz je Migrationsstand), analog zu nullifyRefs.
+      const purgeHistory = [
+        "DELETE FROM activity_requests WHERE user_id = $1",
+        "DELETE FROM bonus_points WHERE konfi_id = $1",
+        "DELETE FROM user_activities WHERE user_id = $1",
+        "DELETE FROM user_badges WHERE user_id = $1",
+        "DELETE FROM event_points WHERE konfi_id = $1",
+        "DELETE FROM event_bookings WHERE user_id = $1",
+        "DELETE FROM konfi_profiles WHERE user_id = $1",
+      ];
+      for (const sql of purgeHistory) {
+        await client.query('SAVEPOINT hist_purge');
+        try {
+          await client.query(sql, [id]);
+          await client.query('RELEASE SAVEPOINT hist_purge');
+        } catch (histErr) {
+          await client.query('ROLLBACK TO SAVEPOINT hist_purge');
+          if (histErr.code !== '42703' && histErr.code !== '42P01') throw histErr;
+        }
       }
 
       // Delete user
@@ -398,12 +485,20 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
       await client.query('COMMIT');
       client.release();
 
+      // Aktive Socket-Verbindungen des geloeschten Users sofort trennen — sonst
+      // liest ein noch verbundener Client mit toter Session weiter Live-Updates
+      // mit, bis er von selbst neu verbindet. Nach dem COMMIT (User ist weg).
+      liveUpdate.disconnectUserSockets(parseInt(id));
+
       // Foto-Dateien nach COMMIT vom Dateisystem entfernen (nicht blockierend)
       for (const filename of photoFilenames) {
         await deletePhotoFile(filename);
       }
 
       res.json({ message: 'Benutzer erfolgreich gelöscht' });
+
+      // Live-Update NACH der Response: geloeschter Benutzer aus der Benutzer-Liste.
+      liveUpdate.sendToOrgAdmins(organizationId, 'users', 'delete', { userId: parseInt(id) });
 
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
@@ -490,6 +585,10 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
             message: jahrgang_assignments.length > 0 ? 'Jahrgangs-Zuweisungen aktualisiert' : 'Alle Jahrgangs-Zuweisungen entfernt',
             assignments_count: jahrgang_assignments.length
         });
+
+        // Live-Update NACH der Response: geaenderte Jahrgangs-Zuweisung wirkt auf
+        // die Benutzer-Liste (Zugehoerigkeit/Anzeige).
+        liveUpdate.sendToOrgAdmins(organizationId, 'users', 'update', { userId: parseInt(userId) });
 
         } catch (err) {
           try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
@@ -594,6 +693,11 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
       const hashedPassword = await bcrypt.hash(password, 10);
       // org-gescopt: id ist eindeutig, organization_id als defensiver Zusatzfilter (matcht den oben geladenen targetUser)
       await db.query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2 AND organization_id = $3', [hashedPassword, id, targetUser.organization_id]);
+
+      // Bestehende Socket-Verbindungen des Users trennen: Nach einem Passwort-
+      // Reset soll die alte Session nicht ueber einen offenen Socket weiterlaufen.
+      // Der Client verbindet sich nach dem naechsten (Re-)Login mit frischem Token.
+      liveUpdate.disconnectUserSockets(parseInt(id));
 
       res.json({ message: 'Passwort erfolgreich zurückgesetzt' });
 

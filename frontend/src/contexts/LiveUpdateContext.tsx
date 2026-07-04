@@ -33,6 +33,12 @@ interface LiveUpdateContextType {
   subscribe: (type: LiveUpdateType, callback: (event: LiveUpdateEvent) => void) => () => void;
   // Manually trigger a refresh (for testing/debugging)
   triggerRefresh: (type: LiveUpdateType) => void;
+  // Zaehler, der sich nach jedem Socket-Reconnect-mit-neuem-Token erhoeht.
+  // Konsumenten, die eigene socket.on(...)-Listener binden (z.B. BadgeContext),
+  // muessen socketEpoch als Effect-Dependency nutzen, damit sie ihre Handler nach
+  // reconnectWithToken am NEUEN Socket-Objekt neu binden — sonst haengen sie am
+  // verworfenen alten Socket und empfangen keine Events mehr.
+  socketEpoch: number;
 }
 
 const LiveUpdateContext = createContext<LiveUpdateContextType | undefined>(undefined);
@@ -95,39 +101,15 @@ export const LiveUpdateProvider = ({ children }: { children: ReactNode }) => {
       window.dispatchEvent(new CustomEvent(`liveUpdate:${event.type}`, { detail: event }));
     };
 
-    // Listen for the main liveUpdate event
+    // Der Server sendet ALLE Live-Updates ueber das einheitliche 'liveUpdate'-Event
+    // (utils/liveUpdate.js). Die frueher hier registrierten 13 '*Update'-Kompatibilitaets-
+    // Listener (dashboardUpdate, eventsUpdate, ...) waren tot: seit dem Entfernen des
+    // globalen io.emit() im Backend wurde KEINES dieser Events mehr emittiert
+    // (verifiziert per grep ueber backend/). Ersatzlos entfernt.
     socket.on('liveUpdate', handleLiveUpdate);
-
-    // Also listen for specific event types (backward compatibility)
-    socket.on('dashboardUpdate', (data: any) => handleLiveUpdate({ type: 'dashboard', action: 'refresh', data }));
-    socket.on('eventsUpdate', (data: any) => handleLiveUpdate({ type: 'events', action: 'refresh', data }));
-    socket.on('badgesUpdate', (data: any) => handleLiveUpdate({ type: 'badges', action: 'refresh', data }));
-    socket.on('requestsUpdate', (data: any) => handleLiveUpdate({ type: 'requests', action: 'refresh', data }));
-    socket.on('konfisUpdate', (data: any) => handleLiveUpdate({ type: 'konfis', action: 'refresh', data }));
-    socket.on('pointsUpdate', (data: any) => handleLiveUpdate({ type: 'points', action: 'refresh', data }));
-    socket.on('bookingUpdate', (data: any) => handleLiveUpdate({ type: 'event_booking', action: 'update', data }));
-    socket.on('activitiesUpdate', (data: any) => handleLiveUpdate({ type: 'activities', action: 'refresh', data }));
-    socket.on('categoriesUpdate', (data: any) => handleLiveUpdate({ type: 'categories', action: 'refresh', data }));
-    socket.on('jahrgaengeUpdate', (data: any) => handleLiveUpdate({ type: 'jahrgaenge', action: 'refresh', data }));
-    socket.on('levelsUpdate', (data: any) => handleLiveUpdate({ type: 'levels', action: 'refresh', data }));
-    socket.on('usersUpdate', (data: any) => handleLiveUpdate({ type: 'users', action: 'refresh', data }));
-    socket.on('organizationsUpdate', (data: any) => handleLiveUpdate({ type: 'organizations', action: 'refresh', data }));
 
     return () => {
       socket.off('liveUpdate', handleLiveUpdate);
-      socket.off('dashboardUpdate');
-      socket.off('eventsUpdate');
-      socket.off('badgesUpdate');
-      socket.off('requestsUpdate');
-      socket.off('konfisUpdate');
-      socket.off('pointsUpdate');
-      socket.off('bookingUpdate');
-      socket.off('activitiesUpdate');
-      socket.off('categoriesUpdate');
-      socket.off('jahrgaengeUpdate');
-      socket.off('levelsUpdate');
-      socket.off('usersUpdate');
-      socket.off('organizationsUpdate');
     };
     // socketEpoch in den Deps: nach Reconnect-mit-neuem-Token werden die
     // Listener am frischen Socket neu gebunden.
@@ -158,7 +140,7 @@ export const LiveUpdateProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   return (
-    <LiveUpdateContext.Provider value={{ subscribe, triggerRefresh }}>
+    <LiveUpdateContext.Provider value={{ subscribe, triggerRefresh, socketEpoch }}>
       {children}
     </LiveUpdateContext.Provider>
   );
@@ -173,6 +155,7 @@ export const useLiveUpdate = () => {
     return {
       subscribe: () => () => {},
       triggerRefresh: () => {},
+      socketEpoch: 0,
     } as LiveUpdateContextType;
   }
   return context;

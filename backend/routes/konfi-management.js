@@ -230,6 +230,11 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
 
             res.status(201).json({ id: userId, username, temporaryPassword: password, message: 'Konfi erfolgreich erstellt' });
 
+            // Live-Update NACH der Response: neuer Konfi taucht in der Admin-Liste auf.
+            // Ausserhalb des try/catch waere ideal, hier aber unkritisch, da der Send
+            // selbst gefangen ist (No-op ohne io) und die Response bereits raus ist.
+            liveUpdate.sendToOrgAdmins(req.user.organization_id, 'konfis', 'create');
+
         } catch (err) {
             await client.query('ROLLBACK').catch(rbErr => console.error('Rollback failed:', rbErr));
 
@@ -307,6 +312,9 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
 
             res.json({ message: 'Konfi erfolgreich aktualisiert' });
 
+            // Live-Update NACH der Response: geaenderter Konfi in der Admin-Liste.
+            liveUpdate.sendToOrgAdmins(req.user.organization_id, 'konfis', 'update', { konfiId: req.params.id });
+
         } catch (err) {
             await client.query('ROLLBACK').catch(rbErr => console.error('Rollback failed:', rbErr));
  console.error('Database error in PUT /konfis/:id:', err);
@@ -338,6 +346,9 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
 
             await client.query('COMMIT');
             res.json({ message: 'Konfi erfolgreich gelöscht' });
+
+            // Live-Update NACH der Response: geloeschter Konfi aus der Admin-Liste entfernen.
+            liveUpdate.sendToOrgAdmins(req.user.organization_id, 'konfis', 'delete', { konfiId: userId });
 
         } catch (err) {
             await client.query('ROLLBACK').catch(rbErr => console.error('Rollback failed:', rbErr));
@@ -1017,6 +1028,11 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
                     role_name: 'teamer'
                 }
             });
+
+            // Live-Update NACH der Response: Konfi verschwindet aus der Konfi-Liste
+            // und taucht als Teamer:in in der Benutzer-Liste auf.
+            liveUpdate.sendToOrgAdmins(req.user.organization_id, 'konfis', 'update', { konfiId });
+            liveUpdate.sendToOrgAdmins(req.user.organization_id, 'users', 'update', { userId: konfiId });
 
         } catch (err) {
             await client.query('ROLLBACK').catch(rbErr => console.error('Rollback failed:', rbErr));

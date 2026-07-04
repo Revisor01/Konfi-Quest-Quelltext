@@ -735,7 +735,6 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                     <IonButton
                       className="app-action-button"
                       expand="block"
-                      fill="outline"
                       color="success"
                       onClick={handleOptIn}
                     >
@@ -821,7 +820,6 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
             <IonButton
               className="app-action-button"
               expand="block"
-              fill="outline"
               color="success"
               disabled={!isOnline}
               onClick={handleRegister}
@@ -833,7 +831,6 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
             <IonButton
               className="app-action-button"
               expand="block"
-              fill="outline"
               color="warning"
               disabled={!isOnline}
               onClick={handleRegister}

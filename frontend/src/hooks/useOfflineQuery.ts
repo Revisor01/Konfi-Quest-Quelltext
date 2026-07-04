@@ -168,6 +168,23 @@ export function useOfflineQuery<T>(
     return () => window.removeEventListener('org:switched', handler);
   }, [revalidate]);
 
+  // Socket-Reconnect (sync:reconnect): Nach einem Verbindungsabriss (z.B. Deploy,
+  // Netzwerkwechsel, App-Resume) laedt die gerade SICHTBARE View frische Daten.
+  // Ionic haelt Pages im IonRouterOutlet-Stack gecacht -> kein Remount/useEffect,
+  // daher greift das plattformunabhaengige window-Event analog zu 'org:switched'.
+  // Der Reconnect-Handler in websocket.ts hat zuvor den Cache invalidiert; wir
+  // nutzen bewusst denselben revalidate-Pfad (kein separater fetch), damit kein
+  // Doppel-Fetch entsteht.
+  useEffect(() => {
+    const handler = () => {
+      if (mountedRef.current && networkMonitor.isOnline) {
+        revalidate();
+      }
+    };
+    window.addEventListener('sync:reconnect', handler);
+    return () => window.removeEventListener('sync:reconnect', handler);
+  }, [revalidate]);
+
   // Cleanup bei Unmount
   useEffect(() => {
     mountedRef.current = true;

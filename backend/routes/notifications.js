@@ -19,6 +19,91 @@ module.exports = (db, verifyTokenRBAC) => {
     handleValidationErrors
   ];
 
+  // Leichtgewichtige Badge-Zaehler fuer die Tab-Leiste.
+  // Ersetzt im BadgeContext die frueheren Voll-Fetches von /chat/rooms +
+  // /admin/activities/requests + /events, die nur fuer Zaehler geladen wurden.
+  // WICHTIG fuer Konsistenz mit den Listen-Ansichten:
+  // - chat.byRoom repliziert EXAKT die unread_count-Semantik der
+  //   GET /chat/rooms-Query (inkl. Mitzaehlen eigener Nachrichten) — die Werte
+  //   speisen chatUnreadByRoom, das ChatRoom/ChatOverview konsumieren.
+  //   BEWUSST OHNE Mitgliedschafts-Sync (der laeuft TTL-gesteuert in /rooms).
+  // - pendingRequests entspricht dem pending-Filter der Admin-Antragsliste
+  //   (GET /admin/activities/requests ist org-weit ueber activities.organization_id).
+  // - pendingEvents entspricht der Frontend-Logik "unprocessed_count > 0 UND
+  //   event_date < jetzt" (unprocessed = bestaetigte Buchung ohne attendance_status).
+  router.get('/badge-counts', verifyTokenRBAC, async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const userType = req.user.type;
+      const organizationId = req.user.organization_id;
+
+      const chatQuery = `
+        SELECT r.id AS room_id,
+               (
+                 SELECT COUNT(*)
+                 FROM chat_messages m
+                 WHERE m.room_id = r.id
+                 AND m.deleted_at IS NULL
+                 AND m.created_at > COALESCE(crs.last_read_at, '1970-01-01')
+               ) AS unread_count
+        FROM chat_rooms r
+        INNER JOIN chat_participants p ON r.id = p.room_id AND p.user_id = $1 AND p.user_type = $2
+        LEFT JOIN chat_read_status crs ON r.id = crs.room_id AND crs.user_id = $1 AND crs.user_type = $2
+        WHERE r.organization_id = $3
+      `;
+
+      // Pending-Zaehler nur fuer Admin-Typen (Konfis/Teamer nutzen sie im
+      // Frontend nicht — BadgeContext zeigt sie nur fuer isAdmin).
+      const isAdminType = userType === 'admin';
+      const zero = Promise.resolve({ rows: [{ c: 0 }] });
+
+      const [chatRes, requestsRes, eventsRes] = await Promise.all([
+        db.query(chatQuery, [userId, userType, organizationId]),
+        isAdminType
+          ? db.query(
+              `SELECT COUNT(*)::int AS c
+               FROM activity_requests ar
+               JOIN activities a ON ar.activity_id = a.id
+               WHERE a.organization_id = $1 AND ar.status = 'pending'`,
+              [organizationId]
+            )
+          : zero,
+        isAdminType
+          ? db.query(
+              `SELECT COUNT(*)::int AS c
+               FROM events e
+               WHERE e.organization_id = $1
+               AND e.event_date < NOW()
+               AND EXISTS (
+                 SELECT 1 FROM event_bookings eb
+                 WHERE eb.event_id = e.id
+                 AND eb.status = 'confirmed'
+                 AND eb.attendance_status IS NULL
+               )`,
+              [organizationId]
+            )
+          : zero
+      ]);
+
+      const byRoom = {};
+      let total = 0;
+      chatRes.rows.forEach((r) => {
+        const unread = parseInt(r.unread_count, 10) || 0;
+        byRoom[r.room_id] = unread;
+        total += unread;
+      });
+
+      res.json({
+        chat: { total, byRoom },
+        pendingRequests: requestsRes.rows[0]?.c || 0,
+        pendingEvents: eventsRes.rows[0]?.c || 0
+      });
+    } catch (err) {
+      console.error('Database error in GET /notifications/badge-counts:', err);
+      res.status(500).json({ error: 'Datenbankfehler' });
+    }
+  });
+
   // Liefert den globalen Push-Master-Schalter des eingeloggten Users
   router.get('/preferences', verifyTokenRBAC, async (req, res) => {
     try {

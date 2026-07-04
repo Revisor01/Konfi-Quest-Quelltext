@@ -43,12 +43,26 @@ async function syncTeamChat(db, organizationId, createdBy = null) {
   const roomId = room.id;
 
   // 2. SOLL-Mitglieder: alle aktiven Org-Admins/Admins/Teamer der Org.
+  //    WICHTIG Multi-Org (Migration 101): Mitgliedschaft kann aus der Primaer-Org
+  //    (users.organization_id + users.role_id) ODER aus user_organizations
+  //    (Org-Switcher) kommen — beide Quellen zaehlen, sonst entfernt der Sync
+  //    eingewechselte Mitglieder aus dem Team-Chat.
   const { rows: sollMembers } = await db.query(
     `
     SELECT u.id AS user_id,
            CASE WHEN r.name = 'teamer' THEN 'teamer' ELSE 'admin' END AS user_type
       FROM users u JOIN roles r ON u.role_id = r.id
      WHERE u.organization_id = $1
+       AND r.name IN ('org_admin', 'admin', 'teamer')
+       AND u.is_active = true
+       AND u.deleted_at IS NULL
+    UNION
+    SELECT u.id AS user_id,
+           CASE WHEN r.name = 'teamer' THEN 'teamer' ELSE 'admin' END AS user_type
+      FROM user_organizations uo
+      JOIN users u ON uo.user_id = u.id
+      JOIN roles r ON uo.role_id = r.id
+     WHERE uo.organization_id = $1
        AND r.name IN ('org_admin', 'admin', 'teamer')
        AND u.is_active = true
        AND u.deleted_at IS NULL

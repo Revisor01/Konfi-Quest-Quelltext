@@ -10,6 +10,7 @@ const { validatePassword } = require('../utils/passwordUtils');
 const { deleteKonfiCascade } = require('../utils/konfiDeletion');
 const { checkKonfiLimit } = require('../utils/konfiLimit');
 const PushService = require('../services/pushService');
+const liveUpdate = require('../utils/liveUpdate');
 const router = express.Router();
 
 // Eigener Rate-Limiter für Passwort-Reset (getrennt vom Login-Limiter)
@@ -885,6 +886,11 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
             role_name: 'konfi'
           }
         });
+
+        // Live-Update NACH der Response: selbstregistrierter Konfi taucht in der
+        // Admin-Konfi-Liste auf. Die Org-ID stammt hier aus dem Invite-Code
+        // (kein req.user — dieser Endpunkt ist unauthentifiziert).
+        liveUpdate.sendToOrgAdmins(invite.organization_id, 'konfis', 'create', { konfiId: newUser.id });
 
       } catch (err) {
         await client.query('ROLLBACK');

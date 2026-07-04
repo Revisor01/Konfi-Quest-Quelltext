@@ -47,6 +47,30 @@ const io = new Server(server, {
   pingInterval: 25000
 });
 
+// Socket.IO-Events REPLIKA-UEBERGREIFEND verteilen:
+// Es laufen zwei Backend-Instanzen hinter Traefik. Ohne Adapter emittet jede
+// Instanz nur an ihre EIGENEN Sockets — ein io.emit() der Replika, die den
+// Request verarbeitet hat, erreichte Clients auf der anderen Replika NIE
+// (betraf alle LiveUpdates und Chat-Events). Der postgres-adapter nutzt die
+// vorhandene DB als Event-Bus (NOTIFY/LISTEN); Payloads > ~8000 Bytes laufen
+// ueber die Tabelle socket_io_attachments (Migration 109).
+const { createAdapter: createPgAdapter } = require('@socket.io/postgres-adapter');
+const { Pool: PgPool } = require('pg');
+
+// Eigener kleiner Pool fuer den Adapter (dedizierte LISTEN-Connection + Queries),
+// getrennt vom App-Pool in database.js, damit die dauerhafte LISTEN-Verbindung
+// keinen App-Slot belegt.
+const socketAdapterPool = new PgPool({
+  connectionString: process.env.DATABASE_URL,
+  max: parseInt(process.env.PG_SOCKET_ADAPTER_POOL_MAX || '2', 10),
+});
+socketAdapterPool.on('error', (err) => {
+  console.error('Socket.IO-Adapter-Pool Fehler:', err.message);
+});
+io.adapter(createPgAdapter(socketAdapterPool, {
+  errorHandler: (err) => console.error('Socket.IO-Postgres-Adapter Fehler:', err.message),
+}));
+
 // Engine-Level Events
 io.engine.on('connection_error', (err) => {
   console.warn('Socket.io Engine connection_error:', err.code, err.message);
@@ -368,6 +392,12 @@ const gracefulShutdown = (signal) => {
       console.warn('Datenbankverbindung geschlossen.');
     } catch (err) {
       console.error('Fehler beim Schliessen der Datenbankverbindung:', err.message);
+    }
+    try {
+      await socketAdapterPool.end();
+      console.warn('Socket.IO-Adapter-Pool geschlossen.');
+    } catch (err) {
+      console.error('Fehler beim Schliessen des Adapter-Pools:', err.message);
     }
     process.exit(0);
   });

@@ -15,21 +15,49 @@ const pool = new Pool({
   connectionTimeoutMillis: parseInt(process.env.PG_CONN_TIMEOUT || '5000', 10),
 });
 
-async function runMigrations(pool) {
-  // Tracking-Tabelle sicherstellen (idempotent)
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      name TEXT PRIMARY KEY,
-      applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    )
-  `);
+// App-weite Lock-ID fuer den Migrations-Advisory-Lock (beliebig, aber fest).
+const MIGRATION_ADVISORY_LOCK_ID = 723001;
 
+async function runMigrations(pool) {
+  // Advisory-Lock: Beide Backend-Replikas starten beim Deploy
+  // PARALLEL und rasten sonst um neue Migrationen (beobachtet bei Migration 109:
+  // eine Replika gewann, die andere warf duplicate-key auf pg_type). Der Lock
+  // serialisiert die Laeufe; die zweite Replika liest danach die frisch
+  // eingetragenen schema_migrations und ueberspringt sauber.
+  // Session-Lock auf dedizierter Connection — wird im finally freigegeben,
+  // bei Prozess-Tod raeumt Postgres den Lock automatisch.
+  const lockClient = await pool.connect();
+  try {
+    await lockClient.query('SELECT pg_advisory_lock($1)', [MIGRATION_ADVISORY_LOCK_ID]);
+
+    // Tracking-Tabelle sicherstellen (idempotent)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        name TEXT PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    await runMigrationsLocked(pool);
+  } finally {
+    try {
+      await lockClient.query('SELECT pg_advisory_unlock($1)', [MIGRATION_ADVISORY_LOCK_ID]);
+    } catch (unlockErr) {
+      // Connection evtl. tot — Postgres gibt Session-Locks dann selbst frei.
+      console.error('Migrations-Lock unlock fehlgeschlagen:', unlockErr.message);
+    }
+    lockClient.release();
+  }
+}
+
+async function runMigrationsLocked(pool) {
   const migrationsDir = path.join(__dirname, 'migrations');
   const files = fs.readdirSync(migrationsDir)
     .filter(f => f.endsWith('.sql'))
     .sort();
 
-  // Bereits ausgefuehrte Migrationen laden
+  // Bereits ausgefuehrte Migrationen laden — bewusst NACH dem Advisory-Lock,
+  // damit die zweite Replika die Eintraege der ersten sieht.
   const { rows: applied } = await pool.query('SELECT name FROM schema_migrations');
   const appliedSet = new Set(applied.map(r => r.name));
 

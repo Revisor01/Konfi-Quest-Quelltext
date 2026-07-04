@@ -8,7 +8,7 @@ import { initializeWebSocket, getSocket } from '../services/websocket';
 import { getToken } from '../services/tokenStore';
 import { removeDeliveredForChatRoom } from '../services/notifications';
 import { useApp } from './AppContext';
-import { useLiveRefresh, LiveUpdateType } from './LiveUpdateContext';
+import { useLiveRefresh, useLiveUpdate, LiveUpdateType } from './LiveUpdateContext';
 
 // Stabiles Array (Modul-Ebene) -> useLiveRefresh re-subscribt nicht bei jedem Render.
 const BADGE_LIVE_TYPES: LiveUpdateType[] = ['requests', 'events'];
@@ -37,6 +37,11 @@ const BadgeContext = createContext<BadgeContextType | undefined>(undefined);
 // Badge Provider Component
 export const BadgeProvider = ({ children }: { children: ReactNode }) => {
   const { user } = useApp();
+  // Erhoeht sich nach Socket-Reconnect-mit-neuem-Token (LiveUpdateContext). Als
+  // Dependency des newMessage-Effekts unten noetig, damit der Listener nach
+  // reconnectWithToken am NEUEN Socket-Objekt neu gebunden wird (der alte Socket
+  // wurde verworfen -> ohne Neubindung kaeme kein 'newMessage' mehr an).
+  const { socketEpoch } = useLiveUpdate();
 
   const [chatUnreadByRoom, setChatUnreadByRoom] = useState<Record<number, number>>({});
   const [chatUnreadTotal, setChatUnreadTotal] = useState(0);
@@ -53,45 +58,33 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
     return chatUnreadTotal;
   }, [chatUnreadTotal, pendingRequestsCount, pendingEventsCount, isAdmin]);
 
-  // Zentraler Refresh aller Counts
+  // Zentraler Refresh aller Counts. Nutzt den leichtgewichtigen Zaehler-Endpoint
+  // statt der frueheren drei Voll-Fetches (/chat/rooms +
+  // /admin/activities/requests + /events), die nur fuer Zahlen geladen wurden.
+  // Die Semantik der Zaehler repliziert der Server exakt aus den Listen-Queries
+  // (unread pro Raum, pending-Antraege, unverarbeitete vergangene Events).
   const refreshAllCounts = useCallback(async () => {
     if (!user) return;
 
     try {
-      // Chat-Rooms immer laden
-      const promises: Promise<any>[] = [api.get('/chat/rooms')];
+      const { data } = await api.get('/notifications/badge-counts');
 
-      // Admin-only: Requests + Events
-      if (isAdmin) {
-        promises.push(api.get('/admin/activities/requests'));
-        promises.push(api.get('/events'));
-      }
-
-      const results = await Promise.all(promises);
-
-      // Chat-Rooms verarbeiten
-      const rooms = results[0].data;
+      // chatUnreadByRoom-Struktur (Record<number, number>) beibehalten —
+      // ChatRoom (initialUnreadRef) und ChatOverview (Effect-Trigger) haengen dran.
+      const byRoomRaw: Record<string, number> = data?.chat?.byRoom || {};
       const unreadByRoom: Record<number, number> = {};
       let totalUnread = 0;
-      rooms.forEach((room: any) => {
-        const unreadCount = room.unread_count || 0;
-        unreadByRoom[room.id] = unreadCount;
-        totalUnread += unreadCount;
+      Object.entries(byRoomRaw).forEach(([roomId, count]) => {
+        const unread = Number(count) || 0;
+        unreadByRoom[Number(roomId)] = unread;
+        totalUnread += unread;
       });
       setChatUnreadByRoom(unreadByRoom);
       setChatUnreadTotal(totalUnread);
 
-      // Admin-Counts verarbeiten
-      if (isAdmin && results.length >= 3) {
-        const requests = results[1].data;
-        const pendingCount = requests.filter((req: any) => req.status === 'pending').length;
-        setPendingRequestsCount(pendingCount);
-
-        const events = results[2].data;
-        const pendingEvents = events.filter((event: any) =>
-          event.unprocessed_count > 0 && new Date(event.event_date) < new Date()
-        ).length;
-        setPendingEventsCount(pendingEvents);
+      if (isAdmin) {
+        setPendingRequestsCount(Number(data?.pendingRequests) || 0);
+        setPendingEventsCount(Number(data?.pendingEvents) || 0);
       }
     } catch (error) {
       console.error('BadgeContext: refreshAllCounts fehlgeschlagen:', error);
@@ -160,7 +153,9 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
     return () => {
       socket.off('newMessage', handleNewMessage);
     };
-  }, [refreshAllCounts, user]);
+    // socketEpoch in den Deps: nach Reconnect-mit-neuem-Token (reconnectWithToken)
+    // ist getSocket() ein anderes Objekt -> Listener am frischen Socket neu binden.
+  }, [refreshAllCounts, user, socketEpoch]);
 
   // LiveUpdateContext-basierte Subscriptions für Daten-Events.
   // Stabiles Array (Modul-Konstante BADGE_LIVE_TYPES) -> kein Re-Subscribe pro Render.
@@ -185,19 +180,16 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [user, refreshAllCounts]);
 
-  // Initialer Load + Polling für Admin-Counts (30s)
+  // Initialer Load der Counts. KEIN Dauer-Polling mehr:
+  // - Chat-Unread aktualisiert der WebSocket ('newMessage')
+  // - Anträge/Events aktualisiert LiveUpdate ('requests'/'events', s. useLiveRefresh oben)
+  // - Nach Verbindungsabriss/Push feuert sync:reconnect bzw. push:received einen Refresh
+  // Das frühere 30s-Intervall war durch diese Live-Kanäle redundant und erzeugte den
+  // Großteil des /chat/rooms-Traffics (Admin-App offen = 120 Requests/h ohne Nutzen).
   useEffect(() => {
     if (!user) return;
-
-    // Initialer Load
     refreshAllCounts();
-
-    // Polling nur für Admin (requests + events ändern sich nicht per WebSocket)
-    if (isAdmin) {
-      const interval = setInterval(refreshAllCounts, 30000);
-      return () => clearInterval(interval);
-    }
-  }, [user, isAdmin, refreshAllCounts]);
+  }, [user, refreshAllCounts]);
 
   // Reset bei Logout
   useEffect(() => {

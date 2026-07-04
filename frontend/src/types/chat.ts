@@ -49,6 +49,10 @@ export interface Message {
   // Queue-Status (Offline-Queue)
   queueStatus?: 'pending' | 'error';
   localId?: string;
+  // client_id der eigenen optimistischen Nachricht — Match gegen das
+  // newMessage-Event (message.client_id) fuer In-Place-Ersetzen ohne Flackern
+  clientId?: string;
+  client_id?: string;
 }
 
 export interface ChatParticipant {

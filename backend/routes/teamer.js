@@ -4,6 +4,8 @@ const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { fetchTageslosung } = require('../services/losungService');
 const { computeCurrentStreak } = require('../utils/streakCalculation');
+const PushService = require('../services/pushService');
+const liveUpdate = require('../utils/liveUpdate');
 
 module.exports = (db, rbacVerifier, roleHelpers) => {
   const { requireTeamer, requireOrgAdmin, requireAdmin } = roleHelpers;
@@ -705,7 +707,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
 
       // Prüfen: Zertifikat-Typ gehört zur Organisation
       const { rows: [certType] } = await db.query(
-        'SELECT id FROM certificate_types WHERE id = $1 AND organization_id = $2 AND is_active = true',
+        'SELECT id, name FROM certificate_types WHERE id = $1 AND organization_id = $2 AND is_active = true',
         [certificate_type_id, req.user.organization_id]
       );
 
@@ -721,6 +723,20 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       );
 
       res.status(201).json({ message: 'Zertifikat erfolgreich zugewiesen', ...created });
+
+      // Push + Live-Update an die Empfaenger:in (Teamer:in). Seiteneffekt NACH res,
+      // in try/catch — ein Push-Fehler darf die erfolgreiche Zuweisung nicht kippen.
+      try {
+        await PushService.sendToUser(db, req.params.userId, {
+          title: 'Neues Zertifikat',
+          body: `Du hast das Zertifikat "${certType.name}" erhalten.`,
+          data: { type: 'certificate' }
+        });
+      } catch (pushErr) {
+        console.error('Error sending certificate push:', pushErr);
+      }
+      // Zertifikate haengen an den Teamer-Badge-/Dashboard-Ansichten -> 'badges'.
+      liveUpdate.sendToUserByRole(req.params.userId, 'badges', 'update');
     } catch (err) {
       if (err.code === '23505') {
         return res.status(409).json({ error: 'Dieses Zertifikat wurde dem Teamer bereits zugewiesen' });
@@ -1015,7 +1031,24 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
         console.error('Notification error (teamer request):', notifErr);
       }
 
+      // Push an alle Admins/Org-Admins der Organisation (analog konfi.js:776).
+      // In try/catch — ein Push-Fehler darf den Antrag nicht kippen.
+      try {
+        await PushService.sendNewActivityRequestToAdmins(
+          db,
+          req.user.organization_id,
+          req.user.display_name,
+          activity.name,
+          activity.points
+        );
+      } catch (pushErr) {
+        console.error('Error sending admin push (teamer request):', pushErr);
+      }
+
       res.status(201).json({ id: newRequest.id, message: 'Antrag eingereicht' });
+
+      // Live-Update an alle Admins/Org-Admins/Teamer:innen der Org (neuer Antrag)
+      liveUpdate.sendToOrgAdmins(req.user.organization_id, 'requests', 'create');
     } catch (err) {
       console.error('Database error in POST /teamer/requests:', err);
       res.status(500).json({ error: 'Datenbankfehler' });
@@ -1040,6 +1073,9 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
 
       await db.query('DELETE FROM activity_requests WHERE id = $1', [requestId]);
       res.json({ message: 'Antrag gelöscht' });
+
+      // Live-Update an alle Admins/Org-Admins/Teamer:innen der Org (Antrag entfernt)
+      liveUpdate.sendToOrgAdmins(req.user.organization_id, 'requests', 'delete');
     } catch (err) {
       console.error('Database error in DELETE /teamer/requests/:id:', err);
       res.status(500).json({ error: 'Datenbankfehler' });

@@ -53,6 +53,13 @@ const formatDayDivider = (d: Date): string => {
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 };
 
+// Pro Raum: Message-ID, an der der "Neue Nachrichten"-Trenner bereits gezeigt
+// wurde (Modul-Scope, ueberlebt Re-Mounts). Der Trenner ist ein EINMALIGER
+// Einstiegs-Indikator: Nach Verlassen+Wiederbetreten darf derselbe (evtl. aus
+// stale unread_count rekonstruierte) Anker nicht erneut erscheinen — nur ein
+// NEUER Anker (= wirklich neue Nachrichten seit dem letzten Besuch) zaehlt.
+const shownMarkerAnchors = new Map<number, number>();
+
 const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingElement }) => {
   const { user, setError, isOnline } = useApp();
   const { markRoomAsRead: badgeMarkRoomAsRead, refreshAllCounts, chatUnreadByRoom } = useBadge();
@@ -60,6 +67,10 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   // markRoomAsRead sie auf 0 setzt) -> Position des "Neu"-Trenners + Scrollziel.
   const initialUnreadRef = useRef<number | null>(null);
   const newDividerRef = useRef<HTMLDivElement | null>(null);
+  // Message-ID, VOR der der "Neue Nachrichten"-Trenner steht — EINMAL beim
+  // ersten vollstaendigen Laden eingefroren. Ein Index (laenge - unread) wuerde
+  // bei jeder neu angehaengten (auch eigenen) Nachricht nach unten wandern.
+  const newDividerAnchorRef = useRef<number | null>(null);
 
   // --- useOfflineQuery: Initial messages load mit Cache ---
   const { data: initialMessages, refresh: refreshMessagesCache } = useOfflineQuery<Message[]>(
@@ -97,6 +108,9 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   const textareaRef = useRef<HTMLIonTextareaElement>(null);
   const scrollPositionRef = useRef<number>(0);
   const viewerRef = useRef<{ files: FileItem[]; initialIndex: number }>({ files: [], initialIndex: 0 });
+  // client_ids eigener Sendungen, deren Server-Kopie noch nicht per Socket
+  // angekommen ist — Fallback-Reload nur wenn der Socket nicht liefert.
+  const pendingSendsRef = useRef<Set<string>>(new Set());
 
 
   // Hooks müssen vor conditional returns stehen!
@@ -261,9 +275,23 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
       // Listen for new messages
       socket.on('newMessage', (data: { roomId: number; message: any }) => {
         if (data.roomId === room.id) {
+          if (data.message?.client_id) {
+            pendingSendsRef.current.delete(data.message.client_id);
+          }
           setMessages(prev => {
             // Avoid duplicates
             if (prev.some(m => m.id === data.message.id)) return prev;
+            // Eigene Nachricht: die optimistische Kopie in-place ersetzen
+            // (Match ueber client_id) statt zusaetzlich anzuhaengen — sonst
+            // erscheint die Nachricht kurz doppelt, bis der Reload aufraeumt.
+            if (data.message.client_id) {
+              const optIdx = prev.findIndex(m => m.clientId === data.message.client_id);
+              if (optIdx !== -1) {
+                const next = [...prev];
+                next[optIdx] = data.message;
+                return next;
+              }
+            }
             return [...prev, data.message];
           });
         }
@@ -312,15 +340,67 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
           }));
         }
       });
+
+      // Listen for poll updates (live votes). Der Server liefert den kompletten,
+      // aktuellen Poll-Stand -> Server gewinnt immer. Das ist die sichere
+      // Variante: stammt das Event vom eigenen Vote, ist die eigene Stimme
+      // serverseitig ohnehin schon enthalten. Wir ersetzen nur den Poll-Teil der
+      // betroffenen Nachricht, nicht die ganze Nachricht.
+      socket.on('pollUpdated', (data: { roomId: number; messageId: number; poll: any }) => {
+        if (data.roomId !== room.id || !data.poll) return;
+        setMessages(prev => prev.map(m => {
+          if (m.id !== data.messageId) return m;
+          return {
+            ...m,
+            question: data.poll.question ?? m.question,
+            options: data.poll.options ?? m.options,
+            multiple_choice: data.poll.multiple_choice ?? m.multiple_choice,
+            anonymous: data.poll.anonymous ?? m.anonymous,
+            exclusive_options: data.poll.exclusive_options ?? m.exclusive_options,
+            expires_at: data.poll.expires_at ?? m.expires_at,
+            poll_id: data.poll.poll_id ?? m.poll_id,
+            votes: data.poll.votes ?? m.votes,
+          };
+        }));
+      });
     }
 
-    // Fallback: 30-second polling als Backup (falls WebSocket ausfaellt)
+    // Fallback: 30s-Poll als Backup fuer den Fall, dass der Socket still
+    // gestorben ist (bewusster Anker, NICHT entfernen). Zwei Optimierungen
+    // 
+    // 1. Inkrementell via loadMissedMessages(lastId) statt jedes Mal die vollen
+    //    100 Nachrichten neu zu laden.
+    // 2. Nur pollen, wenn die Seite sichtbar ist (Web-Tab im Hintergrund pollt
+    //    nicht). Auf Native ist visibilityState 'visible', solange die App im
+    //    Vordergrund ist; im Hintergrund pausiert das OS den Timer ohnehin.
+    // Hinweis: Deletes aelterer Nachrichten kommen ueber das 'messageDeleted'-
+    // Socket-Event. Mit after= gehen sie im Poll verloren -- das ist ok, der
+    // Poll ist nur der Fallback fuer NEUE Nachrichten bei totem Socket.
     const interval = setInterval(async () => {
-      await loadMessages();
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      const currentMessages = messagesRef.current;
+      if (currentMessages.length > 0) {
+        const lastId = currentMessages[currentMessages.length - 1].id;
+        // Nur echte (serverseitige) IDs als Marker verwenden. Optimistische
+        // Nachrichten haben negative IDs -> dann lieber den vollen Load.
+        if (lastId > 0) {
+          await loadMissedMessages(lastId);
+        } else {
+          await loadMessages();
+        }
+      } else {
+        await loadMessages();
+      }
     }, 30000);
 
     return () => {
       clearInterval(interval);
+      // Marker-Zustand zuruecksetzen: Der "Neue Nachrichten"-Trenner ist ein
+      // einmaliger Einstiegs-Indikator — beim Verlassen des Raums (oder
+      // Raumwechsel) wird er verworfen und beim naechsten Betreten nur bei
+      // wirklich neuen Nachrichten neu berechnet (shownMarkerAnchors).
+      initialUnreadRef.current = null;
+      newDividerAnchorRef.current = null;
       if (room?.id) {
         leaveRoom(room.id);
       }
@@ -332,15 +412,39 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
         socket.off('userTyping');
         socket.off('reactionAdded');
         socket.off('reactionRemoved');
+        socket.off('pollUpdated');
       }
     };
   }, [room?.id]);
 
-  // Mark as read only when new messages arrive (not every 5 seconds)
+  // Mark-Read drosseln: Ohne Debounce feuerte dieser
+  // Effekt pro empfangener Nachricht einen POST /mark-read. Wichtig: Der lokale
+  // Badge geht trotzdem SOFORT weg -- badgeMarkRoomAsRead() im BadgeContext
+  // macht ein optimistisches Update. Gedrosselt wird NUR der Server-POST.
+  // Verhalten: erster Aufruf (Chat-Oeffnen) laeuft sofort (leading), damit der
+  // Badge zuegig verschwindet; Folgenachrichten werden mit 1.5s gebuendelt
+  // (letzter Aufruf gewinnt).
+  const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const markReadLeadingDoneRef = useRef(false);
   useEffect(() => {
-    if (messages.length > 0) {
+    if (messages.length === 0) return;
+
+    if (!markReadLeadingDoneRef.current) {
+      // Erster Trigger nach Mount: sofort ausfuehren (Badge zuegig weg).
+      markReadLeadingDoneRef.current = true;
       markRoomAsRead();
+      return;
     }
+
+    // Folgenachrichten: debounced, letzter Aufruf gewinnt.
+    if (markReadTimerRef.current) clearTimeout(markReadTimerRef.current);
+    markReadTimerRef.current = setTimeout(() => {
+      markRoomAsRead();
+    }, 1500);
+
+    return () => {
+      if (markReadTimerRef.current) clearTimeout(markReadTimerRef.current);
+    };
   }, [messages.length]);
 
 
@@ -379,8 +483,10 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
           });
         });
       } else if (shouldAutoScroll && !parkedAtDividerRef.current && messages.length > prevMessageCountRef.current) {
-        // New message - smooth scroll
-        contentRef.current.scrollToBottom(300);
+        // Neue Nachricht: SOFORT ans Ende springen (0ms). Die 300ms-Animation
+        // wirkte in Kombination mit dem Rendern der neuen Bubble ruckelig —
+        // lieber zackig einmalig da sein.
+        contentRef.current.scrollToBottom(0);
       }
     }
     prevMessageCountRef.current = messages.length;
@@ -508,7 +614,14 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
       file_name: file?.name,
       queueStatus: 'pending',
       localId,
+      clientId,
     };
+
+    // Eigene Nachricht geschrieben -> der "Neue Nachrichten"-Trenner hat seinen
+    // Zweck erfuellt (Einstiegs-Indikator) und verschwindet.
+    newDividerAnchorRef.current = null;
+    initialUnreadRef.current = 0;
+    parkedAtDividerRef.current = false;
 
     // UI sofort aktualisieren
     setMessages(prev => [...prev, optimisticMsg]);
@@ -518,11 +631,14 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     setShouldAutoScroll(true);
     // Eigene Nachricht: am Divider-Park loesen, sonst bleibt der Scroll oben haengen.
     parkedAtDividerRef.current = false;
-    setTimeout(() => contentRef.current?.scrollToBottom(300), 100);
+    // Doppel-rAF statt setTimeout(100): direkt nach dem Rendern der optimistischen
+    // Bubble instant ans Ende springen — kein animiertes Nachziehen.
+    requestAnimationFrame(() => requestAnimationFrame(() => contentRef.current?.scrollToBottom(0)));
 
     if (networkMonitor.isOnline) {
       // Online: Normal senden
       setUploading(true);
+      pendingSendsRef.current.add(clientId);
       try {
         const formData = new FormData();
         if (content) formData.append('content', content);
@@ -534,15 +650,22 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
           headers: { 'Content-Type': 'multipart/form-data' }
         });
 
-        // Optimistic msg wird durch WebSocket newMessage Event ersetzt
+        // Die Server-Kopie kommt per newMessage-Socket-Event und ersetzt die
+        // optimistische Nachricht IN-PLACE (client_id-Match im Handler) —
+        // kein Voll-Reload pro Senden mehr; der liess die eigene Nachricht
+        // kurz doppelt erscheinen. Fallback: liefert der Socket nicht binnen
+        // 2,5s (z.B. still tot), einmal komplett nachladen.
         setTimeout(() => {
-          setMessages(prev => prev.filter(m => m.localId !== localId));
-        }, 2000);
+          if (pendingSendsRef.current.has(clientId)) {
+            pendingSendsRef.current.delete(clientId);
+            loadMessages();
+          }
+        }, 2500);
 
         if (room) markRoomAsRead();
         setShouldAutoScroll(true);
-        await loadMessages();
       } catch (err) {
+        pendingSendsRef.current.delete(clientId);
         // Bei Fehler: optimistic msg als error markieren
         setMessages(prev => prev.map(m =>
           m.localId === localId ? { ...m, queueStatus: 'error' as const } : m
@@ -1185,21 +1308,38 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
 
         <div style={{ paddingBottom: '0px', position: 'relative' }}>
           {(() => {
-            // Index der ersten ungelesenen Nachricht (= letzte N Nachrichten, N =
-            // beim Oeffnen eingefrorene Ungelesen-Anzahl). -1 = keine ungelesenen.
+            // Erste ungelesene Nachricht (= letzte N Nachrichten, N = beim
+            // Oeffnen eingefrorene Ungelesen-Anzahl) EINMAL per Message-ID
+            // verankern. Danach bleibt der Trenner an dieser Nachricht kleben —
+            // neu ankommende/eigene Nachrichten verschieben ihn nicht mehr.
             const unread = initialUnreadRef.current ?? 0;
-            const firstUnreadIndex = unread > 0 && unread <= messages.length
-              ? messages.length - unread
-              : -1;
+            if (newDividerAnchorRef.current === null && unread > 0 && unread <= messages.length) {
+              const anchor = messages[messages.length - unread];
+              // Nur echte Server-Nachrichten ankern (optimistische haben id < 0).
+              // Und: derselbe Anker wird pro Raum nur EINMAL gezeigt — nach
+              // Verlassen+Wiederbetreten erscheint der Trenner nur, wenn seither
+              // wirklich neue Nachrichten dazugekommen sind (neuer Anker).
+              if (anchor && anchor.id > 0) {
+                if (room?.id && shownMarkerAnchors.get(room.id) === anchor.id) {
+                  initialUnreadRef.current = 0; // bereits gezeigt -> unterdruecken
+                } else {
+                  newDividerAnchorRef.current = anchor.id;
+                  if (room?.id) shownMarkerAnchors.set(room.id, anchor.id);
+                }
+              }
+            }
             let lastDayKey = '';
             return messages.map((message, index) => {
               const created = message.created_at ? new Date(message.created_at) : null;
               const dayKey = created && !isNaN(created.getTime()) ? created.toDateString() : '';
               const showDayDivider = dayKey && dayKey !== lastDayKey;
               if (showDayDivider) lastDayKey = dayKey;
-              const showNewDivider = index === firstUnreadIndex;
+              const showNewDivider = newDividerAnchorRef.current !== null && message.id === newDividerAnchorRef.current;
               return (
-                <React.Fragment key={message.id}>
+                // Key bevorzugt client_id: bleibt beim Tausch optimistische ->
+                // Server-Nachricht identisch, die Bubble wird NICHT neu gemountet
+                // (kein Aufblitzen/Ruckeln beim Bestaetigen der eigenen Nachricht).
+                <React.Fragment key={message.client_id ?? message.clientId ?? message.id}>
                   {showDayDivider && (
                     <div
                       data-day-divider={formatDayDivider(created!)}

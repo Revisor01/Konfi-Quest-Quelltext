@@ -46,13 +46,24 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
   // Get all events (read-only, accessible to all authenticated users)
   router.get('/', rbacVerifier, async (req, res) => {
     try {
+      // Datumsfenster: standardmaessig nur Events des letzten Jahres (plus alle
+      // zukuenftigen). Mit ?all=true wird die gesamte Historie geliefert.
+      const includeAll = req.query.all === 'true';
+      const dateWindowClause = includeAll
+        ? ''
+        : "AND e.event_date >= NOW() - INTERVAL '1 year'";
+
+      // Restrukturierte Query:
+      // Keine Join-Explosion mehr ueber bookings/users/roles/categories/jahrgaenge.
+      // Stattdessen pro Anliegen ein LATERAL-Aggregat bzw. Sub-Select — kein
+      // GROUP BY ueber die ganze Breite noetig.
       const query = `
         SELECT e.*,
-                COUNT(DISTINCT CASE WHEN eb.status = 'confirmed' THEN eb.id END) as registered_count,
-                COUNT(DISTINCT CASE WHEN eb.status = 'waitlist' THEN eb.id END) as waitlist_count,
-                COUNT(DISTINCT CASE WHEN eb.status = 'confirmed' AND eb.attendance_status IS NULL THEN eb.id END) as unprocessed_count,
-                COUNT(DISTINCT eb.id) as total_participants,
-                COUNT(DISTINCT CASE WHEN eb.status = 'confirmed' AND r_book.name = 'teamer' THEN eb.id END) as teamer_count,
+                bstats.registered_count,
+                bstats.waitlist_count,
+                bstats.unprocessed_count,
+                bstats.total_participants,
+                bstats.teamer_count,
                 CASE
                   WHEN e.has_timeslots THEN COALESCE(timeslot_capacity.total_capacity, e.max_participants)
                   ELSE e.max_participants
@@ -60,41 +71,70 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
                 e.registration_opens_at,
                 e.registration_closes_at,
                 e.point_type,
-                STRING_AGG(DISTINCT c.id::text, ',') as category_ids,
-                STRING_AGG(DISTINCT c.name, ', ') as category_names,
-                STRING_AGG(DISTINCT j.id::text, ',') as jahrgang_ids,
-                STRING_AGG(DISTINCT j.name, ', ') as jahrgang_names,
+                cats.category_ids,
+                cats.category_names,
+                jgs.jahrgang_ids,
+                jgs.jahrgang_names,
                 CASE
                   WHEN e.mandatory THEN 'mandatory'
                   WHEN NOW() < e.registration_opens_at THEN 'upcoming'
                   WHEN NOW() > e.registration_closes_at THEN 'closed'
                   WHEN (
                     CASE WHEN e.has_timeslots THEN COALESCE(timeslot_capacity.total_capacity, e.max_participants) ELSE e.max_participants END
-                  ) > 0 AND COUNT(DISTINCT CASE WHEN eb.status = 'confirmed' THEN eb.id END) >= (
+                  ) > 0 AND bstats.registered_count >= (
                     CASE WHEN e.has_timeslots THEN COALESCE(timeslot_capacity.total_capacity, e.max_participants) ELSE e.max_participants END
-                  ) AND (NOT e.waitlist_enabled OR COUNT(DISTINCT CASE WHEN eb.status = 'waitlist' THEN eb.id END) >= COALESCE(e.max_waitlist_size, 0)) THEN 'closed'
+                  ) AND (NOT e.waitlist_enabled OR bstats.waitlist_count >= COALESCE(e.max_waitlist_size, 0)) THEN 'closed'
                   ELSE 'open'
                 END as registration_status,
                 CASE WHEN eb_user.status = 'confirmed' THEN true ELSE false END as is_registered,
                 eb_user.status as booking_status,
                 eb_user.attendance_status,
-                (SELECT COUNT(*) FROM material_events me WHERE me.event_id = e.id) as material_count
+                mat.material_count
         FROM events e
-        LEFT JOIN event_bookings eb ON e.id = eb.event_id
-        LEFT JOIN users u_book ON eb.user_id = u_book.id
-        LEFT JOIN roles r_book ON u_book.role_id = r_book.id
-        LEFT JOIN event_bookings eb_user ON e.id = eb_user.event_id AND eb_user.user_id = $2
-        LEFT JOIN event_categories ec ON e.id = ec.event_id
-        LEFT JOIN categories c ON ec.category_id = c.id
-        LEFT JOIN event_jahrgang_assignments eja ON e.id = eja.event_id
-        LEFT JOIN jahrgaenge j ON eja.jahrgang_id = j.id
-        LEFT JOIN (
-          SELECT event_id, SUM(max_participants) as total_capacity
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*) FILTER (WHERE eb.status = 'confirmed') as registered_count,
+            COUNT(*) FILTER (WHERE eb.status = 'waitlist') as waitlist_count,
+            COUNT(*) FILTER (WHERE eb.status = 'confirmed' AND eb.attendance_status IS NULL) as unprocessed_count,
+            COUNT(*) as total_participants,
+            COUNT(*) FILTER (WHERE eb.status = 'confirmed' AND r_book.name = 'teamer') as teamer_count
+          FROM event_bookings eb
+          LEFT JOIN users u_book ON eb.user_id = u_book.id
+          LEFT JOIN roles r_book ON u_book.role_id = r_book.id
+          WHERE eb.event_id = e.id
+        ) bstats ON true
+        LEFT JOIN LATERAL (
+          SELECT STRING_AGG(DISTINCT c.id::text, ',') as category_ids,
+                 STRING_AGG(DISTINCT c.name, ', ') as category_names
+          FROM event_categories ec
+          JOIN categories c ON ec.category_id = c.id
+          WHERE ec.event_id = e.id
+        ) cats ON true
+        LEFT JOIN LATERAL (
+          SELECT STRING_AGG(DISTINCT j.id::text, ',') as jahrgang_ids,
+                 STRING_AGG(DISTINCT j.name, ', ') as jahrgang_names
+          FROM event_jahrgang_assignments eja
+          JOIN jahrgaenge j ON eja.jahrgang_id = j.id
+          WHERE eja.event_id = e.id
+        ) jgs ON true
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*) as material_count
+          FROM material_events me
+          WHERE me.event_id = e.id
+        ) mat ON true
+        LEFT JOIN LATERAL (
+          SELECT eb2.status, eb2.attendance_status
+          FROM event_bookings eb2
+          WHERE eb2.event_id = e.id AND eb2.user_id = $2
+          LIMIT 1
+        ) eb_user ON true
+        LEFT JOIN LATERAL (
+          SELECT SUM(max_participants) as total_capacity
           FROM event_timeslots
-          GROUP BY event_id
-        ) timeslot_capacity ON e.id = timeslot_capacity.event_id
+          WHERE event_id = e.id
+        ) timeslot_capacity ON true
         WHERE e.organization_id = $1
-        GROUP BY e.id, timeslot_capacity.total_capacity, eb_user.status, eb_user.attendance_status
+          ${dateWindowClause}
         ORDER BY e.event_date ASC
       `;
 
@@ -840,8 +880,12 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
     try {
       await client.query('BEGIN');
 
-      // Alten mandatory-Wert lesen für bedingte Auto-Enrollment-Logik
-      const { rows: [oldEvent] } = await client.query('SELECT mandatory, registration_open_notified FROM events WHERE id = $1', [id]);
+      // Alte Werte lesen: mandatory/registration_open_notified fuer Auto-Enrollment-Logik,
+      // name/event_date/event_end_time/location/cancelled fuer den Aenderungs-Push-Vergleich unten
+      const { rows: [oldEvent] } = await client.query(
+        'SELECT mandatory, registration_open_notified, name, event_date, event_end_time, location, cancelled FROM events WHERE id = $1',
+        [id]
+      );
 
       const updateQuery = `
         UPDATE events SET
@@ -1041,6 +1085,49 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
         } catch (pushErr) {
           console.error('Flag-Reset for event update (registration open) failed:', pushErr);
         }
+      }
+
+      // Push an gebuchte Teilnehmer bei relevanter Aenderung (Termin/Uhrzeit/Ort).
+      // Normalisierung noetig: DB liefert Date-Objekte (event_date/event_end_time),
+      // der Request liefert Strings -> ohne Normalisierung wuerde der Vergleich bei
+      // JEDEM Speichern (auch ohne inhaltliche Aenderung) als "geaendert" durchgehen.
+      try {
+        const normalizeDate = (value) => {
+          if (!value) return null;
+          const d = new Date(value);
+          return Number.isNaN(d.getTime()) ? null : d.getTime();
+        };
+        const normalizeLocation = (value) => (value === undefined || value === null || value === '') ? null : String(value);
+
+        const dateChanged = normalizeDate(oldEvent?.event_date) !== normalizeDate(event_date);
+        const endTimeChanged = normalizeDate(oldEvent?.event_end_time) !== normalizeDate(event_end_time);
+        const locationChanged = normalizeLocation(oldEvent?.location) !== normalizeLocation(location);
+
+        const isFuture = normalizeDate(event_date) !== null && normalizeDate(event_date) > Date.now();
+
+        if (oldEvent && !oldEvent.cancelled && isFuture && (dateChanged || endTimeChanged || locationChanged)) {
+          const { rows: bookedParticipants } = await db.query(
+            `SELECT eb.user_id FROM event_bookings eb
+             JOIN users u ON eb.user_id = u.id
+             WHERE eb.event_id = $1 AND eb.status IN ('confirmed', 'waitlist') AND u.deleted_at IS NULL`,
+            [id]
+          );
+          const bookedUserIds = bookedParticipants.map(p => p.user_id);
+
+          if (bookedUserIds.length > 0) {
+            const changes = {};
+            if (dateChanged || endTimeChanged) {
+              changes.newDate = event_date;
+              changes.newEndTime = event_end_time;
+            }
+            if (locationChanged) {
+              changes.newLocation = location;
+            }
+            await PushService.sendEventChangedToKonfis(db, bookedUserIds, name, changes, id);
+          }
+        }
+      } catch (pushErr) {
+        console.error('Push notification failed for event change:', pushErr);
       }
 
     } catch (err) {
@@ -1963,6 +2050,10 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
         events_created: seriesDates.length
       });
 
+      // Live-Update an die ganze Org (analog Einzel-Create events.js:766): neue
+      // Serien-Events erschienen -> Konfis + Admins/Teamer:innen aktualisieren.
+      liveUpdate.sendToOrg(req.user.organization_id, 'events', 'create', { seriesId, count: seriesDates.length });
+
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
       client.release();
@@ -1982,10 +2073,16 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
       }
       
       
-      const { rows: [booking] } = await db.query("SELECT eb.status, eb.attendance_status, eb.user_id, e.organization_id FROM event_bookings eb JOIN events e ON eb.event_id = e.id WHERE eb.id = $1 AND eb.event_id = $2", [participantId, eventId]);
+      const { rows: [booking] } = await db.query("SELECT eb.status, eb.attendance_status, eb.user_id, e.organization_id, e.name AS event_name, e.event_date FROM event_bookings eb JOIN events e ON eb.event_id = e.id WHERE eb.id = $1 AND eb.event_id = $2", [participantId, eventId]);
       if (!booking) return res.status(404).json({ error: 'Buchung nicht gefunden' });
       if (booking.organization_id !== req.user.organization_id) return res.status(403).json({ error: 'Zugriff verweigert' });
       if (booking.status === status) return res.status(400).json({ error: `Teilnehmer:in ist bereits ${status === 'confirmed' ? 'bestätigt' : 'auf der Warteliste'}` });
+
+      // Vorheriger Status: bei Wechsel von 'waitlist' -> 'confirmed' ist es eine
+      // Wartelisten-Befoerderung (Push an die betroffene Person). Bei 'confirmed'
+      // -> 'waitlist' werden ggf. Punkte entzogen (Dashboard-Refresh noetig).
+      const wasWaitlist = booking.status === 'waitlist';
+      let pointsRemoved = false;
 
       if (status === 'waitlist') {
         // Auf Warteliste: attendance_status löschen und Event-Punkte zurücknehmen
@@ -1999,6 +2096,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
             ? "UPDATE konfi_profiles SET gottesdienst_points = GREATEST(0, gottesdienst_points - $1) WHERE user_id = $2"
             : "UPDATE konfi_profiles SET gemeinde_points = GREATEST(0, gemeinde_points - $1) WHERE user_id = $2";
           await db.query(updateProfileQuery, [existingPoints.points, booking.user_id]);
+          pointsRemoved = true;
         }
       } else {
         await db.query("UPDATE event_bookings SET status = $1 WHERE id = $2", [status, participantId]);
@@ -2007,38 +2105,142 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
       const action = status === 'confirmed' ? 'Teilnehmer:in von Warteliste bestätigt' : 'Teilnehmer:in auf Warteliste gesetzt';
       res.json({ message: action, status });
 
+      // Push bei Befoerderung von der Warteliste (analog events.js:1010/1513/1731).
+      // Seiteneffekt NACH res, in try/catch — Push-Fehler darf nichts kippen.
+      if (status === 'confirmed' && wasWaitlist) {
+        try {
+          await PushService.sendWaitlistPromotionToKonfi(db, booking.user_id, booking.event_name, booking.event_date, eventId);
+        } catch (pushErr) {
+          console.error('Error sending waitlist promotion push:', pushErr);
+        }
+      }
+
+      // Live-Update an die betroffene Person (korrekter Socket-Raum per Rolle).
+      liveUpdate.sendToUserByRole(booking.user_id, 'events', 'update', { eventId });
+      // Bei Punktentzug (Degradierung) zusaetzlich das Dashboard aktualisieren.
+      if (pointsRemoved) {
+        liveUpdate.sendToUserByRole(booking.user_id, 'dashboard', 'update');
+      }
+      // Live-Update an Admins/Org-Admins/Teamer:innen der Org.
+      liveUpdate.sendToOrgAdmins(req.user.organization_id, 'events', 'update', { eventId });
+
     } catch (err) {
  console.error(`Database error in PUT /events/${eventId}/participants/${participantId}/status:`, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
 
-  // Bulk: ALLE Wartelisten-Teilnehmer eines Events bestaetigen (Admin-Komfort).
-  // Hebt die Kapazitaet auf (Admin uebersteuert bewusst), genau wie das manuelle
-  // Einzel-Bestaetigen oben.
-  router.put('/:id/participants/confirm-all', rbacVerifier, requireTeamer, async (req, res) => {
+  // Bulk-Verbuchung: ALLE angemeldeten (status=confirmed) Konfis ohne
+  // Anwesenheits-Status auf einmal als anwesend verbuchen — inkl. Punkte- und
+  // Badge-Logik identisch zum Einzel-Handler unten. Die WARTELISTE bleibt
+  // bewusst unberuehrt (Nachruecken laeuft automatisch FIFO bzw. einzeln).
+  // Bereits verbuchte (present/absent) werden NICHT angefasst.
+  // Hintergrund: Der fruehere "confirm-all"-Bulk befoerderte die komplette
+  // Warteliste (Kapazitaet uebersteuert) — fachlich war mit "Alle bestaetigen"
+  // aber immer das VERBUCHEN der Angemeldeten gemeint (Betreiber-Entscheid 03.07.).
+  router.put('/:id/participants/attendance-all', rbacVerifier, requireTeamer, async (req, res) => {
     const { id: eventId } = req.params;
     const client = await db.getClient();
     try {
-      const { rows: [event] } = await client.query("SELECT organization_id FROM events WHERE id = $1", [eventId]);
-      if (!event) { client.release(); return res.status(404).json({ error: 'Event nicht gefunden' }); }
-      if (event.organization_id !== req.user.organization_id) { client.release(); return res.status(403).json({ error: 'Zugriff verweigert' }); }
-
-      await client.query('BEGIN');
-      const { rowCount } = await client.query(
-        "UPDATE event_bookings SET status = 'confirmed' WHERE event_id = $1 AND status = 'waitlist'",
+      const { rows: [event] } = await client.query(
+        "SELECT organization_id, name, points, point_type, mandatory FROM events WHERE id = $1",
         [eventId]
       );
+      if (!event) { return res.status(404).json({ error: 'Event nicht gefunden' }); }
+      if (event.organization_id !== req.user.organization_id) { return res.status(403).json({ error: 'Zugriff verweigert' }); }
+
+      await client.query('BEGIN');
+
+      // Nur ANGEMELDETE Konfis ohne Anwesenheits-Status. Teamer:innen werden
+      // weiterhin einzeln verbucht (eigene Liste, keine Punkte).
+      const { rows: unprocessed } = await client.query(
+        `SELECT eb.id AS booking_id, eb.user_id
+         FROM event_bookings eb
+         JOIN users u ON eb.user_id = u.id
+         JOIN roles r ON u.role_id = r.id
+         WHERE eb.event_id = $1 AND eb.status = 'confirmed'
+           AND eb.attendance_status IS NULL AND r.name = 'konfi'
+         ORDER BY eb.created_at ASC`,
+        [eventId]
+      );
+
+      const awarded = []; // Konfis, die Punkte bekommen haben
+      const marked = [];  // alle als anwesend verbuchten Konfis
+      const pointType = event.point_type || 'gemeinde';
+
+      for (const b of unprocessed) {
+        await client.query("UPDATE event_bookings SET attendance_status = 'present' WHERE id = $1", [b.booking_id]);
+        marked.push(b.user_id);
+
+        // Punkte-Logik identisch zum Einzel-Handler: nur nicht-Pflicht-Events
+        // mit Punkten. Deaktivierter Punkt-Typ bricht den Bulk NICHT ab —
+        // die Person wird verbucht, nur ohne Punkte (anders als der 400 des
+        // Einzel-Handlers, der bei einem Bulk alle uebrigen blockieren wuerde).
+        if (event.points > 0 && !event.mandatory) {
+          const { enabled: ptEnabled } = await checkPointTypeEnabled(client, b.user_id, pointType);
+          if (!ptEnabled) continue;
+
+          const { rowCount } = await client.query(
+            `INSERT INTO event_points (konfi_id, event_id, points, point_type, description, awarded_date, admin_id, organization_id)
+             VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7)
+             ON CONFLICT (konfi_id, event_id) DO NOTHING`,
+            [b.user_id, eventId, event.points, pointType, `Event-Teilnahme: ${event.name}`, req.user.id, req.user.organization_id]
+          );
+          if (rowCount > 0) {
+            const updateProfileQuery = pointType === 'gottesdienst'
+              ? "UPDATE konfi_profiles SET gottesdienst_points = gottesdienst_points + $1 WHERE user_id = $2"
+              : "UPDATE konfi_profiles SET gemeinde_points = gemeinde_points + $1 WHERE user_id = $2";
+            await client.query(updateProfileQuery, [event.points, b.user_id]);
+            awarded.push(b.user_id);
+          }
+        }
+      }
+
       await client.query('COMMIT');
-      res.json({ message: `${rowCount} Teilnehmer:in(nen) von der Warteliste bestätigt`, confirmed: rowCount });
+      res.json({
+        message: marked.length > 0
+          ? `${marked.length} Teilnehmer:in(nen) als anwesend verbucht${awarded.length > 0 ? `, ${event.points} Punkte je ${awarded.length}x vergeben` : ''}`
+          : 'Keine unverbuchten Angemeldeten vorhanden',
+        confirmed: marked.length,
+        points_awarded: awarded.length
+      });
+
+      // Seiteneffekte NACH COMMIT (Muster Einzel-Handler): Badges, Level-Up,
+      // Push und LiveUpdates pro Person fehlertolerant.
+      for (const userId of marked) {
+        try {
+          await checkAndAwardBadges(db, userId);
+        } catch (badgeErr) {
+          console.error('Error checking badges after bulk attendance:', badgeErr);
+        }
+      }
+      for (const userId of marked) {
+        const gotPoints = awarded.includes(userId);
+        try {
+          if (gotPoints) {
+            await PushService.checkAndSendLevelUp(db, userId, req.user.organization_id);
+          }
+          await PushService.sendEventAttendanceToKonfi(db, userId, event.name, 'present', gotPoints ? event.points : 0);
+        } catch (pushErr) {
+          console.error('Push notification failed (bulk attendance):', pushErr);
+        }
+        if (gotPoints) {
+          liveUpdate.sendToUser('konfi', userId, 'dashboard', 'update', { points: event.points });
+        }
+        liveUpdate.sendToUser('konfi', userId, 'events', 'update', { eventId });
+      }
+      if (marked.length > 0) {
+        liveUpdate.sendToOrgAdmins(req.user.organization_id, 'events', 'update', { eventId, action: 'attendance' });
+      }
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
-      console.error(`Database error in PUT /events/${eventId}/participants/confirm-all:`, err);
+      console.error(`Database error in PUT /events/${eventId}/participants/attendance-all:`, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     } finally {
       client.release();
     }
   });
+
 
   // Update participant attendance and award event points
   router.put('/:id/participants/:participantId/attendance', rbacVerifier, requireTeamer, async (req, res) => {
@@ -2212,7 +2414,9 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
       const { rows: [newChat] } = await client.query("INSERT INTO chat_rooms (name, type, event_id, created_by, organization_id) VALUES ($1, 'group', $2, $3, $4) RETURNING id", [chatName, eventId, req.user.id, req.user.organization_id]);
       const chatRoomId = newChat.id;
 
-      await client.query("INSERT INTO chat_participants (room_id, user_id, user_type) VALUES ($1, $2, 'admin')", [chatRoomId, req.user.id]);
+      // user_type des Erstellers aus dem Token — hartes 'admin' machte den Raum
+      // fuer Teamer:innen (duerfen Event-Chats erstellen) unsichtbar.
+      await client.query("INSERT INTO chat_participants (room_id, user_id, user_type) VALUES ($1, $2, $3)", [chatRoomId, req.user.id, req.user.type]);
 
       const { rows: participants } = await client.query(`
         SELECT DISTINCT eb.user_id, r.name as role_name
@@ -2225,7 +2429,9 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
       if (participants.length > 0) {
         for (const p of participants) {
           if (p.user_id === req.user.id) continue; // Creator already added
-          const userType = p.role_name === 'teamer' ? 'teamer' : 'konfi';
+          // konfi->konfi, teamer->teamer, admin/org_admin->admin (gebuchte
+          // Admins wurden vorher faelschlich als 'konfi' eingetragen)
+          const userType = p.role_name === 'konfi' ? 'konfi' : p.role_name === 'teamer' ? 'teamer' : 'admin';
           await client.query(
             "INSERT INTO chat_participants (room_id, user_id, user_type) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
             [chatRoomId, p.user_id, userType]

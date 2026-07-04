@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { body } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
+const liveUpdate = require('../utils/liveUpdate');
 
 // Settings: Nur org_admin darf bearbeiten
 module.exports = (db, rbacVerifier, { requireOrgAdmin }) => {
@@ -191,6 +192,10 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }) => {
       }
 
       res.json({ message: 'Einstellungen erfolgreich aktualisiert' });
+
+      // Live-Update NACH der Response an die gesamte Org: Dashboard-Widget-Toggles
+      // und Punkt-Typ-Einstellungen wirken direkt auf Konfi-/Teamer-Dashboards.
+      liveUpdate.sendToOrg(orgId, 'dashboard', 'update');
 
     } catch (err) {
       console.error('Database error in PUT /settings:', err);

@@ -78,10 +78,16 @@ export const clearAuth = async (): Promise<void> => {
   _user = null;
   _refreshToken = null;
   _activeOrgId = null;
+  // Push-Sendefenster zuruecksetzen: Nach Logout+Login muss der FCM-Token
+  // SOFORT neu registriert werden koennen (Server haengt ihn dann an den neuen
+  // User um) — sonst blockt das 12h-Fenster und der alte Account bekommt
+  // weiter Pushes auf diesem Geraet.
+  _pushTokenTimestamp = 0;
   await Preferences.remove({ key: 'konfi_token' });
   await Preferences.remove({ key: 'konfi_user' });
   await Preferences.remove({ key: 'konfi_refresh_token' });
   await Preferences.remove({ key: 'konfi_active_org' });
+  await Preferences.remove({ key: 'push_token_last_refresh' });
 };
 
 // --- Initialisierung: Preferences -> Memory laden ---

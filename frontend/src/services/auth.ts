@@ -57,16 +57,45 @@ export const logout = async (): Promise<void> => {
   // ohne Token und liefert sonst einen 401.
   setLoggingOut(true);
 
-  // WICHTIG: Der LOKALE Logout (Token-Revoke + clearAuth) laeuft ZUERST und
-  // darf NIEMALS an haengenden Netzwerk-Calls scheitern. Frueher konnte ein
-  // offline/haengender Push-Cleanup-Call clearAuth() blockieren -> User blieb
-  // nach Reload eingeloggt (nur online ging es). Daher: Server-Revoke mit hartem
-  // Timeout, dann clearAuth GARANTIERT, Push-Cleanup best-effort DANACH.
+  // WICHTIG: Der LOKALE Logout (clearAuth) darf NIEMALS an haengenden
+  // Netzwerk-Calls scheitern (frueher blieb der User offline nach Reload
+  // eingeloggt). Alle Server-Calls laufen mit hartem Timeout.
+  //
+  // REIHENFOLGE: Push-Token-DELETE MUSS VOR clearAuth laufen — der Endpoint
+  // verlangt Auth (verifyTokenRBAC). Frueher lief er danach, bekam 401, der
+  // Token blieb registriert und der alte Account erhielt nach Account-Wechsel
+  // weiter Pushes auf diesem Geraet. Best-effort: schlaegt der DELETE fehl
+  // (offline/Timeout), haengt POST /device-token den Token beim naechsten
+  // Login serverseitig an den neuen User um.
 
   // Helper: Request mit hartem Timeout, damit ein falsch-positives isOnline
   // (Network-Plugin meldet sporadisch connected trotz keiner Verbindung) nicht haengt.
   const withTimeout = <T>(p: Promise<T>, ms = 4000): Promise<T | undefined> =>
     Promise.race([p, new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ms))]);
+
+  // Push-Token serverseitig loeschen (best-effort, mit Timeout, NOCH authentifiziert)
+  try {
+    let deviceId: string | undefined;
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const deviceInfo = await Device.getId();
+        deviceId = deviceInfo.identifier;
+      } catch (err) {
+        console.warn('Could not get device ID via Capacitor, using TokenStore fallback:', err);
+        deviceId = getDeviceId() || undefined;
+      }
+    } else {
+      deviceId = getDeviceId() || undefined;
+    }
+
+    if (deviceId && networkMonitor.isOnline) {
+      await withTimeout(api.delete('/notifications/device-token', {
+        data: { device_id: deviceId, platform: Capacitor.getPlatform() }
+      }));
+    }
+  } catch (error) {
+    console.warn('Push-Token-Cleanup beim Logout fehlgeschlagen (unkritisch):', error);
+  }
 
   // SEC-02: Refresh Token serverseitig revokieren (best-effort, mit Timeout)
   try {
@@ -84,45 +113,6 @@ export const logout = async (): Promise<void> => {
     await offlineCache.clearAll();
   } catch (error) {
     console.warn('Cache-Clear beim Logout fehlgeschlagen:', error);
-  }
-
-  // Push-Token-Cleanup NACH dem lokalen Logout (blockiert ihn nicht mehr).
-  try {
-    let deviceId: string | undefined;
-    if (Capacitor.isNativePlatform()) {
-      try {
-        const deviceInfo = await Device.getId();
-        deviceId = deviceInfo.identifier;
-      } catch (err) {
-        console.warn('Could not get device ID via Capacitor, using TokenStore fallback:', err);
-        deviceId = getDeviceId() || undefined;
-      }
-    } else {
-      deviceId = getDeviceId() || undefined;
-    }
-
-    if (deviceId) {
-      const deleteData = { device_id: deviceId, platform: Capacitor.getPlatform() };
-      let delivered = false;
-      if (networkMonitor.isOnline) {
-        try {
-          await withTimeout(api.delete('/notifications/device-token', { data: deleteData }));
-          delivered = true;
-        } catch { /* in Queue fallen lassen */ }
-      }
-      if (!delivered) {
-        await writeQueue.enqueue({
-          method: 'DELETE',
-          url: '/notifications/device-token',
-          body: deleteData,
-          maxRetries: 3,
-          hasFileUpload: false,
-          metadata: { type: 'fire-and-forget', clientId: `push_cleanup_${Date.now()}`, label: 'Push-Token entfernen' }
-        });
-      }
-    }
-  } catch (error) {
-    console.warn('Push-Token-Cleanup beim Logout fehlgeschlagen (unkritisch):', error);
   }
 
   // Device ID NICHT loeschen - bleibt fuer das Geraet persistent

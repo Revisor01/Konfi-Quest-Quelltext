@@ -350,25 +350,31 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     }
   };
 
-  // Alle Wartelisten-Teilnehmer auf einmal bestaetigen (Bulk-Route).
-  const handleConfirmAllWaitlist = async () => {
+  // "Alle bestätigen" = Bulk-VERBUCHUNG: alle angemeldeten (bestätigten) Konfis
+  // ohne Anwesenheits-Status werden als anwesend verbucht (inkl. Punkte/Badges,
+  // identisch zum Einzel-Verbuchen). Die Warteliste bleibt bewusst unberührt —
+  // Nachrücken läuft automatisch (FIFO bei Absagen) bzw. einzeln per Swipe.
+  const handleConfirmAllAttendance = async (unprocessedCount: number, waitlistCount: number) => {
     if (!isOnline) return;
+    const waitlistHint = waitlistCount > 0
+      ? ` Die Warteliste (${waitlistCount}) bleibt unberührt.`
+      : '';
     presentAlert({
       header: 'Alle bestätigen?',
-      message: 'Alle Teilnehmer:innen auf der Warteliste werden bestätigt. Die Kapazität wird dabei bewusst übersteuert.',
+      message: `${unprocessedCount} angemeldete Teilnehmer:in(nen) werden als anwesend verbucht (inkl. Punktevergabe). Bereits Verbuchte bleiben unverändert.${waitlistHint}`,
       buttons: [
         { text: 'Abbrechen', role: 'cancel' },
         {
           text: 'Alle bestätigen',
           handler: async () => {
             try {
-              const res = await api.put(`/events/${eventId}/participants/confirm-all`);
+              const res = await api.put(`/events/${eventId}/participants/attendance-all`);
               await loadEventData();
               triggerRefresh('events');
-              setSuccess(res.data?.message || 'Warteliste bestätigt');
+              setSuccess(res.data?.message || 'Teilnahmen verbucht');
             } catch (error) {
-              console.error('Confirm-all error:', error);
-              setError('Fehler beim Bestätigen der Warteliste');
+              console.error('Attendance-all error:', error);
+              setError('Fehler beim Verbuchen der Teilnahmen');
             }
           }
         }
@@ -720,12 +726,19 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                   <IonListHeader>
                     <div className="app-section-icon app-section-icon--events"><IonIcon icon={people} /></div>
                     <IonLabel>{konfiHeaderText}</IonLabel>
-                    {waitlistParticipants.length > 0 && (
-                      <IonButton fill="clear" size="small" disabled={!isOnline} onClick={handleConfirmAllWaitlist}>
-                        <IonIcon icon={checkmark} slot="start" />
-                        Alle bestätigen
-                      </IonButton>
-                    )}
+                    {(() => {
+                      // Button nur, wenn es unverbuchte Angemeldete gibt (Konfis mit
+                      // Status bestätigt, aber ohne Anwesenheits-Status).
+                      const unprocessed = confirmedParticipants.filter(p => !p.attendance_status).length;
+                      if (unprocessed === 0) return null;
+                      return (
+                        <IonButton fill="clear" size="small" disabled={!isOnline}
+                          onClick={() => handleConfirmAllAttendance(unprocessed, waitlistParticipants.length)}>
+                          <IonIcon icon={checkmark} slot="start" />
+                          Alle bestätigen ({unprocessed})
+                        </IonButton>
+                      );
+                    })()}
                   </IonListHeader>
                   <IonCard className="app-card">
                     <IonCardContent style={{ padding: displayParticipants.length === 0 ? '16px' : '12px' }}>

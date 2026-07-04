@@ -209,6 +209,12 @@ section.block{padding:6rem 0}
 .sec-banner h3{font-family:var(--display);font-size:1.6rem;font-weight:800;margin-bottom:.6rem;position:relative;z-index:1}
 .sec-banner p{color:rgba(255,255,255,.82);max-width:62ch;position:relative;z-index:1}
 .sec-banner b{color:#fff}
+.story-card{background:linear-gradient(120deg,#fff,#f6f8fc);border:1px solid var(--line);border-radius:28px;padding:3rem;display:grid;grid-template-columns:auto 1fr;gap:2rem;align-items:start;box-shadow:0 18px 50px rgba(15,23,42,.06)}
+.story-badge{width:84px;height:84px;border-radius:22px;background:var(--grad);display:grid;place-items:center;flex-shrink:0}
+.story-h{font-family:var(--display);font-weight:800;font-size:clamp(1.6rem,3vw,2.3rem);letter-spacing:-.02em;line-height:1.15;margin:.3rem 0 1rem}
+.story-p{color:var(--ink-soft);line-height:1.7;max-width:64ch;margin-bottom:1rem}
+.story-sign{font-family:var(--display);font-weight:700;color:var(--ink);margin-top:1.4rem}
+@media(max-width:760px){.story-card{grid-template-columns:1fr;padding:2rem;text-align:left}}
 
 /* WHY */
 .why-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.4rem}
@@ -329,7 +335,7 @@ footer a:hover{color:#fff}
  <img src="/assets/icon/logo-mark.png" alt="" class="hero-watermark">
  <div class="wrap hero-in">
   <div>
-   <span class="eyebrow"><span class="pip"></span>Moderne Konfi-Arbeit, die ankommt</span>
+   <span class="eyebrow"><span class="pip"></span>Von einem Pastor für die Konfi-Arbeit entwickelt</span>
    <h1 class="hh">Die Konfi-Zeit als <span class="rot" id="rot">Abenteuer</span>.</h1>
    <p class="hclaim">Glaube entdecken, <span class="hclaim-accent">Level für Level</span></p>
    <p class="hsub">Schluss mit Zetteln und Unterschriften. Eine App, die Jugendliche wirklich öffnen – und die euch als Team den Rücken freihält.</p>
@@ -530,6 +536,24 @@ footer a:hover{color:#fff}
    <div>
     <h3>Ein geschützter Raum – beruhigend für die Eltern</h3>
     <p>Konfis können sich <b>nicht gegenseitig privat anschreiben</b>. Direktnachrichten gehen ausschließlich an Teamer:innen und die Leitung. Niemand von außen hat Zugang: Beigetreten wird nur über den <b>Einladungslink der Gemeinde</b>. Keine Werbung, kein Tracking, kein Datenverkauf. Datenschutz nach dem <b>Datenschutzgesetz der EKD (DSG-EKD)</b>, jede Gemeinde streng getrennt.</p>
+   </div>
+  </div>
+ </div>
+</section>
+
+<!-- STORY: Von einem Pastor entwickelt -->
+<section class="block" id="story">
+ <div class="wrap">
+  <div class="story-card reveal">
+   <div class="story-badge">
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v6M9 11h6"/></svg>
+   </div>
+   <div>
+    <p class="kicker">Kein Software-Konzern. Ein Pastor.</p>
+    <h2 class="story-h">Aus der eigenen Konfi-Arbeit entstanden</h2>
+    <p class="story-p">Ich bin Gemeindepastor und habe Konfi Quest in meiner Freizeit entwickelt – für meine eigene Konfi-Arbeit. Angefangen hat das, weil mir die bestehenden Lösungen nicht weit genug gingen und nicht mehr zeitgemäß waren, gerade mit Blick auf die Teamer:innen. Die Idee dahinter ist eine moderne Konfi-Zeit: etwas, das die Jugendlichen motiviert, das ihnen Spaß macht, das die Organisation für die Leitenden einfach macht und dabei wirklich datensicher ist.</p>
+    <p class="story-p">Jede Funktion ist aus der eigenen Praxis heraus entstanden und in echten Gruppen erprobt. Das heißt für eure Gemeinde: Ihr redet mit jemandem, der eure Arbeit kennt – kurze Wege, echtes Verständnis für Kirche, und eine App, die weiterwächst, weil sie täglich selbst im Einsatz ist.</p>
+    <p class="story-sign">– Simon Luthe, Pastor in Wesselburen</p>
    </div>
   </div>
  </div>

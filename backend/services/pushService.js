@@ -22,6 +22,7 @@ const { sendFirebasePushNotification, sendFirebaseSilentPush } = require('../pus
  * event_reminder              | sendEventReminderToKonfi             | Konfi           | ja
  * waitlist_promotion          | sendWaitlistPromotionToKonfi         | Konfi           | ja
  * event_cancelled             | sendEventCancellationToKonfis        | Konfi (multi)   | ja
+ * event_changed               | sendEventChangedToKonfis             | Konfi (multi)   | ja
  * new_event                   | sendNewEventToOrgKonfis              | Org-Konfis      | ja
  * event_attendance            | sendEventAttendanceToKonfi           | Konfi           | ja
  * events_pending_approval     | sendEventsPendingApprovalToAdmins    | Org-Admins      | ja
@@ -753,6 +754,50 @@ class PushService {
       return await this.sendToMultipleUsers(db, userIds, notification);
     } catch (error) {
  console.error('sendEventCancellationToKonfis error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Event geaendert (Termin/Uhrzeit/Ort) - Push an alle gebuchten Teilnehmer
+   * @param {Object} changes - { newDate, newEndTime, newLocation } - nur gesetzte Felder haben sich geaendert
+   */
+  static async sendEventChangedToKonfis(db, userIds, eventName, changes = {}, eventId = null) {
+    try {
+      const parts = [];
+
+      if (changes.newDate) {
+        const date = new Date(changes.newDate);
+        let dateInfo = date.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        dateInfo += `, ${date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}`;
+        if (changes.newEndTime) {
+          const endTime = new Date(changes.newEndTime).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+          dateInfo += ` - ${endTime} Uhr`;
+        } else {
+          dateInfo += ' Uhr';
+        }
+        parts.push(`Neuer Termin: ${dateInfo}`);
+      }
+
+      if (changes.newLocation) {
+        parts.push(`Neuer Ort: ${changes.newLocation}`);
+      }
+
+      const changeText = parts.length > 0 ? parts.join(' | ') : 'Es gibt Änderungen am Event.';
+
+      const notification = {
+        title: 'Event geändert',
+        body: `"${eventName}" wurde geändert. ${changeText}`,
+        data: {
+          type: 'event_changed',
+          event_name: eventName,
+          event_id: eventId?.toString() || ''
+        }
+      };
+
+      return await this.sendToMultipleUsers(db, userIds, notification);
+    } catch (error) {
+ console.error('sendEventChangedToKonfis error:', error);
       return { success: false, error: error.message };
     }
   }

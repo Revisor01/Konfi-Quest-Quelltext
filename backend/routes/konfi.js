@@ -79,22 +79,17 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         return res.status(404).json({ error: 'Konfi nicht gefunden' });
       }
 
-      // Check if badges table exists and get badges for this konfi
-      let badges = [];
-      let badgeCount = 0;
-      const checkBadgesTableQuery = "SELECT to_regclass('public.custom_badges')";
-      const { rows: [tableExistsResult] } = await db.query(checkBadgesTableQuery);
+      // Total points: nur aktive Punkte-Typen summieren. Wird VOR dem Promise.all
+      // gebraucht, weil die userRanking-Query totalPoints als Parameter nutzt.
+      // Bonus ist bereits in konfi_profiles enthalten, daher NICHT nochmal addieren.
+      const totalPoints = (konfi.gottesdienst_enabled ? (konfi.gottesdienst_points || 0) : 0)
+                        + (konfi.gemeinde_enabled ? (konfi.gemeinde_points || 0) : 0);
 
-      if (tableExistsResult && tableExistsResult.to_regclass) {
-        // Get total badge count for this organization
-        const { rows: [badgeCountResult] } = await db.query(
-          'SELECT COUNT(*) as count FROM user_badges kb JOIN users u ON kb.user_id = u.id WHERE kb.user_id = $1 AND kb.organization_id = $2',
-          [konfiId, req.user.organization_id]
-        );
-        badgeCount = parseInt(badgeCountResult.count, 10) || 0;
 
-        // Get recent badges for display
-        const badgesQuery = `
+      // SQL-Konstanten fuer die parallelen Queries
+      const badgeCountSql =
+        'SELECT COUNT(*) as count FROM user_badges kb JOIN users u ON kb.user_id = u.id WHERE kb.user_id = $1 AND kb.organization_id = $2';
+      const badgesSql = `
           SELECT cb.id, cb.name, cb.description, cb.icon, cb.criteria_type, cb.criteria_value,
                  kb.awarded_date AS earned_at
           FROM custom_badges cb
@@ -103,12 +98,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
           ORDER BY kb.awarded_date DESC
           LIMIT 3
         `;
-        const { rows: badgeResults } = await db.query(badgesQuery, [konfiId, req.user.organization_id]);
-        badges = badgeResults;
-      }
-
-      // Get ranking for jahrgang (nur aktive Punkte-Typen)
-      const rankingQuery = `
+      const rankingSql = `
         SELECT u.id, u.display_name,
                (CASE WHEN j.gottesdienst_enabled THEN kp.gottesdienst_points ELSE 0 END
                + CASE WHEN j.gemeinde_enabled THEN kp.gemeinde_points ELSE 0 END) as points
@@ -120,26 +110,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         ORDER BY points DESC
         LIMIT 3
       `;
-      const { rows: ranking } = await db.query(rankingQuery, [konfi.jahrgang_id]);
-
-      // Add initials to ranking
-      const rankingWithInitials = ranking.map(r => ({
-        ...r,
-        initials: r.display_name ? r.display_name.split(' ').map(word => word.charAt(0)).join('').toUpperCase().substring(0, 2) : '??'
-      }));
-
-      // Get bonus points total for this konfi
-      const { rows: [bonusPointsResult] } = await db.query(
-        'SELECT COALESCE(SUM(points), 0) as bonus_total FROM bonus_points WHERE konfi_id = $1 AND organization_id = $2',
-        [konfiId, req.user.organization_id]
-      );
-      const bonusPointsTotal = parseInt(bonusPointsResult.bonus_total, 10) || 0;
-
-      // Total points: nur aktive Punkte-Typen summieren
-      // Bonus ist bereits in konfi_profiles enthalten, daher NICHT nochmal addieren
-      const totalPoints = (konfi.gottesdienst_enabled ? (konfi.gottesdienst_points || 0) : 0)
-                        + (konfi.gemeinde_enabled ? (konfi.gemeinde_points || 0) : 0);
-      const userRankingQuery = `
+      const userRankingSql = `
         WITH MyRank AS (
           SELECT
             (CASE WHEN j.gottesdienst_enabled THEN kp.gottesdienst_points ELSE 0 END
@@ -164,17 +135,9 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         WHERE r.total_points = $2
         LIMIT 1;
       `;
-      const { rows: [userRanking] } = await db.query(userRankingQuery, [konfi.jahrgang_id, totalPoints]);
-
-      // Get registered events count
-      const { rows: [eventCountResult] } = await db.query(
-        'SELECT COUNT(*) as count FROM event_bookings WHERE user_id = $1 AND organization_id = $2',
-        [konfiId, req.user.organization_id]
-      );
-      const eventCount = parseInt(eventCountResult.count, 10) || 0;
-
-      // Get recent registered events
-      const eventsQuery = `
+      const eventCountSql =
+        'SELECT COUNT(*) as count FROM event_bookings WHERE user_id = $1 AND organization_id = $2';
+      const recentEventsSql = `
         SELECT e.name as title, e.event_date, eb.booking_date
         FROM events e
         JOIN event_bookings eb ON e.id = eb.event_id
@@ -182,7 +145,58 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         ORDER BY eb.booking_date DESC
         LIMIT 3
       `;
-      const { rows: recentEvents } = await db.query(eventsQuery, [konfiId]);
+      const allLevelsSql = `
+        SELECT id, name, title, icon, color, points_required, sort_order
+        FROM levels
+        WHERE organization_id = $1 AND is_active = true
+        ORDER BY points_required ASC
+      `;
+      const dashboardSettingsSql =
+        "SELECT key, value FROM settings WHERE organization_id = $1 AND (key LIKE 'dashboard_show_%' OR key = 'dashboard_section_order')";
+      const wrappedSql = `SELECT EXISTS(
+          SELECT 1 FROM jahrgaenge j
+          JOIN konfi_profiles kp ON kp.jahrgang_id = j.id
+          WHERE kp.user_id = $1
+            AND j.wrapped_released_at IS NOT NULL
+            AND j.wrapped_released_at <= NOW()
+        ) as has_wrapped`;
+
+      const [
+        badgeCountRes,
+        badgesRes,
+        rankingRes,
+        userRankingRes,
+        eventCountRes,
+        recentEventsRes,
+        allLevelsRes,
+        dashboardSettingsRes,
+        wrappedRes
+      ] = await Promise.all([
+        db.query(badgeCountSql, [konfiId, req.user.organization_id]),
+        db.query(badgesSql, [konfiId, req.user.organization_id]),
+        db.query(rankingSql, [konfi.jahrgang_id]),
+        db.query(userRankingSql, [konfi.jahrgang_id, totalPoints]),
+        db.query(eventCountSql, [konfiId, req.user.organization_id]),
+        db.query(recentEventsSql, [konfiId]),
+        db.query(allLevelsSql, [req.user.organization_id]),
+        db.query(dashboardSettingsSql, [req.user.organization_id]),
+        db.query(wrappedSql, [konfiId])
+      ]);
+
+      // Badges
+      const badgeCount = parseInt(badgeCountRes.rows[0]?.count, 10) || 0;
+      const badges = badgesRes.rows;
+
+      // Ranking mit Initialen
+      const rankingWithInitials = rankingRes.rows.map(r => ({
+        ...r,
+        initials: r.display_name ? r.display_name.split(' ').map(word => word.charAt(0)).join('').toUpperCase().substring(0, 2) : '??'
+      }));
+
+      const userRanking = userRankingRes.rows[0];
+      const eventCount = parseInt(eventCountRes.rows[0]?.count, 10) || 0;
+      const recentEvents = recentEventsRes.rows;
+      const allLevels = allLevelsRes.rows;
 
       // Calculate days to confirmation (Termin stammt aus dem is_konfirmation-Event)
       let daysToConfirmation = null;
@@ -192,15 +206,6 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         const diffTime = confirmationDate.getTime() - now.getTime();
         daysToConfirmation = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       }
-
-      // Get ALL levels for this organization to calculate correct level dynamically
-      const allLevelsQuery = `
-        SELECT id, name, title, icon, color, points_required, sort_order
-        FROM levels
-        WHERE organization_id = $1 AND is_active = true
-        ORDER BY points_required ASC
-      `;
-      const { rows: allLevels } = await db.query(allLevelsQuery, [req.user.organization_id]);
 
       // Calculate correct current level based on total points (NOT from DB!)
       let currentLevel = null;
@@ -254,11 +259,9 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         target_gemeinde: konfi.target_gemeinde || 10
       };
 
-      // Dashboard config aus Settings laden (show_* + section_order)
-      const { rows: dashboardSettings } = await db.query(
-        "SELECT key, value FROM settings WHERE organization_id = $1 AND (key LIKE 'dashboard_show_%' OR key = 'dashboard_section_order')",
-        [req.user.organization_id]
-      );
+      // Dashboard config aus Settings (show_* + section_order) — bereits im
+      // Promise.all oben geladen.
+      const dashboardSettings = dashboardSettingsRes.rows;
       const dashboardMap = {};
       let sectionOrder = null;
       dashboardSettings.forEach(row => {
@@ -289,18 +292,9 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         section_order: sectionOrder || ['konfirmation', 'konfispruch', 'events', 'losung', 'badges', 'ranking']
       };
 
-      // Wrapped-Verfuegbarkeit pruefen (ueber wrapped_released_at auf Jahrgang)
-      const { rows: [wrappedResult] } = await db.query(
-        `SELECT EXISTS(
-          SELECT 1 FROM jahrgaenge j
-          JOIN konfi_profiles kp ON kp.jahrgang_id = j.id
-          WHERE kp.user_id = $1
-            AND j.wrapped_released_at IS NOT NULL
-            AND j.wrapped_released_at <= NOW()
-        ) as has_wrapped`,
-        [konfiId]
-      );
-      const has_wrapped = wrappedResult?.has_wrapped || false;
+      // Wrapped-Verfuegbarkeit (ueber wrapped_released_at auf Jahrgang) — bereits
+      // im Promise.all oben geladen.
+      const has_wrapped = wrappedRes.rows[0]?.has_wrapped || false;
 
       // Konfispruch-Sichtbarkeit (Backend-Gate, SPRUCH-07): Flag aus
       // jahrgaenge.konfspruch_enabled. Frontend rendert die Card nur bei true.
@@ -1390,28 +1384,38 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
 
       const jahrgangId = konfiProfile.jahrgang_id;
 
-      // Get all events with konfi-specific data, filtered by jahrgang
+      // Datumsfenster: standardmaessig nur Events des letzten Jahres (plus alle
+      // zukuenftigen). Mit ?all=true wird die gesamte Historie geliefert.
+      const includeAll = req.query.all === 'true';
+      const dateWindowClause = includeAll
+        ? ''
+        : "AND e.event_date >= NOW() - INTERVAL '1 year'";
+
+      // Restrukturierte Query:
+      // Keine Join-Explosion mehr ueber bookings/users/roles/categories.
+      // Buchungs-Statistik und Wartelisten-Position als LATERAL-Aggregate,
+      // eigene Buchung als LEFT JOIN LATERAL mit LIMIT 1 — kein GROUP BY noetig.
       const query = `
         SELECT e.*,
-               COUNT(DISTINCT CASE WHEN eb_all.status = 'confirmed' THEN eb_all.id END) as registered_count,
-               COUNT(DISTINCT CASE WHEN eb_all.status = 'waitlist' THEN eb_all.id END) as waitlist_count,
-               COUNT(DISTINCT CASE WHEN eb_all.status = 'confirmed' AND r_book.name = 'teamer' THEN eb_all.id END) as teamer_count,
-               CASE 
+               bstats.registered_count,
+               bstats.waitlist_count,
+               bstats.teamer_count,
+               CASE
                  WHEN e.has_timeslots THEN COALESCE(timeslot_capacity.total_capacity, e.max_participants)
                  ELSE e.max_participants
                END as max_participants,
-               STRING_AGG(DISTINCT c.id::text, ',') as category_ids,
-               STRING_AGG(DISTINCT c.name, ', ') as category_names,
-               CASE 
+               cats.category_ids,
+               cats.category_names,
+               CASE
                  WHEN e.cancelled = true THEN 'cancelled'
                  WHEN NOW() < e.registration_opens_at THEN 'upcoming'
                  WHEN NOW() > e.registration_closes_at THEN 'closed'
-                 WHEN COUNT(DISTINCT CASE WHEN eb_all.status = 'confirmed' THEN eb_all.id END) >= 
-                   CASE 
+                 WHEN bstats.registered_count >=
+                   CASE
                      WHEN e.has_timeslots THEN COALESCE(timeslot_capacity.total_capacity, e.max_participants)
                      ELSE e.max_participants
-                   END AND 
-                      (NOT e.waitlist_enabled OR COUNT(DISTINCT CASE WHEN eb_all.status = 'waitlist' THEN eb_all.id END) >= COALESCE(e.max_waitlist_size, 0)) THEN 'closed'
+                   END AND
+                      (NOT e.waitlist_enabled OR bstats.waitlist_count >= COALESCE(e.max_waitlist_size, 0)) THEN 'closed'
                  ELSE 'open'
                END as registration_status,
                -- Konfi-specific data
@@ -1422,40 +1426,61 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
                et_booked.end_time as booked_timeslot_end,
                CASE WHEN eb_konfi.status = 'confirmed' THEN true ELSE false END as is_registered,
                CASE WHEN eb_konfi.status = 'opted_out' THEN true ELSE false END as is_opted_out,
-               CASE 
+               CASE
                  WHEN e.cancelled = true THEN false
                  WHEN eb_konfi.id IS NOT NULL THEN false
                  WHEN NOW() < e.registration_opens_at OR NOW() > e.registration_closes_at THEN false
                  ELSE true
                END as can_register,
                -- Wartelisten-Position berechnen
-               CASE 
-                 WHEN eb_konfi.status = 'waitlist' THEN
-                   (SELECT COUNT(*) + 1 FROM event_bookings eb2 
-                    WHERE eb2.event_id = e.id 
-                    AND eb2.status = 'waitlist' 
-                    AND eb2.created_at < eb_konfi.created_at)
+               CASE
+                 WHEN eb_konfi.status = 'waitlist' THEN wpos.waitlist_position
                  ELSE NULL
                END as waitlist_position
         FROM events e
         INNER JOIN event_jahrgang_assignments eja ON e.id = eja.event_id
-        LEFT JOIN event_bookings eb_all ON e.id = eb_all.event_id
-        LEFT JOIN users u_book ON eb_all.user_id = u_book.id
-        LEFT JOIN roles r_book ON u_book.role_id = r_book.id
-        LEFT JOIN event_bookings eb_konfi ON e.id = eb_konfi.event_id AND eb_konfi.user_id = $2
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*) FILTER (WHERE eb_all.status = 'confirmed') as registered_count,
+            COUNT(*) FILTER (WHERE eb_all.status = 'waitlist') as waitlist_count,
+            COUNT(*) FILTER (WHERE eb_all.status = 'confirmed' AND r_book.name = 'teamer') as teamer_count
+          FROM event_bookings eb_all
+          LEFT JOIN users u_book ON eb_all.user_id = u_book.id
+          LEFT JOIN roles r_book ON u_book.role_id = r_book.id
+          WHERE eb_all.event_id = e.id
+        ) bstats ON true
+        LEFT JOIN LATERAL (
+          SELECT STRING_AGG(DISTINCT c.id::text, ',') as category_ids,
+                 STRING_AGG(DISTINCT c.name, ', ') as category_names
+          FROM event_categories ec
+          JOIN categories c ON ec.category_id = c.id
+          WHERE ec.event_id = e.id
+        ) cats ON true
+        LEFT JOIN LATERAL (
+          SELECT eb_konfi_i.id, eb_konfi_i.status, eb_konfi_i.attendance_status,
+                 eb_konfi_i.timeslot_id, eb_konfi_i.created_at
+          FROM event_bookings eb_konfi_i
+          WHERE eb_konfi_i.event_id = e.id AND eb_konfi_i.user_id = $2
+          LIMIT 1
+        ) eb_konfi ON true
         LEFT JOIN event_timeslots et_booked ON eb_konfi.timeslot_id = et_booked.id
-        LEFT JOIN event_categories ec ON e.id = ec.event_id
-        LEFT JOIN categories c ON ec.category_id = c.id
-        LEFT JOIN (
-          SELECT event_id, SUM(max_participants) as total_capacity
+        LEFT JOIN LATERAL (
+          SELECT COUNT(*) + 1 as waitlist_position
+          FROM event_bookings eb2
+          WHERE eb2.event_id = e.id
+            AND eb2.status = 'waitlist'
+            AND eb2.created_at < eb_konfi.created_at
+        ) wpos ON true
+        LEFT JOIN LATERAL (
+          SELECT SUM(max_participants) as total_capacity
           FROM event_timeslots
-          GROUP BY event_id
-        ) timeslot_capacity ON e.id = timeslot_capacity.event_id
+          WHERE event_id = e.id
+        ) timeslot_capacity ON true
         WHERE e.organization_id = $1
           AND eja.jahrgang_id = $3
           AND e.teamer_only IS NOT TRUE
           AND (e.cancelled IS NOT TRUE OR eb_konfi.id IS NOT NULL)
-        GROUP BY e.id, timeslot_capacity.total_capacity, eb_konfi.id, eb_konfi.status, eb_konfi.attendance_status, eb_konfi.created_at, eb_konfi.timeslot_id, et_booked.start_time, et_booked.end_time
+          ${dateWindowClause}
         ORDER BY e.event_date ASC
       `;
 

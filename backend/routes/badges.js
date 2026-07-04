@@ -621,6 +621,14 @@ async function insertBadgesAndNotify(db, userId, organizationId, earnedBadgeIds,
     for (const badge of earnedBadgeDetails) {
       await PushService.sendBadgeEarnedToKonfi(db, userId, badge.name, badge.icon, badge.description);
     }
+
+    // Live-Update an den Empfaenger selbst: Badge-Zaehler sofort aktualisieren,
+    // ohne dass die App dafuer alle 60s /konfi/badges pollen muss.
+    // earnedBadgeDetails ist hier immer nicht-leer (Aufrufer prueft das).
+    // sendToUserByRole (statt sendToKonfi), weil Badges auch an Teamer:innen
+    // vergeben werden koennen und deren Socket im Raum user_teamer_ sitzt.
+    // Fire-and-forget.
+    liveUpdate.sendToUserByRole(userId, 'badges', 'earned', { count: earnedBadgeDetails.length });
   } catch (notifErr) {
     console.error('Error sending badge notifications:', notifErr);
   }
@@ -741,6 +749,8 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
 
       // Live-Update an alle Admins senden
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'badges', 'create');
+      // Konfis sehen den Badge-Katalog (KonfiBadgesPage abonniert 'badges').
+      liveUpdate.sendToOrgKonfis(req.user.organization_id, 'badges', 'create');
     } catch (err) {
  console.error('Database error in POST /api/badges:', err);
       res.status(500).json({ error: 'Datenbankfehler' });
@@ -769,6 +779,8 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
 
       // Live-Update an alle Admins senden
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'badges', 'update');
+      // Konfis sehen den Badge-Katalog (KonfiBadgesPage abonniert 'badges').
+      liveUpdate.sendToOrgKonfis(req.user.organization_id, 'badges', 'update');
     } catch (err) {
  console.error(`Database error in PUT /api/badges/${req.params.id}:`, err);
       res.status(500).json({ error: 'Datenbankfehler' });
@@ -797,6 +809,8 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
 
       // Live-Update an alle Admins senden
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'badges', 'delete');
+      // Konfis sehen den Badge-Katalog (KonfiBadgesPage abonniert 'badges').
+      liveUpdate.sendToOrgKonfis(req.user.organization_id, 'badges', 'delete');
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
       client.release();

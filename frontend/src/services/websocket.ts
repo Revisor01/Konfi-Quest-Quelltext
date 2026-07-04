@@ -29,8 +29,13 @@ export const initializeWebSocket = (token: string): Socket => {
     transports: ['websocket', 'polling'], // WebSocket zuerst, dann Polling als Fallback
     upgrade: true,
     reconnection: true,
-    reconnectionAttempts: 10,
+    // Unbegrenzt weiterversuchen: Ein Deploy-Downtime-Fenster (~20-40s) hat die
+    // vorher gedeckelten 10 Versuche endgueltig verbrannt — danach blieb der Socket
+    // tot bis zum App-Neustart. reconnectionDelayMax deckelt den exponentiellen
+    // Backoff bei 30s, sodass dauerhaft (aber ohne Haemmern) neu verbunden wird.
+    reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
+    reconnectionDelayMax: 30000,
     timeout: 20000,
   });
 

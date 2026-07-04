@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 import api from '../services/api';
@@ -34,12 +34,32 @@ let fcmTokenSent: string | null = null;
 let fcmTokenLastSent: number = 0;
 let pendingFcmToken: string | null = null;
 
+// 12 Stunden — Sendefenster fuer einen UNVERAENDERTEN Token.
+const TOKEN_RESEND_WINDOW_MS = 12 * 60 * 60 * 1000;
+
 // Funktion, um Duplikate zu vermeiden
 const sendTokenToServer = async (token: string, retryCount = 0) => {
-  // ANTI-SPAM: Prüfe ob Token in letzten 10 Sekunden bereits gesendet wurde
   const now = Date.now();
+
+  // ANTI-SPAM (In-Memory-Zusatzschutz): gleicher Token in den letzten 10s -> raus.
+  // Faengt schnelle Doppel-Feuerungen innerhalb einer Session ab.
   if (fcmTokenSent === token && (now - fcmTokenLastSent) < 10000) {
     return;
+  }
+
+  // Sendefenster: AppDelegate feuert das fcmToken-Event
+  // bei JEDER App-Aktivierung. Ist der Token UNVERAENDERT und der letzte
+  // erfolgreiche Send weniger als 12h her, NICHT erneut senden (spart org-weit
+  // dutzende POSTs/90min). Der persistierte Timestamp (getPushTokenTimestamp)
+  // ueberlebt App-Neustarts, sodass das Fenster auch nach Kaltstart greift,
+  // sobald bekannt ist, dass sich der Token nicht geaendert hat.
+  // Bei GEAENDERTEM Token (fcmTokenSent !== token) faellt diese Sperre weg ->
+  // sofort senden.
+  if (fcmTokenSent === token) {
+    const lastPersistedSend = getPushTokenTimestamp();
+    if (lastPersistedSend > 0 && (now - lastPersistedSend) < TOKEN_RESEND_WINDOW_MS) {
+      return;
+    }
   }
 
   // Gespeicherte Device ID nutzen (wird bei App-Start einmalig persistiert)
@@ -116,6 +136,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Push notifications state
   const [pushNotificationsPermission, setPushNotificationsPermission] = useState<string>('prompt');
+
+  // Account-Wechsel-Erkennung fuer den FCM-Token: Nach Logout+Login mit einem
+  // ANDEREN Account haengt der Token serverseitig noch am alten User (das
+  // 12h-Sendefenster verhindert den erneuten POST). Bei einem Wechsel innerhalb
+  // der Session das Fenster aufheben und den bekannten Token sofort fuer den
+  // neuen User registrieren — der Server haengt ihn dabei um (DELETE fremder
+  // Bindungen in POST /device-token).
+  const prevPushUserIdRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!user?.id) return; // Logout: vorherige ID absichtlich behalten
+    const prev = prevPushUserIdRef.current;
+    prevPushUserIdRef.current = user.id;
+    if (prev !== null && prev !== user.id && fcmTokenSent) {
+      const t = fcmTokenSent;
+      fcmTokenSent = null; // In-Memory-Sperre aufheben
+      setPushTokenTimestamp(0).finally(() => sendTokenToServer(t));
+    }
+  }, [user?.id]);
 
   // Multi-Org Switcher state
   const [organizations, setOrganizations] = useState<UserOrganization[]>([]);
@@ -505,6 +543,13 @@ useEffect(() => {
     const setupListener = async () => {
       stateChangeListener = await App.addListener('appStateChange', async ({ isActive }) => {
         if (isActive) {
+          // Beim Wechsel in den Vordergrund zuerst den Socket aktiv anstossen:
+          // Nach laengerem Hintergrund (oder Deploy-Downtime) haengt er oft im
+          // getrennten Zustand fest, ohne von selbst neu zu verbinden. Der
+          // anschliessende Reconnect loest die 'sync:reconnect'-Sequenz (flush ->
+          // invalidate -> Badge/View-Refresh) ohnehin aus.
+          ensureSocketConnected();
+
           handleAppActive();
 
           // Admins bekommen ohnehin laufend Erinnerungen -> beim Aktiv-werden
@@ -589,9 +634,13 @@ useEffect(() => {
 
             switch (notificationType) {
               case 'chat':
-                // Navigate to specific chat room
+                // Direkt in den Raum: Die Route ist /chat/room/:roomId — der
+                // fruehere Query-Parameter (?room=) wurde von keiner Seite
+                // konsumiert, der Tap landete nur auf der Chat-Uebersicht.
                 if (action.notification.data?.roomId) {
-                  targetUrl = `${routePrefix}/chat?room=${action.notification.data.roomId}`;
+                  targetUrl = `${routePrefix}/chat/room/${action.notification.data.roomId}`;
+                } else {
+                  targetUrl = `${routePrefix}/chat`;
                 }
                 break;
 
@@ -678,6 +727,18 @@ useEffect(() => {
     };
 
     setupPushNotifications();
+
+    // Cleanup: Ohne Cleanup akkumulieren die vier
+    // addListener-Registrierungen bei jedem User-Wechsel (Effect-Dep ist [user]).
+    // removeAllListeners ist hier gefahrlos: Dieser Effect ist die EINZIGE Stelle
+    // im gesamten Frontend, die PushNotifications-Listener registriert (per grep
+    // verifiziert) -- es werden also nur die hier gesetzten vier Listener
+    // entfernt, kein fremder Listener wird mitgerissen.
+    return () => {
+      if (Capacitor.isNativePlatform()) {
+        PushNotifications.removeAllListeners();
+      }
+    };
   }, [user]); // Abhängigkeit ist korrekt
 
   // hasPermission entfernt - Berechtigung jetzt über user.role_name prüfen

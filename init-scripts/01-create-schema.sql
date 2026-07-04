@@ -450,7 +450,8 @@ CREATE INDEX idx_event_points_org ON event_points (organization_id);
 CREATE TABLE chat_rooms (
     id SERIAL PRIMARY KEY,
     name VARCHAR(255) NOT NULL,
-    type VARCHAR(50) NOT NULL CHECK (type IN ('direct', 'group', 'jahrgang')),
+    -- 'admin' = automatischer Team-Chat (teamChat.js), 'admin_team' = manuell erstellte Team-Gruppen
+    type VARCHAR(50) NOT NULL CHECK (type IN ('direct', 'group', 'jahrgang', 'admin', 'admin_team')),
     jahrgang_id INTEGER REFERENCES jahrgaenge(id) ON DELETE CASCADE,
     event_id INTEGER REFERENCES events(id) ON DELETE CASCADE,
     created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,

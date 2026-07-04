@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   IonCard,
   IonCardContent,
@@ -74,7 +74,7 @@ interface KonfisViewProps {
   onAddKonfiClick: () => void;
   onSelectKonfi: (konfi: Konfi) => void;
   onDeleteKonfi: (konfi: Konfi) => void;
-  onDeleteTeamer: (teamer: any) => void;
+  onDeleteTeamer: (teamer: any) => void | Promise<void>;
   // Im iPad-Split-View aktuell rechts geoeffneter Konfi (fuer Highlighting).
   selectedKonfiId?: number | null;
 }
@@ -119,24 +119,26 @@ const KonfisView: React.FC<KonfisViewProps> = ({
     return () => { cancelled = true; };
   }, [user?.organization_id]);
 
+  // Teamer laden (wiederverwendbar: Segment-Wechsel + Reload nach Loeschen)
+  const loadTeamers = useCallback(async () => {
+    setTeamerLoading(true);
+    try {
+      const response = await api.get('/admin/konfis/teamer');
+      setTeamers(response.data || []);
+    } catch (err) {
+      console.error('Error loading teamers:', err);
+      setTeamers([]);
+    } finally {
+      setTeamerLoading(false);
+    }
+  }, []);
+
   // Teamer laden wenn Teamer-Segment aktiv
   useEffect(() => {
     if (viewMode === 'teamer') {
-      const loadTeamers = async () => {
-        setTeamerLoading(true);
-        try {
-          const response = await api.get('/admin/konfis/teamer');
-          setTeamers(response.data || []);
-        } catch (err) {
-          console.error('Error loading teamers:', err);
-          setTeamers([]);
-        } finally {
-          setTeamerLoading(false);
-        }
-      };
       loadTeamers();
     }
-  }, [viewMode]);
+  }, [viewMode, loadTeamers]);
 
   const getTotalPoints = (konfi: Konfi) => {
     const godiEnabled = konfi.gottesdienst_enabled !== false;
@@ -376,7 +378,7 @@ const KonfisView: React.FC<KonfisViewProps> = ({
               {(user?.role_name === 'org_admin' || user?.is_super_admin === true) && (
                 <IonItemOptions side="end" className="app-swipe-actions">
                   <IonItemOption
-                    onClick={() => onDeleteTeamer(teamer)}
+                    onClick={async () => { await onDeleteTeamer(teamer); await loadTeamers(); }}
                     className="app-swipe-action"
                   >
                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">

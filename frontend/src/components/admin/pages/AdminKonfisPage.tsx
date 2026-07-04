@@ -153,26 +153,33 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
     });
   };
 
-  const handleDeleteTeamer = async (teamer: any) => {
-    if (!isOnline) return;
-    presentAlert({
-      header: 'Teamer:in löschen',
-      message: `Teamer:in "${teamer.display_name || teamer.name}" wirklich löschen?\n\nDas Konto wird mit allen zugehörigen Daten entfernt. Punkte und Abzeichen aus einer früheren Konfi-Zeit gehen dabei verloren.`,
-      buttons: [
-        { text: 'Abbrechen', role: 'cancel' },
-        {
-          text: 'Löschen',
-          role: 'destructive',
-          handler: async () => {
-            try {
-              await api.delete(`/users/${teamer.id}`);
-              await refreshKonfis();
-            } catch (err: any) {
-              setError(err.response?.data?.error || 'Fehler beim Löschen');
+  // Gibt ein Promise zurueck, das erst nach abgeschlossenem Delete (oder Abbruch)
+  // resolved — so kann KonfisView danach die lokale Teamer-Liste neu laden.
+  const handleDeleteTeamer = (teamer: any): Promise<void> => {
+    if (!isOnline) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      presentAlert({
+        header: 'Teamer:in löschen',
+        message: `Teamer:in "${teamer.display_name || teamer.name}" wirklich löschen?\n\nDas Konto wird mit allen zugehörigen Daten entfernt. Punkte und Abzeichen aus einer früheren Konfi-Zeit gehen dabei verloren.`,
+        buttons: [
+          { text: 'Abbrechen', role: 'cancel', handler: () => resolve() },
+          {
+            text: 'Löschen',
+            role: 'destructive',
+            handler: async () => {
+              try {
+                await api.delete(`/users/${teamer.id}`);
+                await refreshKonfis();
+                setSuccess(`Teamer:in "${teamer.display_name || teamer.name}" gelöscht`);
+              } catch (err: any) {
+                setError(err.response?.data?.error || 'Fehler beim Löschen');
+              } finally {
+                resolve();
+              }
             }
           }
-        }
-      ]
+        ]
+      });
     });
   };
 

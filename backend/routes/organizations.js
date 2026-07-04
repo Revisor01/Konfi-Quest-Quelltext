@@ -4,6 +4,10 @@ const bcrypt = require('bcrypt');
 const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { invalidateUserCache } = require('../middleware/rbac');
+const liveUpdate = require('../utils/liveUpdate');
+const { syncTeamChat } = require('../utils/teamChat');
+const { syncJahrgangChat } = require('../utils/jahrgangChat');
+const chatSyncCache = require('../utils/chatSyncCache');
 
 // Organizations routes
 // ============================================
@@ -454,6 +458,12 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
         message: `Organisation erfolgreich erstellt (Standard-Rollen, Admin, ${defaultBadges.length} Badges, ${defaultCertificates.length} Zertifikate, ${defaultLevels.length} Levels, ${defaultCategories.length} Kategorien, ${defaultActivities.length} Aktivitäten)`
       });
 
+      // Live-Update NACH der Response: nur an den ausfuehrenden Super-Admin selbst
+      // (Multi-Device-Sync seiner eigenen Sitzung). Die Organisations-Verwaltung ist
+      // super-admin-only und org-uebergreifend; ein Org-Broadcast passt hier nicht.
+      // Andere Super-Admins sind selten und aktualisieren beim naechsten Seitenaufruf.
+      liveUpdate.sendToUserByRole(req.user.id, 'organizations', 'create');
+
     } catch (err) {
       if (err.code === '23505') { // unique_violation
         return res.status(409).json({ error: 'Organisations-Slug existiert bereits' });
@@ -517,6 +527,10 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       }
         
       res.json({ message: 'Organisation erfolgreich aktualisiert' });
+
+      // Live-Update NACH der Response an den Ausfuehrenden selbst (Multi-Device).
+      // Passt fuer super_admin (org-uebergreifende Verwaltung) und org_admin (eigene Org).
+      liveUpdate.sendToUserByRole(req.user.id, 'organizations', 'update');
     } catch (err) {
       if (err.code === '23505') { // unique_violation
         return res.status(409).json({ error: 'Organisations-Slug existiert bereits' });
@@ -643,6 +657,9 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       await client.query('COMMIT');
       res.json({ message: 'Organisation und alle zugehörigen Daten erfolgreich gelöscht' });
 
+      // Live-Update NACH der Response an den ausfuehrenden Super-Admin selbst (Multi-Device).
+      liveUpdate.sendToUserByRole(req.user.id, 'organizations', 'delete');
+
     } catch (err) {
       await client.query('ROLLBACK').catch(rbErr => console.error('Rollback failed:', rbErr));
       console.error('Error deleting organization:', err);
@@ -680,6 +697,9 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       }
 
       res.json({ message: 'Konfi-Limit erfolgreich aktualisiert', max_konfis: value });
+
+      // Live-Update NACH der Response an den ausfuehrenden Super-Admin selbst (Multi-Device).
+      liveUpdate.sendToUserByRole(req.user.id, 'organizations', 'update');
     } catch (err) {
       console.error('Error setting organization limit:', err);
       res.status(500).json({ error: 'Datenbankfehler' });
@@ -923,6 +943,24 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
 
       invalidateUserCache(parseInt(user_id));
       res.status(201).json({ message: 'Mitgliedschaft gespeichert' });
+
+      // Chat-Mitgliedschaft der Ziel-Org INLINE pflegen (TTL-Cache verlaesst
+      // sich darauf): neues Mitglied sofort in Team-Chat, Org-Admins zusaetzlich
+      // in alle Jahrgangs-Chats der Ziel-Org.
+      try {
+        chatSyncCache.invalidate(orgId, parseInt(user_id));
+        await syncTeamChat(db, orgId, req.user.id);
+        if (role_name === 'org_admin') {
+          const { rows: jgs } = await db.query(
+            'SELECT id FROM jahrgaenge WHERE organization_id = $1', [orgId]
+          );
+          for (const jg of jgs) {
+            await syncJahrgangChat(db, jg.id, orgId, req.user.id);
+          }
+        }
+      } catch (syncErr) {
+        console.error('Chat-Sync nach Mitgliedschafts-Zuweisung fehlgeschlagen:', syncErr.message);
+      }
     } catch (err) {
       console.error('Database error in POST /organizations/:id/members:', err);
       res.status(500).json({ error: 'Datenbankfehler' });
@@ -955,6 +993,21 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       }
       invalidateUserCache(userId);
       res.json({ message: 'Mitgliedschaft entfernt' });
+
+      // Chat-Mitgliedschaft der Org INLINE aufraeumen: Ex-Mitglied fliegt aus
+      // Team-Chat und allen Jahrgangs-Chats der Org (Sync entfernt Nicht-Soll).
+      try {
+        chatSyncCache.invalidate(orgId, userId);
+        await syncTeamChat(db, orgId, req.user.id);
+        const { rows: jgs } = await db.query(
+          'SELECT id FROM jahrgaenge WHERE organization_id = $1', [orgId]
+        );
+        for (const jg of jgs) {
+          await syncJahrgangChat(db, jg.id, orgId, req.user.id);
+        }
+      } catch (syncErr) {
+        console.error('Chat-Sync nach Mitgliedschafts-Entzug fehlgeschlagen:', syncErr.message);
+      }
     } catch (err) {
       console.error('Database error in DELETE /organizations/:id/members/:userId:', err);
       res.status(500).json({ error: 'Datenbankfehler' });

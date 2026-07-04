@@ -1,5 +1,5 @@
 // MainTabs.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Redirect, Route, RouteComponentProps, useLocation } from 'react-router-dom'; // useLocation importieren!
 import {
   IonIcon,
@@ -28,6 +28,7 @@ import { useIonRouter, isPlatform } from '@ionic/react';
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
 import { useApp } from '../../contexts/AppContext';
 import { useBadge } from '../../contexts/BadgeContext';
+import { useLiveRefresh } from '../../contexts/LiveUpdateContext';
 import api from '../../services/api';
 import { ModalProvider } from '../../contexts/ModalContext'; // Behalten
 import AdminKonfisPage from '../admin/pages/AdminKonfisPage';
@@ -154,27 +155,27 @@ const MainTabs: React.FC = () => {
     };
   }, [user?.role_name, user?.type]);
 
-  // Load new badges count for konfi (badges not yet seen)
+  // Zaehler ungesehener Badges (Konfi). KEIN 60s-Polling mehr: Der Server sendet
+  // beim Vergeben eines Badges ein LiveUpdate ('badges'), das checkAndAwardBadges
+  // an genau den Punktevergabe-Stellen (Aktivitaet/Bonus/Event) ausloest. Bei
+  // Verbindungsabriss/Push feuert zusaetzlich der initiale Load beim Reconnect.
+  const loadNewBadgesCount = useCallback(async () => {
+    if (user?.type !== 'konfi') return;
+    try {
+      const response = await api.get('/konfi/badges');
+      // earned array contains badges with the seen flag
+      const newCount = response.data.earned?.filter((badge: any) => !badge.seen)?.length || 0;
+      setNewBadgesCount(newCount);
+    } catch (error) {
+      console.warn('Badges konnten nicht geladen werden:', error);
+    }
+  }, [user?.type]);
+
   useEffect(() => {
-    const loadNewBadgesCount = async () => {
-      if (user?.type === 'konfi') {
-        try {
-          const response = await api.get('/konfi/badges');
-          // earned array contains badges with the seen flag
-          const newCount = response.data.earned?.filter((badge: any) => !badge.seen)?.length || 0;
-          setNewBadgesCount(newCount);
-        } catch (error) {
- console.warn('Badges konnten nicht geladen werden:', error);
-        }
-      }
-    };
-
     loadNewBadgesCount();
+  }, [loadNewBadgesCount]);
 
-    // Refresh every 60 seconds
-    const interval = setInterval(loadNewBadgesCount, 60000);
-    return () => clearInterval(interval);
-  }, [user]);
+  useLiveRefresh('badges', loadNewBadgesCount);
 
 
   if (!user) {

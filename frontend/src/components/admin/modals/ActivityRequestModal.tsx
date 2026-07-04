@@ -438,11 +438,11 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                 <div style={{ display: 'flex', gap: '12px' }}>
                   <IonButton
                     fill="outline"
-                    expand="block"
                     onClick={() => !loading && setSelectedAction('approve')}
                     disabled={loading}
                     style={{
                       flex: 1,
+                      minWidth: 0,
                       '--border-color': '#059669',
                       '--color': selectedAction === 'approve' ? 'white' : '#059669',
                       '--background': selectedAction === 'approve' ? '#059669' : 'transparent',
@@ -456,11 +456,11 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                   </IonButton>
                   <IonButton
                     fill="outline"
-                    expand="block"
                     onClick={() => !loading && setSelectedAction('reject')}
                     disabled={loading}
                     style={{
                       flex: 1,
+                      minWidth: 0,
                       '--border-color': '#dc3545',
                       '--color': selectedAction === 'reject' ? 'white' : '#dc3545',
                       '--background': selectedAction === 'reject' ? '#dc3545' : 'transparent',
