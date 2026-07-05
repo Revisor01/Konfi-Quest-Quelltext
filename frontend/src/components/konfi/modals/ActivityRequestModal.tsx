@@ -45,6 +45,7 @@ import api from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
+import { compressForUpload } from '../../../services/mediaCompression';
 
 interface Activity {
   id: number;
@@ -107,24 +108,25 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
     input.click();
   };
 
-  const handleFileSelect = (event: Event) => {
+  const handleFileSelect = async (event: Event) => {
     const target = event.target as HTMLInputElement;
     const file = target.files?.[0];
-    if (file) {
-      // Check file size (max 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        setError('Foto ist zu groß. Maximal 5MB erlaubt.');
-        return;
-      }
-
-      setFormData(prev => ({ ...prev, photo_file: file }));
+    if (!file) return;
+    try {
+      // Erst komprimieren (1920px/JPEG wie im Chat), DANN Groessen-Check:
+      // Live-Kamerafotos sind oft 8-16 MB und wuerden einen vorgezogenen
+      // 5MB-Check immer reissen; nach Kompression passen sie locker.
+      const prepared = await compressForUpload(file);
+      setFormData(prev => ({ ...prev, photo_file: prepared }));
 
       // Create preview
       const reader = new FileReader();
       reader.onload = (e) => {
         setPhotoPreview(e.target?.result as string);
       };
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(prepared);
+    } catch (err: any) {
+      setError(err?.message || 'Foto konnte nicht verarbeitet werden');
     }
   };
 
@@ -139,6 +141,8 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
         headers: {
           'Content-Type': 'multipart/form-data',
         },
+        // Foto-Upload auf Mobilfunk kann laenger dauern als die globalen 20s
+        timeout: 60000,
         onUploadProgress: (progressEvent) => {
           if (progressEvent.total) {
             const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total);

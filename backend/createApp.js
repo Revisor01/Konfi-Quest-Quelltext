@@ -393,6 +393,11 @@ function createApp(db, options = {}) {
   // ====================================================================
 
   app.use((err, req, res, next) => {
+    // Multer-Limit (zu grosse Datei) als klares 413 statt generischem 500 —
+    // das Frontend zeigt err.response.data.error direkt dem User an.
+    if (err && err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'Datei ist zu groß (max. 5 MB).' });
+    }
     console.error(err.stack);
     res.status(500).json({ error: 'Something went wrong!' });
   });

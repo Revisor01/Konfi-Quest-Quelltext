@@ -1,6 +1,8 @@
 import { io, Socket } from 'socket.io-client';
 import { writeQueue } from './writeQueue';
 import { offlineCache } from './offlineCache';
+import { getToken } from './tokenStore';
+import { ensureFreshToken } from './api';
 
 const WS_URL = import.meta.env.VITE_API_URL
   ? import.meta.env.VITE_API_URL.replace(/\/api$/, '')
@@ -25,7 +27,17 @@ export const initializeWebSocket = (token: string): Socket => {
   }
 
   socket = io(WS_URL, {
-    auth: { token },
+    // Token bei JEDEM (Re-)Connect frisch besorgen: ein statisches auth-Objekt
+    // friert den Token vom Erstellzeitpunkt ein — nach Ablauf (15 Min) lehnt der
+    // Server dann jeden Reconnect mit "jwt expired" ab und Chat/Live-Updates
+    // haengen, bis der Auth-Error-Umweg den Socket komplett neu aufgebaut hat.
+    // ensureFreshToken refresht bei Bedarf, faellt bei Fehlern auf den
+    // gespeicherten Token zurueck (dann greift weiterhin der Recovery-Pfad).
+    auth: (cb) => {
+      ensureFreshToken()
+        .then((fresh) => cb({ token: fresh ?? getToken() ?? token }))
+        .catch(() => cb({ token: getToken() ?? token }));
+    },
     transports: ['websocket', 'polling'], // WebSocket zuerst, dann Polling als Fallback
     upgrade: true,
     reconnection: true,

@@ -60,6 +60,23 @@ const changeExtension = (name: string, ext: string): string => {
  * unveraenderte) File samt frischer Preview-URL zurueck. Nicht-Bilder werden
  * unveraendert durchgereicht.
  */
+/**
+ * Kompression + Groessen-Gate fuer Foto-Uploads (Aktivitaetsantraege etc.):
+ * erst verkleinern, DANN gegen maxBytes pruefen — Live-Kamerafotos (8-16 MB)
+ * wuerden einen vorgezogenen Check sonst immer reissen, obwohl sie nach der
+ * Kompression locker passen. Die Preview-URL aus compressImage wird hier
+ * sofort freigegeben (die Aufrufer bauen ihre eigene Vorschau).
+ * Wirft bei Ueberschreitung einen Error mit deutscher Meldung.
+ */
+export const compressForUpload = async (file: File, maxBytes = 5 * 1024 * 1024): Promise<File> => {
+  const { file: compressed, previewUrl } = await compressImage(file);
+  URL.revokeObjectURL(previewUrl);
+  if (compressed.size > maxBytes) {
+    throw new Error(`Foto ist zu groß (max. ${Math.round(maxBytes / 1024 / 1024)} MB).`);
+  }
+  return compressed;
+};
+
 export const compressImage = async (file: File): Promise<CompressResult> => {
   if (!file.type.startsWith('image/') || file.type === 'image/gif') {
     // GIFs (moeglw. animiert) und Nicht-Bilder nicht anfassen.

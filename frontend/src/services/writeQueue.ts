@@ -139,6 +139,8 @@ async function resolveLocalPhoto(body: any): Promise<void> {
   formData.append('photo', blob, body._photoFileName || 'photo.jpg');
   const uploadResponse = await api.post('/konfi/upload-photo', formData, {
     headers: { 'Content-Type': 'multipart/form-data' },
+    // Foto-Upload auf Mobilfunk kann laenger dauern als die globalen 20s
+    timeout: 60000,
   });
 
   // Filename in body setzen, lokale Felder entfernen
@@ -257,6 +259,10 @@ async function flush(): Promise<FlushResult> {
 
         const config: any = {};
         if (requestHeaders) config.headers = requestHeaders;
+        // Medien-Replays (FormData) brauchen auf Mobilfunk mehr als die globalen 20s
+        if (typeof FormData !== 'undefined' && requestBody instanceof FormData) {
+          config.timeout = 60000;
+        }
 
         if (item.method === 'DELETE') {
           await api.delete(item.url, config);

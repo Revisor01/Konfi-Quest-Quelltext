@@ -37,9 +37,17 @@ axiosRetry(api, {
 // Export API_BASE_URL für andere Komponenten
 export const API_URL = API_BASE_URL;
 
-// Add token to requests (synchron aus Memory-Cache)
-api.interceptors.request.use((config) => {
-  const token = getToken();
+// Add token to requests. Laeuft der Token in Kuerze ab (oder ist er schon
+// abgelaufen), wird VOR dem Senden einmal refresht — sonst rennt z.B. der
+// Request-Burst beim App-Oeffnen erst in 401s und alle haengen ~1s im
+// Refresh-Umweg (das war die Hauptquelle der "App haengt kurz"-Momente).
+api.interceptors.request.use(async (config) => {
+  const url = config.url || '';
+  const isAuthFree = url.includes('/login') || url.includes('/refresh');
+  let token = getToken();
+  if (token && !isAuthFree) {
+    token = (await ensureFreshToken()) ?? token;
+  }
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
@@ -52,17 +60,87 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Verhindere parallele Refresh-Requests
+// Verhindere parallele Refresh-Requests. Subscriber haben einen Fehlerpfad:
+// ohne ihn wuerden Requests, die auf einen fehlschlagenden Refresh warten,
+// als nie-aufloesende Promises haengen bleiben.
 let isRefreshing = false;
-let refreshSubscribers: ((token: string) => void)[] = [];
+let refreshSubscribers: { onSuccess: (token: string) => void; onFail: (err: unknown) => void }[] = [];
 
 const onTokenRefreshed = (token: string) => {
-  refreshSubscribers.forEach(cb => cb(token));
+  refreshSubscribers.forEach(s => s.onSuccess(token));
   refreshSubscribers = [];
 };
 
-const addRefreshSubscriber = (cb: (token: string) => void) => {
-  refreshSubscribers.push(cb);
+const onTokenRefreshFailed = (err: unknown) => {
+  refreshSubscribers.forEach(s => s.onFail(err));
+  refreshSubscribers = [];
+};
+
+const addRefreshSubscriber = (onSuccess: (token: string) => void, onFail: (err: unknown) => void) => {
+  refreshSubscribers.push({ onSuccess, onFail });
+};
+
+// Refresh-Request selbst (direktes axios, nicht api — vermeidet Interceptor-Loop).
+// Aktive Org mitsenden, damit das neue Token den Org-Claim behaelt.
+const performRefresh = async (refreshToken: string): Promise<string> => {
+  const activeOrgId = getActiveOrgId();
+  const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
+    refresh_token: refreshToken
+  }, activeOrgId ? { headers: { 'X-Active-Organization': String(activeOrgId) } } : undefined);
+
+  const { token: newToken, refresh_token: newRefreshToken } = response.data;
+  await setToken(newToken);
+  await setRefreshToken(newRefreshToken);
+  return newToken;
+};
+
+// exp-Claim aus dem JWT lesen (Base64url), gecacht pro Token-String.
+let _expCache: { token: string; exp: number | null } | null = null;
+const getTokenExp = (token: string): number | null => {
+  if (_expCache?.token === token) return _expCache.exp;
+  let exp: number | null = null;
+  try {
+    const b64 = token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(b64));
+    if (typeof payload.exp === 'number') exp = payload.exp;
+  } catch {
+    // Kein dekodierbares JWT — exp bleibt null, der 401-Interceptor regelt es.
+  }
+  _expCache = { token, exp };
+  return exp;
+};
+
+// Sorgt dafuer, dass der Access-Token noch mindestens marginSeconds gueltig ist,
+// und refresht sonst proaktiv EINMAL (parallel wartende Aufrufer teilen sich den
+// Refresh). Gibt bei transienten Fehlern den alten Token zurueck — die Session
+// wird hier bewusst NICHT zerstoert, das entscheidet allein der 401-Interceptor.
+export const ensureFreshToken = async (marginSeconds = 30): Promise<string | null> => {
+  const token = getToken();
+  if (!token) return null;
+  const exp = getTokenExp(token);
+  if (exp === null) return token;
+  if (exp * 1000 - Date.now() > marginSeconds * 1000) return token;
+  if (!networkMonitor.isOnline) return token;
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return token;
+
+  if (isRefreshing) {
+    return new Promise((resolve) => {
+      addRefreshSubscriber(resolve, () => resolve(getToken()));
+    });
+  }
+
+  isRefreshing = true;
+  try {
+    const newToken = await performRefresh(refreshToken);
+    isRefreshing = false;
+    onTokenRefreshed(newToken);
+    return newToken;
+  } catch (err) {
+    isRefreshing = false;
+    onTokenRefreshFailed(err);
+    return token;
+  }
 };
 
 // Handle auth errors and rate limiting
@@ -115,28 +193,23 @@ api.interceptors.response.use(
       }
 
       if (isRefreshing) {
-        // Anderer Request refresht bereits → warten
-        return new Promise((resolve) => {
-          addRefreshSubscriber((newToken: string) => {
-            originalRequest.headers.Authorization = `Bearer ${newToken}`;
-            resolve(api(originalRequest));
-          });
+        // Anderer Request refresht bereits → warten. Schlaegt der Refresh fehl,
+        // wird der wartende Request mit dem Fehler abgewiesen (statt ewig zu haengen).
+        return new Promise((resolve, reject) => {
+          addRefreshSubscriber(
+            (newToken: string) => {
+              originalRequest.headers.Authorization = `Bearer ${newToken}`;
+              resolve(api(originalRequest));
+            },
+            (err) => reject(err)
+          );
         });
       }
 
       isRefreshing = true;
 
       try {
-        // Refresh-Versuch mit direktem axios (nicht api, um Interceptor-Loop zu vermeiden).
-        // Aktive Org mitsenden, damit das neue Token den Org-Claim behaelt.
-        const activeOrgId = getActiveOrgId();
-        const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
-          refresh_token: refreshToken
-        }, activeOrgId ? { headers: { 'X-Active-Organization': String(activeOrgId) } } : undefined);
-
-        const { token: newToken, refresh_token: newRefreshToken } = response.data;
-        await setToken(newToken);
-        await setRefreshToken(newRefreshToken);
+        const newToken = await performRefresh(refreshToken);
 
         isRefreshing = false;
         onTokenRefreshed(newToken);
@@ -146,7 +219,7 @@ api.interceptors.response.use(
         return api(originalRequest);
       } catch (refreshError) {
         isRefreshing = false;
-        refreshSubscribers = [];
+        onTokenRefreshFailed(refreshError);
 
         // Bewusster Logout laeuft → kein "Sitzung abgelaufen"-Dialog.
         if (isLoggingOut()) {

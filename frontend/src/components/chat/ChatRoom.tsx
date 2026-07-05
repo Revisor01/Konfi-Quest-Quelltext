@@ -647,7 +647,9 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
         formData.append('client_id', clientId);
 
         await api.post(`/chat/rooms/${room.id}/messages`, formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
+          headers: { 'Content-Type': 'multipart/form-data' },
+          // Mit Datei kann der Upload auf Mobilfunk laenger als die globalen 20s dauern
+          timeout: file ? 60000 : 20000
         });
 
         // Die Server-Kopie kommt per newMessage-Socket-Event und ersetzt die
