@@ -46,6 +46,7 @@ import {
   checkmarkCircle
 } from 'ionicons/icons';
 import ActivityRings from './ActivityRings';
+import { EmptyState } from '../../shared';
 
 // ---- Shared Types ----
 
@@ -316,9 +317,12 @@ export const BonusSection = React.memo<BonusSectionProps>(({
     <IonCard className="app-card">
       <IonCardContent style={{ padding: bonusEntries.length === 0 ? '16px' : '12px' }}>
         {bonusEntries.length === 0 ? (
-          <div className="app-empty-state">
-            <p className="app-empty-state__text">Noch keine Bonuspunkte erhalten</p>
-          </div>
+          <EmptyState
+            icon={giftOutline}
+            title="Keine Bonuspunkte"
+            message="Noch keine Bonuspunkte erhalten"
+            iconColor="var(--app-color-bonus)"
+          />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {bonusEntries.map((bonus: any, index: number) => {
@@ -516,9 +520,12 @@ export const EventPointsSection = React.memo<EventPointsSectionProps>(({
     <IonCard className="app-card">
       <IonCardContent style={{ padding: eventPoints.length === 0 ? '16px' : '12px' }}>
         {eventPoints.length === 0 ? (
-          <div className="app-empty-state">
-            <p className="app-empty-state__text">Noch keine Event-Punkte erhalten</p>
-          </div>
+          <EmptyState
+            icon={calendarOutline}
+            title="Keine Event-Punkte"
+            message="Noch keine Event-Punkte erhalten"
+            iconColor="var(--app-color-events)"
+          />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {eventPoints.map((eventPoint: any, index: number) => {
@@ -697,9 +704,12 @@ export const ActivitiesSection = React.memo<ActivitiesSectionProps>(({
     <IonCard className="app-card">
       <IonCardContent style={{ padding: activities.length === 0 ? '16px' : '12px' }}>
         {activities.length === 0 ? (
-          <div className="app-empty-state">
-            <p className="app-empty-state__text">Noch keine Aktivitäten vorhanden</p>
-          </div>
+          <EmptyState
+            icon={flashOutline}
+            title="Keine Aktivitäten"
+            message="Noch keine Aktivitäten vorhanden"
+            iconColor="var(--app-color-activities)"
+          />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {activities.slice(0, 10).map((activity, index) => {
@@ -855,9 +865,12 @@ export const CertificatesSection = React.memo<CertificatesSectionProps>(({
     <IonCard className="app-card">
       <IonCardContent style={{ padding: certificates.length === 0 ? '16px' : '12px' }}>
         {certificates.length === 0 ? (
-          <div className="app-empty-state">
-            <p className="app-empty-state__text">Noch keine Zertifikate zugewiesen</p>
-          </div>
+          <EmptyState
+            icon={documentOutline}
+            title="Keine Zertifikate"
+            message="Noch keine Zertifikate zugewiesen"
+            iconColor="var(--app-color-teamer)"
+          />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
             {certificates.map((cert, index) => (
@@ -1122,9 +1135,12 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
             )}
           </div>
         ) : (
-          <div className="app-empty-state">
-            <p className="app-empty-state__text">Keine Konfi-Punkte vorhanden</p>
-          </div>
+          <EmptyState
+            icon={timeOutline}
+            title="Keine Konfi-Punkte"
+            message="Keine Konfi-Punkte vorhanden"
+            iconColor="var(--app-color-purple)"
+          />
         )}
       </IonCardContent>
     </IonCard>

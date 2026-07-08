@@ -7,6 +7,7 @@ const jwt = require('jsonwebtoken');
 const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
 const { checkExistingBooking, validateRegistrationWindow, determineBookingStatus, promoteFromWaitlist, isRegistrationOpenForKonfis } = require('../utils/bookingUtils');
+const { allIdsBelongToOrg } = require('../utils/orgOwnership');
 
 const QR_SECRET = process.env.QR_SECRET;
 if (!QR_SECRET) {
@@ -542,9 +543,11 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
       }
 
       const timeslotsQuery = `
-        SELECT et.*, COUNT(eb.id) as registered_count
+        SELECT et.*,
+               COUNT(eb.id) FILTER (WHERE eb.status = 'confirmed') as registered_count,
+               COUNT(eb.id) FILTER (WHERE eb.status = 'waitlist') as waitlist_count
         FROM event_timeslots et
-        LEFT JOIN event_bookings eb ON et.id = eb.timeslot_id AND eb.status = 'confirmed'
+        LEFT JOIN event_bookings eb ON et.id = eb.timeslot_id
         WHERE et.event_id = $1 AND et.organization_id = $2
         GROUP BY et.id
         ORDER BY et.start_time ASC
@@ -618,9 +621,11 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
       let timeslots = [];
       if (event.has_timeslots) {
         const timeslotsQuery = `
-          SELECT et.*, COUNT(eb.id) as registered_count
+          SELECT et.*,
+                 COUNT(eb.id) FILTER (WHERE eb.status = 'confirmed') as registered_count,
+                 COUNT(eb.id) FILTER (WHERE eb.status = 'waitlist') as waitlist_count
           FROM event_timeslots et
-          LEFT JOIN event_bookings eb ON et.id = eb.timeslot_id AND eb.status = 'confirmed'
+          LEFT JOIN event_bookings eb ON et.id = eb.timeslot_id
           WHERE et.event_id = $1 AND et.organization_id = $2
           GROUP BY et.id
           ORDER BY et.start_time ASC
@@ -719,6 +724,19 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
     // Pflicht-Events benoetigen mindestens einen Jahrgang
     if (mandatory && (!jahrgang_ids || jahrgang_ids.length === 0)) {
       return res.status(400).json({ error: 'Pflicht-Events benötigen mindestens einen Jahrgang' });
+    }
+
+    // Org-Isolation: fremde jahrgang_ids/category_ids abweisen (Cross-Org-Referenzen)
+    try {
+      if (!(await allIdsBelongToOrg(db, 'jahrgaenge', jahrgang_ids, req.user.organization_id))) {
+        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Organisation' });
+      }
+      if (!(await allIdsBelongToOrg(db, 'categories', category_ids, req.user.organization_id))) {
+        return res.status(400).json({ error: 'Mindestens eine Kategorie gehört nicht zu deiner Organisation' });
+      }
+    } catch (err) {
+      console.error('Org-Ownership-Check fehlgeschlagen:', err);
+      return res.status(500).json({ error: 'Datenbankfehler' });
     }
 
     // Guards für Pflicht-Events
@@ -868,6 +886,19 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
     // Guards für Pflicht-Events
     // Pflicht- UND Konfirmations-Events geben keine Punkte (serverseitig erzwungen).
     const effectivePoints = (mandatory || is_konfirmation) ? 0 : points;
+
+    // Org-Isolation: fremde jahrgang_ids/category_ids abweisen (Cross-Org-Referenzen)
+    try {
+      if (!(await allIdsBelongToOrg(db, 'jahrgaenge', jahrgang_ids, req.user.organization_id))) {
+        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Organisation' });
+      }
+      if (!(await allIdsBelongToOrg(db, 'categories', category_ids, req.user.organization_id))) {
+        return res.status(400).json({ error: 'Mindestens eine Kategorie gehört nicht zu deiner Organisation' });
+      }
+    } catch (err) {
+      console.error('Org-Ownership-Check fehlgeschlagen:', err);
+      return res.status(500).json({ error: 'Datenbankfehler' });
+    }
     const effectiveMaxParticipants = mandatory ? 0 : max_participants;
     const effectiveWaitlist = mandatory ? false : (waitlist_enabled !== undefined ? waitlist_enabled : true);
     // Timeslots bei Pflicht-Events UND Konfirmationen nicht erlaubt (siehe POST).
@@ -1410,52 +1441,24 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
         }
       }
 
-      // 3. Check available spots and waitlist (Kapazität gilt nur für Konfis)
-      let totalCapacity = event.max_participants;
-      if (event.has_timeslots) {
-        const { rows: timeslots } = await client.query(
-          "SELECT SUM(max_participants) as total_capacity FROM event_timeslots WHERE event_id = $1",
-          [eventId]
-        );
-        if (timeslots[0] && timeslots[0].total_capacity) {
-          totalCapacity = parseInt(timeslots[0].total_capacity, 10);
-        }
-      }
-
-      // Nur Konfi-Bookings zählen gegen Kapazität (Teamer zählen nicht)
-      const { rows: [counts] } = await client.query(
-        `SELECT COUNT(*) FILTER (WHERE eb.status = 'confirmed') as confirmed_count,
-                COUNT(*) FILTER (WHERE eb.status = 'waitlist') as waitlist_count
-         FROM event_bookings eb
-         JOIN users u ON eb.user_id = u.id
-         JOIN roles r ON u.role_id = r.id
-         WHERE eb.event_id = $1 AND r.name != 'teamer' AND u.deleted_at IS NULL`,
-        [eventId]
-      );
-      const confirmedCount = parseInt(counts.confirmed_count, 10);
-      const waitlistCount = parseInt(counts.waitlist_count, 10);
-
-      // Buchungsstatus bestimmen (confirmed oder waitlist)
-      const statusResult = determineBookingStatus(event, confirmedCount, waitlistCount, totalCapacity);
-      if (typeof statusResult === 'object') {
-        await client.query('ROLLBACK');
-        client.release();
-        return res.status(statusResult.status).json({ error: statusResult.error });
-      }
-      const bookingStatus = statusResult;
-      const message = bookingStatus === 'confirmed' ? 'Erfolgreich angemeldet' : 'Auf die Warteliste gesetzt';
-
-      // 3b. Timeslot validieren (bei Timeslot-Events): muss zum Event + zur Org gehoeren.
-      // Bei bestaetigter Buchung zusaetzlich die Einzelkapazitaet des Timeslots pruefen.
+      // 3. Kapazität + Warteliste bestimmen (gilt nur für Konfis).
+      // WICHTIG: Bei Timeslot-Events zählt die Kapazität PRO SLOT, nicht event-weit.
+      // Frueher entschied die Summe aller Slots ueber confirmed/waitlist — dadurch
+      // wurde ein voller Slot als "noch Platz" gewertet (Gesamt hatte ja Luft) und
+      // die Warteliste griff nie; die nachgelagerte Slot-Pruefung warf dann nur ein
+      // hartes "ausgebucht" ohne Wartelisten-Option. Jetzt entscheidet der Slot.
+      let bookingStatus;
       if (event.has_timeslots) {
         if (!timeslot_id) {
           await client.query('ROLLBACK');
           client.release();
           return res.status(400).json({ error: 'Bitte einen Zeitslot auswählen' });
         }
+        // Slot sperren (FOR UPDATE) — verhindert, dass zwei gleichzeitige Buchungen
+        // denselben letzten Platz bekommen.
         const { rows: [slot] } = await client.query(
           `SELECT id, max_participants FROM event_timeslots
-           WHERE id = $1 AND event_id = $2 AND organization_id = $3`,
+           WHERE id = $1 AND event_id = $2 AND organization_id = $3 FOR UPDATE`,
           [timeslot_id, eventId, req.user.organization_id]
         );
         if (!slot) {
@@ -1463,24 +1466,57 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
           client.release();
           return res.status(400).json({ error: 'Ungültiger Zeitslot' });
         }
-        if (bookingStatus === 'confirmed' && slot.max_participants > 0) {
-          const { rows: [slotCount] } = await client.query(
-            `SELECT COUNT(*)::int as confirmed_count FROM event_bookings
-             WHERE timeslot_id = $1 AND status = 'confirmed' AND organization_id = $2`,
-            [timeslot_id, req.user.organization_id]
-          );
-          if (slotCount.confirmed_count >= slot.max_participants) {
-            await client.query('ROLLBACK');
-            client.release();
-            return res.status(400).json({ error: 'Dieser Zeitslot ist bereits ausgebucht' });
-          }
+        // confirmed/waitlist NUR fuer diesen Slot zaehlen (Teamer zaehlen nicht)
+        const { rows: [slotCounts] } = await client.query(
+          `SELECT COUNT(*) FILTER (WHERE eb.status = 'confirmed') as confirmed_count,
+                  COUNT(*) FILTER (WHERE eb.status = 'waitlist') as waitlist_count
+           FROM event_bookings eb
+           JOIN users u ON eb.user_id = u.id
+           JOIN roles r ON u.role_id = r.id
+           WHERE eb.timeslot_id = $1 AND r.name != 'teamer' AND u.deleted_at IS NULL`,
+          [timeslot_id]
+        );
+        const slotConfirmed = parseInt(slotCounts.confirmed_count, 10);
+        const slotWaitlist = parseInt(slotCounts.waitlist_count, 10);
+
+        // determineBookingStatus mit der SLOT-Kapazitaet: voller Slot + Warteliste
+        // aktiv -> 'waitlist'; voller Slot ohne/volle Warteliste -> 400.
+        const statusResult = determineBookingStatus(event, slotConfirmed, slotWaitlist, slot.max_participants);
+        if (typeof statusResult === 'object') {
+          await client.query('ROLLBACK');
+          client.release();
+          return res.status(statusResult.status).json({ error: statusResult.error });
         }
-      } else if (timeslot_id) {
-        // Event ohne Timeslots: kein timeslot_id zulassen
-        await client.query('ROLLBACK');
-        client.release();
-        return res.status(400).json({ error: 'Dieses Event hat keine Zeitslots' });
+        bookingStatus = statusResult;
+      } else {
+        if (timeslot_id) {
+          // Event ohne Timeslots: kein timeslot_id zulassen
+          await client.query('ROLLBACK');
+          client.release();
+          return res.status(400).json({ error: 'Dieses Event hat keine Zeitslots' });
+        }
+        // Event-weite Kapazitaet (Teamer zaehlen nicht)
+        const { rows: [counts] } = await client.query(
+          `SELECT COUNT(*) FILTER (WHERE eb.status = 'confirmed') as confirmed_count,
+                  COUNT(*) FILTER (WHERE eb.status = 'waitlist') as waitlist_count
+           FROM event_bookings eb
+           JOIN users u ON eb.user_id = u.id
+           JOIN roles r ON u.role_id = r.id
+           WHERE eb.event_id = $1 AND r.name != 'teamer' AND u.deleted_at IS NULL`,
+          [eventId]
+        );
+        const confirmedCount = parseInt(counts.confirmed_count, 10);
+        const waitlistCount = parseInt(counts.waitlist_count, 10);
+
+        const statusResult = determineBookingStatus(event, confirmedCount, waitlistCount, event.max_participants);
+        if (typeof statusResult === 'object') {
+          await client.query('ROLLBACK');
+          client.release();
+          return res.status(statusResult.status).json({ error: statusResult.error });
+        }
+        bookingStatus = statusResult;
       }
+      const message = bookingStatus === 'confirmed' ? 'Erfolgreich angemeldet' : 'Auf die Warteliste gesetzt';
 
       // 4. Create booking
       const insertBookingQuery = "INSERT INTO event_bookings (event_id, user_id, timeslot_id, status, booking_date, organization_id) VALUES ($1, $2, $3, $4, NOW(), $5) RETURNING id";
@@ -1566,20 +1602,39 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
           [userId, eventId, req.user.organization_id]
         );
 
-        // If a confirmed Konfi-spot was opened, auto-promote from waitlist (nur für Konfis relevant)
+        // If a confirmed Konfi-spot was opened, auto-promote from waitlist (nur für Konfis relevant).
+        // Kapazitaet wird SLOT-bezogen geprueft, wenn die Buchung an einem Timeslot hing —
+        // sonst (event-weite Zaehlung) waere bei mehreren Slots die falsche Grenze massgeblich
+        // und es rueckte niemand oder der Falsche nach.
         if (booking.status === 'confirmed' && isKonfi) {
           const { rows: [eventCapInfo] } = await client.query(
             "SELECT max_participants, name FROM events WHERE id = $1 AND organization_id = $2",
             [eventId, req.user.organization_id]
           );
-          const { rows: [countResult] } = await client.query(
-            "SELECT COUNT(*) as confirmed_count FROM event_bookings WHERE event_id = $1 AND status = 'confirmed'",
-            [eventId]
-          );
-          const maxCapacity = eventCapInfo?.max_participants || 0;
-          const confirmedCount = parseInt(countResult?.confirmed_count || '0', 10);
 
-          // Nur nachruecken wenn unter Kapazitaet (0 = unbegrenzt, immer nachruecken)
+          let maxCapacity, confirmedCount;
+          if (booking.timeslot_id) {
+            const { rows: [slotInfo] } = await client.query(
+              "SELECT max_participants FROM event_timeslots WHERE id = $1 AND organization_id = $2",
+              [booking.timeslot_id, req.user.organization_id]
+            );
+            const { rows: [slotCountRes] } = await client.query(
+              "SELECT COUNT(*) as confirmed_count FROM event_bookings WHERE timeslot_id = $1 AND status = 'confirmed'",
+              [booking.timeslot_id]
+            );
+            maxCapacity = slotInfo?.max_participants || 0;
+            confirmedCount = parseInt(slotCountRes?.confirmed_count || '0', 10);
+          } else {
+            const { rows: [countResult] } = await client.query(
+              "SELECT COUNT(*) as confirmed_count FROM event_bookings WHERE event_id = $1 AND status = 'confirmed'",
+              [eventId]
+            );
+            maxCapacity = eventCapInfo?.max_participants || 0;
+            confirmedCount = parseInt(countResult?.confirmed_count || '0', 10);
+          }
+
+          // Nur nachruecken wenn unter Kapazitaet (0 = unbegrenzt, immer nachruecken).
+          // promoteFromWaitlist ist timeslot-aware und nimmt den naechsten des Slots.
           if (maxCapacity === 0 || confirmedCount < maxCapacity) {
             promotedUserId = await promoteFromWaitlist(client, eventId, booking.timeslot_id);
             if (promotedUserId) promotedEventName = eventCapInfo?.name || null;
@@ -1884,6 +1939,19 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
     }
     if (series_interval !== undefined && !SERIES_INTERVALS.includes(series_interval)) {
       return res.status(400).json({ error: 'Ungültiges Serien-Intervall. Erlaubt: day, week, 2weeks, month' });
+    }
+
+    // Org-Isolation: fremde jahrgang_ids/category_ids abweisen (Cross-Org-Referenzen)
+    try {
+      if (!(await allIdsBelongToOrg(db, 'jahrgaenge', jahrgang_ids, req.user.organization_id))) {
+        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Organisation' });
+      }
+      if (!(await allIdsBelongToOrg(db, 'categories', category_ids, req.user.organization_id))) {
+        return res.status(400).json({ error: 'Mindestens eine Kategorie gehört nicht zu deiner Organisation' });
+      }
+    } catch (err) {
+      console.error('Org-Ownership-Check fehlgeschlagen:', err);
+      return res.status(500).json({ error: 'Datenbankfehler' });
     }
 
     const generateSeriesDates = (startDate, count, interval) => {

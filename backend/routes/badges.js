@@ -126,6 +126,12 @@ const checkAndAwardBadges = async (db, userId) => {
     `;
     const { rows: [konfi] } = await db.query(konfiQuery, [userId]);
     if (!konfi) return { count: 0, badges: [] };
+    // pg liefert numeric/integer-Spalten als STRING. Ohne Konvertierung macht
+    // `total += konfi.gottesdienst_points` String-Konkatenation ("0"+"3"+"5"="035")
+    // statt Addition -> total_points/gottesdienst/gemeinde/both_categories werden
+    // falsch bewertet (mal zu grosszuegig, mal gar nicht). Hier EINMAL zu Zahl.
+    konfi.gottesdienst_points = parseInt(konfi.gottesdienst_points, 10) || 0;
+    konfi.gemeinde_points = parseInt(konfi.gemeinde_points, 10) || 0;
 
     // Jahrgang-Config laden (gottesdienst_enabled/gemeinde_enabled)
     const jahrgangConfigQuery = `
@@ -138,7 +144,7 @@ const checkAndAwardBadges = async (db, userId) => {
 
     // Nur Konfi-Badges laden
     const { rows: badges } = await db.query(
-      "SELECT id, name, description, icon, color, criteria_type, criteria_value, criteria_extra, is_hidden, sort_order, is_active, target_role, organization_id FROM custom_badges WHERE is_active = true AND organization_id = $1 AND target_role = 'konfi'",
+      "SELECT id, name, description, icon, color, criteria_type, criteria_value::int AS criteria_value, criteria_extra, is_hidden, sort_order, is_active, target_role, organization_id FROM custom_badges WHERE is_active = true AND organization_id = $1 AND target_role = 'konfi'",
       [konfi.organization_id]
     );
     if (badges.length === 0) return { count: 0, badges: [] };
@@ -335,7 +341,7 @@ const checkAndAwardBadges = async (db, userId) => {
 async function checkAndAwardTeamerBadges(db, userId, organizationId) {
   // Teamer-Badges laden
   const { rows: badges } = await db.query(
-    "SELECT id, name, description, icon, color, criteria_type, criteria_value, criteria_extra, is_hidden, sort_order, is_active, target_role, organization_id FROM custom_badges WHERE is_active = true AND organization_id = $1 AND target_role = 'teamer'",
+    "SELECT id, name, description, icon, color, criteria_type, criteria_value::int AS criteria_value, criteria_extra, is_hidden, sort_order, is_active, target_role, organization_id FROM custom_badges WHERE is_active = true AND organization_id = $1 AND target_role = 'teamer'",
     [organizationId]
   );
   if (badges.length === 0) return { count: 0, badges: [] };

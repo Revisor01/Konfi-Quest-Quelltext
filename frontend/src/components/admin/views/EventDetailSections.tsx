@@ -93,6 +93,7 @@ export interface Participant {
   created_at: string;
   status?: 'confirmed' | 'waitlist' | 'pending' | 'opted_out';
   attendance_status?: 'present' | 'absent' | null;
+  timeslot_id?: number;
   timeslot_start_time?: string;
   timeslot_end_time?: string;
   opt_out_reason?: string;
@@ -571,13 +572,14 @@ export const EventActionsSection = React.memo<EventActionsSectionProps>(({
 // ---- TimeslotsSection ----
 
 interface TimeslotsSectionProps {
-  timeslots: Array<{ id: number; start_time: string; end_time: string; max_participants: number; registered_count: number }>;
+  timeslots: Array<{ id: number; start_time: string; end_time: string; max_participants: number; registered_count: number; waitlist_count?: number }>;
   participants: Participant[];
   eventMandatory?: boolean;
   formatTime: (dateString: string) => string;
   showAttendanceActionSheet: (participant: Participant) => void;
   handleDemoteParticipant: (participant: Participant) => void;
   handleRemoveParticipant: (participant: Participant) => void;
+  showWaitlistActionSheet?: (participant: Participant) => void;
 }
 
 export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
@@ -587,7 +589,8 @@ export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
   formatTime,
   showAttendanceActionSheet,
   handleDemoteParticipant,
-  handleRemoveParticipant
+  handleRemoveParticipant,
+  showWaitlistActionSheet
 }) => (
   <IonList className="app-section-inset" inset={true}>
     <IonListHeader>
@@ -602,23 +605,28 @@ export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
         {timeslots.map((timeslot) => {
           const slotStartFormatted = formatTime(timeslot.start_time);
           const slotEndFormatted = formatTime(timeslot.end_time);
-          const slotParticipants = participants.filter(p => {
-            if (p.status !== 'confirmed') return false;
+          // Teilnehmer diesem Slot zuordnen (per timeslot_id, Fallback ueber Zeit).
+          const matchesSlot = (p: Participant) => {
             if ((p as any).timeslot_id && (timeslot as any).id) return (p as any).timeslot_id === (timeslot as any).id;
             if (p.timeslot_start_time && p.timeslot_end_time) {
               return formatTime(p.timeslot_start_time) === slotStartFormatted &&
                      formatTime(p.timeslot_end_time) === slotEndFormatted;
             }
             return false;
-          });
+          };
+          const slotParticipants = participants.filter(p => p.status === 'confirmed' && matchesSlot(p));
+          const slotWaitlist = participants.filter(p => p.status === 'waitlist' && matchesSlot(p));
           const isFull = (timeslot.registered_count || 0) >= timeslot.max_participants;
+          const waitlistCount = timeslot.waitlist_count || 0;
 
           return (
             <div key={timeslot.id} className="app-event-detail__slot-group">
               <div className={`app-list-item ${isFull ? 'app-list-item--danger' : 'app-list-item--success'}`}>
                 <div className="app-corner-badges">
-                  <div className={`app-corner-badge ${isFull ? 'app-corner-badge--danger' : 'app-corner-badge--success'}`}>
-                    {isFull ? 'Voll' : 'Frei'}
+                  <div className={`app-corner-badge ${isFull ? 'app-corner-badge--danger' : 'app-corner-badge--success'}`}
+                    style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
+                    title={isFull ? 'Voll' : 'Frei'}>
+                    <IonIcon icon={isFull ? closeCircle : checkmarkCircle} style={{ color: '#fff', fontSize: '0.85rem' }} />
                   </div>
                 </div>
                 <div className="app-list-item__row">
@@ -632,6 +640,7 @@ export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
                       </div>
                       <div className="app-list-item__subtitle">
                         {timeslot.registered_count || 0}/{timeslot.max_participants} Teilnehmer:innen
+                        {waitlistCount > 0 && ` · ${waitlistCount} Warteliste`}
                       </div>
                     </div>
                   </div>
@@ -692,6 +701,38 @@ export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
                       </IonItemSliding>
                     );
                   })}
+                </div>
+              )}
+              {slotWaitlist.length > 0 && (
+                <div className="app-event-detail__slot-participants">
+                  <div className="app-list-item__subtitle" style={{ padding: '4px 8px', opacity: 0.7 }}>
+                    Warteliste
+                  </div>
+                  {slotWaitlist.map((participant) => (
+                    <IonItem key={participant.id} className="app-item-transparent" button={!!showWaitlistActionSheet} detail={false} lines="none"
+                      onClick={() => showWaitlistActionSheet && showWaitlistActionSheet(participant)}>
+                      <div className="app-list-item app-list-item--warning app-event-detail__list-item-flush">
+                        <div className="app-corner-badges">
+                          <div className="app-corner-badge app-corner-badge--warning"
+                            style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
+                            title="Warteliste">
+                            <IonIcon icon={time} style={{ color: '#fff', fontSize: '0.85rem' }} />
+                          </div>
+                        </div>
+                        <div className="app-list-item__row">
+                          <div className="app-list-item__main">
+                            <div className="app-icon-circle app-icon-circle--warning">
+                              <IonIcon icon={time} />
+                            </div>
+                            <div className="app-list-item__content">
+                              <div className="app-list-item__title app-list-item__title--badge-space-lg">{participant.participant_name}</div>
+                              <div className="app-list-item__subtitle">{participant.jahrgang_name || ''}</div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </IonItem>
+                  ))}
                 </div>
               )}
             </div>

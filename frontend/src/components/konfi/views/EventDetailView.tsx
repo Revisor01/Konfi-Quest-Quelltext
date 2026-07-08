@@ -72,6 +72,7 @@ interface DetailTimeslot {
   end_time: string;
   max_participants: number;
   registered_count: number;
+  waitlist_count?: number;
 }
 
 interface Participant {
@@ -256,8 +257,12 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
       if (timeslotId) {
         payload.timeslot_id = timeslotId;
       }
-      await api.post(`/konfi/events/${eventData.id}/register`, payload);
-      // Kein Erfolgs-Toast: der Server schickt bereits einen Push.
+      const res = await api.post(`/konfi/events/${eventData.id}/register`, payload);
+      // Bei Warteliste braucht der Konfi eine sichtbare Rueckmeldung (der Server
+      // schickt zwar Push, aber die Buchung kann eben confirmed ODER waitlist sein).
+      if (res.data?.status === 'waitlist') {
+        setSuccess('Du bist auf der Warteliste. Wird ein Platz frei, rückst du automatisch nach.');
+      }
       await refreshEvents();
       triggerRefresh('events');
     } catch (err: any) {
@@ -282,22 +287,41 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
 
     const hasTimeslots = eventData.has_timeslots && timeslots.length > 0;
     if (hasTimeslots) {
+      const waitlistEnabled = !!eventData.waitlist_enabled;
+      const maxWaitlist = eventData.max_waitlist_size || 0;
+
       const timeslotButtons = timeslots.map((slot) => {
         const isFull = slot.max_participants > 0 && parseInt(String(slot.registered_count || 0)) >= slot.max_participants;
+        const slotWaitlist = parseInt(String(slot.waitlist_count || 0));
+        // Auf einen vollen Slot kann man sich auf die Warteliste setzen, solange
+        // die Warteliste aktiv und nicht voll ist. Nur dann bleibt der Slot
+        // buchbar; sonst ist er wirklich dicht.
+        const waitlistPossible = isFull && waitlistEnabled && (maxWaitlist === 0 || slotWaitlist < maxWaitlist);
+        const blocked = isFull && !waitlistPossible;
+
         const startTime = formatTime(slot.start_time);
         const endTime = formatTime(slot.end_time);
-        const spotsLeft = slot.max_participants - (slot.registered_count || 0);
+        const spotsLeft = Math.max(0, slot.max_participants - (slot.registered_count || 0));
+
+        let label;
+        if (waitlistPossible) {
+          label = `${startTime} - ${endTime} (voll — auf Warteliste${slotWaitlist > 0 ? `, ${slotWaitlist} warten` : ''})`;
+        } else if (blocked) {
+          label = `${startTime} - ${endTime} (ausgebucht)`;
+        } else {
+          label = `${startTime} - ${endTime} (${spotsLeft} frei)`;
+        }
 
         return {
-          text: `${startTime} - ${endTime} (${spotsLeft} frei)`,
+          text: label,
           handler: () => {
-            if (isFull) {
-              setError('Dieser Zeitslot ist leider voll');
+            if (blocked) {
+              setError('Dieser Zeitslot ist ausgebucht und hat keine Warteliste.');
               return false;
             }
             doRegister(slot.id);
           },
-          cssClass: isFull ? 'action-sheet-disabled' : ''
+          cssClass: blocked ? 'action-sheet-disabled' : ''
         };
       });
 
@@ -515,13 +539,20 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                     <div className="app-info-row__label">Zeitfenster</div>
                     {timeslots.map((slot, idx) => (
                       <div key={slot.id || idx} className="app-info-row__value app-event-detail__timeslot-entry">
-                        {formatTime(slot.start_time)} – {formatTime(slot.end_time)} ({slot.registered_count || 0}/{slot.max_participants} TN)
+                        {formatTime(slot.start_time)} – {formatTime(slot.end_time)} ({slot.registered_count || 0}/{slot.max_participants} TN{(slot.waitlist_count || 0) > 0 ? ` · ${slot.waitlist_count} Warteliste` : ''})
                       </div>
                     ))}
                     {/* Gebuchter Timeslot hervorheben wenn angemeldet */}
                     {eventData.is_registered && eventData.booked_timeslot_start && (
                       <div className="app-icon-color--success app-event-detail__booked-slot">
                         Dein Slot: {formatTime(eventData.booked_timeslot_start)}
+                        {eventData.booked_timeslot_end && ` - ${formatTime(eventData.booked_timeslot_end)}`}
+                      </div>
+                    )}
+                    {/* Warteliste fuer einen bestimmten Slot */}
+                    {eventData.booking_status === 'waitlist' && eventData.booked_timeslot_start && (
+                      <div className="app-icon-color--waitlist app-event-detail__booked-slot">
+                        Auf der Warteliste für {formatTime(eventData.booked_timeslot_start)}
                         {eventData.booked_timeslot_end && ` - ${formatTime(eventData.booked_timeslot_end)}`}
                       </div>
                     )}

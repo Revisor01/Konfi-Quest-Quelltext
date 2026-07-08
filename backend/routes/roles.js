@@ -101,8 +101,10 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
 
     try {
       // Welche Rollen kann der User zuweisen?
+      // is_super_admin wird wie super_admin behandelt (Projekt-Regel: immer das Flag
+      // pruefen, nicht role_name === 'super_admin' — z.B. org_admin mit Super-Flag).
       let allowedRoles = [];
-      if (userRole === 'super_admin') {
+      if (userRole === 'super_admin' || req.user.is_super_admin) {
         allowedRoles = ['org_admin', 'admin', 'teamer', 'konfi'];
       } else if (userRole === 'org_admin') {
         allowedRoles = ['admin', 'teamer', 'konfi'];

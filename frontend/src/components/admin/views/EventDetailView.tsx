@@ -666,6 +666,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
             showAttendanceActionSheet={showAttendanceActionSheet}
             handleDemoteParticipant={handleDemoteParticipant}
             handleRemoveParticipant={handleRemoveParticipant}
+            showWaitlistActionSheet={showWaitlistActionSheet}
           />
         )}
 
@@ -684,9 +685,15 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           const konfiParticipants = participants.filter(p => p.role_name !== 'teamer');
           const teamerParticipants = participants.filter(p => p.role_name === 'teamer');
           const confirmedParticipants = konfiParticipants.filter(p => p.status === 'confirmed');
-          const waitlistParticipants = konfiParticipants.filter(p => p.status === 'waitlist');
+          const allWaitlistParticipants = konfiParticipants.filter(p => p.status === 'waitlist');
           const unassignedParticipants = eventData?.has_timeslots
             ? confirmedParticipants.filter(p => !(p as any).timeslot_id && !p.timeslot_start_time) : [];
+          // Bei Timeslot-Events werden slot-zugeordnete Wartelistler bereits in der
+          // TimeslotsSection unter ihrem Slot angezeigt -> hier nur die OHNE Slot,
+          // damit sie nicht doppelt erscheinen.
+          const waitlistParticipants = eventData?.has_timeslots
+            ? allWaitlistParticipants.filter(p => !(p as any).timeslot_id && !p.timeslot_start_time)
+            : allWaitlistParticipants;
           const displayParticipants = eventData?.has_timeslots
             ? [...unassignedParticipants, ...waitlistParticipants] : konfiParticipants;
           const hasWaitlist = (eventData as any)?.waitlist_enabled && waitlistParticipants.length > 0;

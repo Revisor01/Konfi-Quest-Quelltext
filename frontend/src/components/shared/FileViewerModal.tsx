@@ -175,6 +175,18 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
     setPosition({ x: 0, y: 0 });
   }, [currentIndex]);
 
+  // Beim Unmount alle gecachten Blob-URLs freigeben (sonst Leak bei Multi-Datei)
+  useEffect(() => {
+    return () => {
+      Object.values(resolvedUrlsRef.current).forEach((u) => {
+        if (u.startsWith('blob:')) {
+          try { URL.revokeObjectURL(u); } catch {}
+        }
+      });
+      resolvedUrlsRef.current = {};
+    };
+  }, []);
+
   // Automatisch nativ öffnen (PDF/DOCX auf iOS/Android)
   useEffect(() => {
     if (!resolvedUrl || !currentFile || !isNative) return;

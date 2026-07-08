@@ -7,6 +7,7 @@ const { generateBiblicalPassword } = require('../utils/passwordUtils');
 const { deleteKonfiCascade } = require('../utils/konfiDeletion');
 const { checkKonfiLimit, nextTier } = require('../utils/konfiLimit');
 const { syncJahrgangChat } = require('../utils/jahrgangChat');
+const { getKonfiBadgeProgress } = require('../utils/konfiBadgeProgress');
 const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
 const router = express.Router();
@@ -599,6 +600,34 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
             res.json(eventPoints || []);
         } catch (err) {
  console.error('Database error in GET /konfis/:id/event-points:', err);
+            res.status(500).json({ error: 'Datenbankfehler' });
+        }
+    });
+
+    // GET Badges eines Konfis (Admin-Einsicht) — identische Wertung/Progress wie
+    // die Konfi-eigene Ansicht (GET /konfi/badges), gemeinsame Quelle
+    // utils/konfiBadgeProgress.js. Teamer:innen duerfen ansehen.
+    router.get('/:id/badges', rbacVerifier, requireTeamer, async (req, res) => {
+        const konfiId = req.params.id;
+
+        try {
+            // Org-Zugehoerigkeit + Konfi-Rolle pruefen (Badge-Progress ist
+            // konfi-spezifisch; Teamer haben eigene Badges ueber teamer.js).
+            const { rows: [konfi] } = await db.query(
+                `SELECT u.id FROM users u
+                 JOIN roles r ON u.role_id = r.id
+                 WHERE u.id = $1 AND r.name = 'konfi' AND u.organization_id = $2 AND u.deleted_at IS NULL`,
+                [konfiId, req.user.organization_id]
+            );
+
+            if (!konfi) {
+                return res.status(404).json({ error: 'Konfi nicht gefunden' });
+            }
+
+            const result = await getKonfiBadgeProgress(db, parseInt(konfiId, 10), req.user.organization_id);
+            res.json(result);
+        } catch (err) {
+ console.error('Database error in GET /konfis/:id/badges:', err);
             res.status(500).json({ error: 'Datenbankfehler' });
         }
     });

@@ -11,6 +11,7 @@ const { encryptBuffer, decryptBuffer } = require('../utils/photoCrypto');
 const { deletePhotoFile } = require('../utils/photoStorage');
 const { checkExistingBooking, getEventWithCounts, validateRegistrationWindow, determineBookingStatus, promoteFromWaitlist } = require('../utils/bookingUtils');
 const { computeCurrentStreak } = require('../utils/streakCalculation');
+const { getKonfiBadgeProgress } = require('../utils/konfiBadgeProgress');
 // Single Source of Truth: welche Events zaehlen fuer Konfi-Badges (kein Pflicht/Konfirmation).
 const { KONFI_BADGE_EVENT_CONDITION } = require('../utils/badgeEventRule');
 
@@ -623,10 +624,12 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
 
       // konfi_profiles enthält bereits alle Punkte (Aktivitäten + Events + Bonus)
       // Single Source of Truth - direkt verwenden
+      const gdPoints = parseInt(konfiProfile?.gottesdienst_points, 10) || 0;
+      const gmPoints = parseInt(konfiProfile?.gemeinde_points, 10) || 0;
       const totals = {
-        gottesdienst: konfiProfile?.gottesdienst_points || 0,
-        gemeinde: konfiProfile?.gemeinde_points || 0,
-        total: (konfiProfile?.gottesdienst_points || 0) + (konfiProfile?.gemeinde_points || 0)
+        gottesdienst: gdPoints,
+        gemeinde: gmPoints,
+        total: gdPoints + gmPoints
       };
 
       res.json({
@@ -1001,310 +1004,12 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
     }
     
     try {
-      const konfiId = req.user.id;
-      const checkBadgesTableQuery = "SELECT to_regclass('public.custom_badges')";
-      const { rows: [tableExistsResult] } = await db.query(checkBadgesTableQuery);
-
-      if (!tableExistsResult || !tableExistsResult.to_regclass) {
-        return res.json({
-          available: [],
-          earned: []
-        });
-      }
-
-      const query = `
-        SELECT cb.*,
-               CASE WHEN kb.user_id IS NOT NULL THEN TRUE ELSE FALSE END as earned,
-               kb.awarded_date AS earned_at,
-               COALESCE(kb.seen, false) as seen
-        FROM custom_badges cb
-        LEFT JOIN user_badges kb ON cb.id = kb.badge_id AND kb.user_id = $1 AND kb.organization_id = $2
-        WHERE cb.is_active = TRUE AND cb.organization_id = $2 AND cb.target_role = 'konfi'
-        ORDER BY earned DESC, cb.name
-      `;
-      const { rows: badges } = await db.query(query, [konfiId, req.user.organization_id]);
-
-      // Punkte-Daten EINMAL vorab laden (statt pro Punkte-Badge erneut) — vermeidet N+1
-      // fuer die Cases total_points/gottesdienst_points/gemeinde_points/both_categories.
-      const { rows: [pointsRow] } = await db.query(
-        `SELECT kp.gottesdienst_points, kp.gemeinde_points, j.gottesdienst_enabled, j.gemeinde_enabled
-         FROM konfi_profiles kp JOIN jahrgaenge j ON kp.jahrgang_id = j.id WHERE kp.user_id = $1`,
-        [konfiId]
-      );
-      const gdEnabled = !!pointsRow?.gottesdienst_enabled;
-      const gmEnabled = !!pointsRow?.gemeinde_enabled;
-      const gdPoints = gdEnabled ? (pointsRow?.gottesdienst_points || 0) : 0;
-      const gmPoints = gmEnabled ? (pointsRow?.gemeinde_points || 0) : 0;
-
-      // Badges, deren Punkt-Kategorie im Jahrgang deaktiviert ist, sind fuer
-      // diesen Konfi NICHT erreichbar -> markieren, damit das Frontend sie
-      // ausblenden/ausgrauen kann (kein irrefuehrender Fortschritt).
-      const isUnreachable = (badge) => {
-        switch (badge.criteria_type) {
-          case 'gottesdienst_points': return !gdEnabled;
-          case 'gemeinde_points': return !gmEnabled;
-          case 'both_categories': return !gdEnabled || !gmEnabled;
-          case 'total_points': return !gdEnabled && !gmEnabled;
-          default: return false;
-        }
-      };
-
-      // Calculate progress for each badge
-      for (let badge of badges) {
-        badge.unreachable = !badge.earned && isUnreachable(badge);
-
-        if (badge.earned) {
-          badge.progress = { current: badge.criteria_value, target: badge.criteria_value, percentage: 100 };
-          continue;
-        }
-
-        let progress = { current: 0, target: badge.criteria_value || 1, percentage: 0 };
-        
-        try {
-          switch (badge.criteria_type) {
-            case 'total_points': {
-              // Nutzt vorab geladene Punkte-Daten (kein Query pro Badge)
-              progress.current = gdPoints + gmPoints;
-              break;
-            }
-            case 'gottesdienst_points': {
-              progress.current = gdPoints;
-              break;
-            }
-            case 'gemeinde_points': {
-              progress.current = gmPoints;
-              break;
-            }
-            case 'both_categories': {
-              // Fortschritt = Minimum beider Kategorien; nur wenn beide Typen aktiv sind
-              progress.current = (!gdEnabled || !gmEnabled) ? 0 : Math.min(gdPoints, gmPoints);
-              break;
-            }
-              
-            case 'activity_count': {
-              // Wertung (badges.js:272) addiert activityCount + eventCount.
-              // Progress muss identisch zaehlen, sonst Wertung/Progress-Mismatch.
-              const { rows: [activityCountResult] } = await db.query(
-                'SELECT COUNT(*) as count FROM user_activities WHERE user_id = $1 AND organization_id = $2',
-                [konfiId, req.user.organization_id]
-              );
-              const { rows: [acEventCountResult] } = await db.query(
-                `SELECT COUNT(*) as count FROM event_bookings eb JOIN events e ON eb.event_id = e.id WHERE eb.user_id = $1 AND ${KONFI_BADGE_EVENT_CONDITION} AND eb.organization_id = $2`,
-                [konfiId, req.user.organization_id]
-              );
-              progress.current = parseInt(activityCountResult?.count || 0) + parseInt(acEventCountResult?.count || 0);
-              break;
-            }
-
-            case 'event_count': {
-              // Anzahl besuchter Events — nur freiwillige (kein Pflicht/Konfirmation),
-              // identisch zur Wertung (badges.js KONFI_BADGE_EVENT_CONDITION).
-              const { rows: [eventCountResult] } = await db.query(
-                `SELECT COUNT(*) as count FROM event_bookings eb JOIN events e ON eb.event_id = e.id WHERE eb.user_id = $1 AND ${KONFI_BADGE_EVENT_CONDITION} AND eb.organization_id = $2`,
-                [konfiId, req.user.organization_id]
-              );
-              progress.current = parseInt(eventCountResult?.count || 0);
-              break;
-            }
-
-            case 'mandatory_event_count': {
-              // KONSISTENZ-VERTRAG: byte-identisch zur Wertung in badges.js (Plan 01).
-              const { rows: [mandResult] } = await db.query(
-                `SELECT COUNT(*) FROM event_bookings eb JOIN events e ON eb.event_id = e.id
-             WHERE eb.user_id = $1 AND eb.attendance_status = 'present' AND e.mandatory = true AND eb.organization_id = $2`,
-                [konfiId, req.user.organization_id]
-              );
-              progress.current = parseInt(mandResult?.count || 0);
-              break;
-            }
-
-            case 'teamer_year': {
-              // teamer_year nur im Teamer-Endpoint (teamer.js) relevant; hier defensiv 0.
-              // GET /konfi/badges liefert nur target_role='konfi', dieser Case greift fuer Konfis nie.
-              progress.current = 0;
-              break;
-            }
-              
-            case 'unique_activities':
-              const { rows: [uniqueActivitiesResult] } = await db.query(
-                'SELECT COUNT(DISTINCT activity_id) as count FROM user_activities WHERE user_id = $1',
-                [konfiId]
-              );
-              progress.current = parseInt(uniqueActivitiesResult?.count || 0);
-              break;
-
-            case 'specific_activity':
-              // Extra-Feld-Fix: Wertung nutzt required_activity_name (Name), NICHT activity_id.
-              // Identisch zur Wertung badges.js:209-214 (JOIN activities a ON ... a.name = $2).
-              let requiredActivityName = null;
-              try {
-                const extraData = typeof badge.criteria_extra === 'string' ? JSON.parse(badge.criteria_extra || '{}') : (badge.criteria_extra || {});
-                requiredActivityName = extraData.required_activity_name;
-              } catch (e) {
- console.error('Error parsing criteria_extra for specific_activity badge:', e);
-              }
-
-              if (requiredActivityName) {
-                const { rows: [specificResult] } = await db.query(
-                  `SELECT COUNT(*) as count FROM user_activities ua
-                   JOIN activities a ON ua.activity_id = a.id
-                   WHERE ua.user_id = $1 AND a.name = $2 AND a.organization_id = $3`,
-                  [konfiId, requiredActivityName, req.user.organization_id]
-                );
-                progress.current = parseInt(specificResult?.count || 0);
-              } else {
-                progress.current = 0;
-              }
-              break;
-
-            case 'category_activities':
-              // Count activities in specific category (criteria_extra contains required_category)
-              let requiredCategory = null;
-              try {
-                const extraData = typeof badge.criteria_extra === 'string' ? JSON.parse(badge.criteria_extra || '{}') : (badge.criteria_extra || {});
-                requiredCategory = extraData.required_category;
-              } catch (e) {
- console.error('Error parsing criteria_extra for category_activities badge:', e);
-              }
-              
-              if (requiredCategory) {
-                // KONSISTENZ-VERTRAG: byte-identisch zur Wertung (badges.js:222-242).
-                // Zaehlt Aktivitaeten UND anwesende Events der Kategorie (UNION) +org.
-                const { rows: [categoryResult] } = await db.query(
-                  `SELECT COUNT(*) as count FROM (
-                     SELECT ka.id FROM user_activities ka
-                     JOIN activities a ON ka.activity_id = a.id
-                     JOIN activity_categories ac ON a.id = ac.activity_id
-                     JOIN categories c ON ac.category_id = c.id
-                     WHERE ka.user_id = $1 AND c.name = $2 AND a.organization_id = $3 AND c.organization_id = $3
-                     UNION ALL
-                     SELECT eb.id FROM event_bookings eb
-                     JOIN events e ON eb.event_id = e.id
-                     JOIN event_categories ec ON eb.event_id = ec.event_id
-                     JOIN categories c ON ec.category_id = c.id
-                     WHERE eb.user_id = $1 AND ${KONFI_BADGE_EVENT_CONDITION} AND c.name = $2 AND c.organization_id = $3 AND eb.organization_id = $3
-                   ) as combined`,
-                  [konfiId, requiredCategory, req.user.organization_id]
-                );
-                progress.current = parseInt(categoryResult?.count || 0);
-              } else {
-                progress.current = 0;
-              }
-              break;
-
-            case 'activity_combination':
-              // Extra-Feld-Fix: Wertung nutzt required_activities (Namen), NICHT activity_ids.
-              // Identisch zur Wertung badges.js:221-223 (Abgleich gegen erledigte Aktivitaets-Namen).
-              let requiredActivities = [];
-              try {
-                const extraData = typeof badge.criteria_extra === 'string' ? JSON.parse(badge.criteria_extra || '{}') : (badge.criteria_extra || {});
-                requiredActivities = extraData.required_activities || [];
-              } catch (e) {
- console.error('Error parsing criteria_extra for activity_combination badge:', e);
-              }
-
-              if (requiredActivities.length > 0) {
-                const placeholders = requiredActivities.map((_, i) => `$${i + 2}`).join(',');
-                const { rows: [combinationResult] } = await db.query(
-                  `SELECT COUNT(DISTINCT a.name) as count
-                   FROM user_activities ua
-                   JOIN activities a ON ua.activity_id = a.id
-                   WHERE ua.user_id = $1 AND a.name IN (${placeholders}) AND a.organization_id = $${requiredActivities.length + 2}`,
-                  [konfiId, ...requiredActivities, req.user.organization_id]
-                );
-                progress.current = parseInt(combinationResult?.count || 0);
-              } else {
-                progress.current = 0;
-              }
-              break;
-
-            case 'bonus_points':
-              // Count total bonus points
-              const { rows: [bonusResult] } = await db.query(
-                'SELECT COALESCE(SUM(points), 0) as total FROM bonus_points WHERE konfi_id = $1',
-                [konfiId]
-              );
-              progress.current = parseInt(bonusResult?.total || 0);
-              break;
-              
-            case 'streak': {
-              // Streak: Wochen mit mindestens einer Aktivitaet/Event in Folge
-              const streakQuery = `
-                SELECT completed_date as date FROM user_activities WHERE user_id = $1 AND organization_id = $2
-                UNION ALL
-                SELECT e.event_date as date FROM event_bookings eb
-                JOIN events e ON eb.event_id = e.id
-                WHERE eb.user_id = $1 AND ${KONFI_BADGE_EVENT_CONDITION} AND eb.organization_id = $2
-                ORDER BY date DESC
-              `;
-              const { rows: streakResults } = await db.query(streakQuery, [konfiId, req.user.organization_id]);
-
-              // Wochen-Streak-Rechnung aus gemeinsamer Util (Single Source of Truth,
-              // identisch zur Badge-Wertung in badges.js checkStreakCriteria).
-              progress.current = computeCurrentStreak(streakResults.map(r => r.date));
-              break;
-            }
-
-            case 'time_based': {
-              // Time-based: Anzahl Aktivitaeten/Events im konfigurierten Zeitraum
-              let tbDays = null;
-              try {
-                const extraData = typeof badge.criteria_extra === 'string' ? JSON.parse(badge.criteria_extra || '{}') : (badge.criteria_extra || {});
-                tbDays = extraData.days || (extraData.weeks ? extraData.weeks * 7 : null);
-              } catch (e) {
-                console.error('Error parsing criteria_extra for time_based badge:', e);
-              }
-              if (tbDays) {
-                const tbQuery = `
-                  SELECT completed_date as date FROM user_activities WHERE user_id = $1 AND organization_id = $2
-                  UNION ALL
-                  SELECT e.event_date as date FROM event_bookings eb
-                  JOIN events e ON eb.event_id = e.id
-                  WHERE eb.user_id = $1 AND ${KONFI_BADGE_EVENT_CONDITION} AND eb.organization_id = $2
-                  ORDER BY date DESC
-                `;
-                const { rows: tbResults } = await db.query(tbQuery, [konfiId, req.user.organization_id]);
-                const now = new Date();
-                const cutoff = new Date(now.getTime() - (tbDays * 24 * 60 * 60 * 1000));
-                progress.current = tbResults.filter(r => new Date(r.date) >= cutoff).length;
-              }
-              break;
-            }
-          }
-          
-          progress.percentage = Math.min((progress.current / progress.target) * 100, 100);
-        } catch (err) {
- console.error(`Error calculating progress for badge ${badge.id}:`, err);
-        }
-        
-        badge.progress = progress;
-      }
-      
-      // Separate earned and available badges correctly
-      const earned = badges.filter(badge => badge.earned);
-      // Available = not earned AND not hidden AND erreichbar. Badges, deren
-      // Punkt-Kategorie im Jahrgang deaktiviert ist (unreachable), tauchen NICHT
-      // als erreichbare Badges auf — der Konfi koennte sie nie bekommen, ein
-      // Fortschrittsbalken waere irrefuehrend.
-      const available = badges.filter(badge => !badge.earned && !badge.is_hidden && !badge.unreachable);
-      
-      // Get total counts for dashboard stats
-      const { rows: [totalStats] } = await db.query(`
-        SELECT 
-          COUNT(*) FILTER (WHERE is_hidden = false) as total_visible,
-          COUNT(*) FILTER (WHERE is_hidden = true) as total_secret
-        FROM custom_badges 
-        WHERE is_active = TRUE AND organization_id = $1
-      `, [req.user.organization_id]);
-      
-      res.json({
-        available: available,
-        earned: earned,
-        stats: {
-          totalVisible: parseInt(totalStats.total_visible) || 0,
-          totalSecret: parseInt(totalStats.total_secret) || 0
-        }
-      });
+      // Berechnung ausgelagert in utils/konfiBadgeProgress.js (Single Source of
+      // Truth) — dieselbe Logik nutzt der Admin-Endpoint
+      // GET /admin/konfis/:id/badges, damit Admin und Konfi identische
+      // Badge-Fortschritte sehen.
+      const result = await getKonfiBadgeProgress(db, req.user.id, req.user.organization_id);
+      res.json(result);
     } catch (err) {
  console.error('Database error in GET /badges:', err);
       res.status(500).json({ error: 'Datenbankfehler' });
@@ -1729,11 +1434,13 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         return res.json([]);
       }
 
-      // Get timeslots with registration counts
+      // Get timeslots with registration counts + Warteliste pro Slot
       const timeslotsQuery = `
-        SELECT et.*, COUNT(eb.id) as registered_count
+        SELECT et.*,
+               COUNT(eb.id) FILTER (WHERE eb.status = 'confirmed') as registered_count,
+               COUNT(eb.id) FILTER (WHERE eb.status = 'waitlist') as waitlist_count
         FROM event_timeslots et
-        LEFT JOIN event_bookings eb ON et.id = eb.timeslot_id AND eb.status = 'confirmed'
+        LEFT JOIN event_bookings eb ON et.id = eb.timeslot_id
         WHERE et.event_id = $1 AND et.organization_id = $2
         GROUP BY et.id
         ORDER BY et.start_time ASC

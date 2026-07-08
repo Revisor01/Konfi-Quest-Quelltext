@@ -5,6 +5,7 @@ const fs = require('fs');
 const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { encryptBuffer, decryptBuffer } = require('../utils/photoCrypto');
+const { allIdsBelongToOrg } = require('../utils/orgOwnership');
 
 module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
   const { requireTeamer, requireAdmin } = roleHelpers;
@@ -340,6 +341,17 @@ module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
         return res.status(400).json({ error: 'Titel ist erforderlich' });
       }
 
+      // Org-Isolation: fremde IDs abweisen (Cross-Org-Referenzen)
+      if (!(await allIdsBelongToOrg(db, 'events', event_ids, req.user.organization_id))) {
+        return res.status(400).json({ error: 'Mindestens ein Event gehört nicht zu deiner Organisation' });
+      }
+      if (!(await allIdsBelongToOrg(db, 'jahrgaenge', jahrgang_ids, req.user.organization_id))) {
+        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Organisation' });
+      }
+      if (!(await allIdsBelongToOrg(db, 'material_tags', tag_ids, req.user.organization_id))) {
+        return res.status(400).json({ error: 'Mindestens ein Tag gehört nicht zu deiner Organisation' });
+      }
+
       const { rows: [material] } = await db.query(
         `INSERT INTO materials (title, description, organization_id, created_by)
          VALUES ($1, $2, $3, $4)
@@ -401,6 +413,17 @@ module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
 
       if (!existing) {
         return res.status(404).json({ error: 'Material nicht gefunden' });
+      }
+
+      // Org-Isolation: fremde IDs abweisen (Cross-Org-Referenzen)
+      if (!(await allIdsBelongToOrg(db, 'events', event_ids, req.user.organization_id))) {
+        return res.status(400).json({ error: 'Mindestens ein Event gehört nicht zu deiner Organisation' });
+      }
+      if (!(await allIdsBelongToOrg(db, 'jahrgaenge', jahrgang_ids, req.user.organization_id))) {
+        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Organisation' });
+      }
+      if (!(await allIdsBelongToOrg(db, 'material_tags', tag_ids, req.user.organization_id))) {
+        return res.status(400).json({ error: 'Mindestens ein Tag gehört nicht zu deiner Organisation' });
       }
 
       const updates = [];

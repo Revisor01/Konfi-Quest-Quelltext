@@ -240,10 +240,12 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
         [userId]
       );
 
+      const gdPoints = parseInt(konfiProfile?.gottesdienst_points, 10) || 0;
+      const gmPoints = parseInt(konfiProfile?.gemeinde_points, 10) || 0;
       const totals = {
-        gottesdienst: konfiProfile?.gottesdienst_points || 0,
-        gemeinde: konfiProfile?.gemeinde_points || 0,
-        total: (konfiProfile?.gottesdienst_points || 0) + (konfiProfile?.gemeinde_points || 0)
+        gottesdienst: gdPoints,
+        gemeinde: gmPoints,
+        total: gdPoints + gmPoints
       };
 
       res.json({

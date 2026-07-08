@@ -86,6 +86,7 @@ const TeamerEventsPage: React.FC = () => {
   const [bookingLoading, setBookingLoading] = useState(false);
   const [initialEventHandled, setInitialEventHandled] = useState(false);
   const [eventMaterials, setEventMaterials] = useState<any[]>([]);
+  const [eventTimeslots, setEventTimeslots] = useState<Array<{ id: number; start_time: string; end_time: string; max_participants: number; registered_count: number; waitlist_count?: number }>>([]);
   const materialIdRef = useRef<number | null>(null);
 
   // Offline-Query: Events
@@ -135,6 +136,17 @@ const TeamerEventsPage: React.FC = () => {
       setEventMaterials([]);
     }
   }, [selectedEvent?.id]);
+
+  // Zeitslots (samt Belegung + Warteliste) fuer ausgewaehltes Timeslot-Event laden
+  useEffect(() => {
+    if (selectedEvent?.has_timeslots) {
+      api.get(`/events/${selectedEvent.id}/timeslots`)
+        .then(res => setEventTimeslots(res.data || []))
+        .catch(() => setEventTimeslots([]));
+    } else {
+      setEventTimeslots([]);
+    }
+  }, [selectedEvent?.id, selectedEvent?.has_timeslots]);
 
   // Wenn von Dashboard mit selectedEventId navigiert wurde, Event direkt öffnen
   useEffect(() => {
@@ -506,6 +518,21 @@ const TeamerEventsPage: React.FC = () => {
                     </div>
                   </div>
                 </div>
+
+                {/* Zeitslots mit Belegung + Warteliste pro Slot */}
+                {selectedEvent.has_timeslots && eventTimeslots.length > 0 && (
+                  <div className="app-info-row app-info-row--top">
+                    <IonIcon icon={time} className="app-info-row__icon app-icon-color--time app-event-detail__icon--align-top" />
+                    <div className="app-event-detail__timeslot-list">
+                      <div className="app-info-row__label">Zeitfenster</div>
+                      {eventTimeslots.map((slot, idx) => (
+                        <div key={slot.id || idx} className="app-info-row__value app-event-detail__timeslot-entry">
+                          {formatTime(slot.start_time)} \u2013 {formatTime(slot.end_time)} ({slot.registered_count || 0}/{slot.max_participants} TN{(slot.waitlist_count || 0) > 0 ? ` \u00B7 ${slot.waitlist_count} Warteliste` : ''})
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 {/* Team */}
                 {(selectedEvent.teamer_count !== undefined && selectedEvent.teamer_count > 0) && (

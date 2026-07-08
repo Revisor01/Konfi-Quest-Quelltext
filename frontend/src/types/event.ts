@@ -13,6 +13,7 @@ export interface Timeslot {
   end_time: string;
   max_participants: number;
   registered_count?: number;
+  waitlist_count?: number;
 }
 
 export interface Jahrgang {
