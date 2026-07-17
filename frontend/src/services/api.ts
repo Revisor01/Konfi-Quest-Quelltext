@@ -89,8 +89,18 @@ const performRefresh = async (refreshToken: string): Promise<string> => {
   }, activeOrgId ? { headers: { 'X-Active-Organization': String(activeOrgId) } } : undefined);
 
   const { token: newToken, refresh_token: newRefreshToken } = response.data;
-  await setToken(newToken);
+
+  // REIHENFOLGE IST KRITISCH (Android-Session-Verlust, 1.5.0):
+  // Der Server rotiert bei jedem Refresh und REVOKED den alten Refresh-Token
+  // sofort (Grace-Window nur 30s). Der neue Refresh-Token ist der einzige
+  // langlebige (90d) Wiederherstellungs-Schluessel — geht er verloren, ist die
+  // Session nach 30s unrettbar tot (kein Push-Token-Send, Chat laedt nur Stale-
+  // Cache, Socket 'jwt expired'). Android killt App-Prozesse aggressiver als iOS,
+  // daher MUSS der Refresh-Token ZUERST und bestaetigt persistiert werden.
+  // Der Access-Token ist unkritisch: geht er bei einem Crash verloren, holt ihn
+  // der naechste ensureFreshToken() ueber den (gesicherten) Refresh-Token neu.
   await setRefreshToken(newRefreshToken);
+  await setToken(newToken);
   return newToken;
 };
 

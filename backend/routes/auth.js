@@ -965,13 +965,18 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         // GRACE-WINDOW gegen Rotation-Race: Bei vielen parallelen Requests (Dashboard
         // laedt viele Endpoints) + langsamem Netz kann ein zweiter Request mit dem
         // GERADE rotierten Token ankommen. Statt den User rauszuwerfen, akzeptieren
-        // wir ein Token, das in den letzten 30s revoked wurde (es war nachweislich
-        // gueltig) und stellen ein frisches Paar aus. Verhindert "Sitzung abgelaufen"
-        // bei Konfis auf langsamen Handys. Aelter als 30s -> echtes 401.
+        // wir ein Token, das kuerzlich revoked wurde (es war nachweislich gueltig)
+        // und stellen ein frisches Paar aus.
+        // 5 MINUTEN (vorher 30s): Der kritische Fall ist NICHT der parallele Burst,
+        // sondern der Client, der rotiert, den neuen Refresh-Token aber wegen eines
+        // Android-Process-Kills nicht mehr persistieren konnte und erst beim NAECHSTEN
+        // App-Oeffnen wieder mit dem alten Token ankommt. 30s deckten das nicht ab
+        // (Ursache des Android-Session-/Push-/Chat-Totalausfalls ab 1.5.0). Aelter
+        // als 5 Min -> echtes 401. Der alte Token bleibt einmalig+kurz nutzbar.
         const { rows: [recent] } = await db.query(
           `SELECT id, user_id, expires_at FROM refresh_tokens
            WHERE token_hash = $1 AND revoked_at IS NOT NULL
-             AND revoked_at > NOW() - INTERVAL '30 seconds'
+             AND revoked_at > NOW() - INTERVAL '5 minutes'
              AND expires_at > NOW()`,
           [tokenHash]
         );

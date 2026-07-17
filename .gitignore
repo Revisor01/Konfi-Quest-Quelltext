@@ -119,6 +119,12 @@ docker-compose.yml
 # Firebase Config (API Keys)
 **/GoogleService-Info.plist
 **/google-services.json
+# AUSNAHME: versionierte Master-Kopien (ueberleben `prebuild --clean`, aus denen
+# scripts/prepare-android.sh + der iOS-Build die native Config wiederherstellen).
+# Diese Dateien enthalten NUR client-seitige FCM-Config (steckt ohnehin in jeder
+# installierten App) — NICHT das geheime backend/push/firebase-service-account.json.
+!frontend/config/google-services.json
+!frontend/config/GoogleService-Info.plist
 
 # APNs Keys
 docs/AuthKey_*.p8
