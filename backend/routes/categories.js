@@ -88,7 +88,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
       if (err.code === '23505') {
         return res.status(409).json({ error: 'Kategoriename existiert bereits' });
       }
- console.error(`Database error in PUT /api/categories/${req.params.id}:`, err);
+ console.error('Database error in PUT /api/categories/:id:', req.params.id, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -126,7 +126,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
       // Live-Update an alle Admins senden
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'categories', 'delete');
     } catch (err) {
- console.error(`Database error in DELETE /api/categories/${categoryId}:`, err);
+ console.error('Database error in DELETE /api/categories/:categoryId:', categoryId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });

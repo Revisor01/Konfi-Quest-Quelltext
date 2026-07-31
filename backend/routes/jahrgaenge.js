@@ -177,7 +177,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
       if (err.code === '23505') {
         return res.status(409).json({ error: 'Jahrgang-Name existiert bereits' });
       }
- console.error(`Database error in PUT /api/jahrgaenge/${req.params.id}:`, err);
+ console.error('Database error in PUT /api/jahrgaenge/:id:', req.params.id, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -295,7 +295,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
       // Live-Update an alle Admins senden
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'jahrgaenge', 'delete');
     } catch (err) {
- console.error(`Database error in DELETE /api/jahrgaenge/${jahrgangId}:`, err);
+ console.error('Database error in DELETE /api/jahrgaenge/:jahrgangId:', jahrgangId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -346,7 +346,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
         bookings
       });
     } catch (err) {
-      console.error(`Database error in GET /api/admin/jahrgaenge/${jahrgangId}/attendance-matrix:`, err);
+      console.error('Database error in GET /api/admin/jahrgaenge/:jahrgangId/attendance-matrix:', jahrgangId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -443,7 +443,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
       const sprueche = await buildSpruecheList(jahrgangId, req.user.organization_id);
       res.json(sprueche);
     } catch (err) {
-      console.error(`Database error in GET /api/admin/jahrgaenge/${jahrgangId}/sprueche:`, err);
+      console.error('Database error in GET /api/admin/jahrgaenge/:jahrgangId/sprueche:', jahrgangId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -542,7 +542,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
       }
       res.json({ success: true });
     } catch (err) {
-      console.error(`Database error in POST /api/admin/jahrgaenge/${jahrgangId}/matrix-email:`, err);
+      console.error('Database error in POST /api/admin/jahrgaenge/:jahrgangId/matrix-email:', jahrgangId, err);
       res.status(500).json({ error: 'Fehler beim Senden der E-Mail' });
     }
   });

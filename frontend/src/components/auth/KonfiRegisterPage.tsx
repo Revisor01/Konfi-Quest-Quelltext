@@ -31,6 +31,7 @@ import {
 import { useLocation } from 'react-router-dom';
 import api from '../../services/api';
 import { setToken, setUser as setTokenStoreUser } from '../../services/tokenStore';
+import { hasValidUsernameChars, USERNAME_RULES_MESSAGE } from '../../utils/usernameValidation';
 import { useApp } from '../../contexts/AppContext';
 
 interface PasswordCheck {
@@ -72,7 +73,7 @@ const KonfiRegisterPage: React.FC = () => {
   });
 
   // Username-Verfügbarkeitsprüfung
-  const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
+  const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken' | 'invalid'>('idle');
   const usernameCheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Passwort-Checks
@@ -106,6 +107,12 @@ const KonfiRegisterPage: React.FC = () => {
     if (usernameCheckTimer.current) {
       clearTimeout(usernameCheckTimer.current);
     }
+    // Ungültige Zeichen sofort anzeigen — sonst schluckt der Verfügbarkeits-Check
+    // den 400er still und der Fehler kommt erst beim Absenden.
+    if (value.length > 0 && !hasValidUsernameChars(value)) {
+      setUsernameStatus('invalid');
+      return;
+    }
     if (value.length >= 3) {
       usernameCheckTimer.current = setTimeout(() => {
         checkUsername(value);
@@ -117,7 +124,7 @@ const KonfiRegisterPage: React.FC = () => {
 
   const handleUsernameBlur = () => {
     // Sofort prüfen falls noch nicht geprüft
-    if (formData.username.length >= 3 && usernameStatus === 'idle') {
+    if (formData.username.length >= 3 && usernameStatus === 'idle' && hasValidUsernameChars(formData.username)) {
       if (usernameCheckTimer.current) {
         clearTimeout(usernameCheckTimer.current);
       }
@@ -207,6 +214,11 @@ const KonfiRegisterPage: React.FC = () => {
       triggerShake();
       return;
     }
+    if (!hasValidUsernameChars(formData.username)) {
+      setError('Benutzername darf nur Buchstaben, Zahlen, Punkt (.) und Bindestrich (-) enthalten — keine Leerzeichen oder Umlaute');
+      triggerShake();
+      return;
+    }
     if (!isPasswordValid) {
       setError('Passwort erfüllt nicht alle Anforderungen');
       triggerShake();
@@ -251,7 +263,10 @@ const KonfiRegisterPage: React.FC = () => {
         setIsNetworkError(true);
         setError('Verbindung fehlgeschlagen. Bitte prüfe deine Internetverbindung.');
       } else {
-        setError(err.response?.data?.error || 'Fehler bei der Registrierung');
+        // Validierungsfehler des Backends kommen als details-Array — die konkrete
+        // Meldung anzeigen statt nur "Validierungsfehler".
+        const detailMessage = err.response?.data?.details?.[0]?.message;
+        setError(detailMessage || err.response?.data?.error || 'Fehler bei der Registrierung');
       }
       triggerShake();
     } finally {
@@ -458,6 +473,12 @@ const KonfiRegisterPage: React.FC = () => {
                       <span>Benutzername bereits vergeben</span>
                     </div>
                   )}
+                  {usernameStatus === 'invalid' && (
+                    <div className="app-auth-username-status app-auth-username-status--taken">
+                      <IonIcon icon={closeCircle} />
+                      <span>Nur Buchstaben, Zahlen, Punkt (.) und Bindestrich (-) — keine Leerzeichen oder Umlaute</span>
+                    </div>
+                  )}
 
                   {/* E-Mail (optional) */}
                   <IonItem lines="none" className="app-auth-input app-auth-input--compact">
@@ -573,7 +594,7 @@ const KonfiRegisterPage: React.FC = () => {
                   <IonButton
                     expand="full"
                     onClick={handleSubmit}
-                    disabled={registering || !isPasswordValid || usernameStatus === 'taken' || !isOnline}
+                    disabled={registering || !isPasswordValid || usernameStatus === 'taken' || usernameStatus === 'invalid' || !isOnline}
                     className="app-auth-button"
                     style={{ marginBottom: '16px' }}
                   >

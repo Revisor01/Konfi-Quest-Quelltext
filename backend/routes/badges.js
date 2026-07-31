@@ -788,7 +788,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
       // Konfis sehen den Badge-Katalog (KonfiBadgesPage abonniert 'badges').
       liveUpdate.sendToOrgKonfis(req.user.organization_id, 'badges', 'update');
     } catch (err) {
- console.error(`Database error in PUT /api/badges/${req.params.id}:`, err);
+ console.error('Database error in PUT /api/badges/:id:', req.params.id, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -820,7 +820,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
       client.release();
-      console.error(`Database error in DELETE /api/badges/${req.params.id}:`, err);
+      console.error('Database error in DELETE /api/badges/:id:', req.params.id, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });

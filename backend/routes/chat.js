@@ -272,7 +272,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
             db.query(
               "INSERT INTO chat_participants (room_id, user_id, user_type) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
               [roomId, pu.id, roleToParticipantType(pu.role_name)]
-            ).catch(err => console.error(`Error adding participant ${pu.id}:`, err))
+            ).catch(err => console.error('Error adding participant :id:', pu.id, err))
           );
           await Promise.all(participantPromises);
         }
@@ -286,7 +286,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         if (konfis.length > 0) {
           const konfiPromises = konfis.map(konfi => 
             db.query("INSERT INTO chat_participants (room_id, user_id, user_type) VALUES ($1, $2, 'konfi')", [roomId, konfi.id])
- .catch(err => console.error(`Error adding konfi ${konfi.id} to jahrgang chat:`, err))
+ .catch(err => console.error('Error adding konfi :id to jahrgang chat:', konfi.id, err))
           );
           await Promise.all(konfiPromises);
         }
@@ -528,7 +528,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       res.json(room);
       
     } catch (err) {
- console.error(`Database error in GET /rooms/${req.params.roomId}:`, err);
+ console.error('Database error in GET /rooms/:roomId:', req.params.roomId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -683,7 +683,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       // Bei ?after ist die Query bereits ASC sortiert, kein reverse noetig
       res.json(after ? processedMessages : processedMessages.reverse());
     } catch (err) {
- console.error(`Database error in GET /rooms/${req.params.roomId}/messages:`, err);
+ console.error('Database error in GET /rooms/:roomId/messages:', req.params.roomId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -912,7 +912,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
           console.error('Error looking up duplicate message:', lookupErr);
         }
       }
-      console.error(`Database error in POST /rooms/${req.params.roomId}/messages:`, err);
+      console.error('Database error in POST /rooms/:roomId/messages:', req.params.roomId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -953,7 +953,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       res.json({ message: 'Raum als gelesen markiert', affected: rowCount });
       
     } catch (err) {
- console.error(`Database error in POST /rooms/${req.params.roomId}/mark-read:`, err);
+ console.error('Database error in POST /rooms/:roomId/mark-read:', req.params.roomId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -1011,7 +1011,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       res.json(participants);
       
     } catch (err) {
- console.error(`Database error in GET /rooms/${req.params.roomId}/participants:`, err);
+ console.error('Database error in GET /rooms/:roomId/participants:', req.params.roomId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -1078,7 +1078,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       if (err.code === '23505') {
         return res.status(409).json({ error: 'Benutzer ist bereits Teilnehmer' });
       }
- console.error(`Database error in POST /rooms/${req.params.roomId}/participants:`, err);
+ console.error('Database error in POST /rooms/:roomId/participants:', req.params.roomId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -1123,7 +1123,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         console.error('Failed to emit roomsChanged (remove participant):', notifyErr);
       }
     } catch (err) {
- console.error(`Database error in DELETE /rooms/${req.params.roomId}/participants/...:`, err);
+ console.error('Database error in DELETE /rooms/:roomId/participants/...:', req.params.roomId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -1181,7 +1181,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         console.error('Failed to emit roomsChanged (leave):', notifyErr);
       }
     } catch (err) {
-      console.error(`Database error in DELETE /rooms/${req.params.roomId}/leave:`, err);
+      console.error('Database error in DELETE /rooms/:roomId/leave:', req.params.roomId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -1970,7 +1970,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       }
 
     } catch (err) {
-      console.error(`Database error in DELETE /rooms/${roomId}:`, err);
+      console.error('Database error in DELETE /rooms/:roomId:', roomId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });

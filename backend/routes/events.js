@@ -497,7 +497,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
 
       res.json({ qr_token: token });
     } catch (err) {
-      console.error(`Database error in POST /events/${id}/generate-qr:`, err);
+      console.error('Database error in POST /events/:id/generate-qr:', id, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -521,7 +521,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
         total: parseInt(counts.total) || 0
       });
     } catch (err) {
-      console.error(`Database error in GET /events/${id}/attendance-count:`, err);
+      console.error('Database error in GET /events/:id/attendance-count:', id, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -557,7 +557,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
       res.json(timeslots);
 
     } catch (err) {
- console.error(`Database error in GET /events/${req.params.id}/timeslots:`, err);
+ console.error('Database error in GET /events/:id/timeslots:', req.params.id, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -694,7 +694,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
       });
       
     } catch (err) {
- console.error(`Database error in GET /events/${req.params.id}:`, err);
+ console.error('Database error in GET /events/:id:', req.params.id, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -1164,7 +1164,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
       client.release();
-      console.error(`Database error in PUT /events/${id}:`, err);
+      console.error('Database error in PUT /events/:id:', id, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -1310,7 +1310,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
       client.release();
-      console.error(`Database error in DELETE /events/${id}:`, err);
+      console.error('Database error in DELETE /events/:id:', id, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -1535,7 +1535,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
       client.release();
-      console.error(`Database error in POST /events/${eventId}/book:`, err);
+      console.error('Database error in POST /events/:eventId/book:', eventId, err);
       res.status(500).json({ error: 'Datenbankfehler bei der Anmeldung' });
     }
   });
@@ -1680,7 +1680,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
       }
 
     } catch (err) {
-      console.error(`Database error in DELETE /events/${eventId}/book:`, err);
+      console.error('Database error in DELETE /events/:eventId/book:', eventId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -1800,7 +1800,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
       client.release();
-      console.error(`Database error in POST /events/${req.params.id}/participants:`, err);
+      console.error('Database error in POST /events/:id/participants:', req.params.id, err);
       if (err.code === '23505') { // unique_violation
         return res.status(409).json({ error: 'Dieser Benutzer ist bereits für dieses Event angemeldet.' });
       }
@@ -1887,7 +1887,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'events', 'update', { eventId, action: 'booking_removed' });
 
     } catch (err) {
- console.error(`Database error in DELETE /events/${eventId}/bookings/${bookingId}:`, err);
+ console.error('Database error in DELETE /events/:eventId/bookings/:bookingId:', eventId, bookingId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -2193,7 +2193,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'events', 'update', { eventId });
 
     } catch (err) {
- console.error(`Database error in PUT /events/${eventId}/participants/${participantId}/status:`, err);
+ console.error('Database error in PUT /events/:eventId/participants/:participantId/status:', eventId, participantId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -2302,7 +2302,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
       }
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
-      console.error(`Database error in PUT /events/${eventId}/participants/attendance-all:`, err);
+      console.error('Database error in PUT /events/:eventId/participants/attendance-all:', eventId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     } finally {
       client.release();
@@ -2450,7 +2450,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
       client.release();
-      console.error(`Database error in PUT /events/${eventId}/participants/${participantId}/attendance:`, err);
+      console.error('Database error in PUT /events/:eventId/participants/:participantId/attendance:', eventId, participantId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -2519,7 +2519,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
       client.release();
-      console.error(`Database error in POST /events/${eventId}/chat:`, err);
+      console.error('Database error in POST /events/:eventId/chat:', eventId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -2586,7 +2586,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
       client.release();
-      console.error(`Database error in PUT /events/${eventId}/cancel:`, err);
+      console.error('Database error in PUT /events/:eventId/cancel:', eventId, err);
       res.status(500).json({ error: 'Datenbankfehler beim Absagen des Events' });
     }
   });

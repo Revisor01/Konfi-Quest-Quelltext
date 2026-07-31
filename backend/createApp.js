@@ -37,7 +37,17 @@ function createApp(db, options = {}) {
   // ====================================================================
 
   app.use(helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        'default-src': ["'self'"],
+        'script-src': ["'none'"],
+        'object-src': ["'none'"],
+        'base-uri': ["'none'"],
+        'form-action': ["'none'"],
+        'frame-ancestors': ["'none'"],
+      },
+    },
     strictTransportSecurity: false,
     crossOriginEmbedderPolicy: false,
     xContentTypeOptions: true,

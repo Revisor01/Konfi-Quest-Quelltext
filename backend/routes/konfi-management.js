@@ -4,6 +4,7 @@ const { body, param } = require('express-validator');
 const { handleValidationErrors, commonValidations, getPointField } = require('../middleware/validation');
 const { checkPointTypeEnabled } = require('../utils/pointTypeGuard');
 const { generateBiblicalPassword } = require('../utils/passwordUtils');
+const { generateUniqueUsername } = require('../utils/usernameGenerator');
 const { deleteKonfiCascade } = require('../utils/konfiDeletion');
 const { checkKonfiLimit, nextTier } = require('../utils/konfiLimit');
 const { syncJahrgangChat } = require('../utils/jahrgangChat');
@@ -143,11 +144,14 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
 
         const password = generateBiblicalPassword();
         const hashedPassword = await bcrypt.hash(password, 10);
-        const username = name.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z.äöüß]/g, '');
 
         const client = await db.getClient();
         try {
             await client.query('BEGIN');
+
+            // Global freien Username generieren (Kollision -> anna.musterfrau2 usw.),
+            // sonst knallt der UNIQUE-Index (organization_id, username) mit 500.
+            const username = await generateUniqueUsername(client, name);
 
             // First verify that the jahrgang exists
             const jahrgangCheckQuery = "SELECT id FROM jahrgaenge WHERE id = $1 AND organization_id = $2";
@@ -255,8 +259,6 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
         if (!name || !jahrgang_id) {
             return res.status(400).json({ error: 'Name und Jahrgang sind erforderlich' });
         }
-        const username = name.toLowerCase().replace(/\s+/g, '.').replace(/[^a-z.äöüß]/g, '');
-
         const client = await db.getClient();
         try {
             await client.query('BEGIN');
@@ -265,10 +267,14 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
             const currentProfileQuery = `SELECT jahrgang_id FROM konfi_profiles WHERE user_id = $1`;
             const { rows: [currentProfile] } = await client.query(currentProfileQuery, [req.params.id]);
 
+            // Username wird beim Update BEWUSST NICHT mehr neu generiert: das
+            // ueberschrieb still selbstgewaehlte Usernamen aus der Registrierung
+            // (z.B. "anna.musterfrau" -> "anna", sobald ein Admin den Datensatz
+            // bearbeitete) — die Login-Kennung blieb dann unauffindbar.
             const userQuery = `
-                UPDATE users SET display_name = $1, username = $2
-                WHERE id = $3 AND organization_id = $4`;
-            const { rowCount: userUpdateCount } = await client.query(userQuery, [name, username, req.params.id, req.user.organization_id]);
+                UPDATE users SET display_name = $1
+                WHERE id = $2 AND organization_id = $3`;
+            const { rowCount: userUpdateCount } = await client.query(userQuery, [name, req.params.id, req.user.organization_id]);
 
             if (userUpdateCount === 0) {
                 await client.query('ROLLBACK');

@@ -29,7 +29,11 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
 
   const validateUpdateUser = [
     param('id').isInt({ min: 1 }).withMessage('Ungültige ID'),
-    body('username').optional().trim().isLength({ min: 3 }).withMessage('Benutzername muss mindestens 3 Zeichen lang sein'),
+    // Gleiche Zeichenregeln wie beim Anlegen (commonValidations.username) —
+    // sonst kann ein Update Usernamen mit Leerzeichen/Sonderzeichen einschleusen.
+    body('username').optional()
+      .isLength({ min: 3, max: 50 }).withMessage('Benutzername muss zwischen 3 und 50 Zeichen lang sein')
+      .matches(/^[a-zA-Z0-9.-]+$/).withMessage('Benutzername darf nur Buchstaben, Zahlen, Punkt (.) und Bindestrich (-) enthalten — keine Leerzeichen oder anderen Sonderzeichen'),
     body('display_name').optional().trim().notEmpty().withMessage('Anzeigename darf nicht leer sein'),
     handleValidationErrors
   ];
