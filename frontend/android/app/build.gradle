@@ -1,0 +1,81 @@
+import groovy.json.JsonSlurper
+
+apply plugin: 'com.android.application'
+
+// Version aus der GEMEINSAMEN, getrackten Quelle frontend/version.json lesen
+// (dieselbe Datei fuettert iOS via scripts/apply-version.sh). rootProject ist
+// frontend/android, die Datei liegt eine Ebene darueber in frontend/.
+def versionJsonFile = new File(rootProject.projectDir, '../version.json')
+def appVersionCode = 1
+def appVersionName = '1.0.0'
+if (versionJsonFile.exists()) {
+    def v = new JsonSlurper().parse(versionJsonFile)
+    appVersionCode = (v.androidVersionCode ?: 1) as int
+    appVersionName = (v.version ?: '1.0.0') as String
+} else {
+    logger.warn("version.json nicht gefunden unter ${versionJsonFile} — nutze Defaults ${appVersionCode}/${appVersionName}")
+}
+
+android {
+    namespace "de.godsapp.konfiquest"
+    compileSdk rootProject.ext. compileSdkVersion
+    defaultConfig {
+        applicationId "de.godsapp.konfiquest"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode appVersionCode
+        versionName appVersionName
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        release {
+            if (project.hasProperty('KONFI_KEYSTORE_PATH')) {
+                storeFile file(KONFI_KEYSTORE_PATH)
+                storePassword KONFI_KEYSTORE_PASSWORD
+                keyAlias KONFI_KEY_ALIAS
+                keyPassword KONFI_KEY_PASSWORD
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (project.hasProperty('KONFI_KEYSTORE_PATH')) {
+                signingConfig signingConfigs.release
+            }
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

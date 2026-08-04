@@ -653,11 +653,13 @@ export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
                                        participant.attendance_status === 'absent' ? 'Abwesend' : 'Gebucht';
                     const cornerBadgeClass = participant.attendance_status === 'present' ? 'app-corner-badge--success' :
                                              participant.attendance_status === 'absent' ? 'app-corner-badge--danger' : 'app-corner-badge--info';
+                    const listItemClass = participant.attendance_status === 'present' ? 'app-list-item--success' :
+                                          participant.attendance_status === 'absent' ? 'app-list-item--danger' : 'app-list-item--booked';
                     return (
                       <IonItemSliding key={participant.id} className="app-event-detail__sliding-item">
                         <IonItem className="app-item-transparent" button detail={false} lines="none"
                           onClick={() => showAttendanceActionSheet(participant)}>
-                          <div className="app-list-item app-list-item--booked app-event-detail__list-item-flush">
+                          <div className={`app-list-item ${listItemClass} app-event-detail__list-item-flush`}>
                             <div className="app-corner-badges">
                               <div
                                 className={`app-corner-badge ${cornerBadgeClass}`}

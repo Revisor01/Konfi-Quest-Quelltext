@@ -158,10 +158,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Multi-Org Switcher state
   const [organizations, setOrganizations] = useState<UserOrganization[]>([]);
   const [activeOrgId, setActiveOrgIdState] = useState<number | null>(getActiveOrgId());
-  // Zusaetzliche Absicherung: bei Org-Wechsel/Fallback erhoeht, dient als React-key
-  // am Router (App.tsx) -> Remount. Der PRIMAERE Reload-Mechanismus ist aber das
-  // 'org:switched'-Event (greift auch nativ bei gecachten Pages); orgVersion ist
-  // nur Web-Zusatz. KEIN window.location-Reload (zerschiesst nativen WebView).
+  // Bei Org-Wechsel und 403-Fallback erhoeht; dient als React-key am Router
+  // (App.tsx) -> kompletter Remount des Subtrees. Zusammen mit dem
+  // 'org:switched'-Event: das Event revalidiert useOfflineQuery-Daten (auch in
+  // gecachten Pages), der Remount erwischt zusaetzlich alles, was seinen State
+  // selbst haelt. Beides ist noetig — mit dem Event allein blieben Views mit
+  // eigenem useState auf den Daten der alten Org stehen.
+  // KEIN window.location-Reload (zerschiesst nativen WebView).
   const [orgVersion, setOrgVersion] = useState(0);
 
   // Badge sync through state updates only (no custom events)
@@ -318,6 +321,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // mit dem neuen aktiven-Org-Header. Greift web UND nativ (auch bei im
     // IonRouterOutlet-Stack gecachten Pages, wo ein Router-Remount nicht zieht).
     window.dispatchEvent(new CustomEvent('org:switched'));
+
+    // 5b. orgVersion erhoehen -> React-key am Router (App.tsx) wechselt -> der
+    // gesamte Router-Subtree remountet mit frischem State.
+    //
+    // Ohne diesen Bump blieb der Wechsel unsichtbar: 'org:switched' erreicht nur
+    // Komponenten, die useOfflineQuery benutzen UND gerade gemountet sind. Alles,
+    // was seine Daten im eigenen useState/useEffect haelt (oder im
+    // IonRouterOutlet-Stack geparkt ist), behielt die Daten der alten Org — die
+    // Ansicht sah nach dem Umschalten unveraendert aus.
+    setOrgVersion(v => v + 1);
 
     // 6. Switcher-Liste fuer die neue Org neu laden (Rollen/Namen koennen sich
     // unterscheiden) — best-effort, Fehler hier sind unkritisch und duerfen den

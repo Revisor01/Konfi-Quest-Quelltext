@@ -430,9 +430,7 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
         { name: 'Taufe', points: 1, type: 'gottesdienst', categoryKey: 'kasualien' },
         { name: 'Hochzeit', points: 1, type: 'gottesdienst', categoryKey: 'kasualien' },
         { name: 'Beerdigung', points: 2, type: 'gottesdienst', categoryKey: 'kasualien' },
-        { name: 'Gemeindefest helfen', points: 2, type: 'gemeinde', categoryKey: 'gemeinde' },
-        { name: 'Seniorennachmittag', points: 1, type: 'gemeinde', categoryKey: 'gemeinde' },
-        { name: 'Gemeindebrief verteilen', points: 1, type: 'gemeinde', categoryKey: 'gemeinde' }
+        { name: 'Küsterdienst', points: 1, type: 'gemeinde', categoryKey: 'gemeinde' }
       ];
 
       const activityQuery = `INSERT INTO activities (name, points, type, organization_id)
@@ -1055,8 +1053,20 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
     }
   });
 
-  // Seed default certificates for existing organizations without any
+  // Standard-Zertifikatstypen fuer Organisationen nachziehen, die noch keine
+  // haben (einmalige Datenmigration fuer Bestandsorganisationen).
+  //
+  // Laeuft bewusst NICHT in Tests: Der Aufruf am Ende dieser Datei ist nicht
+  // awaited und haengt am Router-Load. In der Testsuite wird createApp() pro
+  // Datei neu aufgerufen, waehrend beforeEach die Organisationen loescht und
+  // neu anlegt — die noch laufende Schleife schrieb dann gegen bereits
+  // geloeschte org-IDs ("violates foreign key constraint
+  // certificate_types_organization_id_fkey"). Traf das den
+  // POST /certificate-types im beforeEach von teamer.test.js, blieb certTypeId
+  // undefined und die Folgetests fielen um — ein sporadisch roter Build, der
+  // Deploys blockierte, ohne dass am Code etwas kaputt war.
   const seedDefaultCertificates = async () => {
+    if (process.env.NODE_ENV === 'test') return;
     try {
       const { rows: orgs } = await db.query(
         `SELECT o.id FROM organizations o

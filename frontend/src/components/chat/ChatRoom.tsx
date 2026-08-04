@@ -14,7 +14,8 @@ import {
   useIonActionSheet
 } from '@ionic/react';
 import {
-  arrowBack
+  arrowBack,
+  chevronDown
 } from 'ionicons/icons';
 import { useApp } from '../../contexts/AppContext';
 import { useBadge } from '../../contexts/BadgeContext';
@@ -60,6 +61,9 @@ const formatDayDivider = (d: Date): string => {
 // NEUER Anker (= wirklich neue Nachrichten seit dem letzten Besuch) zaehlt.
 const shownMarkerAnchors = new Map<number, number>();
 
+// Ab welchem Abstand zum Listenende (in px) der "Nach unten"-Button erscheint.
+const SCROLL_DOWN_THRESHOLD = 300;
+
 const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingElement }) => {
   const { user, setError, isOnline } = useApp();
   const { markRoomAsRead: badgeMarkRoomAsRead, refreshAllCounts, chatUnreadByRoom } = useBadge();
@@ -103,6 +107,10 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   // Schwebender Tages-Chip oben (WhatsApp-Style): zeigt den Tag der obersten
   // sichtbaren Nachricht. Genau EIN Chip -> kein Ueberlagern mehrerer Sticky-Trenner.
   const [floatingDay, setFloatingDay] = useState<string>('');
+  // "Nach unten"-Button: erscheint erst, wenn der Nutzer spuerbar weiter oben
+  // steht (Schwelle SCROLL_DOWN_THRESHOLD). Nahe am Ende waere er nur Ballast,
+  // weil dort ohnehin automatisch nachgescrollt wird.
+  const [showScrollDown, setShowScrollDown] = useState(false);
   const contentRef = useRef<HTMLIonContentElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLIonTextareaElement>(null);
@@ -487,6 +495,11 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
         // wirkte in Kombination mit dem Rendern der neuen Bubble ruckelig —
         // lieber zackig einmalig da sein.
         contentRef.current.scrollToBottom(0);
+      } else if (messages.length > prevMessageCountRef.current) {
+        // Neue Nachricht, aber KEIN Auto-Scroll (Nutzer liest weiter oben):
+        // Der Abstand zum Ende hat sich geaendert, ohne dass ein Scroll-Event
+        // feuert -> Sichtbarkeit des "Nach unten"-Buttons nachziehen.
+        handleScroll();
       }
     }
     prevMessageCountRef.current = messages.length;
@@ -499,10 +512,19 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     if (!contentRef.current) return;
     const scrollEl = await contentRef.current.getScrollElement();
 
+    const distanceFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+
     if (parkedAtDividerRef.current) {
-      const nearBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight < 80;
-      if (nearBottom) parkedAtDividerRef.current = false;
+      if (distanceFromBottom < 80) parkedAtDividerRef.current = false;
     }
+
+    // "Nach unten"-Button ein-/ausblenden. Grosszuegigere Schwelle als beim
+    // Entparken (80px): der Button soll erst auftauchen, wenn man wirklich
+    // weiter oben liest, nicht schon bei einer halb sichtbaren Bubble.
+    setShowScrollDown(prev => {
+      const next = distanceFromBottom > SCROLL_DOWN_THRESHOLD;
+      return prev === next ? prev : next;
+    });
 
     // Obersten Tages-Trenner finden, der gerade noch oberhalb der Sichtgrenze
     // liegt -> dessen Tag im schwebenden Chip anzeigen.
@@ -521,6 +543,16 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     // Fallback: vor dem ersten Trenner -> Tag des ersten Trenners zeigen.
     if (!current && markers.length > 0) current = markers[0].getAttribute('data-day-divider') || '';
     setFloatingDay(prev => (prev === current ? prev : current));
+  };
+
+  // Klick auf den "Nach unten"-Button: ans Listenende springen. Dabei
+  // "entparken" und Auto-Scroll wieder scharf schalten — wer bewusst ans Ende
+  // springt, will auch neuen Nachrichten folgen.
+  const handleScrollDownClick = () => {
+    parkedAtDividerRef.current = false;
+    setShouldAutoScroll(true);
+    setShowScrollDown(false);
+    contentRef.current?.scrollToBottom(300);
   };
 
   const loadMessages = async () => {
@@ -1293,6 +1325,46 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
             </span>
           </div>
         )}
+
+        {/* "Nach unten"-Button: slot="fixed" -> haengt ueber dem Scroll-Inhalt
+            unten rechts, direkt oberhalb des Eingabefelds. Erscheint nur, wenn
+            man weiter oben liest (SCROLL_DOWN_THRESHOLD). */}
+        <div
+          slot="fixed"
+          style={{
+            position: 'absolute',
+            right: '16px',
+            bottom: 'calc(16px + env(safe-area-inset-bottom))',
+            zIndex: 11,
+            opacity: showScrollDown ? 1 : 0,
+            transform: showScrollDown ? 'translateY(0) scale(1)' : 'translateY(8px) scale(0.9)',
+            pointerEvents: showScrollDown ? 'auto' : 'none',
+            transition: 'opacity 180ms ease, transform 180ms ease'
+          }}
+          aria-hidden={!showScrollDown}
+        >
+          <button
+            type="button"
+            onClick={handleScrollDownClick}
+            aria-label="Zu den neuesten Nachrichten springen"
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              border: 'none',
+              padding: 0,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              backgroundColor: 'rgba(255,255,255,0.95)',
+              backdropFilter: 'blur(10px)',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.18)'
+            }}
+          >
+            <IonIcon icon={chevronDown} style={{ fontSize: '1.35rem', color: '#06b6d4' }} />
+          </button>
+        </div>
 
         {user?.type === 'admin' && room && (room.type === 'group' || room.type === 'admin') && (
           <div style={{

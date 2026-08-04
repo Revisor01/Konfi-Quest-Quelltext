@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Konfi Quest</string>
+    <string name="title_activity_main">Konfi Quest</string>
+    <string name="package_name">de.godsapp.konfiquest</string>
+    <string name="custom_url_scheme">de.godsapp.konfiquest</string>
+</resources>

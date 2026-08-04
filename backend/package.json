@@ -17,7 +17,7 @@
     "confirmation"
   ],
   "author": "Konfi Quest",
-  "license": "CC BY-NC-SA 4.0",
+  "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
     "@socket.io/postgres-adapter": "^0.5.0",
     "bcrypt": "^6.0.0",

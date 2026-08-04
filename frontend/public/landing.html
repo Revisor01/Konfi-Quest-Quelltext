@@ -3,18 +3,154 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Konfi Quest – Die Konfi-Zeit als Abenteuer</title>
-<meta name="description" content="Schluss mit Zetteln und Unterschriften. Konfi Quest macht moderne Konfi-Arbeit, die bei Jugendlichen ankommt: Punkte, Badges, Events, Chat – pädagogisch durchdacht, kirchlich sicher.">
-<meta property="og:title" content="Konfi Quest – Die Konfi-Zeit als Abenteuer">
-<meta property="og:description" content="Schluss mit Zetteln. Moderne Konfi-Arbeit für Konfis, Teamer:innen und die ganze Gemeinde.">
+<title>Konfi Quest – App für moderne Konfi-Arbeit | Konfirmandenarbeit digital</title>
+<meta name="description" content="Konfi Quest ist die App für moderne Konfirmandenarbeit: Punkte statt Laufzettel, Badges, Events, QR-Anwesenheit und Chat. Von einem Pastor entwickelt, Datenschutz nach DSG-EKD. 30 Tage kostenlos testen.">
+<meta name="author" content="Simon Luthe">
+<link rel="canonical" href="https://konfi-quest.de/">
+<meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large">
+
+<!-- Open Graph -->
+<meta property="og:site_name" content="Konfi Quest">
+<meta property="og:locale" content="de_DE">
+<meta property="og:title" content="Konfi Quest – App für moderne Konfi-Arbeit">
+<meta property="og:description" content="Punkte statt Laufzettel: Konfi Quest zeigt, wie innovative Konfi-Arbeit aussehen kann – mit Badges, Events, QR-Anwesenheit und Chat. Datenschutz nach DSG-EKD.">
 <meta property="og:type" content="website">
+<meta property="og:url" content="https://konfi-quest.de/">
+<meta property="og:image" content="https://konfi-quest.de/og-image.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Konfi Quest – die App für moderne Konfirmandenarbeit">
+
+<!-- Twitter/X -->
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Konfi Quest – App für moderne Konfi-Arbeit">
+<meta name="twitter:description" content="Punkte statt Laufzettel: So kann innovative Konfi-Arbeit aussehen. Von einem Pastor entwickelt, DSG-EKD-konform.">
+<meta name="twitter:image" content="https://konfi-quest.de/og-image.png">
+
+<meta name="theme-color" content="#5b21b6">
 <link rel="icon" type="image/png" href="/favicon.png">
-<!-- Hero-Mock: erste sichtbare Screenshots vorladen (kein Flackern beim Slide-Wechsel) -->
-<link rel="preload" as="image" href="/hero-ios-1.png">
-<link rel="preload" as="image" href="/hero-and-1.png">
+<!-- Hero-Mock: erste sichtbare Screenshots vorladen (kein Flackern beim Slide-Wechsel).
+     WebP statt PNG: ~97% kleiner (12 MB -> 0,4 MB) bei gleicher Darstellungsqualitaet,
+     da der Mock ohnehin nur ~270px breit gezeigt wird. -->
+<link rel="preload" as="image" href="/hero-ios-1.webp" fetchpriority="high">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://konfi-quest.de/#app",
+      "name": "Konfi Quest",
+      "alternateName": "Konfi-Quest",
+      "url": "https://konfi-quest.de/",
+      "applicationCategory": "EducationalApplication",
+      "applicationSubCategory": "Konfirmandenarbeit",
+      "operatingSystem": "iOS, Android, Web",
+      "inLanguage": "de",
+      "description": "Konfi Quest ist eine App für moderne Konfirmandenarbeit in evangelischen Kirchengemeinden: Punkte statt Laufzettel, Badges und Level, Event-Verwaltung mit QR-Anwesenheit, geschützter Chat und Teamer-Verwaltung. Datenschutz nach DSG-EKD.",
+      "author": { "@id": "https://simonluthe.de/#person" },
+      "creator": { "@id": "https://simonluthe.de/#person" },
+      "publisher": { "@id": "https://konfi-quest.de/#organization" },
+      "screenshot": "https://konfi-quest.de/hero-ios-1.webp",
+      "featureList": [
+        "Punktesystem für Gottesdienst- und Gemeindepunkte",
+        "Badges und Level als Gamification",
+        "Event-Verwaltung mit Warteliste und Terminserien",
+        "Anwesenheitskontrolle per QR-Code",
+        "Geschützter Chat für Jahrgänge und Teams",
+        "Teamer-Verwaltung mit Juleica-Zertifikaten",
+        "Konfirmationsspruch und Jahresrückblick",
+        "Offline nutzbar"
+      ],
+      "offers": [
+        { "@type": "Offer", "name": "Klein – bis 15 Konfis", "price": "49", "priceCurrency": "EUR" },
+        { "@type": "Offer", "name": "Standard – bis 50 Konfis", "price": "99", "priceCurrency": "EUR" },
+        { "@type": "Offer", "name": "Plus – bis 75 Konfis", "price": "139", "priceCurrency": "EUR" },
+        { "@type": "Offer", "name": "Groß – bis 100 Konfis", "price": "179", "priceCurrency": "EUR" },
+        { "@type": "Offer", "name": "Organisation – bis 4 Gemeinden", "price": "390", "priceCurrency": "EUR" }
+      ],
+      "installUrl": [
+        "https://apps.apple.com/de/app/id6748016619",
+        "https://play.google.com/store/apps/details?id=de.godsapp.konfiquest"
+      ],
+      "audience": {
+        "@type": "Audience",
+        "audienceType": "Evangelische Kirchengemeinden, Pastorinnen und Pastoren, Konfirmandenarbeit, Jugendarbeit"
+      }
+    },
+    {
+      "@type": "Organization",
+      "@id": "https://konfi-quest.de/#organization",
+      "name": "Konfi Quest",
+      "url": "https://konfi-quest.de/",
+      "logo": "https://konfi-quest.de/assets/icon/logo-mark.png",
+      "email": "moin@konfi-quest.de",
+      "founder": { "@id": "https://simonluthe.de/#person" },
+      "address": {
+        "@type": "PostalAddress",
+        "streetAddress": "Marktstraße 2",
+        "postalCode": "25764",
+        "addressLocality": "Wesselburen",
+        "addressRegion": "Schleswig-Holstein",
+        "addressCountry": "DE"
+      }
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://konfi-quest.de/#website",
+      "url": "https://konfi-quest.de/",
+      "name": "Konfi Quest",
+      "inLanguage": "de",
+      "publisher": { "@id": "https://konfi-quest.de/#organization" }
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://konfi-quest.de/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Wie funktioniert das Punktesystem?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Konfi Quest führt zwei getrennte Punktekonten: Gottesdienst-Punkte und Gemeinde-Punkte. Jede Aktivität und jedes Event zahlt auf genau eine der beiden Kategorien ein. Beide werden getrennt angezeigt und ausgewertet – mit eigenen Zielwerten." }
+        },
+        {
+          "@type": "Question",
+          "name": "Können wir eine der beiden Punktekategorien weglassen?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Ja. Pro Jahrgang lässt sich jede Kategorie einzeln ein- oder ausschalten und mit einem eigenen Zielwert versehen. Wenn ihr nur mit Gottesdienst-Punkten oder nur mit Gemeinde-Punkten arbeiten wollt, ist das problemlos möglich." }
+        },
+        {
+          "@type": "Question",
+          "name": "Können wir mehrere Jahrgänge verwalten?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Ja, beliebig viele. Jeder Jahrgang hat einen eigenen Namen und eigene Punkte-Einstellungen. Jahrgänge lassen sich anlegen, bearbeiten und – wenn keine Konfis mehr zugeordnet sind – wieder löschen." }
+        },
+        {
+          "@type": "Question",
+          "name": "Können Konfis untereinander chatten?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Private Einzelchats zwischen zwei Konfis sind nicht möglich – Konfis können von sich aus nur Admins und Teamer:innen direkt anschreiben. Untereinander schreiben Konfis ausschließlich im gemeinsamen Jahrgangs-Gruppenchat, der von der Gemeinde moderiert werden kann." }
+        },
+        {
+          "@type": "Question",
+          "name": "Können wir eigene Badges erstellen?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Ja. Jede Gemeinde kann eigene Auszeichnungen frei anlegen – mit Name, Symbol, Farbe und Beschreibung. Zur Auswahl stehen viele Bedingungen, etwa Gesamtpunkte, Punkte einer Kategorie, Anzahl besuchter Events oder Aktivitäten, Pflicht-Anwesenheit oder Serien." }
+        },
+        {
+          "@type": "Question",
+          "name": "Was kostet Konfi Quest?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Konfi Quest kostet als Jahreslizenz zwischen 49 Euro (bis 15 Konfis) und 179 Euro (bis 100 Konfis). Für bis zu vier Gemeinden gibt es die Organisationslizenz für 390 Euro pro Jahr. Vorab könnt ihr 30 Tage kostenlos mit 5 Konfis testen." }
+        },
+        {
+          "@type": "Question",
+          "name": "Wie steht es um den Datenschutz?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Konfi Quest ist nach dem Datenschutzgesetz der EKD (DSG-EKD) entwickelt. Die Server stehen in Deutschland, jede Gemeinde ist streng getrennt. Es gibt keine Werbung, kein Tracking und keinen Datenverkauf. Der Beitritt erfolgt ausschließlich über den Einladungslink der Gemeinde." }
+        }
+      ]
+    }
+  ]
+}
+</script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
@@ -155,8 +291,8 @@ section.block{padding:6rem 0}
 .rose-logo{position:relative;width:220px;height:220px;
  /* weisses logo-mark in Verlauffarbe einfaerben via mask */
  background:linear-gradient(135deg,#a78bfa,#22d3ee);
- -webkit-mask:url(/assets/icon/logo-mark.png) center/contain no-repeat;
- mask:url(/assets/icon/logo-mark.png) center/contain no-repeat;
+ -webkit-mask:url(/assets/icon/logo-mark-512.png) center/contain no-repeat;
+ mask:url(/assets/icon/logo-mark-512.png) center/contain no-repeat;
  filter:drop-shadow(0 16px 40px rgba(34,211,238,.35));animation:floaty 7s ease-in-out infinite}
 .rose-kicker{font-weight:700;font-size:.8rem;letter-spacing:.09em;text-transform:uppercase;background:linear-gradient(90deg,#a78bfa,#22d3ee);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:.7rem}
 .rose-h{font-family:var(--display);font-weight:800;font-size:clamp(1.7rem,3.2vw,2.5rem);letter-spacing:-.02em;line-height:1.15;margin-bottom:1rem}
@@ -209,12 +345,28 @@ section.block{padding:6rem 0}
 .sec-banner h3{font-family:var(--display);font-size:1.6rem;font-weight:800;margin-bottom:.6rem;position:relative;z-index:1}
 .sec-banner p{color:rgba(255,255,255,.82);max-width:62ch;position:relative;z-index:1}
 .sec-banner b{color:#fff}
-.story-card{background:linear-gradient(120deg,#fff,#f6f8fc);border:1px solid var(--line);border-radius:28px;padding:3rem;display:grid;grid-template-columns:auto 1fr;gap:2rem;align-items:start;box-shadow:0 18px 50px rgba(15,23,42,.06)}
+.story-card{background:linear-gradient(120deg,#fff,#f6f8fc);border:1px solid var(--line);border-radius:28px;padding:2.6rem;display:grid;grid-template-columns:300px 1fr;gap:2.8rem;align-items:center;box-shadow:0 18px 50px rgba(15,23,42,.06)}
 .story-badge{width:84px;height:84px;border-radius:22px;background:var(--grad);display:grid;place-items:center;flex-shrink:0}
+/* Portraitfoto: leicht angeschnittener Rahmen mit Markenverlauf-Kante */
+.story-photo{margin:0;position:relative}
+.story-photo img{width:100%;height:auto;aspect-ratio:560/718;object-fit:cover;border-radius:22px;display:block;box-shadow:0 22px 50px rgba(15,23,42,.18)}
+.story-photo::before{content:'';position:absolute;inset:-9px -9px 26px -9px;border-radius:29px;background:var(--grad);opacity:.14;z-index:-1}
+.story-photo figcaption{margin-top:.85rem;font-size:.82rem;color:var(--ink-soft);line-height:1.45;font-style:italic}
 .story-h{font-family:var(--display);font-weight:800;font-size:clamp(1.6rem,3vw,2.3rem);letter-spacing:-.02em;line-height:1.15;margin:.3rem 0 1rem}
 .story-p{color:var(--ink-soft);line-height:1.7;max-width:64ch;margin-bottom:1rem}
-.story-sign{font-family:var(--display);font-weight:700;color:var(--ink);margin-top:1.4rem}
-@media(max-width:760px){.story-card{grid-template-columns:1fr;padding:2rem;text-align:left}}
+.story-quote{border-left:3px solid var(--violet);padding:.15rem 0 .15rem 1.15rem;margin:1.4rem 0;font-family:var(--display);font-size:1.12rem;font-weight:600;line-height:1.5;color:var(--ink);max-width:60ch}
+.story-sign-row{display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap;margin-top:1.8rem;padding-top:1.4rem;border-top:1px solid var(--line)}
+.story-sign{font-family:var(--display);font-weight:800;font-size:1.1rem;color:var(--ink)}
+.story-role{color:var(--ink-soft);font-size:.9rem;margin-top:.15rem}
+.story-link{display:inline-flex;align-items:center;gap:.45rem;border:1.5px solid var(--purple);color:var(--purple);padding:.5rem 1.1rem;border-radius:999px;font-weight:600;font-size:.92rem;transition:background .2s,color .2s,transform .2s}
+.story-link:hover{background:var(--purple);color:#fff;transform:translateY(-1px)}
+@media(max-width:860px){
+ .story-card{grid-template-columns:1fr;padding:2rem;text-align:left;gap:1.8rem}
+ /* Foto nicht ueber die volle Breite ziehen — sonst dominiert es die Sektion */
+ .story-photo{max-width:280px;margin:0 auto}
+ .story-photo figcaption{text-align:center}
+ .story-sign-row{justify-content:flex-start}
+}
 
 /* WHY */
 .why-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.4rem}
@@ -303,11 +455,17 @@ footer a:hover{color:#fff}
 }
 @media(max-width:520px){.price-grid,.steps,.foot-grid{grid-template-columns:1fr}section.block{padding:4rem 0}}
 </style>
+
+<!-- Umami-Reichweitenmessung (self-hosted auf t.godsapp.de).
+     Cookiefrei und ohne personenbezogene Daten -> keine Einwilligung noetig,
+     deshalb darf das Script direkt laden. Das Event-Tracking selbst steht
+     gebuendelt am Seitenende. -->
+<script defer src="https://t.godsapp.de/script.js" data-website-id="dfd37276-5ad4-474d-8306-bf3ed9a3a5d3"></script>
 </head>
 <body>
 <nav>
  <div class="nav-in">
-  <a href="#top" class="brand"><img src="/assets/icon/logo-mark.png" alt="">Konfi&nbsp;Quest</a>
+  <a href="#top" class="brand"><img src="/assets/icon/logo-mark-512.png" width="34" height="34" alt="Konfi Quest Logo">Konfi&nbsp;Quest</a>
   <div class="nav-right">
    <div class="nav-links">
     <a href="#problem">Warum</a><a href="#features">Funktionen</a><a href="#sicherheit">Sicherheit</a><a href="#faq">FAQ</a><a href="#preise">Preise</a>
@@ -332,7 +490,7 @@ footer a:hover{color:#fff}
 <!-- HERO -->
 <header class="hero" id="top">
  <div class="glow a"></div><div class="glow b"></div><div class="glow c"></div><div class="grid-bg"></div>
- <img src="/assets/icon/logo-mark.png" alt="" class="hero-watermark">
+ <img src="/assets/icon/logo-mark-512.png" alt="" aria-hidden="true" class="hero-watermark">
  <div class="wrap hero-in">
   <div>
    <span class="eyebrow"><span class="pip"></span>Von einem Pastor für die Konfi-Arbeit entwickelt</span>
@@ -351,14 +509,14 @@ footer a:hover{color:#fff}
   </div>
   <div class="hero-art">
    <div class="device device--ios" id="heroDevice"><div class="screen">
-    <img src="/hero-ios-1.png" class="on" data-os="ios" alt="Konfi Quest auf dem Smartphone">
-    <img src="/hero-and-1.png" data-os="android" alt="">
-    <img src="/hero-ios-2.png" data-os="ios" alt="">
-    <img src="/hero-and-2.png" data-os="android" alt="">
-    <img src="/hero-ios-3.png" data-os="ios" alt="">
-    <img src="/hero-and-3.png" data-os="android" alt="">
-    <img src="/hero-ios-4.png" data-os="ios" alt="">
-    <img src="/hero-and-4.png" data-os="android" alt="">
+    <img src="/hero-ios-1.webp" class="on" data-os="ios" width="810" height="1753" fetchpriority="high" alt="Konfi Quest App auf dem iPhone: Dashboard eines Konfis mit Punktestand, Level und Badges">
+    <img src="/hero-and-1.webp" data-os="android" width="810" height="1753" loading="lazy" decoding="async" alt="Konfi Quest auf Android: Übersicht der gesammelten Gottesdienst- und Gemeindepunkte">
+    <img src="/hero-ios-2.webp" data-os="ios" width="810" height="1753" loading="lazy" decoding="async" alt="Event-Übersicht in Konfi Quest mit Anmeldung und Terminen der Gemeinde">
+    <img src="/hero-and-2.webp" data-os="android" width="810" height="1753" loading="lazy" decoding="async" alt="Konfi Quest Event-Anmeldung mit Warteliste auf Android">
+    <img src="/hero-ios-3.webp" data-os="ios" width="810" height="1753" loading="lazy" decoding="async" alt="Badges und Auszeichnungen, die Konfis in Konfi Quest freischalten">
+    <img src="/hero-and-3.webp" data-os="android" width="810" height="1753" loading="lazy" decoding="async" alt="Level-Fortschritt eines Konfis in der Konfi Quest App">
+    <img src="/hero-ios-4.webp" data-os="ios" width="810" height="1753" loading="lazy" decoding="async" alt="Aktivität mit Foto-Beleg in Konfi Quest einreichen statt Laufzettel abzeichnen">
+    <img src="/hero-and-4.webp" data-os="android" width="810" height="1753" loading="lazy" decoding="async" alt="Geschützter Jahrgangs-Chat in Konfi Quest">
    </div></div>
   </div>
  </div>
@@ -405,7 +563,7 @@ footer a:hover{color:#fff}
  <div class="wrap rose-in">
   <div class="rose-art">
    <span class="rose-ring"></span>
-   <img src="/assets/icon/logo-mark.png" alt="Konfi Quest – Lutherrose mit Herz" class="rose-logo">
+   <img src="/assets/icon/logo-mark-512.png" width="220" height="220" loading="lazy" decoding="async" alt="Das Konfi Quest Logo: eine Lutherrose mit einem Herz in der Mitte" class="rose-logo">
   </div>
   <div class="rose-copy">
    <p class="rose-kicker">Das Zeichen dahinter</p>
@@ -541,19 +699,32 @@ footer a:hover{color:#fff}
  </div>
 </section>
 
-<!-- STORY: Von einem Pastor entwickelt -->
+<!-- STORY: Von einem Pastor entwickelt — Gesicht + Name schaffen Vertrauen -->
 <section class="block" id="story">
  <div class="wrap">
   <div class="story-card reveal">
-   <div class="story-badge">
-    <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v6M9 11h6"/></svg>
-   </div>
-   <div>
-    <p class="kicker">Kein Software-Konzern. Ein Pastor.</p>
-    <h2 class="story-h">Aus der eigenen Konfi-Arbeit entstanden</h2>
-    <p class="story-p">Ich bin Gemeindepastor und habe Konfi Quest in meiner Freizeit entwickelt – für meine eigene Konfi-Arbeit. Angefangen hat das, weil mir die bestehenden Lösungen nicht weit genug gingen und nicht mehr zeitgemäß waren, gerade mit Blick auf die Teamer:innen. Die Idee dahinter ist eine moderne Konfi-Zeit: etwas, das die Jugendlichen motiviert, das ihnen Spaß macht, das die Organisation für die Leitenden einfach macht und dabei wirklich datensicher ist.</p>
-    <p class="story-p">Jede Funktion ist aus der eigenen Praxis heraus entstanden und in echten Gruppen erprobt. Das heißt für eure Gemeinde: Ihr redet mit jemandem, der eure Arbeit kennt – kurze Wege, echtes Verständnis für Kirche, und eine App, die weiterwächst, weil sie täglich selbst im Einsatz ist.</p>
-    <p class="story-sign">– Simon Luthe, Pastor in Wesselburen</p>
+   <figure class="story-photo">
+    <img src="/assets/branding/simon-luthe.webp" width="560" height="718" loading="lazy" decoding="async"
+         alt="Simon Luthe, Pastor in Wesselburen und Neuenkirchen und Entwickler von Konfi Quest, beim Radiogottesdienst in St. Jacobi">
+    <figcaption>Simon Luthe beim Radiogottesdienst in St. Jacobi, Neuenkirchen.</figcaption>
+   </figure>
+   <div class="story-text">
+    <p class="kicker" style="text-align:left">Kein Software-Konzern. Ein Pastor.</p>
+    <h2 class="story-h">Hinter Konfi Quest steht ein Gesicht</h2>
+    <p class="story-p">Ich bin <b>Simon Luthe</b>, Pastor in Wesselburen und Neuenkirchen in Dithmarschen. Konfi Quest habe ich in meiner Freizeit entwickelt – für meine eigene Konfi-Arbeit. Angefangen hat das, weil mir die bestehenden Lösungen nicht weit genug gingen und nicht mehr zeitgemäß waren, gerade mit Blick auf die Teamer:innen.</p>
+    <blockquote class="story-quote">„Digital ist ein Ort. Apps und digitale Formate sind kein Ersatz für Gemeinde, sondern eine Erweiterung – sie schaffen frische Zugänge zu Glauben und Gemeinschaft."</blockquote>
+    <p class="story-p">Nicht Konfi-Unterricht, sondern eine Konfi-Zeit, die den Jugendlichen gehört: ihr Glaube, ihr Weg, ihre Konfirmation. Die App gehört dazu und zeigt, wie <b>innovative Konfi-Arbeit</b> aussehen kann. Jede Funktion ist aus der eigenen Praxis entstanden und in echten Gruppen erprobt.</p>
+    <p class="story-p">Das heißt für eure Gemeinde: Ihr redet mit jemandem, der eure Arbeit kennt – kurze Wege, echtes Verständnis für Kirche, und eine App, die weiterwächst, weil sie täglich selbst im Einsatz ist.</p>
+    <div class="story-sign-row">
+     <div>
+      <p class="story-sign">Simon Luthe</p>
+      <p class="story-role">Pastor in Wesselburen &amp; Neuenkirchen · Entwickler von Konfi Quest</p>
+     </div>
+     <a href="https://simonluthe.de" rel="me" class="story-link" target="_blank">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+      simonluthe.de
+     </a>
+    </div>
    </div>
   </div>
  </div>
@@ -646,7 +817,7 @@ footer a:hover{color:#fff}
 
    <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
     <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Wir haben einen Fehler gefunden oder Feedback – wohin?</summary>
-    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Schreibt uns einfach an <a href="mailto:team@konfi-quest.de" style="color:var(--purple);font-weight:600">team@konfi-quest.de</a>. Wir freuen uns über jede Rückmeldung und helfen schnell weiter.</p>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Schreibt uns einfach an <a href="mailto:moin@konfi-quest.de" style="color:var(--purple);font-weight:600">moin@konfi-quest.de</a>. Wir freuen uns über jede Rückmeldung und helfen schnell weiter.</p>
    </details>
 
   </div>
@@ -696,7 +867,7 @@ footer a:hover{color:#fff}
  <div class="wrap">
   <h2 class="final-h reveal">Bereit für moderne Konfi-Arbeit?</h2>
   <p class="reveal d1">Probiert Konfi Quest mit eurem nächsten Jahrgang. Ihr werdet sehen, wie anders Konfis reagieren, wenn sich ihre Konfi-Zeit anfühlt wie etwas, das ihnen gehört.</p>
-  <a href="mailto:team@konfi-quest.de?subject=Konfi%20Quest%20f%C3%BCr%20unsere%20Gemeinde" class="btn btn-light reveal d2">Jetzt kostenlos starten</a>
+  <a href="mailto:moin@konfi-quest.de?subject=Konfi%20Quest%20f%C3%BCr%20unsere%20Gemeinde" class="btn btn-light reveal d2">Jetzt kostenlos starten</a>
  </div>
 </section>
 
@@ -705,16 +876,17 @@ footer a:hover{color:#fff}
  <div class="wrap">
   <div class="foot-grid">
    <div>
-    <div class="foot-brand"><img src="/assets/icon/logo-mark.png" alt="">Konfi&nbsp;Quest</div>
+    <div class="foot-brand"><img src="/assets/icon/logo-mark-512.png" width="30" height="30" loading="lazy" alt="">Konfi&nbsp;Quest</div>
     <p class="foot-note">Moderne Konfi-Arbeit, die bei den Jugendlichen ankommt – für Konfis, Teamer:innen und die ganze Gemeinde.</p>
    </div>
    <div><h4>Produkt</h4><a href="#problem">Warum</a><a href="#features">Funktionen</a><a href="#sicherheit">Sicherheit</a><a href="#preise">Preise</a><a href="/login">Zur App</a></div>
-   <div><h4>Kontakt</h4><p class="foot-note">Pastor Simon Luthe<br>Marktstraße 2<br>25764 Wesselburen<br><a href="mailto:team@konfi-quest.de" style="display:inline">team@konfi-quest.de</a></p></div>
+   <div><h4>Kontakt</h4><p class="foot-note">Pastor Simon Luthe<br>Marktstraße 2<br>25764 Wesselburen<br><a href="mailto:moin@konfi-quest.de" style="display:inline">moin@konfi-quest.de</a></p>
+    <p class="foot-note" style="margin-top:.7rem">Entwickelt von <a href="https://simonluthe.de" rel="me" style="display:inline">Simon Luthe</a></p></div>
    <div><h4>Rechtliches</h4><a href="/impressum">Impressum</a><a href="/datenschutz">Datenschutz</a><a href="/konto-loeschen">Konto löschen</a></div>
   </div>
   <div class="foot-bottom">
    <p>&copy; 2026 Konfi Quest</p>
-   <p class="spirit">Made with <img class="bird" src="/assets/branding/bird.png" width="14" height="14" alt="" aria-hidden="true"> in Hennstedt · Friede. Schalom. Salam.</p>
+   <p class="spirit">Made with <img class="bird" src="/assets/branding/bird-56.png" width="14" height="14" loading="lazy" alt="" aria-hidden="true"> in Hennstedt · Friede. Schalom. Salam.</p>
   </div>
  </div>
 </footer>
@@ -728,8 +900,9 @@ setInterval(()=>{wi=(wi+1)%words.length;rot.style.opacity='0';setTimeout(()=>{ro
 (function(){
   const dev=document.getElementById('heroDevice');if(!dev)return;
   const imgs=dev.querySelectorAll('.screen img');if(imgs.length<2)return;
-  // Alle Screenshots vorab in den Cache laden -> kein Flackern beim Wechsel.
-  imgs.forEach(im=>{const p=new Image();p.src=im.src;});
+  // Screenshots erst nach dem Load vorwaermen -> blockiert den ersten Seitenaufbau
+  // nicht (LCP), verhindert aber trotzdem Flackern beim Slide-Wechsel.
+  addEventListener('load',()=>{imgs.forEach(im=>{const p=new Image();p.src=im.src;});});
   let i=0;
   setInterval(()=>{
     const prev=imgs[i];
@@ -758,6 +931,325 @@ document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
 // Count-up
 const cio=new IntersectionObserver((es)=>{es.forEach(e=>{if(e.isIntersecting){const el=e.target,to=+el.dataset.count;let n=0;const t=setInterval(()=>{n++;el.textContent=n;if(n>=to)clearInterval(t);},180);cio.unobserve(el);}});},{threshold:.5});
 document.querySelectorAll('[data-count]').forEach(el=>cio.observe(el));
+</script>
+
+<!-- ===================================================================
+     Umami Event-Tracking
+     -------------------------------------------------------------------
+     Erfasst wird ausschliesslich anonymes Interaktionsverhalten:
+     welche Buttons geklickt werden, wie weit gescrollt wird, welche
+     Abschnitte gelesen werden. KEINE personenbezogenen Daten, keine
+     Cookies, keine Eingaben aus Formularen — damit bleibt die Messung
+     einwilligungsfrei und DSG-EKD-konform.
+
+     Jedes Event feuert pro Seitenaufruf nur EINMAL (Set-basierte
+     Deduplizierung), sonst produziert ein einzelner Besuch hunderte
+     Zeilen und die Auswertung wird unbrauchbar.
+     =================================================================== -->
+<script>
+(function(){
+  'use strict';
+
+  // Umami laedt async. Bis window.umami existiert, werden Events gepuffert
+  // und danach nachgereicht — sonst gehen fruehe Klicks (z.B. auf den
+  // Hero-CTA) verloren, gerade bei schnellen Nutzern auf langsamer Leitung.
+  var warteschlange = [];
+  var bereit = false;
+
+  function flush(){
+    if(!window.umami || typeof window.umami.track !== 'function') return;
+    bereit = true;
+    while(warteschlange.length){
+      var e = warteschlange.shift();
+      try { window.umami.track(e[0], e[1]); } catch(_){}
+    }
+  }
+
+  function track(name, daten){
+    if(bereit && window.umami && typeof window.umami.track === 'function'){
+      try { window.umami.track(name, daten || {}); } catch(_){}
+    } else {
+      // Puffer begrenzen, damit ein nie ladendes Umami keinen Speicher frisst
+      if(warteschlange.length < 60) warteschlange.push([name, daten || {}]);
+    }
+  }
+
+  // Auf das Laden von Umami warten (max. 15s, dann aufgeben)
+  var versuche = 0;
+  var warteTimer = setInterval(function(){
+    if(window.umami && typeof window.umami.track === 'function'){
+      clearInterval(warteTimer);
+      flush();
+    } else if(++versuche > 150){
+      clearInterval(warteTimer);
+      warteschlange.length = 0;
+    }
+  }, 100);
+
+  // Geraeteklasse einmal pro Aufruf mitschicken — erlaubt spaeter die Frage
+  // "klicken Mobilnutzer den CTA seltener?" ohne zweites Analyse-Tool.
+  function geraet(){
+    var b = innerWidth;
+    return b < 640 ? 'mobil' : (b < 1024 ? 'tablet' : 'desktop');
+  }
+
+  var einmalig = new Set();
+  function einmal(schluessel, name, daten){
+    if(einmalig.has(schluessel)) return;
+    einmalig.add(schluessel);
+    track(name, daten);
+  }
+
+  // Text eines Elements auf eine kurze, stabile Bezeichnung eindampfen.
+  // Umami-Event-Namen sind auf 50 Zeichen begrenzt, Property-Werte ebenso
+  // knapp zu halten macht die Auswertung lesbar.
+  function label(el){
+    var t = (el.getAttribute('aria-label') || el.getAttribute('title') || el.textContent || '')
+      .replace(/\s+/g,' ').trim();
+    return t.length > 60 ? t.slice(0,57) + '...' : (t || 'ohne-text');
+  }
+
+  // In welchem Seitenabschnitt sitzt das geklickte Element? Das ist die
+  // eigentlich interessante Frage: derselbe CTA-Text steht mehrfach auf
+  // der Seite, und wir wollen wissen, WELCHER davon zieht.
+  function abschnitt(el){
+    var s = el.closest('section[id], header[id], nav, footer');
+    if(!s) return 'sonstige';
+    if(s.id) return s.id;
+    var tag = s.tagName.toLowerCase();
+    return tag === 'nav' ? 'navigation' : (tag === 'footer' ? 'footer' : 'sonstige');
+  }
+
+  /* ---------- 1. Klick-Tracking -------------------------------------
+     Ein einziger delegierter Listener auf dem Dokument statt N einzelner
+     Listener: funktioniert auch fuer spaeter eingefuegte Elemente und
+     kostet nur einen Handler. */
+  document.addEventListener('click', function(ev){
+    var a = ev.target.closest('a, button');
+    if(!a) return;
+
+    var href = a.getAttribute('href') || '';
+    var basis = {
+      bereich: abschnitt(a),
+      text: label(a),
+      geraet: geraet()
+    };
+
+    // App-Store-Badges
+    if(href.indexOf('apps.apple.com') > -1){
+      track('store-klick', Object.assign(basis, { store: 'app-store' }));
+      return;
+    }
+    if(href.indexOf('play.google.com') > -1){
+      track('store-klick', Object.assign(basis, { store: 'google-play' }));
+      return;
+    }
+
+    // Mail-Kontakt — das ist die wichtigste Konversion der Seite,
+    // weil es keinen Registrierungs-Flow auf der Landingpage gibt.
+    if(href.indexOf('mailto:') === 0){
+      track('kontakt-mail', basis);
+      return;
+    }
+
+    // Weg in die App (Login/Web-App)
+    if(href === '/login' || href.indexOf('/login') === 0){
+      track('app-oeffnen', basis);
+      return;
+    }
+
+    // Rechtstexte
+    if(href === '/impressum' || href === '/datenschutz' || href === '/konto-loeschen'){
+      track('rechtstext-klick', Object.assign(basis, { ziel: href.replace('/','') }));
+      return;
+    }
+
+    // Sprungmarken innerhalb der Seite (Navigation + CTA-Buttons)
+    if(href.indexOf('#') === 0){
+      var istCta = a.classList.contains('btn') || a.classList.contains('nav-cta');
+      track(istCta ? 'cta-klick' : 'anker-klick', Object.assign(basis, { ziel: href.slice(1) }));
+      return;
+    }
+
+    // Externe Links (z.B. simonluthe.de)
+    if(/^https?:\/\//.test(href) && href.indexOf(location.hostname) === -1){
+      var ziel = 'extern';
+      try { ziel = new URL(href).hostname.replace(/^www\./,''); } catch(_){}
+      track('extern-klick', Object.assign(basis, { ziel: ziel }));
+      return;
+    }
+  }, { passive: true });
+
+  /* ---------- 2. Scroll-Tiefe ---------------------------------------
+     Gemessen wird der tiefste erreichte Punkt in Prozent der scrollbaren
+     Strecke. Jede Schwelle feuert genau einmal. Das beantwortet:
+     "Wie weit lesen die Leute ueberhaupt?" */
+  var schwellen = [25, 50, 75, 90, 100];
+  var maxTiefe = 0;
+
+  function scrollTiefe(){
+    var doc = document.documentElement;
+    var scrollbar = doc.scrollHeight - innerHeight;
+    if(scrollbar <= 0) return 100; // Seite passt komplett ins Fenster
+    return Math.min(100, Math.round((scrollY / scrollbar) * 100));
+  }
+
+  function pruefeScroll(){
+    var tiefe = scrollTiefe();
+    if(tiefe > maxTiefe) maxTiefe = tiefe;
+    for(var i = 0; i < schwellen.length; i++){
+      var s = schwellen[i];
+      if(tiefe >= s){
+        einmal('scroll-' + s, 'scroll-tiefe', { tiefe: s + '%', geraet: geraet() });
+        // Eigener Event-Name fuer die 75%-Marke, damit sich darauf ein
+        // Umami-Goal setzen laesst (Goals matchen nur den Event-Namen,
+        // nicht die Property "tiefe").
+        if(s === 75){
+          einmal('ziel-gelesen', 'seite-gelesen', { geraet: geraet() });
+        }
+      }
+    }
+  }
+
+  // Scroll-Events per requestAnimationFrame drosseln — ungedrosselt feuert
+  // das hunderte Male pro Sekunde und ruckelt auf schwachen Geraeten.
+  var scrollWartet = false;
+  addEventListener('scroll', function(){
+    if(scrollWartet) return;
+    scrollWartet = true;
+    requestAnimationFrame(function(){
+      scrollWartet = false;
+      pruefeScroll();
+    });
+  }, { passive: true });
+
+  /* ---------- 3. Sektions-Sichtbarkeit ------------------------------
+     Welche Abschnitte werden tatsaechlich angesehen? Ein Abschnitt zaehlt
+     als gesehen, wenn er insgesamt mind. 1s nennenswert im Bild stand —
+     schnelles Durchrauschen faellt damit raus.
+
+     Bewusst KEIN IntersectionObserver-Timer. Zwei Fallen, beide gemessen:
+     1. Ein fixer Prozent-Threshold (z.B. 0.35) loest fuer hohe Abschnitte
+        NIE aus: #features ist ~2100px hoch, 35% davon passen nicht in ein
+        ~900px-Fenster. Ausgerechnet die inhaltsreichsten Abschnitte waeren
+        damit unsichtbar fuer die Messung.
+     2. Der Observer feuert pro Abschnitt 5-17 mal (jede Threshold-Stufe).
+        Ein setTimeout, das bei jedem Callback geloescht und neu gesetzt
+        wird, laeuft beim Scrollen nie bis zum Ablauf durch.
+
+     Stattdessen ein einziger Ticker, der zweimal pro Sekunde nachsieht,
+     welche Abschnitte gerade im Bild stehen, und deren Sichtzeit
+     aufaddiert. Robust und unabhaengig vom Scrolltempo. */
+  var sektionen = document.querySelectorAll('section[id], header[id]');
+  if(sektionen.length){
+    var SCHWELLE_MS = 1000;  // gemessen: echtes Lese-Scrollen = ~0,8-2,1s pro Abschnitt
+    var TAKT_MS = 500;
+    var sichtzeit = new Map();
+
+    var ticker = setInterval(function(){
+      // Im Hintergrund-Tab nicht mitzaehlen — sonst sammelt eine offen
+      // liegengelassene Seite Sichtzeit fuer den zuletzt sichtbaren Abschnitt.
+      if(document.visibilityState !== 'visible') return;
+
+      var offen = 0;
+      sektionen.forEach(function(s){
+        if(einmalig.has('sektion-' + s.id)) return;
+        offen++;
+        var r = s.getBoundingClientRect();
+        var sichtbar = Math.min(r.bottom, innerHeight) - Math.max(r.top, 0);
+        if(sichtbar <= 0) return;
+        // "Fuellt der Abschnitt mind. ein Drittel des Bildschirms — oder,
+        // falls er kleiner ist als das, ist er vollstaendig zu sehen?"
+        if(sichtbar < Math.min(r.height, innerHeight * 0.33)) return;
+
+        var neu = (sichtzeit.get(s.id) || 0) + TAKT_MS;
+        sichtzeit.set(s.id, neu);
+        if(neu >= SCHWELLE_MS){
+          einmal('sektion-' + s.id, 'sektion-gesehen', { sektion: s.id, geraet: geraet() });
+          // Der Preis-Abschnitt bekommt zusaetzlich ein eigenes Event.
+          // Grund: Umami-Goals matchen ausschliesslich auf den Event-NAMEN,
+          // nicht auf Properties — ein Goal auf "sektion-gesehen" wuerde
+          // also jeden beliebigen Abschnitt zaehlen. Fuer das wichtigste
+          // Kaufsignal braucht es daher einen eigenen Namen.
+          if(s.id === 'preise'){
+            einmal('ziel-preise', 'preise-angesehen', { geraet: geraet() });
+          }
+        }
+      });
+      // Alle Abschnitte erfasst -> Ticker abschalten
+      if(offen === 0) clearInterval(ticker);
+    }, TAKT_MS);
+  }
+
+  /* ---------- 4. FAQ-Interaktion ------------------------------------
+     Welche Fragen interessieren wirklich? Nur das Oeffnen zaehlt. */
+  document.querySelectorAll('#faq details').forEach(function(d, idx){
+    d.addEventListener('toggle', function(){
+      if(!d.open) return;
+      var frage = d.querySelector('summary');
+      einmal('faq-' + idx, 'faq-geoeffnet', {
+        frage: frage ? label(frage) : ('frage-' + (idx + 1)),
+        geraet: geraet()
+      });
+    });
+  });
+
+  /* ---------- 5. Verweildauer + Ausstiegstiefe ----------------------
+     Beim Verlassen einmal buendeln: wie lange war der Besuch aktiv und
+     wie weit ist er gekommen. In Stufen statt Sekundenwerten, damit die
+     Auswertung gruppierbar bleibt.
+
+     Gemessen wird AKTIVE Zeit: Phasen im Hintergrund-Tab zaehlen nicht mit.
+     Sonst meldet eine seit dem Fruehstueck offene Seite "ueber 10 Minuten"
+     und die Kennzahl wird wertlos.
+
+     visibilitychange statt unload: unload wird auf iOS/Safari haeufig nicht
+     mehr ausgeloest, visibilitychange dagegen zuverlaessig. */
+  var aktivSeit = Date.now();
+  var aktivSumme = 0;
+  var abgeschickt = false;
+
+  function dauerStufe(sek){
+    if(sek < 10) return '0-10s';
+    if(sek < 30) return '10-30s';
+    if(sek < 60) return '30-60s';
+    if(sek < 180) return '1-3min';
+    if(sek < 600) return '3-10min';
+    return 'ueber-10min';
+  }
+
+  function aktiveSekunden(){
+    var summe = aktivSumme;
+    if(aktivSeit) summe += Date.now() - aktivSeit;
+    return Math.round(summe / 1000);
+  }
+
+  function besuchsEnde(){
+    if(abgeschickt) return;
+    abgeschickt = true;
+    track('besuch-ende', {
+      dauer: dauerStufe(aktiveSekunden()),
+      tiefe: maxTiefe + '%',
+      geraet: geraet()
+    });
+  }
+
+  addEventListener('visibilitychange', function(){
+    if(document.visibilityState === 'hidden'){
+      // Zeit bis hierher sichern und Uhr anhalten
+      if(aktivSeit){ aktivSumme += Date.now() - aktivSeit; aktivSeit = 0; }
+      besuchsEnde();
+    } else {
+      // Rueckkehr in den Tab: Uhr wieder starten
+      if(!aktivSeit) aktivSeit = Date.now();
+    }
+  });
+  addEventListener('pagehide', besuchsEnde);
+
+  // Startwerte direkt setzen (Seite kann bereits gescrollt geladen werden,
+  // etwa bei einem Deep-Link auf #preise)
+  pruefeScroll();
+})();
 </script>
 </body>
 </html>
