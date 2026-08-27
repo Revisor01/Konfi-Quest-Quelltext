@@ -11,6 +11,7 @@ const { deleteKonfiCascade } = require('../utils/konfiDeletion');
 const { checkKonfiLimit } = require('../utils/konfiLimit');
 const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
+const { invalidateUserCache } = require('../middleware/rbac');
 const router = express.Router();
 
 // Eigener Rate-Limiter für Passwort-Reset (getrennt vom Login-Limiter)
@@ -42,6 +43,55 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
 
   // SHA-256 Hash für DB-Speicherung (konsistent mit Phase 66)
   const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+
+  // Frisches Token-Paar für einen User erzeugen. Wird nach dem Passwortwechsel
+  // gebraucht: dort werden alle Sitzungen invalidiert, und ohne neues Paar
+  // wuerde der eigene Client sofort mitfliegen.
+  // Gibt null zurück, wenn der User nicht (mehr) ladbar ist — der Aufrufer
+  // antwortet dann ohne Token, der Wechsel selbst bleibt gueltig.
+  const erstelleTokenPaarFuerUser = async (dbConn, userId) => {
+    try {
+      const { rows: [u] } = await dbConn.query(
+        `SELECT u.id, u.display_name, u.email, u.organization_id, u.is_super_admin,
+                r.name AS role_name
+         FROM users u JOIN roles r ON u.role_id = r.id
+         WHERE u.id = $1`,
+        [userId]
+      );
+      if (!u) return null;
+
+      const userType = u.role_name === 'konfi' ? 'konfi'
+        : u.role_name === 'teamer' ? 'teamer' : 'admin';
+
+      // iat bewusst eine Sekunde in die Zukunft: Die Soft-Revoke-Prüfung in
+      // rbac.js arbeitet auf Sekunden (iat < token_invalidated_at). Ein in
+      // derselben Sekunde wie die Invalidierung ausgestelltes Token laege sonst
+      // auf der Kippe und könnte sich selbst aussperren.
+      const iatVordatiert = Math.floor(Date.now() / 1000) + 1;
+
+      const accessToken = jwt.sign({
+        id: u.id,
+        type: userType,
+        display_name: u.display_name,
+        email: u.email,
+        organization_id: u.organization_id,
+        role_name: u.role_name,
+        is_super_admin: u.is_super_admin || false,
+        iat: iatVordatiert
+      }, JWT_SECRET, { expiresIn: '15m' });
+
+      const refreshToken = generateRefreshToken();
+      await dbConn.query(
+        'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
+        [u.id, hashToken(refreshToken), new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)]
+      );
+
+      return { token: accessToken, refresh_token: refreshToken };
+    } catch (err) {
+      console.error('Token-Neuausstellung nach Passwortwechsel fehlgeschlagen:', err);
+      return null;
+    }
+  };
 
   // ===== UNIFIED LOGIN ENDPOINTS =====
 
@@ -98,7 +148,7 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
     // Eingabe daher case-insensitiv machen: trim + lowercase, sonst scheitert
     // der Login wenn jemand z.B. "Anna.Schmidt" statt "anna.schmidt" tippt
     // (iOS schreibt das erste Zeichen automatisch gross). Der Username wird NICHT
-    // mehr veraendert gespeichert -> Login case-insensitiv per LOWER-Vergleich.
+    // mehr verändert gespeichert -> Login case-insensitiv per LOWER-Vergleich.
     const username = (req.body.username || '').trim();
     const { password } = req.body;
  console.warn(`Login-Versuch: ${username}`);
@@ -198,7 +248,23 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         responseUser.gottesdienst_points = user.gottesdienst_points || 0;
         responseUser.gemeinde_points = user.gemeinde_points || 0;
       }
-      
+
+      // Bewusst nur hier und in GET /auth/me: `org_admin` und `super_admin`
+      // sehen ohnehin alle Jahrgaenge, `konfi` und `teamer` brauchen es nicht.
+      // Die Login-Route laeuft ohne rbacVerifier, deshalb die eigene Abfrage —
+      // in /auth/me wird stattdessen durchgereicht, was rbacVerifier ohnehin
+      // geladen hat.
+      if (user.role_name === 'admin') {
+        const { rows: zuweisungen } = await db.query(
+          `SELECT j.id, j.name, uja.can_view, uja.can_edit
+           FROM user_jahrgang_assignments uja
+           JOIN jahrgaenge j ON uja.jahrgang_id = j.id
+           WHERE uja.user_id = $1 AND j.organization_id = $2`,
+          [user.id, user.organization_id]
+        );
+        responseUser.assigned_jahrgaenge = zuweisungen;
+      }
+
       res.json({ token, refresh_token: refreshToken, user: responseUser });
 
     } catch (err) {
@@ -234,10 +300,37 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       }
       
       const hashedPassword = await bcrypt.hash(newPassword, 10);
-      
-      await db.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [hashedPassword, userId]);
-      
-      res.json({ message: 'Passwort erfolgreich geändert' });
+
+      // Alle anderen Sitzungen beenden. Vorher
+      // blieben bestehende Access- und Refresh-Tokens nach einem Passwort-
+      // wechsel weiter gueltig — bis zu 90 Tage. Wer sein Passwort ändert,
+      // weil jemand Zugriff hat, sperrte den Fremdzugriff damit NICHT aus.
+      //
+      // Die Prüfung in rbac.js vergleicht token_invalidated_at gegen den
+      // JWT-Claim iat, der nur SEKUNDEN-Aufloesung hat (iat < invalidatedAt).
+      // Deshalb wird hier exakt auf NOW() invalidiert und das neue Token unten
+      // um eine Sekunde VORdatiert. Zurueckdatieren wäre falsch herum: dann
+      // ueberleben Tokens aus derselben und der vorherigen Sekunde.
+      await db.query(
+        `UPDATE users SET password_hash = $1, token_invalidated_at = NOW() WHERE id = $2`,
+        [hashedPassword, userId]
+      );
+      await db.query(
+        'UPDATE refresh_tokens SET revoked_at = NOW(), expires_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL',
+        [userId]
+      );
+      invalidateUserCache(userId);
+
+      // Frisches Token-Paar für die AKTUELLE Sitzung: Ohne das wuerde der
+      // eigene Client beim nächsten Request am gerade gesetzten
+      // token_invalidated_at scheitern und der Passwortwechsel wuerde sich
+      // wie ein unerwarteter Rauswurf anfuehlen.
+      const neuesPaar = await erstelleTokenPaarFuerUser(db, userId);
+
+      res.json({
+        message: 'Passwort erfolgreich geändert',
+        ...(neuesPaar || {})
+      });
 
     } catch (err) {
  console.error('Database error in POST /api/auth/change-password:', err);
@@ -267,6 +360,30 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         return res.status(400).json({ error: 'Aktuelles Passwort ist falsch' });
       }
 
+      // Der letzte Org-Admin darf sich nicht selbst entfernen — sonst bleibt
+      // die Organisation ohne jede Verwaltung zurueck und laesst sich nur noch
+      // per Datenbankeingriff retten. DELETE /users/:id kannte diesen Schutz
+      // laengst (users.js), die Selbstloeschung nicht.
+      const { rows: [eigeneRolle] } = await db.query(
+        `SELECT r.name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = $1`,
+        [userId]
+      );
+      if (eigeneRolle?.name === 'org_admin') {
+        const { rows: [andere] } = await db.query(
+          `SELECT COUNT(*)::int AS anzahl
+             FROM users u JOIN roles r ON u.role_id = r.id
+            WHERE r.name = 'org_admin' AND u.organization_id = $1
+              AND u.id != $2 AND u.deleted_at IS NULL`,
+          [user.organization_id, userId]
+        );
+        if ((andere?.anzahl ?? 0) === 0) {
+          return res.status(409).json({
+            error: 'Du bist die letzte Person mit Verwaltungsrechten in dieser Gemeinde. '
+                 + 'Bitte gib die Rechte zuerst an jemanden weiter, dann kannst du dein Konto löschen.'
+          });
+        }
+      }
+
       // Gesamte Kaskade in einer Transaktion (T-114-06): alles oder nichts.
       const client = await db.getClient();
       try {
@@ -281,6 +398,12 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       }
 
       res.json({ message: 'Account erfolgreich gelöscht' });
+
+      // Admin-Liste aktualisieren und den Socket des geloeschten Kontos trennen —
+      // sonst empfing er weiter Org-Updates und die Liste blieb stehen
+      // 
+      liveUpdate.sendToOrgAdmins(req.user.organization_id, 'konfis', 'delete', { userId });
+      liveUpdate.disconnectUserSockets(userId);
 
     } catch (err) {
  console.error('Database error in POST /api/auth/delete-account:', err);
@@ -363,7 +486,10 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         return res.status(404).json({ error: 'Benutzer nicht gefunden' });
       }
 
-      res.json(user);
+      // Eigene Jahrgangs-Zuweisungen mitliefern. KEINE zusaetzliche Abfrage:
+      // rbacVerifier laedt sie ohnehin bei jedem Request (rbac.js:183-193),
+      // hier werden sie nur durchgereicht.
+      res.json({ ...user, assigned_jahrgaenge: req.user.assigned_jahrgaenge || [] });
 
     } catch (err) {
  console.error('Database error in GET /api/auth/me:', err);
@@ -384,7 +510,7 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       // Sonst fehlt beim ersten Login die aktive Primaer-Org in der Switcher-Liste
       // -> der Button findet currentOrg nicht und zeigt keinen Namen. Pro Org EIN
       // Eintrag (DISTINCT ON); bei Doppelung gewinnt die Rolle aus dem Mapping
-      // nicht zwingend — fuer die Primaer-Org ist die users.role_id maßgeblich,
+      // nicht zwingend — für die Primaer-Org ist die users.role_id maßgeblich,
       // daher Primaer-Zeile zuerst (is_primary DESC).
       const { rows } = await db.query(`
         SELECT DISTINCT ON (m.id)
@@ -499,16 +625,24 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         const token = generateResetToken();
         const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
 
+        // Nur den HASH speichern. Der Klartext-Token lag
+        // bisher in der DB — wer sie lesen kann (Backup, Dump, SQL-Injection),
+        // konnte damit fremde Passwoerter zuruecksetzen. Refresh-Tokens werden
+        // hier laengst gehasht abgelegt; Reset-Tokens ziehen nach.
         await db.query('INSERT INTO password_resets (user_id, user_type, token, expires_at) VALUES ($1, $2, $3, $4)',
-          [user.id, userType, token, expiresAt]);
+          [user.id, userType, hashToken(token), expiresAt]);
 
         const resetUrl = `https://konfi-quest.de/reset-password?token=${token}`;
 
         try {
           await emailService.sendPasswordResetEmail(email, user.name, token, resetUrl);
         } catch (emailError) {
+          // BEWUSST kein 500 nach aussen: Die Antwort unten
+          // ist absichtlich neutral formuliert, damit sie nicht verraet, ob es
+          // ein Konto gibt. Ein Fehlerstatus genau dann, wenn ein Konto
+          // existiert, hätte dieselbe Auskunft über die Hintertuer gegeben —
+          // 200 = unbekannte Adresse, 500 = Adresse vorhanden.
           console.error('E-Mail-Versand fehlgeschlagen:', emailError);
-          return res.status(500).json({ error: 'Fehler beim Senden der E-Mail. Bitte versuche es später erneut.' });
         }
       }
 
@@ -672,7 +806,7 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
     }
 
     try {
-      // case-insensitiv pruefen (LOWER), damit "Anna"/"anna" nicht doppelt geht.
+      // case-insensitiv prüfen (LOWER), damit "Anna"/"anna" nicht doppelt geht.
       const { rows } = await db.query('SELECT id FROM users WHERE LOWER(username) = LOWER($1)', [trimmed]);
 
       if (rows.length > 0) {
@@ -765,7 +899,7 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       }
 
       // Check if username already exists (case-insensitiv, damit nicht "Anna" und
-      // "anna" parallel existieren koennen).
+      // "anna" parallel existieren können).
       const { rows: existingUsers } = await db.query(
         'SELECT id FROM users WHERE LOWER(username) = LOWER($1)',
         [username]
@@ -793,8 +927,8 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       try {
         await client.query('BEGIN');
 
-        // Konfi-Limit-Pruefung (Weg 2, D-08b): NUR Hard-Block ablehnen. Grace und
-        // under_limit laufen unveraendert durch — der sich selbst anmeldende Konfi
+        // Konfi-Limit-Prüfung (Weg 2, D-08b): NUR Hard-Block ablehnen. Grace und
+        // under_limit laufen unverändert durch — der sich selbst anmeldende Konfi
         // kann keinen "Trotzdem anlegen"-Dialog der Leitung bestaetigen (kein 409,
         // kein confirm). max_konfis NULL -> under_limit -> kein Block.
         const { stufe } = await checkKonfiLimit(client, invite.organization_id);
@@ -917,9 +1051,18 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
     if (newPasswordError) return res.status(400).json({ error: newPasswordError });
     
     try {
+      // Ausschliesslich gegen den HASH vergleichen. Ein zusaetzlicher
+      // Klartext-Zweig (token IN (hash, klartext)) wäre naheliegend für die
+      // Uebergangszeit, hebt den Schutz aber auf: Der gespeicherte Hash ist
+      // selbst ein gueltiger Klartext-Wert und wuerde damit als Token
+      // funktionieren — wer die DB lesen kann, könnte ihn direkt einsetzen.
+      // Genau das hat der Test aufgedeckt. Alt-Eintraege aus der Zeit vor der
+      // Umstellung werden stattdessen bei der Migration gehasht.
       const { rows: [resetRecord] } = await db.query(
-        'SELECT id, user_id, token, expires_at, used_at, created_at FROM password_resets WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()',
-        [token]
+        `SELECT id, user_id, token, expires_at, used_at, created_at
+         FROM password_resets
+         WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()`,
+        [hashToken(token)]
       );
 
       if (!resetRecord) {
@@ -927,10 +1070,22 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       }
       
       const hashedPassword = await bcrypt.hash(newPassword, 10);
-      
-      await db.query(`UPDATE users SET password_hash = $1 WHERE id = $2`, [hashedPassword, resetRecord.user_id]);
+
+      // Wie bei change-password alle bestehenden Sitzungen beenden (LÜCKE N2).
+      // Hier wiegt es schwerer: Ein Reset erfolgt typischerweise, WEIL der
+      // Zugang nicht mehr sicher ist. Hier wird KEIN neues Token ausgestellt —
+      // nach einem Reset meldet man sich regulaer neu an.
+      await db.query(
+        `UPDATE users SET password_hash = $1, token_invalidated_at = NOW() WHERE id = $2`,
+        [hashedPassword, resetRecord.user_id]
+      );
+      await db.query(
+        'UPDATE refresh_tokens SET revoked_at = NOW(), expires_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL',
+        [resetRecord.user_id]
+      );
       await db.query('UPDATE password_resets SET used_at = NOW() WHERE id = $1', [resetRecord.id]);
-      
+      invalidateUserCache(resetRecord.user_id);
+
       res.json({ message: 'Passwort erfolgreich zurückgesetzt' });
 
     } catch (err) {
@@ -983,7 +1138,7 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         if (!recent) {
           return res.status(401).json({ error: 'Ungültiger oder abgelaufener Refresh-Token' });
         }
-        // Im Grace-Fenster: weiter wie mit einem gueltigen Token (kein erneutes Revoke noetig)
+        // Im Grace-Fenster: weiter wie mit einem gueltigen Token (kein erneutes Revoke nötig)
         return await issueRefreshedTokens(db, res, recent.user_id, activeOrgId);
       }
 
@@ -997,10 +1152,10 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
     }
   });
 
-  // Helper: laedt User (inkl. Org-Status), prueft die Zugriffs-Sperre und stellt
+  // Helper: laedt User (inkl. Org-Status), prüft die Zugriffs-Sperre und stellt
   // ein neues Token-Paar aus. Genutzt vom normalen Refresh UND vom Grace-Window.
   // activeOrgId (optional): aktive Multi-Org, kommt beim Refresh aus dem Header
-  // X-Active-Organization. Sie wird (nach Mitgliedschafts-Pruefung) als Claim ins
+  // X-Active-Organization. Sie wird (nach Mitgliedschafts-Prüfung) als Claim ins
   // neue Access-Token geschrieben, damit der Org-Kontext den Refresh ueberlebt.
   async function issueRefreshedTokens(db, res, userId, activeOrgId = null) {
     const { rows: [user] } = await db.query(`
@@ -1071,9 +1226,33 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
     return res.json({ token: newAccessToken, refresh_token: newRefreshToken });
   }
 
-  // POST /api/auth/logout — Revokiert das aktive Refresh Token
+  // POST /api/auth/logout — Revokiert das aktive Refresh Token und entfernt
+  // den Push-Token dieses Geraets.
   router.post('/logout', rbacVerifier, async (req, res) => {
-    const { refresh_token } = req.body;
+    const { refresh_token, device_id, platform } = req.body;
+
+    // Push-Token dieses Geraets löschen.
+    //
+    // Der Client ruft dafuer zwar schon DELETE /notifications/device-token,
+    // aber best-effort: mit 4s-Timeout, nur wenn networkMonitor online meldet
+    // und nur wenn die Geraete-ID ermittelbar war. Schlaegt einer dieser
+    // Punkte fehl, bleibt der Token registriert und das Geraet bekommt
+    // weiter Push-Nachrichten für das abgemeldete Konto — bis zum nächsten
+    // Login auf demselben Geraet, der ihn umhaengt. Genau das wurde von einer
+    // Teamer:in auf iOS berichtet.
+    //
+    // Hier läuft es in DERSELBEN Anfrage, die ohnehin gesendet wird. Kein
+    // Zusatz-Roundtrip, und ein Fehler darf den Logout nie aufhalten.
+    if (device_id && platform) {
+      try {
+        await db.query(
+          'DELETE FROM push_tokens WHERE user_id = $1 AND device_id = $2 AND platform = $3',
+          [req.user.id, device_id, platform]
+        );
+      } catch (err) {
+        console.error('Push-Token-Cleanup beim Logout fehlgeschlagen:', err.message);
+      }
+    }
 
     // Best-effort: Logout geht immer durch, auch ohne Token
     if (!refresh_token) {
@@ -1083,8 +1262,8 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
     try {
       const hash = hashToken(refresh_token);
       // Beim Logout zusaetzlich expires_at auf jetzt setzen, damit das Token NICHT
-      // ins Refresh-Grace-Window faellt (das verlangt expires_at > NOW()). Sonst
-      // koennte ein gerade ausgeloggter User binnen 30s noch ein Token bekommen.
+      // ins Refresh-Grace-Window fällt (das verlangt expires_at > NOW()). Sonst
+      // könnte ein gerade ausgeloggter User binnen 30s noch ein Token bekommen.
       await db.query(
         'UPDATE refresh_tokens SET revoked_at = NOW(), expires_at = NOW() WHERE token_hash = $1 AND revoked_at IS NULL',
         [hash]
@@ -1097,7 +1276,7 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
     }
   });
 
-  // Abgelaufene + revoked Refresh-Tokens alle 24h aufraeumen
+  // Abgelaufene + revoked Refresh-Tokens alle 24h aufräumen
   setInterval(async () => {
     try {
       const { rowCount } = await db.query(

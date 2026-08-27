@@ -1,4 +1,4 @@
-// Mock fuer @capacitor/preferences — In-Memory-Store fuer Tests
+// Mock für @capacitor/preferences — In-Memory-Store für Tests
 const store = new Map<string, string>();
 
 export const clearMockStore = () => {

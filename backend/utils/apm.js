@@ -1,13 +1,13 @@
 // apm.js — Leichtgewichtiges Application Performance Monitoring (in-memory).
 //
-// Sammelt pro Route-Schluessel (Methode + normalisierter Pfad) Anzahl, Fehlerrate
+// Sammelt pro Route-Schlüssel (Methode + normalisierter Pfad) Anzahl, Fehlerrate
 // und Antwortzeiten. Bewusst ohne externe Abhaengigkeit/DB: ein rollierendes
-// Fenster der letzten N Dauer-Werte pro Route fuer eine p95-Naeherung. Reicht, um
+// Fenster der letzten N Dauer-Werte pro Route für eine p95-Naeherung. Reicht, um
 // im Livebetrieb langsame/fehlerhafte Endpunkte zu erkennen, ohne Overhead.
 //
-// Zusaetzlich: Gauge fuer parallele (in-flight) Requests, ein rollierendes Log der
+// Zusaetzlich: Gauge für parallele (in-flight) Requests, ein rollierendes Log der
 // letzten Fehler und ein 1-Sekunden-Bucket-Verlauf (Requests/Fehler pro Sekunde)
-// fuer die letzten ~30 Minuten. Persistenz (Verlauf ueber Deploys hinweg) macht
+// für die letzten ~30 Minuten. Persistenz (Verlauf über Deploys hinweg) macht
 // der BackgroundService via snapshot() -> apm_snapshots-Tabelle.
 
 const SLOW_MS = 1000;          // Schwelle fuer "langsamer Request" (Log-Warnung)
@@ -26,7 +26,7 @@ let maxInFlight = 0;
 // Rollierendes Fehler-Log (neueste zuletzt).
 const recentErrors = [];
 
-// Sekunden-Buckets fuer den Live-Verlauf: Map<epochSec, { requests, errors, sumMs }>
+// Sekunden-Buckets für den Live-Verlauf: Map<epochSec, { requests, errors, sumMs }>
 const buckets = new Map();
 
 // Normalisiert den Pfad, damit IDs nicht zu tausenden Einzel-Routen explodieren:
@@ -60,7 +60,7 @@ function record(method, normPath, statusCode, durationMs, rawUrl) {
   s.samples.push(durationMs);
   if (s.samples.length > MAX_SAMPLES) s.samples.shift();
 
-  // Sekunden-Bucket fuer den Verlauf
+  // Sekunden-Bucket für den Verlauf
   const nowSec = Math.floor(Date.now() / 1000);
   let b = buckets.get(nowSec);
   if (!b) { b = { requests: 0, errors: 0, sumMs: 0 }; buckets.set(nowSec, b); }
@@ -88,7 +88,7 @@ function percentile(sortedAsc, p) {
   return sortedAsc[idx];
 }
 
-// Infrastruktur-Endpoints, die NICHT in die Nutzungsstatistik gehoeren:
+// Infrastruktur-Endpoints, die NICHT in die Nutzungsstatistik gehören:
 // - /api/health: Docker- + Traefik-Loadbalancer-Healthchecks (bei 2 Replicas ~30/min,
 //   sinnvoll fuers Zero-Downtime-Routing, aber keine echten Nutzeranfragen).
 // - /api/status: Uptime-Kuma/Readiness-Polling.
@@ -96,8 +96,8 @@ function percentile(sortedAsc, p) {
 //   in die eigene Statistik schreiben.
 const IGNORED_PATHS = /^\/api\/(health|status|metrics)\b/;
 
-// Express-Middleware: misst jede Request-Dauer, zaehlt parallele Requests,
-// loggt langsame Requests. Infrastruktur-Pings (s.o.) werden uebersprungen.
+// Express-Middleware: misst jede Request-Dauer, zählt parallele Requests,
+// loggt langsame Requests. Infrastruktur-Pings (s.o.) werden übersprungen.
 function apmMiddleware(req, res, next) {
   if (IGNORED_PATHS.test((req.originalUrl || req.url || '').split('?')[0])) {
     return next();
@@ -164,7 +164,7 @@ function timeline(minutes = 30) {
     }));
 }
 
-// Requests pro Sekunde (Durchschnitt) ueber das letzte `windowSec`-Fenster.
+// Requests pro Sekunde (Durchschnitt) über das letzte `windowSec`-Fenster.
 function currentRps(windowSec = 10) {
   const nowSec = Math.floor(Date.now() / 1000);
   let sum = 0;
@@ -203,7 +203,7 @@ function snapshot() {
 }
 
 // Mergt mehrere Replica-Snapshots zu EINEM Gesamtbild + Lastverteilung pro Replica.
-// Counts/Errors/inFlight werden summiert, p95/avg/max pro Route ueber die Replicas
+// Counts/Errors/inFlight werden summiert, p95/avg/max pro Route über die Replicas
 // zusammengefasst (max p95, gewichteter avg), Timelines pro Minute addiert.
 function mergeSnapshots(snaps) {
   const valid = snaps.filter(Boolean);
@@ -212,7 +212,7 @@ function mergeSnapshots(snaps) {
     return { ...valid[0], replicas: [{ replica: valid[0].replica, requests: valid[0].totalRequests, inFlight: valid[0].inFlight, share: 1 }] };
   }
 
-  // Routen ueber Replicas zusammenfassen (Key = route).
+  // Routen über Replicas zusammenfassen (Key = route).
   const routeMap = new Map();
   const addRoutes = (rows) => {
     for (const r of rows) {
@@ -276,7 +276,7 @@ function mergeSnapshots(snaps) {
   };
 }
 
-// Kompaktes Objekt fuer die persistente Historie (apm_snapshots-Tabelle).
+// Kompaktes Objekt für die persistente Historie (apm_snapshots-Tabelle).
 function persistSummary() {
   const routes = routeRows();
   let totalCount = 0;

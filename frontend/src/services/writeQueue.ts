@@ -33,11 +33,182 @@ export interface FlushResult {
   failed: FailedQueueItem[];
 }
 
+// --- Endgueltig fehlgeschlagene Items melden ---
+type FailedListener = (item: FailedQueueItem) => void;
+const failedListeners = new Set<FailedListener>();
+
+export function onItemFailed(listener: FailedListener): () => void {
+  failedListeners.add(listener);
+  return () => { failedListeners.delete(listener); };
+}
+
+function notifyFailed(item: FailedQueueItem): void {
+  failedListeners.forEach((l) => {
+    try { l(item); } catch { /* ein kaputter Melder darf den Flush nicht stoppen */ }
+  });
+}
+
 // --- Persistenz-Layer ---
 
 const QUEUE_KEY = 'queue:items';
+const FAILED_CHAT_KEY = 'queue:failedChat';
+const FAILED_CHAT_MAX = 50;
+const FAILED_ACTIONS_KEY = 'queue:failedActions';
+const FAILED_ACTIONS_MAX = 50;
 let _items: QueueItem[] | null = null; // In-Memory-Cache, lazy geladen
 let _flushing = false;
+// Zaehlt clear()-Aufrufe. Ein laufender flush() vergleicht dagegen: Wurde die
+// Queue zwischenzeitlich geleert (Org-Wechsel/Logout), darf er seinen alten
+// Arbeitsstand NICHT zurueckschreiben — sonst stehen geleerte Items wieder auf.
+let _generation = 0;
+
+// Merker für endgueltig fehlgeschlagene Chat-Nachrichten. Gibt die Queue ein
+// Chat-Item nach maxRetries (oder bei 4xx) auf, waere die Nachricht ohne
+// geoeffneten Chat spurlos weg: kein Queue-Item mehr, kein Toast (bewusst,
+// siehe handleFlushResult), keine Bubble. Der Merker haelt Inhalt und client_id
+// fest, damit der Chat sie beim naechsten Oeffnen als fehlgeschlagene Bubble
+// mit Retry-Knopf wieder anzeigen kann.
+export interface FailedChatMessage {
+  clientId: string;
+  roomId?: number;
+  content: string;
+  fileName?: string;
+  fileType?: string;
+  localFilePath?: string;
+  createdAt: number;
+  failedAt: number;
+  error: { status: number; message: string };
+}
+
+let _failedChat: FailedChatMessage[] | null = null;
+
+// Bis dahin gab es fuer sie nur `showFailedToast` — vier Sekunden, und weg.
+// Laeuft der Flush im Hintergrund (Reconnect, App-Start) oder startet die App
+// zwischendurch neu, sieht die Meldung niemand: Eine offline abgegebene
+// Abmeldung konnte verpuffen, waehrend die App "wird gesendet" bestaetigt
+// hatte. Chat-Nachrichten hatten diesen Schutz laengst (siehe oben) — hier
+// bekommt ihn der Rest, nach demselben Muster.
+//
+// Der Toast bleibt: Er ist der schnelle Hinweis, wenn jemand gerade hinsieht.
+// Der Merker ist das Gedaechtnis fuer alle anderen Faelle.
+export interface FailedAction {
+  id: string;
+  label: string;
+  type: string;
+  createdAt: number;
+  failedAt: number;
+  error: { status: number; message: string };
+}
+
+let _failedActions: FailedAction[] | null = null;
+
+async function _loadFailedActions(): Promise<FailedAction[]> {
+  if (_failedActions !== null) return _failedActions;
+  try {
+    const result = await Preferences.get({ key: FAILED_ACTIONS_KEY });
+    _failedActions = result.value ? (JSON.parse(result.value) as FailedAction[]) : [];
+  } catch {
+    await Preferences.remove({ key: FAILED_ACTIONS_KEY });
+    _failedActions = [];
+  }
+  return _failedActions;
+}
+
+async function _saveFailedActions(list: FailedAction[]): Promise<void> {
+  _failedActions = list;
+  await Preferences.set({ key: FAILED_ACTIONS_KEY, value: JSON.stringify(list) });
+}
+
+async function rememberFailedAction(
+  item: QueueItem,
+  error: { status: number; message: string }
+): Promise<void> {
+  const list = await _loadFailedActions();
+  const ohneAlten = list.filter(f => f.id !== item.id);
+  ohneAlten.push({
+    id: item.id,
+    label: item.metadata.label || 'Aktion',
+    type: item.metadata.type,
+    createdAt: item.createdAt,
+    failedAt: Date.now(),
+    error,
+  });
+  while (ohneAlten.length > FAILED_ACTIONS_MAX) ohneAlten.shift();
+  await _saveFailedActions(ohneAlten);
+}
+
+/** Alle gemerkten Fehlschlaege, neueste zuletzt. */
+async function getFailedActions(): Promise<FailedAction[]> {
+  return [...(await _loadFailedActions())];
+}
+
+/** Einen gemerkten Fehlschlag verwerfen (z.B. nachdem jemand ihn gesehen hat). */
+async function forgetFailedAction(id: string): Promise<void> {
+  const list = await _loadFailedActions();
+  if (!list.some(f => f.id === id)) return;
+  await _saveFailedActions(list.filter(f => f.id !== id));
+}
+
+/** Alle gemerkten Fehlschlaege verwerfen. */
+async function forgetAllFailedActions(): Promise<void> {
+  await _saveFailedActions([]);
+}
+
+async function _loadFailedChat(): Promise<FailedChatMessage[]> {
+  if (_failedChat !== null) return _failedChat;
+  try {
+    const result = await Preferences.get({ key: FAILED_CHAT_KEY });
+    _failedChat = result.value ? (JSON.parse(result.value) as FailedChatMessage[]) : [];
+  } catch {
+    await Preferences.remove({ key: FAILED_CHAT_KEY });
+    _failedChat = [];
+  }
+  return _failedChat;
+}
+
+async function _saveFailedChat(list: FailedChatMessage[]): Promise<void> {
+  _failedChat = list;
+  await Preferences.set({ key: FAILED_CHAT_KEY, value: JSON.stringify(list) });
+}
+
+async function rememberFailedChat(item: QueueItem, error: { status: number; message: string }): Promise<void> {
+  if (item.metadata.type !== 'chat') return;
+  const list = await _loadFailedChat();
+  const ohneAlten = list.filter(f => f.clientId !== item.metadata.clientId);
+  ohneAlten.push({
+    clientId: item.metadata.clientId,
+    roomId: item.metadata.roomId,
+    content: item.body?.content || '',
+    fileName: item.body?._fileName,
+    fileType: item.body?._fileType,
+    localFilePath: item.body?._localFilePath,
+    createdAt: item.createdAt,
+    failedAt: Date.now(),
+    error,
+  });
+  while (ohneAlten.length > FAILED_CHAT_MAX) ohneAlten.shift();
+  await _saveFailedChat(ohneAlten);
+}
+
+async function forgetFailedChat(clientId?: string | null): Promise<void> {
+  if (!clientId) return;
+  const list = await _loadFailedChat();
+  if (!list.some(f => f.clientId === clientId)) return;
+  await _saveFailedChat(list.filter(f => f.clientId !== clientId));
+}
+
+async function forgetFailedChatMany(clientIds: Array<string | undefined | null>): Promise<void> {
+  const ids = new Set(clientIds.filter((id): id is string => !!id));
+  if (ids.size === 0) return;
+  const list = await _loadFailedChat();
+  const rest = list.filter(f => !ids.has(f.clientId));
+  if (rest.length !== list.length) await _saveFailedChat(rest);
+}
+
+async function getFailedChat(roomId?: number): Promise<FailedChatMessage[]> {
+  const list = await _loadFailedChat();
+  return roomId ? list.filter(f => f.roomId === roomId) : [...list];
+}
 
 async function _load(): Promise<QueueItem[]> {
   if (_items !== null) return _items;
@@ -50,8 +221,14 @@ async function _load(): Promise<QueueItem[]> {
     _items = JSON.parse(result.value) as QueueItem[];
     return _items;
   } catch {
-    // Korruptes JSON — zurücksetzen
-    await Preferences.remove({ key: QUEUE_KEY });
+    // Korruptes JSON — zuruecksetzen. Das Aufraeumen darf selbst nicht werfen:
+    // Beim Beenden (und in Tests nach dem Abbau der Speicher-Simulation) ist
+    // der Speicher schon weg, und ein Fehler hier riss den ganzen Lauf mit.
+    try {
+      await Preferences.remove({ key: QUEUE_KEY });
+    } catch {
+      // Speicher nicht mehr verfuegbar — die Warteschlange ist ohnehin leer.
+    }
     _items = [];
     return _items;
   }
@@ -92,7 +269,10 @@ async function showFailedToast(label: string): Promise<void> {
   }
 }
 
-function handleFlushResult(result: FlushResult): void {
+// Wird von flush() abgewartet: Der Merker muss geschrieben sein, bevor der
+// Aufrufer weiterarbeitet -- sonst sieht ein direkt folgender Lesezugriff
+// (oder ein App-Wechsel im selben Moment) ihn noch nicht.
+async function handleFlushResult(result: FlushResult): Promise<void> {
   for (const item of result.failed) {
     // 'fire-and-forget' sind stille Hintergrund-Cleanups (z.B. Push-Token beim
     // Logout entfernen). Sie scheitern nach dem Logout zwangslaeufig (kein
@@ -107,6 +287,7 @@ function handleFlushResult(result: FlushResult): void {
     if (item.metadata.type === 'chat') continue;
     const label = item.metadata.label || 'Aktion';
     showFailedToast(label);
+    await rememberFailedAction(item, item.error);
   }
 }
 
@@ -162,11 +343,11 @@ async function resolveLocalPhoto(body: any): Promise<void> {
 
 // --- Chat-Bild-Upload Helfer für Queue-Items mit _localFilePath ---
 
-// Konvertiert die lokal gespeicherte Chat-Datei zu FormData fuer den Request.
+// Konvertiert die lokal gespeicherte Chat-Datei zu FormData für den Request.
 // WICHTIG: Ueberschreibt NICHT item.body (FormData ist nicht serialisierbar und
-// wuerde beim _save zu {} werden -> Datenverlust bei Retry). Gibt FormData zurueck;
-// das persistierte Item behaelt _localFilePath, damit ein Retry erneut lesen kann.
-// Die lokale Datei wird erst nach erfolgreichem Request geloescht (siehe flush()).
+// wuerde beim _save zu {} werden -> Datenverlust bei Retry). Gibt FormData zurück;
+// das persistierte Item behält _localFilePath, damit ein Retry erneut lesen kann.
+// Die lokale Datei wird erst nach erfolgreichem Request gelöscht (siehe flush()).
 async function resolveLocalFile(item: QueueItem): Promise<FormData | null> {
   const body = item.body;
   if (!body?._localFilePath) return null;
@@ -205,7 +386,7 @@ async function cleanupLocalFile(item: QueueItem): Promise<void> {
   try {
     await Filesystem.deleteFile({ path, directory: Directory.Data });
   } catch {
-    // Ignorieren — wird beim naechsten Cleanup aufgeraeumt
+    // Ignorieren — wird beim nächsten Cleanup aufgeraeumt
   }
 }
 
@@ -228,9 +409,16 @@ async function enqueue(
 
 async function flush(): Promise<FlushResult> {
   if (_flushing) return { succeeded: [], failed: [] };
+  // Offline gar nicht erst versuchen: jeder aussichtslose Versuch erhoeht
+  // retryCount — nach genug Offline-Anlaeufen (z.B. wiederholte Kaltstarts im
+  // Funkloch) war das Retry-Budget verbrannt, bevor je ein echter Versand
+  // moeglich war, und die Nachricht wurde aufgegeben.
+  if (!networkMonitor.isOnline) return { succeeded: [], failed: [] };
   _flushing = true;
 
   const result: FlushResult = { succeeded: [], failed: [] };
+  const gen = _generation;
+  const zwischenzeitlichGeleert = () => gen !== _generation;
 
   try {
     const items = await _load();
@@ -238,14 +426,14 @@ async function flush(): Promise<FlushResult> {
     while (items.length > 0) {
       const item = items[0];
       try {
-        // Lokales Foto zuerst hochladen falls vorhanden (Aktivitäts-Anträge)
+        // Lokales Foto zuerst hochladen falls vorhanden (gemeldete Aktivitäten)
         if (item.body?._localPhotoPath) {
           await resolveLocalPhoto(item.body);
           await _save(items); // Body-Update persistieren
         }
 
         // Chat-Bild aus lokalem Filesystem zu FormData konvertieren.
-        // requestBody ist FLUECHTIG — item.body bleibt unveraendert (serialisierbar),
+        // requestBody ist FLUECHTIG — item.body bleibt unverändert (serialisierbar),
         // damit ein Retry nach transientem Fehler die Datei erneut lesen kann.
         let requestBody: any = item.body;
         let requestHeaders = item.headers;
@@ -272,19 +460,27 @@ async function flush(): Promise<FlushResult> {
           await api.post(item.url, requestBody, config);
         }
 
-        // Erfolg: lokale Datei aufraeumen, dann Item entfernen
+        // Wurde die Queue waehrend des Requests geleert (Org-Wechsel/Logout),
+        // den alten Arbeitsstand NICHT zurueckschreiben.
+        if (zwischenzeitlichGeleert()) break;
+
+        // Erfolg: lokale Datei aufräumen, dann Item entfernen
         await cleanupLocalFile(item);
+        if (item.metadata.type === 'chat') await forgetFailedChat(item.metadata.clientId);
         result.succeeded.push(item);
         items.shift();
         await _save(items);
       } catch (err: any) {
+        if (zwischenzeitlichGeleert()) break;
         const status = err?.response?.status || 0;
         const message = err?.response?.data?.error || err?.message || 'Unbekannter Fehler';
 
         if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
-          // 4xx (ausser 408/429): Item entfernen, als failed markieren
+          // 4xx (außer 408/429): Item entfernen, als failed markieren
           const failedItem: FailedQueueItem = { ...item, error: { status, message } };
+          await rememberFailedChat(item, failedItem.error);
           result.failed.push(failedItem);
+          notifyFailed(failedItem);
           items.shift();
           await _save(items);
         } else {
@@ -292,7 +488,9 @@ async function flush(): Promise<FlushResult> {
           item.retryCount++;
           if (item.retryCount >= item.maxRetries) {
             const failedItem: FailedQueueItem = { ...item, error: { status, message } };
+            await rememberFailedChat(item, failedItem.error);
             result.failed.push(failedItem);
+            notifyFailed(failedItem);
             items.shift();
           } else {
             // Item behalten mit erhöhtem retryCount
@@ -307,15 +505,18 @@ async function flush(): Promise<FlushResult> {
     _flushing = false;
   }
 
-  handleFlushResult(result);
+  await handleFlushResult(result);
   return result;
 }
 
 async function flushTextOnly(): Promise<FlushResult> {
   if (_flushing) return { succeeded: [], failed: [] };
+  if (!networkMonitor.isOnline) return { succeeded: [], failed: [] };
   _flushing = true;
 
   const result: FlushResult = { succeeded: [], failed: [] };
+  const gen = _generation;
+  const zwischenzeitlichGeleert = () => gen !== _generation;
 
   try {
     const items = await _load();
@@ -342,23 +543,30 @@ async function flushTextOnly(): Promise<FlushResult> {
           await api.post(item.url, item.body, config);
         }
 
+        if (zwischenzeitlichGeleert()) break;
+        if (item.metadata.type === 'chat') await forgetFailedChat(item.metadata.clientId);
         result.succeeded.push(item);
         items.splice(i, 1);
         await _save(items);
       } catch (err: any) {
+        if (zwischenzeitlichGeleert()) break;
         const status = err?.response?.status || 0;
         const message = err?.response?.data?.error || err?.message || 'Unbekannter Fehler';
 
         if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
           const failedItem: FailedQueueItem = { ...item, error: { status, message } };
+          await rememberFailedChat(item, failedItem.error);
           result.failed.push(failedItem);
+          notifyFailed(failedItem);
           items.splice(i, 1);
           await _save(items);
         } else {
           item.retryCount++;
           if (item.retryCount >= item.maxRetries) {
             const failedItem: FailedQueueItem = { ...item, error: { status, message } };
+            await rememberFailedChat(item, failedItem.error);
             result.failed.push(failedItem);
+            notifyFailed(failedItem);
             items.splice(i, 1);
           } else {
             i++;
@@ -372,7 +580,7 @@ async function flushTextOnly(): Promise<FlushResult> {
     _flushing = false;
   }
 
-  handleFlushResult(result);
+  await handleFlushResult(result);
   return result;
 }
 
@@ -398,7 +606,25 @@ async function getByMetadata(filter: Partial<QueueItem['metadata']>): Promise<Qu
 }
 
 async function clear(): Promise<void> {
+  // Laufende flush()-Durchgaenge abbrechen lassen (siehe _generation oben).
+  _generation++;
+  const items = await _load();
+  // Lokal zwischengespeicherte Dateien der Items nicht verwaisen lassen.
+  const pfade = new Set<string>();
+  for (const item of items) {
+    if (item.body?._localFilePath) pfade.add(item.body._localFilePath);
+    if (item.body?._localPhotoPath) pfade.add(item.body._localPhotoPath);
+  }
+  for (const f of await _loadFailedChat()) {
+    if (f.localFilePath) pfade.add(f.localFilePath);
+  }
+  for (const pfad of pfade) {
+    try {
+      await Filesystem.deleteFile({ path: pfad, directory: Directory.Data });
+    } catch { /* best-effort */ }
+  }
   await _save([]);
+  await _saveFailedChat([]);
 }
 
 // --- Auto-Flush bei Online-Wechsel ---
@@ -418,5 +644,11 @@ export const writeQueue = {
   remove,
   getAll,
   getByMetadata,
+  getFailedChat,
+  forgetFailedChat,
+  forgetFailedChatMany,
+  getFailedActions,
+  forgetFailedAction,
+  forgetAllFailedActions,
   clear,
 };

@@ -1,6 +1,6 @@
 // --- START OF FILE createApp.js ---
 // Express-App Factory ohne Seiteneffekte (kein listen, Socket.IO, SMTP, Cron, Firebase)
-// Tests rufen createApp(testDb) auf und bekommen saubere Express-App fuer supertest.
+// Tests rufen createApp(testDb) auf und bekommen saubere Express-App für supertest.
 
 const express = require('express');
 const helmet = require('helmet');
@@ -8,6 +8,11 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
+
+// Upload-Limit für Challenge-Beitraege (Audio/Video sind deutlich größer als
+// Chat-Anhänge). Als Konstante, weil der zentrale Multer-Error-Handler weiter
+// unten die Fehlermeldung anhand der betroffenen Route differenzieren muss.
+const CHALLENGE_UPLOAD_LIMIT = 50 * 1024 * 1024;
 
 /**
  * Erstellt eine Express-App mit allen Routes und Middleware.
@@ -31,6 +36,17 @@ function createApp(db, options = {}) {
 
   const app = express();
   app.set('trust proxy', 1); // Traefik Reverse Proxy
+
+  // NUR im Test: Jede Antwort schliesst ihre Verbindung.
+  //
+  // Ohne Keep-Alive kann kein Nachlauf einen fremden Request treffen. Im Test
+  // kostet das nichts; Produktion bleibt unberuehrt (Bedingung NODE_ENV).
+  if (process.env.NODE_ENV === 'test') {
+    app.use((req, res, next) => {
+      res.set('Connection', 'close');
+      next();
+    });
+  }
 
   // ====================================================================
   // SECURITY HEADERS
@@ -89,9 +105,10 @@ function createApp(db, options = {}) {
   const requestsDir = path.join(uploadsDir, 'requests');
   const chatDir = path.join(uploadsDir, 'chat');
   const materialDir = path.join(uploadsDir, 'material');
+  const challengesDir = path.join(uploadsDir, 'challenges');
 
   // Upload-Verzeichnisse erstellen
-  [uploadsDir, requestsDir, chatDir, materialDir].forEach(dir => {
+  [uploadsDir, requestsDir, chatDir, materialDir, challengesDir].forEach(dir => {
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
@@ -99,7 +116,7 @@ function createApp(db, options = {}) {
 
   // Chat Upload Config (verschluesselte Dateinamen)
   // memoryStorage: Chat-Datei landet als Buffer in req.file.buffer und wird im
-  // Route-Handler (chat.js) verschluesselt auf die Platte geschrieben.
+  // Route-Handler (chat.js) verschlüsselt auf die Platte geschrieben.
   const chatUpload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 5 * 1024 * 1024 },
@@ -128,7 +145,7 @@ function createApp(db, options = {}) {
 
   // Material Upload Config (20MB Limit)
   // memoryStorage: Datei landet als Buffer in req.file.buffer und wird im
-  // Route-Handler (material.js) verschluesselt auf die Platte geschrieben.
+  // Route-Handler (material.js) verschlüsselt auf die Platte geschrieben.
   const materialUpload = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: 20 * 1024 * 1024 },
@@ -162,7 +179,7 @@ function createApp(db, options = {}) {
 
   // Request Upload Config (nur Bilder, 5MB)
   // memoryStorage: Foto landet als Buffer in req.file.buffer und wird im
-  // Route-Handler (konfi.js /upload-photo) verschluesselt auf die Platte
+  // Route-Handler (konfi.js /upload-photo) verschlüsselt auf die Platte
   // geschrieben. Der Dateiname wird dort nach erfolgreicher Validierung erzeugt.
   const requestUpload = multer({
     storage: multer.memoryStorage(),
@@ -171,6 +188,29 @@ function createApp(db, options = {}) {
       if (file.mimetype.startsWith('image/')) {
         cb(null, true);
       } else {
+        cb(null, false);
+      }
+    }
+  });
+
+  // Challenge Upload Config (50MB Limit — Konfis reichen auch Sprachaufnahmen
+  // und kurze Videoclips ein, nicht nur Fotos).
+  // memoryStorage: Datei landet als Buffer in req.file.buffer und wird im
+  // Route-Handler (challenges.js) nach der Magic-Bytes-Prüfung verschlüsselt
+  // auf die Platte geschrieben.
+  const challengeUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: CHALLENGE_UPLOAD_LIMIT },
+    fileFilter: (req, file, cb) => {
+      const allowedMimes = [
+        'video/mp4', 'video/quicktime', 'video/webm', 'video/x-m4v',
+        'audio/mpeg', 'audio/mp4', 'audio/m4a', 'audio/x-m4a', 'audio/ogg', 'audio/webm', 'audio/wav', 'audio/aac'
+      ];
+      const isAllowed = file.mimetype.startsWith('image/') || allowedMimes.includes(file.mimetype);
+      if (isAllowed) {
+        cb(null, true);
+      } else {
+        console.warn(`Challenge-Datei abgelehnt: ${file.originalname} (${file.mimetype})`);
         cb(null, false);
       }
     }
@@ -236,15 +276,15 @@ function createApp(db, options = {}) {
   // ROUTE MOUNTING
   // ====================================================================
 
-  // Health-Endpoint — BEWUSST minimal (Liveness fuer Docker-Healthcheck +
+  // Health-Endpoint — BEWUSST minimal (Liveness für Docker-Healthcheck +
   // Traefik). NICHT mit DB-Checks aufblaehen: ein haengender DB-Check wuerde
   // sonst den gesunden Container vom Healthcheck killen lassen.
   app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Konfi Points API is running' });
   });
 
-  // Status-Endpoint — Detail-Readiness fuer Status-Page / Uptime Kuma.
-  // Getrennt von /health, weil er echte Abhaengigkeiten prueft (DB) und damit
+  // Status-Endpoint — Detail-Readiness für Status-Page / Uptime Kuma.
+  // Getrennt von /health, weil er echte Abhaengigkeiten prüft (DB) und damit
   // langsamer/haengbar ist. Gibt 200 bei gesunder DB, sonst 503.
   app.get('/api/status', async (req, res) => {
     const startedAt = Date.now();
@@ -268,7 +308,7 @@ function createApp(db, options = {}) {
     res.status(dbOk ? 200 : 503).json(body);
   });
 
-  // Roh-Snapshot NUR dieser Replica (fuer die Peer-Aggregation; auch direkt nutzbar).
+  // Roh-Snapshot NUR dieser Replica (für die Peer-Aggregation; auch direkt nutzbar).
   app.get('/api/metrics/local', rbacVerifier, (req, res) => {
     if (!req.user?.is_super_admin) {
       return res.status(403).json({ error: 'Zugriff verweigert' });
@@ -318,7 +358,7 @@ function createApp(db, options = {}) {
     res.json(merged);
   });
 
-  // Persistente APM-Historie (ueber Deploys hinweg). Liefert die gespeicherten
+  // Persistente APM-Historie (über Deploys hinweg). Liefert die gespeicherten
   // Snapshots der letzten N Tage; das Dashboard bildet daraus Deltas pro Intervall.
   app.get('/api/metrics/history', rbacVerifier, async (req, res) => {
     if (!req.user?.is_super_admin) {
@@ -341,6 +381,15 @@ function createApp(db, options = {}) {
   });
 
   // Auth Routes
+  // Anmeldung für die API-Doku. Bewusst ohne rbacVerifier: Die Doku hängt nicht
+  // an einem Konto, sondern an einem gemeinsamen Passwort (DOCS_PASSWORD).
+  // Streng limitiert: ein einzelnes Passwort ohne Benutzernamen wäre sonst
+  // einfach durchprobierbar.
+  if (rateLimiters.docsLoginLimiter) {
+    app.post('/api/docs-auth/anmelden', rateLimiters.docsLoginLimiter);
+  }
+  app.use('/api/docs-auth', require('./routes/docsAuth')());
+
   app.use('/api/auth', require('./routes/auth')(db, verifyToken, transporterOrDummy, smtpConfig, {
     authLimiter: rateLimiters.authLimiter,
     registerLimiter: rateLimiters.registerLimiter,
@@ -352,6 +401,11 @@ function createApp(db, options = {}) {
   // Chat Routes (mit optionalem Rate-Limiter)
   if (rateLimiters.chatMessageLimiter) {
     app.post('/api/chat/rooms/:roomId/messages', rateLimiters.chatMessageLimiter, rateLimiters.uploadLimiter);
+  }
+  // Team-Chat leeren loescht alle Nachrichten samt Dateien -- eigener,
+  // enger Limiter statt des weiten generalLimiter.
+  if (rateLimiters.chatClearLimiter) {
+    app.delete('/api/chat/rooms/:roomId/messages', rateLimiters.chatClearLimiter);
   }
   app.use('/api/chat', require('./routes/chat')(db, { verifyTokenRBAC: rbacVerifier }, uploadsDir, chatUpload, ioOrDummy));
 
@@ -367,6 +421,10 @@ function createApp(db, options = {}) {
   // Konfi Foto-Upload (mit optionalem Rate-Limiter)
   if (rateLimiters.uploadLimiter) {
     app.post('/api/konfi/upload-photo', rateLimiters.uploadLimiter);
+  }
+
+  if (rateLimiters.uploadLimiter) {
+    app.post('/api/challenges/konfi/:id/submissions', rateLimiters.uploadLimiter);
   }
 
   // Settings
@@ -397,6 +455,7 @@ function createApp(db, options = {}) {
   const wrappedRouter = require('./routes/wrapped')(db, rbacVerifier, roleHelpers);
   app.use('/api/wrapped', wrappedRouter);
   app.use('/api/material', require('./routes/material')(db, rbacVerifier, roleHelpers, materialUpload));
+  app.use('/api/challenges', require('./routes/challenges')(db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload));
 
   // ====================================================================
   // ERROR HANDLING
@@ -405,14 +464,24 @@ function createApp(db, options = {}) {
   app.use((err, req, res, next) => {
     // Multer-Limit (zu grosse Datei) als klares 413 statt generischem 500 —
     // das Frontend zeigt err.response.data.error direkt dem User an.
+    // Das Limit ist pro Upload-Config verschieden, deshalb wird die Meldung
+    // anhand der betroffenen Route differenziert (sonst steht bei einem
+    // 40-MB-Video faelschlich "max. 5 MB" und der Konfi versteht nicht, warum
+    // die kleinere Datei ebenfalls scheitert).
     if (err && err.code === 'LIMIT_FILE_SIZE') {
+      if (req.path.startsWith('/api/challenges') || req.originalUrl.startsWith('/api/challenges')) {
+        return res.status(413).json({ error: 'Datei ist zu groß (max. 50 MB).' });
+      }
+      if (req.path.startsWith('/api/material') || req.originalUrl.startsWith('/api/material')) {
+        return res.status(413).json({ error: 'Datei ist zu groß (max. 20 MB).' });
+      }
       return res.status(413).json({ error: 'Datei ist zu groß (max. 5 MB).' });
     }
     console.error(err.stack);
     res.status(500).json({ error: 'Something went wrong!' });
   });
 
-  // wrappedRouter fuer BackgroundService in server.js verfuegbar machen
+  // wrappedRouter für BackgroundService in server.js verfuegbar machen
   app.wrappedRouter = wrappedRouter;
 
   return app;

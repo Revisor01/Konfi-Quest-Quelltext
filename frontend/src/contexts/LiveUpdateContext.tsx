@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useCallback, useRef, React
 import { initializeWebSocket, getSocket, reconnectWithToken } from '../services/websocket';
 import { getToken } from '../services/tokenStore';
 import api from '../services/api';
+import { useApp } from './AppContext';
 
 // Live Update Event Types
 export type LiveUpdateType =
@@ -9,7 +10,7 @@ export type LiveUpdateType =
   | 'events'         // Events Liste
   | 'event_booking'  // Einzelne Buchung
   | 'badges'         // Badges
-  | 'requests'       // Aktivitäts-Anträge
+  | 'requests'       // Gemeldete Aktivitäten
   | 'konfis'         // Admin Konfi-Liste
   | 'points'         // Punkte-Änderungen
   | 'chat'           // Chat (bereits via BadgeContext)
@@ -18,11 +19,15 @@ export type LiveUpdateType =
   | 'jahrgaenge'     // Jahrgänge-Verwaltung
   | 'levels'         // Level-Verwaltung
   | 'users'          // Benutzer-Verwaltung
+  | 'challenges'     // Challenges (neue Beiträge, Moderations-Änderungen)
+  | 'materials'      // Material-Verwaltung (Leitung und Teamer:innen)
   | 'organizations'; // Organisations-Verwaltung
 
 export interface LiveUpdateEvent {
   type: LiveUpdateType;
-  action: 'refresh' | 'update' | 'delete' | 'create';
+  // 'submission_update'/'challenge_update' sendet challenges.js real mit —
+  // useLiveRefresh wertet die action nicht aus, der Typ soll aber nicht luegen.
+  action: 'refresh' | 'update' | 'delete' | 'create' | 'earned' | 'submission_update' | 'challenge_update';
   targetUserId?: number;      // Fuer welchen User
   targetUserType?: string;    // 'konfi' | 'admin'
   data?: any;                 // Optionale Daten
@@ -33,10 +38,10 @@ interface LiveUpdateContextType {
   subscribe: (type: LiveUpdateType, callback: (event: LiveUpdateEvent) => void) => () => void;
   // Manually trigger a refresh (for testing/debugging)
   triggerRefresh: (type: LiveUpdateType) => void;
-  // Zaehler, der sich nach jedem Socket-Reconnect-mit-neuem-Token erhoeht.
+  // Zähler, der sich nach jedem Socket-Reconnect-mit-neuem-Token erhöht.
   // Konsumenten, die eigene socket.on(...)-Listener binden (z.B. BadgeContext),
-  // muessen socketEpoch als Effect-Dependency nutzen, damit sie ihre Handler nach
-  // reconnectWithToken am NEUEN Socket-Objekt neu binden — sonst haengen sie am
+  // müssen socketEpoch als Effect-Dependency nutzen, damit sie ihre Handler nach
+  // reconnectWithToken am NEUEN Socket-Objekt neu binden — sonst hängen sie am
   // verworfenen alten Socket und empfangen keine Events mehr.
   socketEpoch: number;
 }
@@ -44,6 +49,9 @@ interface LiveUpdateContextType {
 const LiveUpdateContext = createContext<LiveUpdateContextType | undefined>(undefined);
 
 export const LiveUpdateProvider = ({ children }: { children: ReactNode }) => {
+  // AppProvider liegt aussen (siehe App.tsx) — der angemeldete Nutzer ist hier
+  // also verfuegbar und dient als Ausloeser für das Binden der Handler.
+  const { user } = useApp();
   const listenersRef = useRef<Map<LiveUpdateType, Set<(event: LiveUpdateEvent) => void>>>(new Map());
   const authRecoveringRef = useRef(false);
   // Erhoeht sich nach einem Socket-Reconnect mit frischem Token -> der
@@ -51,7 +59,7 @@ export const LiveUpdateProvider = ({ children }: { children: ReactNode }) => {
   const [socketEpoch, setSocketEpoch] = React.useState(0);
 
   // Socket-Auth-Fehler (abgelaufenes Token) sauber auffangen, statt den Chat-Tab
-  // haengen/crashen zu lassen. Ein leichter authentifizierter Call laesst den
+  // hängen/crashen zu lassen. Ein leichter authentifizierter Call laesst den
   // api.ts-Interceptor den Token-Refresh erledigen; klappt das, verbinden wir den
   // Socket mit dem frischen Token neu. Schlaegt der Refresh fehl, feuert der
   // Interceptor selbst 'auth:relogin-required' -> sauberer Weg zum Login.
@@ -67,7 +75,7 @@ export const LiveUpdateProvider = ({ children }: { children: ReactNode }) => {
           setSocketEpoch((e) => e + 1); // Listener am neuen Socket neu binden
         }
       } catch {
-        // Refresh endgueltig fehlgeschlagen -> Interceptor hat Relogin ausgeloest.
+        // Refresh endgueltig fehlgeschlagen -> Interceptor hat Relogin ausgelöst.
       } finally {
         authRecoveringRef.current = false;
       }
@@ -77,9 +85,16 @@ export const LiveUpdateProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   // Setup WebSocket listener
+  //
+  // WICHTIG: Der Effekt hängt am angemeldeten Nutzer, nicht nur an socketEpoch.
+  // Startete die App ausgeloggt, gab es beim ersten Lauf keinen Token — der
+  // Handler wurde nie gebunden und die GANZE Sitzung blieb ohne Live-Updates,
+  // obwohl BadgeContext den Socket später aufbaute.
+  // Mit user.id in den Deps bindet der Effekt nach dem Login nach; ein
+  // Nutzerwechsel bindet ihn ausserdem sauber neu.
   useEffect(() => {
     const token = getToken();
-    if (!token) return;
+    if (!token || !user?.id) return;
 
     const socket = initializeWebSocket(token);
 
@@ -101,11 +116,11 @@ export const LiveUpdateProvider = ({ children }: { children: ReactNode }) => {
       window.dispatchEvent(new CustomEvent(`liveUpdate:${event.type}`, { detail: event }));
     };
 
-    // Der Server sendet ALLE Live-Updates ueber das einheitliche 'liveUpdate'-Event
-    // (utils/liveUpdate.js). Die frueher hier registrierten 13 '*Update'-Kompatibilitaets-
+    // Der Server sendet ALLE Live-Updates über das einheitliche 'liveUpdate'-Event
+    // (utils/liveUpdate.js). Die früher hier registrierten 13 '*Update'-Kompatibilitaets-
     // Listener (dashboardUpdate, eventsUpdate, ...) waren tot: seit dem Entfernen des
     // globalen io.emit() im Backend wurde KEINES dieser Events mehr emittiert
-    // (verifiziert per grep ueber backend/). Ersatzlos entfernt.
+    // (verifiziert per grep über backend/). Ersatzlos entfernt.
     socket.on('liveUpdate', handleLiveUpdate);
 
     return () => {
@@ -114,7 +129,7 @@ export const LiveUpdateProvider = ({ children }: { children: ReactNode }) => {
     // socketEpoch in den Deps: nach Reconnect-mit-neuem-Token werden die
     // Listener am frischen Socket neu gebunden.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socketEpoch]);
+  }, [socketEpoch, user?.id]);
 
   // Subscribe function
   const subscribe = useCallback((type: LiveUpdateType, callback: (event: LiveUpdateEvent) => void) => {
@@ -150,7 +165,7 @@ export const LiveUpdateProvider = ({ children }: { children: ReactNode }) => {
 export const useLiveUpdate = () => {
   const context = useContext(LiveUpdateContext);
   if (context === undefined) {
-    // Graceful fallback fuer Komponenten die ausserhalb des Provider-Trees gerendert werden
+    // Graceful fallback für Komponenten die außerhalb des Provider-Trees gerendert werden
     // (z.B. useIonModal Modals). Statt Crash: no-op Funktionen zurueckgeben.
     return {
       subscribe: () => () => {},

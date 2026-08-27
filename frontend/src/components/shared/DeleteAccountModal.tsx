@@ -54,7 +54,7 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({ onClose, onDele
       try {
         await api.post('/auth/delete-account', { password });
 
-        // Account geloescht: sauber ausloggen (raeumt Token/Cache + State -> Login).
+        // Account gelöscht: sauber ausloggen (räumt Token/Cache + State -> Login).
         onDeleted?.();
         onClose();
         await signOut();
@@ -76,7 +76,7 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({ onClose, onDele
         <IonToolbar>
           <IonTitle>Account löschen</IonTitle>
           <IonButtons slot="start">
-            <IonButton className="app-modal-close-btn" onClick={onClose} disabled={isSubmitting}>
+            <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose} disabled={isSubmitting}>
               <IonIcon icon={closeOutline} />
             </IonButton>
           </IonButtons>
@@ -128,7 +128,7 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({ onClose, onDele
                     placeholder="Passwort zur Bestätigung eingeben"
                     disabled={isSubmitting}
                   />
-                  <IonButton
+                  <IonButton aria-label="Passwort anzeigen oder verbergen"
                     slot="end"
                     fill="clear"
                     onClick={() => setShowPassword(prev => !prev)}

@@ -43,10 +43,14 @@ import {
   book,
   documentText,
   chevronForward,
-  checkmarkCircle
+  checkmarkCircle,
+  closeCircle,
+  alertCircle
 } from 'ionicons/icons';
 import ActivityRings from './ActivityRings';
 import { EmptyState } from '../../shared';
+import { getIconFromString } from '../../../utils/badgeIcons';
+import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 
 // ---- Shared Types ----
 
@@ -129,7 +133,7 @@ export const KonfiHeaderCard = React.memo<KonfiHeaderCardProps>(({
   <div
     style={{
       background: isTeamer
-        ? 'linear-gradient(135deg, #e11d48 0%, #be185d 50%, #9f1239 100%)'
+        ? 'var(--app-gradient-teamer)'
         : 'linear-gradient(135deg, #5b21b6 0%, #4c1d95 100%)',
       borderRadius: '24px',
       padding: '24px',
@@ -379,7 +383,8 @@ export const BonusSection = React.memo<BonusSectionProps>(({
                 <IonItemOptions className="app-swipe-actions" side="end">
                   <IonItemOption
                     className="app-swipe-action"
-                    onClick={() => handleDeleteBonus(bonus)}
+                    onClick={() => { closeOpenSlidingItems(); handleDeleteBonus(bonus); }}
+                    aria-label="Bonuspunkte löschen"
                   >
                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
                       <IonIcon icon={trash} />
@@ -615,7 +620,15 @@ export const TeamerEventsSection = React.memo<TeamerEventsSectionProps>(({
       <IonLabel>Events ({teamerEvents.length})</IonLabel>
     </IonListHeader>
     <IonCard className="app-card">
-      <IonCardContent style={{ padding: '12px' }}>
+      <IonCardContent style={{ padding: teamerEvents.length === 0 ? '16px' : '12px' }}>
+        {teamerEvents.length === 0 ? (
+          <EmptyState
+            icon={calendar}
+            title="Keine Events"
+            message="Noch bei keinem Termin dabei gewesen"
+            iconColor="var(--app-color-events)"
+          />
+        ) : (
         <div style={{ display: 'flex', flexDirection: 'column' }}>
           {teamerEvents.slice(0, 10).map((event, index) => {
             return (
@@ -629,18 +642,28 @@ export const TeamerEventsSection = React.memo<TeamerEventsSectionProps>(({
                 <div
                   className="app-list-item app-list-item--events"
                 >
+                  {/* Status als Symbol-Badge statt Text (wie in Challenges und
+                      Zertifikaten) — der Titel darunter bekommt dadurch die
+                      volle Breite. Klartext haengt am title-Attribut. */}
                   <div className="app-corner-badges">
                     <div
                       className="app-corner-badge"
                       style={{
                         backgroundColor: event.booking_status === 'confirmed' ? '#059669'
                           : event.booking_status === 'absent' ? 'var(--app-color-events)'
-                          : 'var(--app-color-badges)'
+                          : 'var(--app-color-badges)',
+                        padding: '4px 6px'
                       }}
-                    >
-                      {event.booking_status === 'confirmed' ? 'Anwesend'
+                      title={event.booking_status === 'confirmed' ? 'Anwesend'
                         : event.booking_status === 'absent' ? 'Abwesend'
                         : 'Ausstehend'}
+                    >
+                      <IonIcon
+                        icon={event.booking_status === 'confirmed' ? checkmarkCircle
+                          : event.booking_status === 'absent' ? closeCircle
+                          : time}
+                        style={{ color: '#fff', fontSize: '0.85rem', display: 'block' }}
+                      />
                     </div>
                   </div>
                   <div className="app-list-item__row">
@@ -665,7 +688,21 @@ export const TeamerEventsSection = React.memo<TeamerEventsSectionProps>(({
               </IonItem>
             );
           })}
+          {/* Die Liste ist auf 10 begrenzt, der Titel zaehlt aber alle —
+              ohne diesen Hinweis sah "Events (23)" mit 10 Zeilen nach einem
+              Fehler aus. */}
+          {teamerEvents.length > 10 && (
+            <div
+              style={{
+                textAlign: 'center', fontSize: '0.8rem', color: 'var(--app-text-system)',
+                padding: '8px 0 2px 0'
+              }}
+            >
+              und {teamerEvents.length - 10} weitere
+            </div>
+          )}
         </div>
+        )}
       </IonCardContent>
     </IonCard>
   </IonList>
@@ -716,7 +753,7 @@ export const ActivitiesSection = React.memo<ActivitiesSectionProps>(({
               const isActivityTypeDisabled = !activity.isPending
                 && ((activity.type === 'gottesdienst' && currentKonfi?.gottesdienst_enabled === false)
                 || (activity.type === 'gemeinde' && currentKonfi?.gemeinde_enabled === false));
-              // Einheitliche Typ-Farbe fuer BEIDE vorderen Elemente (Eselsohr-Badge
+              // Einheitliche Typ-Farbe für BEIDE vorderen Elemente (Eselsohr-Badge
               // UND Icon-Kreis/Border): Gottesdienst=blau, Gemeinde=gruen, Teamer=pink.
               // Pending = Warning-Orange.
               const typeColor = activity.isPending
@@ -762,7 +799,11 @@ export const ActivitiesSection = React.memo<ActivitiesSectionProps>(({
                           className="app-icon-circle"
                           style={{ backgroundColor: activityColor }}
                         >
-                          <IonIcon icon={activity.isPending ? time : activity.type === 'gottesdienst' ? school : flash} />
+                          {/* Teamer-Aktivitaeten haben keinen Typ — ohne den
+                              Zweig bekaemen sie immer das Gemeinde-Icon. */}
+                          <IonIcon icon={activity.isPending ? time
+                            : isTeamer ? ribbon
+                            : activity.type === 'gottesdienst' ? school : flash} />
                         </div>
                         <div className="app-list-item__content">
                           <div
@@ -798,7 +839,8 @@ export const ActivitiesSection = React.memo<ActivitiesSectionProps>(({
                   <IonItemOptions className="app-swipe-actions" side="end">
                     <IonItemOption
                       className="app-swipe-action"
-                      onClick={() => handleDeleteActivity(activity)}
+                      onClick={() => { closeOpenSlidingItems(); handleDeleteActivity(activity); }}
+                      aria-label="Aktivität löschen"
                     >
                       <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
                         <IonIcon icon={trash} />
@@ -883,13 +925,22 @@ export const CertificatesSection = React.memo<CertificatesSectionProps>(({
                   <div
                     className="app-list-item"
                     style={{
-                      borderLeftColor: '#db2777'
+                      // Teamer-Token statt eines abweichenden Pink — der
+                      // Sektionskopf nutzt dieselbe Farbe.
+                      borderLeftColor: 'var(--app-color-teamer)'
                     }}
                   >
                     {cert.status === 'expired' && (
                       <div className="app-corner-badges">
-                        <div className="app-corner-badge" style={{ backgroundColor: '#ef4444' }}>
-                          Abgelaufen
+                        <div
+                          className="app-corner-badge"
+                          style={{ backgroundColor: 'var(--app-color-danger)', padding: '4px 6px' }}
+                          title="Abgelaufen"
+                        >
+                          <IonIcon
+                            icon={alertCircle}
+                            style={{ color: '#fff', fontSize: '0.85rem', display: 'block' }}
+                          />
                         </div>
                       </div>
                     )}
@@ -898,10 +949,13 @@ export const CertificatesSection = React.memo<CertificatesSectionProps>(({
                         <div
                           className="app-icon-circle"
                           style={{
-                            backgroundColor: '#db2777'
+                            backgroundColor: 'var(--app-color-teamer)'
                           }}
                         >
-                          <IonIcon icon={ribbon} />
+                          {/* Das gepflegte Zertifikats-Icon zeigen — die
+                              Teamer-Sicht (Dashboard) tut das laengst; hier
+                              sahen bisher alle Zertifikate gleich aus. */}
+                          <IonIcon icon={getIconFromString(cert.icon)} />
                         </div>
                         <div className="app-list-item__content">
                           <div className="app-list-item__title app-list-item__title--badge-space">
@@ -926,7 +980,8 @@ export const CertificatesSection = React.memo<CertificatesSectionProps>(({
                 <IonItemOptions className="app-swipe-actions" side="end">
                   <IonItemOption
                     className="app-swipe-action"
-                    onClick={() => handleDeleteCertificate(cert)}
+                    onClick={() => { closeOpenSlidingItems(); handleDeleteCertificate(cert); }}
+                    aria-label="Zertifikat entfernen"
                   >
                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
                       <IonIcon icon={trash} />
@@ -1022,20 +1077,26 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
   formatDate
 }) => {
   const [expanded, setExpanded] = React.useState(false);
-  const visibleCount = expanded ? konfiHistory.history.length : 3;
+  // NULL-SICHER: Fehlt history/totals (alter Cache, Teamer ohne Konfi-Zeit,
+  // unvollstaendige Antwort), wirft ein Zugriff hier den ganzen Render — und
+  // die ErrorBoundary leert dann Auth + Cache, was sich als "ploetzlich
+  // ausgeloggt" zeigt (User-Hinweis 11.08.).
+  const history = Array.isArray(konfiHistory?.history) ? konfiHistory.history : [];
+  const totals = konfiHistory?.totals || { gottesdienst: 0, gemeinde: 0, total: 0 };
+  const visibleCount = expanded ? history.length : 3;
   return (
   <IonList className="app-section-inset" inset={true} style={{ marginBottom: '32px' }}>
     <IonListHeader>
       <div className="app-section-icon app-section-icon--purple">
         <IonIcon icon={timeOutline} />
       </div>
-      <IonLabel>Konfi-Historie ({konfiHistory.totals.total} Punkte)</IonLabel>
+      <IonLabel>Konfi-Historie ({totals.total} Punkte)</IonLabel>
     </IonListHeader>
     <IonCard className="app-card">
       <IonCardContent style={{ padding: '12px' }}>
         {/* Punkte-Uebersicht */}
         <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-          {konfiHistory.totals.gottesdienst > 0 && (
+          {totals.gottesdienst > 0 && (
             <div style={{
               flex: 1,
               background: 'rgba(59, 130, 246, 0.1)',
@@ -1043,11 +1104,11 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
               padding: '10px',
               textAlign: 'center'
             }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: '700', color: '#3b82f6' }}>{konfiHistory.totals.gottesdienst}</div>
+              <div style={{ fontSize: '1.2rem', fontWeight: '700', color: '#3b82f6' }}>{totals.gottesdienst}</div>
               <div style={{ fontSize: '0.65rem', color: '#6b7280', fontWeight: '600' }}>GOTTESDIENST</div>
             </div>
           )}
-          {konfiHistory.totals.gemeinde > 0 && (
+          {totals.gemeinde > 0 && (
             <div style={{
               flex: 1,
               background: 'rgba(5, 150, 105, 0.1)',
@@ -1055,7 +1116,7 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
               padding: '10px',
               textAlign: 'center'
             }}>
-              <div style={{ fontSize: '1.2rem', fontWeight: '700', color: '#059669' }}>{konfiHistory.totals.gemeinde}</div>
+              <div style={{ fontSize: '1.2rem', fontWeight: '700', color: '#059669' }}>{totals.gemeinde}</div>
               <div style={{ fontSize: '0.65rem', color: '#6b7280', fontWeight: '600' }}>GEMEINDE</div>
             </div>
           )}
@@ -1066,15 +1127,15 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
             padding: '10px',
             textAlign: 'center'
           }}>
-            <div style={{ fontSize: '1.2rem', fontWeight: '700', color: 'var(--app-color-konfis)' }}>{konfiHistory.totals.total}</div>
+            <div style={{ fontSize: '1.2rem', fontWeight: '700', color: 'var(--app-color-konfis)' }}>{totals.total}</div>
             <div style={{ fontSize: '0.65rem', color: '#6b7280', fontWeight: '600' }}>GESAMT</div>
           </div>
         </div>
 
         {/* Verlauf */}
-        {konfiHistory.history.length > 0 ? (
+        {history.length > 0 ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {konfiHistory.history.slice(0, visibleCount).map((entry) => {
+            {history.slice(0, visibleCount).map((entry) => {
               const categoryColor = entry.category === 'gottesdienst' ? '#3b82f6' : '#059669';
               const entryIcon = entry.source_type === 'bonus' ? giftOutline
                 : entry.source_type === 'event' ? calendarOutline
@@ -1092,10 +1153,23 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
                   style={{ borderLeftColor: categoryColor, position: 'relative', overflow: 'hidden' }}
                 >
                   <div className="app-corner-badges">
+                    {/* Herkunft als Symbol (Geschenk = Bonus, Kalender = Event);
+                        Klartext am title. Die Punktzahl daneben bleibt Text —
+                        sie ist die eigentliche Information und laesst sich
+                        nicht als Symbol ausdruecken. Punkte sind hier korrekt:
+                        die Sektion zeigt die KONFI-Zeit einer befoerderten
+                        Teamer:in. */}
                     {typeBadgeColor && typeBadgeLabel && (
                       <>
-                        <div className="app-corner-badge" style={{ backgroundColor: typeBadgeColor }}>
-                          {typeBadgeLabel}
+                        <div
+                          className="app-corner-badge"
+                          style={{ backgroundColor: typeBadgeColor, padding: '4px 6px' }}
+                          title={typeBadgeLabel}
+                        >
+                          <IonIcon
+                            icon={entry.source_type === 'bonus' ? giftOutline : calendarOutline}
+                            style={{ color: '#fff', fontSize: '0.85rem', display: 'block' }}
+                          />
                         </div>
                         <div className="app-corner-badges__separator" />
                       </>
@@ -1120,7 +1194,7 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
                 </div>
               );
             })}
-            {konfiHistory.history.length > 3 && (
+            {history.length > 3 && (
               <IonButton
                 expand="block"
                 fill="outline"
@@ -1130,7 +1204,7 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
                 <IonIcon icon={expanded ? chevronUp : chevronDown} slot="start" />
                 {expanded
                   ? 'Weniger anzeigen'
-                  : `${konfiHistory.history.length - 3} weitere anzeigen`}
+                  : `${history.length - 3} weitere anzeigen`}
               </IonButton>
             )}
           </div>
@@ -1169,7 +1243,7 @@ export const PromoteSection = React.memo<PromoteSectionProps>(({
     <IonCard className="app-card">
       <IonCardContent style={{ padding: '12px' }}>
         <p style={{ fontSize: '0.8rem', color: 'var(--ion-color-medium)', textAlign: 'center', marginBottom: '12px' }}>
-          Beim Befördern bleiben Konfi-Punkte und Badges als Historie erhalten. Event-Buchungen und offene Anträge werden gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.
+          Beim Befördern bleiben Konfi-Punkte und Badges als Historie erhalten. Event-Buchungen und offene Aktivitäten werden gelöscht. Diese Aktion kann nicht rückgängig gemacht werden.
         </p>
         <div className="app-event-detail__add-button-wrapper">
           <IonButton

@@ -3,9 +3,9 @@ import { useIonAlert } from '@ionic/react';
 import { clearMediaCache, getMediaCacheSize } from '../services/mediaCache';
 import { formatFileSize } from '../utils/helpers';
 
-// Gemeinsame Logik fuer den "Medien-Cache leeren"-Eintrag in allen Profil-Seiten
-// (Konfi/Teamer/Admin). Liefert die belegte Groesse (formatiert) und einen
-// Handler, der nach Bestaetigung den Chat-Medien-Cache loescht.
+// Gemeinsame Logik für den "Medien-Cache leeren"-Eintrag in allen Profil-Seiten
+// (Konfi/Teamer/Admin). Liefert die belegte Größe (formatiert) und einen
+// Handler, der nach Bestaetigung den Chat-Medien-Cache löscht.
 export function useMediaCacheControl() {
   const [presentAlert] = useIonAlert();
   const [cacheSize, setCacheSize] = useState<number>(0);

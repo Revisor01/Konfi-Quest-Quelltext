@@ -1,7 +1,7 @@
 import React from 'react';
 import { IonIcon } from '@ionic/react';
 import SlideBase from '../SlideBase';
-import { getIconFromString } from '../../../konfi/views/DashboardSections';
+import { getIconFromString } from '../../../../utils/badgeIcons';
 import type { SlideProps, TeamerBadgesSlide as TeamerBadgesSlideType } from '../../../../types/wrapped';
 
 interface TeamerBadgesSlideProps extends SlideProps {

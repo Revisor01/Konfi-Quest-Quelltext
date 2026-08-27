@@ -21,60 +21,10 @@ import {
   add,
   trophy,
   trash,
-  arrowBack,
-  star,
-  medal,
-  ribbon,
-  checkmarkCircle,
-  diamond,
-  shield,
-  flame,
-  flash,
-  rocket,
-  sparkles,
-  thumbsUp,
-  heart,
-  people,
-  personAdd,
-  chatbubbles,
-  gift,
-  book,
-  school,
-  construct,
-  brush,
-  colorPalette,
-  sunny,
-  moon,
-  leaf,
-  rose,
-  calendar,
-  today,
-  time,
-  timer,
-  stopwatch,
-  restaurant,
-  fitness,
-  bicycle,
-  car,
-  airplane,
-  boat,
-  camera,
-  image,
-  musicalNote,
-  balloon,
-  home,
-  business,
-  location,
-  navigate,
-  compass,
-  pin,
-  flag,
-  informationCircle,
-  helpCircle,
-  alertCircle,
-  hammer
+  arrowBack
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import api from '../../../services/api';
@@ -84,23 +34,10 @@ import LevelManagementModal from '../modals/LevelManagementModal';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { SectionHeader, ListSection } from '../../shared';
 import { triggerPullHaptic } from '../../../utils/haptics';
+import { closeOpenSlidingItems } from '../../../utils/slidingItems';
+import { getIconFromString } from '../../../utils/badgeIcons';
 
-// Icon Mapping (same as in LevelManagementModal)
-const LEVEL_ICONS: Record<string, any> = {
-  trophy, medal, ribbon, star, checkmarkCircle, diamond, shield,
-  flame, flash, rocket, sparkles, thumbsUp,
-  heart, people, personAdd, chatbubbles, gift,
-  book, school, construct, brush, colorPalette,
-  sunny, moon, leaf, rose,
-  calendar, today, time, timer, stopwatch,
-  restaurant, fitness, bicycle, car, airplane, boat, camera, image, musicalNote, balloon,
-  home, business, location, navigate, compass, pin, flag,
-  informationCircle, helpCircle, alertCircle, hammer
-};
 
-const getIconFromString = (iconName: string) => {
-  return LEVEL_ICONS[iconName] || trophy;
-};
 
 interface Level {
   id: number;
@@ -125,7 +62,7 @@ const AdminLevelsPage: React.FC = () => {
   const [editLevel, setEditLevel] = useState<Level | undefined>(undefined);
 
   // Offline-Query: Levels
-  const { data: levels, loading, refresh: refreshLevels } = useOfflineQuery<Level[]>(
+  const { data: levels, loading, refresh: refreshLevels, refreshLive: refreshLevelsLive } = useOfflineQuery<Level[]>(
     'admin:levels:' + user?.organization_id,
     async () => { const res = await api.get('/levels'); return res.data; },
     { ttl: CACHE_TTL.STAMMDATEN }
@@ -140,10 +77,10 @@ const AdminLevelsPage: React.FC = () => {
     }
   });
 
-  // Live-Updates fuer Level abonnieren: der Server sendet nach Anlegen/Aendern/
-  // Loeschen ein 'levels'-Event (levels.js). Ohne dieses Abo blieb die Liste auf
+  // Live-Updates für Level abonnieren: der Server sendet nach Anlegen/Ändern/
+  // Löschen ein 'levels'-Event (levels.js). Ohne dieses Abo blieb die Liste auf
   // anderen Geraeten/Sitzungen bis zum manuellen Refresh veraltet (toter Sender).
-  useLiveRefresh('levels', refreshLevels);
+  useLiveRefresh('levels', refreshLevelsLive);
 
   const handleAdd = () => {
     setEditLevel(undefined);
@@ -156,7 +93,7 @@ const AdminLevelsPage: React.FC = () => {
   };
 
   const handleDelete = (level: Level) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Level löschen',
       message: `Level "${level.title}" wirklich löschen?`,
@@ -192,13 +129,13 @@ const AdminLevelsPage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()}>
+            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
               <IonIcon icon={arrowBack} />
             </IonButton>
           </IonButtons>
           <IonTitle>Level</IonTitle>
           <IonButtons slot="end">
-            <IonButton onClick={handleAdd}>
+            <IonButton aria-label="Neues Level anlegen" onClick={handleAdd}>
               <IonIcon icon={add} />
             </IonButton>
           </IonButtons>
@@ -300,7 +237,8 @@ const AdminLevelsPage: React.FC = () => {
 
                           <IonItemOptions side="end" className="app-swipe-actions">
                             <IonItemOption
-                              onClick={() => handleDelete(level)}
+                              onClick={() => { closeOpenSlidingItems(); handleDelete(level); }}
+                              aria-label="Level löschen"
                               className="app-swipe-action"
                             >
                               <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">

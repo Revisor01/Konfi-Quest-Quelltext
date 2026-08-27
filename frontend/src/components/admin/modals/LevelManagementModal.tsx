@@ -26,57 +26,7 @@ import {
   closeOutline,
   create,
   trophy,
-  medal,
-  ribbon,
-  star,
-  flame,
-  heart,
-  thumbsUp,
-  flash,
-  diamond,
-  rocket,
-  shield,
-  sparkles,
-  sunny,
-  moon,
-  leaf,
-  rose,
-  gift,
-  balloon,
-  musicalNote,
-  book,
-  school,
-  restaurant,
-  fitness,
-  bicycle,
-  car,
-  airplane,
-  boat,
-  home,
-  business,
-  construct,
-  hammer,
-  brush,
-  colorPalette,
-  camera,
-  image,
-  chatbubbles,
-  people,
-  personAdd,
-  checkmarkCircle,
-  alertCircle,
-  informationCircle,
-  helpCircle,
-  flag,
   pin,
-  navigate,
-  location,
-  compass,
-  timer,
-  stopwatch,
-  calendar,
-  today,
-  time,
   chevronDownOutline
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
@@ -85,75 +35,9 @@ import api from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
+import { ICON_CHOICES as LEVEL_ICONS, getIconFromString } from '../../../utils/badgeIcons';
 
-// Level Icon Mapping
-const LEVEL_ICONS = {
-  trophy: { icon: trophy, name: 'Pokal', category: 'Erfolg' },
-  medal: { icon: medal, name: 'Medaille', category: 'Erfolg' },
-  ribbon: { icon: ribbon, name: 'Band', category: 'Erfolg' },
-  star: { icon: star, name: 'Stern', category: 'Erfolg' },
-  checkmarkCircle: { icon: checkmarkCircle, name: 'Bestanden', category: 'Erfolg' },
-  diamond: { icon: diamond, name: 'Diamant', category: 'Erfolg' },
-  shield: { icon: shield, name: 'Schild', category: 'Erfolg' },
 
-  flame: { icon: flame, name: 'Flamme', category: 'Engagement' },
-  flash: { icon: flash, name: 'Blitz', category: 'Engagement' },
-  rocket: { icon: rocket, name: 'Rakete', category: 'Engagement' },
-  sparkles: { icon: sparkles, name: 'Funken', category: 'Engagement' },
-  thumbsUp: { icon: thumbsUp, name: 'Daumen hoch', category: 'Engagement' },
-
-  heart: { icon: heart, name: 'Herz', category: 'Gemeinschaft' },
-  people: { icon: people, name: 'Gruppe', category: 'Gemeinschaft' },
-  personAdd: { icon: personAdd, name: 'Neue Person', category: 'Gemeinschaft' },
-  chatbubbles: { icon: chatbubbles, name: 'Chat', category: 'Gemeinschaft' },
-  gift: { icon: gift, name: 'Geschenk', category: 'Gemeinschaft' },
-
-  book: { icon: book, name: 'Buch', category: 'Lernen' },
-  school: { icon: school, name: 'Schule', category: 'Lernen' },
-  construct: { icon: construct, name: 'Werkzeug', category: 'Lernen' },
-  brush: { icon: brush, name: 'Pinsel', category: 'Lernen' },
-  colorPalette: { icon: colorPalette, name: 'Farbpalette', category: 'Lernen' },
-
-  sunny: { icon: sunny, name: 'Sonne', category: 'Natur' },
-  moon: { icon: moon, name: 'Mond', category: 'Natur' },
-  leaf: { icon: leaf, name: 'Blatt', category: 'Natur' },
-  rose: { icon: rose, name: 'Rose', category: 'Natur' },
-
-  calendar: { icon: calendar, name: 'Kalender', category: 'Zeit' },
-  today: { icon: today, name: 'Heute', category: 'Zeit' },
-  time: { icon: time, name: 'Uhr', category: 'Zeit' },
-  timer: { icon: timer, name: 'Timer', category: 'Zeit' },
-  stopwatch: { icon: stopwatch, name: 'Stoppuhr', category: 'Zeit' },
-
-  restaurant: { icon: restaurant, name: 'Restaurant', category: 'Aktivitäten' },
-  fitness: { icon: fitness, name: 'Fitness', category: 'Aktivitäten' },
-  bicycle: { icon: bicycle, name: 'Fahrrad', category: 'Aktivitäten' },
-  car: { icon: car, name: 'Auto', category: 'Aktivitäten' },
-  airplane: { icon: airplane, name: 'Flugzeug', category: 'Aktivitäten' },
-  boat: { icon: boat, name: 'Boot', category: 'Aktivitäten' },
-  camera: { icon: camera, name: 'Kamera', category: 'Aktivitäten' },
-  image: { icon: image, name: 'Bild', category: 'Aktivitäten' },
-  musicalNote: { icon: musicalNote, name: 'Musik', category: 'Aktivitäten' },
-  balloon: { icon: balloon, name: 'Ballon', category: 'Aktivitäten' },
-
-  home: { icon: home, name: 'Zuhause', category: 'Orte' },
-  business: { icon: business, name: 'Gebäude', category: 'Orte' },
-  location: { icon: location, name: 'Standort', category: 'Orte' },
-  navigate: { icon: navigate, name: 'Navigation', category: 'Orte' },
-  compass: { icon: compass, name: 'Kompass', category: 'Orte' },
-  pin: { icon: pin, name: 'Pin', category: 'Orte' },
-  flag: { icon: flag, name: 'Flagge', category: 'Orte' },
-
-  informationCircle: { icon: informationCircle, name: 'Info', category: 'Sonstiges' },
-  helpCircle: { icon: helpCircle, name: 'Hilfe', category: 'Sonstiges' },
-  alertCircle: { icon: alertCircle, name: 'Warnung', category: 'Sonstiges' },
-  hammer: { icon: hammer, name: 'Hammer', category: 'Sonstiges' }
-};
-
-// Helper function to get icon from string
-const getIconFromString = (iconName: string) => {
-  return LEVEL_ICONS[iconName as keyof typeof LEVEL_ICONS]?.icon || trophy;
-};
 
 interface Level {
   id?: number;
@@ -280,7 +164,7 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
         <IonToolbar>
           <IonTitle>{level ? 'Level bearbeiten' : 'Neues Level'}</IonTitle>
           <IonButtons slot="start">
-            <IonButton
+            <IonButton aria-label="Schließen"
               onClick={handleClose}
               disabled={loading}
               className="app-modal-close-btn"
@@ -289,7 +173,7 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
-            <IonButton
+            <IonButton aria-label="Level speichern"
               onClick={handleSubmit}
               disabled={!isFormValid || loading || isSubmitting}
               className="app-modal-submit-btn app-modal-submit-btn--level"
@@ -328,7 +212,7 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
                 </IonItem>
 
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
-                  <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Benötigte Punkte *</IonLabel>
+                  <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Benötigte Punkte * <span style={{ fontWeight: 700, color: 'var(--ion-color-primary)' }}>{formData.points_required}</span></IonLabel>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
                     <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>1</span>
                     <IonRange
@@ -339,7 +223,7 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
                       disabled={loading}
                       style={{ flex: 1 }}
                     />
-                    <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--ion-color-primary)', minWidth: '28px', textAlign: 'center' }}>{formData.points_required}</span>
+                    <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>40</span>
                   </div>
                 </IonItem>
 

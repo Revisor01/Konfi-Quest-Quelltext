@@ -23,35 +23,42 @@ import {
   calendarOutline,
   starOutline,
   trophy,
+  checkmark,
   flash,
   logOutOutline,
   trashOutline,
-  checkmark,
   rocket,
   keyOutline,
   bookOutline,
   locationOutline,
   mailOutline,
   timeOutline,
-  closeOutline,
   compassOutline,
-  imagesOutline
+  imagesOutline,
+  sparklesOutline,
+  chevronForwardOutline
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
+import { setUser as setTokenStoreUser } from '../../../services/tokenStore';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { SectionHeader } from '../../shared';
 import { useMediaCacheControl } from '../../../hooks/useMediaCacheControl';
-import ChangePasswordModal from '../modals/ChangePasswordModal';
-import ChangeEmailModal from '../modals/ChangeEmailModal';
+import ChangePasswordModal from '../../shared/ChangePasswordModal';
+import ChangeEmailModal from '../../shared/ChangeEmailModal';
 import DeleteAccountModal from '../../shared/DeleteAccountModal';
+import BibleTranslationModal, { getTranslationName } from '../../shared/BibleTranslationModal';
+import BiometrieSchalter from '../../shared/BiometrieSchalter';
 import SpiritFooter from '../../shared/SpiritFooter';
 import PointsHistoryModal from '../modals/PointsHistoryModal';
 import WrappedModal from '../../wrapped/WrappedModal';
 import KonfiOnboardingModal from '../modals/KonfiOnboardingModal';
+import KonfiUpdateWalkthroughModal from '../modals/KonfiUpdateWalkthroughModal';
 import type { WrappedHistoryEntry } from '../../../types/wrapped';
 import { safeUUID } from '../../../utils/uuid';
+import NeuerungenBanner from '../../shared/NeuerungenBanner';
+import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
 
 interface KonfiProfile {
   id: number;
@@ -65,6 +72,8 @@ interface KonfiProfile {
   created_at: string;
   last_login_at?: string;
   bible_translation?: string;
+  gottesdienst_enabled?: boolean;
+  gemeinde_enabled?: boolean;
   // Statistics
   total_points: number;
   gottesdienst_points?: number;
@@ -114,95 +123,15 @@ interface ProfileViewProps {
   pageRef?: React.RefObject<HTMLElement | null>;
 }
 
-const BibleTranslationModal: React.FC<{
-  onClose: () => void;
-  currentTranslation: string;
-  onSelect: (code: string) => void;
-}> = ({ onClose, currentTranslation, onSelect }) => {
-  const translations = [
-    { code: 'LUT', name: 'Lutherbibel 2017', description: 'Die klassische deutsche Standardübersetzung, nah am Originaltext mit der Sprachkraft Martin Luthers. Weit verbreitet in evangelischen Gottesdiensten.' },
-    { code: 'ELB', name: 'Elberfelder Bibel', description: 'Besonders wörtliche Übersetzung, die sich eng an den hebräischen und griechischen Grundtext hält. Ideal zum genauen Bibelstudium.' },
-    { code: 'GNB', name: 'Gute Nachricht Bibel', description: 'Leicht verständliche Übersetzung in modernem Deutsch. Gut geeignet für Einsteiger:innen und den Konfi-Unterricht.' },
-    { code: 'BIGS', name: 'Bibel in gerechter Sprache', description: 'Übersetzung mit Fokus auf Gerechtigkeit, Inklusion und die Vielfalt biblischer Gottesbilder. Gendersensibel und theologisch reflektiert.' },
-    { code: 'NIV', name: 'New International Version', description: 'Die meistgelesene englische Bibelübersetzung. Gute Balance zwischen Wörtlichkeit und Verständlichkeit. Für alle die Englisch bevorzugen.' },
-    { code: 'LSG', name: 'Louis Segond 1910', description: 'Französische Standardübersetzung, vergleichbar mit der Lutherbibel im deutschen Sprachraum. Klassisch und weit verbreitet.' },
-    { code: 'RVR60', name: 'Reina-Valera 1960', description: 'Spanische Standardübersetzung mit großer Treue zum Grundtext. Die am häufigsten verwendete spanische Bibel.' }
-  ];
-
-  return (
-    <IonPage>
-      <IonHeader>
-        <IonToolbar>
-          <IonTitle>Bibelübersetzung</IonTitle>
-          <IonButtons slot="start">
-            <IonButton className="app-modal-close-btn" onClick={onClose}>
-              <IonIcon icon={closeOutline} />
-            </IonButton>
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
-      <IonContent className="app-gradient-background">
-        <IonList inset={true} style={{ margin: '16px' }}>
-          <IonListHeader>
-            <div className="app-section-icon app-section-icon--purple">
-              <IonIcon icon={bookOutline} />
-            </div>
-            <IonLabel>Übersetzung wählen</IonLabel>
-          </IonListHeader>
-          <IonCard className="app-card">
-            <IonCardContent style={{ padding: '12px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column' }}>
-                {translations.map((t) => {
-                  const isSelected = currentTranslation === t.code;
-                  return (
-                    <div
-                      key={t.code}
-                      className={`app-list-item app-list-item--purple ${isSelected ? 'app-list-item--selected' : ''}`}
-                      onClick={() => onSelect(t.code)}
-                      style={{
-                        cursor: 'pointer',
-                        position: 'relative',
-                        overflow: 'hidden',
-                        background: isSelected ? 'rgba(91, 33, 182, 0.08)' : undefined
-                      }}
-                    >
-                      {isSelected && (
-                        <div className="app-corner-badges">
-                          <div
-                            className="app-corner-badge"
-                            style={{ backgroundColor: '#5b21b6', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
-                            title="Ausgewählt"
-                          >
-                            <IonIcon icon={checkmark} style={{ color: '#fff', fontSize: '0.85rem' }} />
-                          </div>
-                        </div>
-                      )}
-                      <div className="app-list-item__row">
-                        <div className="app-list-item__main">
-                          <div className="app-list-item__content">
-                            <div className="app-list-item__title" style={{ paddingRight: isSelected ? '40px' : '0' }}>{t.name}</div>
-                            <div className="app-list-item__subtitle" style={{ whiteSpace: 'normal', lineHeight: '1.4' }}>{t.description}</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </IonCardContent>
-          </IonCard>
-        </IonList>
-      </IonContent>
-    </IonPage>
-  );
-};
-
 const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presentingElement, pageRef }) => {
-  const { user, setError, signOut } = useApp();
+  const { user, setUser, setError, signOut } = useApp();
   const [presentAlert] = useIonAlert();
 
   const [selectedTranslation, setSelectedTranslation] = useState<string>(profile.bible_translation || 'LUT');
   const [earnedBadgesCount, setEarnedBadgesCount] = useState<number>(0);
+  // Anzahl der eigenen Challenge-Stempel (marks). Schlanker Zusatzabruf —
+  // fällt er aus, bleibt die Kachel bei 0 statt das Profil zu stoeren.
+  const [challengeMarksCount, setChallengeMarksCount] = useState<number>(0);
   const { cacheLabel, clearMediaCache: handleClearMediaCache } = useMediaCacheControl();
   const [wrappedHistory, setWrappedHistory] = useState<WrappedHistoryEntry[]>([]);
   // Wrapped-Historie laden
@@ -248,7 +177,17 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
     };
     loadBadges();
   }, []);
-  
+
+  // Challenge-Stempel zählen. Fehler bewusst still: die Kachel zeigt dann 0.
+  React.useEffect(() => {
+    api.get('/challenges/konfi')
+      .then(res => {
+        const marks = Array.isArray(res.data?.marks) ? res.data.marks : [];
+        setChallengeMarksCount(marks.length);
+      })
+      .catch(() => { /* optionale Kachel — stiller Fehler */ });
+  }, []);
+
   const handleTranslationChange = async (translation: string) => {
     // Offline: Optimistic UI + Queue-Fallback (fire-and-forget)
     if (!networkMonitor.isOnline) {
@@ -274,19 +213,6 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
     }
   };
 
-  const getTranslationName = (code: string) => {
-    const translations = {
-      'LUT': 'Lutherbibel 2017',
-      'ELB': 'Elberfelder Bibel',
-      'GNB': 'Gute Nachricht Bibel',
-      'BIGS': 'Bibel in gerechter Sprache',
-      'NIV': 'New International Version',
-      'LSG': 'Louis Segond 1910',
-      'RVR60': 'Reina-Valera 1960'
-    };
-    return translations[code as keyof typeof translations] || code;
-  };
-
   const handleLogout = () => {
     presentAlert({
       header: 'Abmelden',
@@ -298,7 +224,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
           role: 'destructive',
           handler: async () => {
             // signOut() ist failsafe (kein throw, erzwingt intern clearAuth +
-            // setUser(null) -> Login-Route). Kein window.location-Reload noetig.
+            // setUser(null) -> Login-Route). Kein window.location-Reload nötig.
             await signOut();
           }
         }
@@ -309,11 +235,22 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
   // Modal with useIonModal Hook for Email Edit
   const [presentEmailModal, dismissEmailModal] = useIonModal(ChangeEmailModal, {
     onClose: () => dismissEmailModal(),
-    onSuccess: () => {
+    onSuccess: async () => {
       dismissEmailModal();
       onReload();
-    }
+      try {
+        const response = await api.get('/auth/me');
+        if (user) {
+          const updatedUser = { ...user, email: response.data.email };
+          await setTokenStoreUser(updatedUser);
+          setUser(updatedUser);
+        }
+      } catch (err) {
+        console.error('Error refreshing user:', err);
+      }
+    },
     // initialEmail wird nicht mehr benötigt - Modal lädt selbst vom Server
+    variante: 'purple'
   });
 
   // Modal with useIonModal Hook for Password Change
@@ -321,7 +258,8 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
     onClose: () => dismissPasswordModal(),
     onSuccess: () => {
       dismissPasswordModal();
-    }
+    },
+    variante: 'purple'
   });
 
   // Modal with useIonModal Hook for Account Deletion
@@ -331,6 +269,10 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
 
   // App-Tour (Onboarding) erneut ansehen — Vollbild-Overlay (kein Modal)
   const [showOnboarding, setShowOnboarding] = useState(false);
+  // "Was ist neu?" — derselbe Update-Walkthrough, den Bestandsnutzer einmalig
+  // nach dem Update sehen. Hier jederzeit erneut aufrufbar.
+  const [showUpdateWalkthrough, setShowUpdateWalkthrough] = useState(false);
+  const [showMitmachenErklaerung, setShowMitmachenErklaerung] = useState(false);
 
   // Modal with useIonModal Hook for Bible Translation
   const [presentBibleModal, dismissBibleModal] = useIonModal(BibleTranslationModal, {
@@ -345,6 +287,13 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
   // Modal with useIonModal Hook for Points History
   const [presentPointsModal, dismissPointsModal] = useIonModal(PointsHistoryModal, {
     onClose: () => dismissPointsModal(),
+    // Ohne pointConfig faellt das Modal auf "beide Arten aktiv" zurueck.
+    pointConfig: profile
+      ? {
+          gottesdienst_enabled: profile.gottesdienst_enabled !== false,
+          gemeinde_enabled: profile.gemeinde_enabled !== false,
+        }
+      : undefined,
     profileTotals: profile ? {
       total_points: profile.total_points || 0,
       gottesdienst_points: profile.gottesdienst_points || 0,
@@ -414,13 +363,13 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
         subtitle={`@${profile.username}`}
         icon={personOutline}
         preset="konfis"
+        // Bewusst nur DREI Kacheln: sechs Zahlen nebeneinander waren zu eng und
+        // die Aufteilung (GD/Gemeinde/Bonus) steht ohnehin in der
+        // Punkte-Übersicht weiter unten. Hier zählt der Ueberblick.
         stats={[
           { value: profile.total_points || 0, label: 'PUNKTE' },
-          { value: profile.gottesdienst_points || 0, label: 'GD' },
-          { value: profile.gemeinde_points || 0, label: 'GEMEINDE' },
-          { value: profile.event_count || 0, label: 'EVENTS' },
           { value: earnedBadgesCount, label: 'BADGES' },
-          { value: profile.bonus_points || 0, label: 'BONUS' }
+          { value: challengeMarksCount, label: 'CHALLENGES' }
         ]}
       />
 
@@ -645,6 +594,11 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
         </IonCard>
       )}
 
+      <NeuerungenBanner
+        onUpdateOeffnen={() => setShowUpdateWalkthrough(true)}
+        onMitmachenOeffnen={() => setShowMitmachenErklaerung(true)}
+      />
+
       {/* Konto-Einstellungen - iOS26 Pattern wie Admin */}
       <IonList inset={true} style={{ margin: '16px' }}>
         <IonListHeader>
@@ -779,6 +733,10 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                 </div>
               </div>
 
+              {/* Biometrische Anmeldung (blendet sich selbst aus, wenn das
+                  Geraet keine eingerichtete Biometrie hat) */}
+              <BiometrieSchalter variante="purple" />
+
               {/* Medien-Cache leeren */}
               <div
                 className="app-list-item app-list-item--purple"
@@ -847,6 +805,21 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
         <KonfiOnboardingModal
           onClose={() => setShowOnboarding(false)}
           displayName={(user?.display_name || profile.display_name || '').split(' ')[0]}
+        />
+      )}
+
+      {/* "Was ist neu?" — derselbe Walkthrough wie nach dem Update */}
+      {showUpdateWalkthrough && (
+        <KonfiUpdateWalkthroughModal
+          onClose={() => setShowUpdateWalkthrough(false)}
+          displayName={(user?.display_name || profile.display_name || '').split(' ')[0]}
+        />
+      )}
+
+      {showMitmachenErklaerung && (
+        <MitmachenErklaerungModal
+          rolle="konfi"
+          onClose={() => setShowMitmachenErklaerung(false)}
         />
       )}
     </div>

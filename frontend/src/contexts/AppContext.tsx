@@ -2,9 +2,9 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { Capacitor, registerPlugin } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 import api from '../services/api';
-import { getUser, setUser as persistUser, getDeviceId, setDeviceId, getPushTokenTimestamp, setPushTokenTimestamp, getActiveOrgId, setActiveOrgId, setToken } from '../services/tokenStore';
+import { getUser, setUser as persistUser, getDeviceId, setDeviceId, getPushTokenTimestamp, setPushTokenTimestamp, getActiveOrgId, setActiveOrgId, setToken, getToken } from '../services/tokenStore';
 import { networkMonitor } from '../services/networkMonitor';
-import { ensureSocketConnected } from '../services/websocket';
+import { ensureSocketConnected, reconnectWithToken } from '../services/websocket';
 import { App } from '@capacitor/app';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { removeDeliveredById, removeAllDelivered } from '../services/notifications';
@@ -14,6 +14,8 @@ import { logout as performLogout } from '../services/auth';
 import { clearAuth } from '../services/tokenStore';
 import { BackgroundTask } from '@capawesome/capacitor-background-task';
 import { BaseUser } from '../types/user';
+import { setAnalyticsRole, trackFehler, trackSitzungsstart } from '../services/analytics';
+import { buildPushTargetUrl, resolveOrgForPush, PushUserType } from '../utils/pushNavigation';
 
 // FCM Token wird über Window Events empfangen (siehe AppDelegate.swift)
 
@@ -29,12 +31,12 @@ const FCM = registerPlugin<FCMPlugin>('FCM');
 let pushRegistrationInProgress = false;
 let pushAlreadyRegistered = false;
 
-// In-Memory Anti-Spam-State fuer FCM-Token (kein window-Zugriff noetig)
+// In-Memory Anti-Spam-State für FCM-Token (kein window-Zugriff nötig)
 let fcmTokenSent: string | null = null;
 let fcmTokenLastSent: number = 0;
 let pendingFcmToken: string | null = null;
 
-// 12 Stunden — Sendefenster fuer einen UNVERAENDERTEN Token.
+// 12 Stunden — Sendefenster für einen UNVERAENDERTEN Token.
 const TOKEN_RESEND_WINDOW_MS = 12 * 60 * 60 * 1000;
 
 // Funktion, um Duplikate zu vermeiden
@@ -52,8 +54,8 @@ const sendTokenToServer = async (token: string, retryCount = 0) => {
   // erfolgreiche Send weniger als 12h her, NICHT erneut senden (spart org-weit
   // dutzende POSTs/90min). Der persistierte Timestamp (getPushTokenTimestamp)
   // ueberlebt App-Neustarts, sodass das Fenster auch nach Kaltstart greift,
-  // sobald bekannt ist, dass sich der Token nicht geaendert hat.
-  // Bei GEAENDERTEM Token (fcmTokenSent !== token) faellt diese Sperre weg ->
+  // sobald bekannt ist, dass sich der Token nicht geändert hat.
+  // Bei GEAENDERTEM Token (fcmTokenSent !== token) fällt diese Sperre weg ->
   // sofort senden.
   if (fcmTokenSent === token) {
     const lastPersistedSend = getPushTokenTimestamp();
@@ -86,7 +88,7 @@ const sendTokenToServer = async (token: string, retryCount = 0) => {
     if (retryCount < retryDelays.length) {
       setTimeout(() => sendTokenToServer(token, retryCount + 1), retryDelays[retryCount]);
     } else {
-      // Alle Retries fehlgeschlagen — Token fuer Reconnect-Retry merken
+      // Alle Retries fehlgeschlagen — Token für Reconnect-Retry merken
       pendingFcmToken = token;
     }
   }
@@ -114,7 +116,8 @@ interface AppContextType {
   organizations: UserOrganization[];
   activeOrgId: number | null;
   orgVersion: number;
-  switchOrg: (orgId: number) => Promise<void>;
+  // Liefert ok + den User-Typ in der ZIEL-Org (Rolle kann pro Org anders sein).
+  switchOrg: (orgId: number) => Promise<{ ok: boolean; type?: PushUserType }>;
   signOut: () => Promise<void>;
   setUser: (user: BaseUser | null) => void;
   refreshUser: () => Promise<void>;
@@ -134,14 +137,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [success, setSuccess] = useState('');
   const [isOnline, setIsOnline] = useState<boolean>(true);
 
+  // Jede Fehlermeldung, die tatsaechlich jemand zu sehen bekommt, fliesst in
+  // die anonyme Messung ein — DAS beantwortet "wo klemmt es". Uebertragen wird
+  // nur eine gekuerzte, entschaerfte Fassung des Textes: keine Namen, keine
+  // IDs, keine Freitexte aus Beitraegen (Zahlen werden ersetzt).
+  const setErrorTracked = useCallback((meldung: string) => {
+    setError(meldung);
+    if (meldung) {
+      const anonym = meldung
+        .replace(/\d+/g, '#')
+        .slice(0, 80);
+      trackFehler(anonym);
+    }
+  }, []);
+
+  // Rolle für die anonyme Nutzungsmessung mitfuehren (konfi/teamer/admin) —
+  // die EINZIGE Eigenschaft, die dorthin übertragen wird. Zentral hier, damit
+  // sie bei Login, Logout und Organisationswechsel automatisch stimmt.
+  useEffect(() => {
+    setAnalyticsRole(user?.role_name);
+    // Sitzungsbeginn als Seitenaufruf melden — ohne den zählt Umami weder
+    // Besucher noch Sitzungen, die Ereignisse allein erscheinen im Dashboard
+    // nicht (11.08.: 130 Ereignisse, aber 0 Besucher). Nur bei vorhandener
+    // Rolle, sonst wuerde der Logout als weiterer Besuch gezählt.
+    if (user?.role_name) trackSitzungsstart();
+  }, [user?.role_name]);
+
   // Push notifications state
   const [pushNotificationsPermission, setPushNotificationsPermission] = useState<string>('prompt');
 
-  // Account-Wechsel-Erkennung fuer den FCM-Token: Nach Logout+Login mit einem
-  // ANDEREN Account haengt der Token serverseitig noch am alten User (das
+  // Account-Wechsel-Erkennung für den FCM-Token: Nach Logout+Login mit einem
+  // ANDEREN Account hängt der Token serverseitig noch am alten User (das
   // 12h-Sendefenster verhindert den erneuten POST). Bei einem Wechsel innerhalb
-  // der Session das Fenster aufheben und den bekannten Token sofort fuer den
-  // neuen User registrieren — der Server haengt ihn dabei um (DELETE fremder
+  // der Session das Fenster aufheben und den bekannten Token sofort für den
+  // neuen User registrieren — der Server hängt ihn dabei um (DELETE fremder
   // Bindungen in POST /device-token).
   const prevPushUserIdRef = useRef<number | null>(null);
   useEffect(() => {
@@ -158,11 +187,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Multi-Org Switcher state
   const [organizations, setOrganizations] = useState<UserOrganization[]>([]);
   const [activeOrgId, setActiveOrgIdState] = useState<number | null>(getActiveOrgId());
-  // Bei Org-Wechsel und 403-Fallback erhoeht; dient als React-key am Router
+  // Bei Org-Wechsel und 403-Fallback erhöht; dient als React-key am Router
   // (App.tsx) -> kompletter Remount des Subtrees. Zusammen mit dem
   // 'org:switched'-Event: das Event revalidiert useOfflineQuery-Daten (auch in
   // gecachten Pages), der Remount erwischt zusaetzlich alles, was seinen State
-  // selbst haelt. Beides ist noetig — mit dem Event allein blieben Views mit
+  // selbst haelt. Beides ist nötig — mit dem Event allein blieben Views mit
   // eigenem useState auf den Daten der alten Org stehen.
   // KEIN window.location-Reload (zerschiesst nativen WebView).
   const [orgVersion, setOrgVersion] = useState(0);
@@ -199,7 +228,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // User-Daten frisch von /me ziehen (Trial-Status, Rolle etc.) und in State +
   // Cache mergen. Wird beim App-Start aufgerufen UND nach Aktionen, die den
-  // eigenen User betreffen koennen (z.B. eigene Org auf Test stellen) — damit
+  // eigenen User betreffen können (z.B. eigene Org auf Test stellen) — damit
   // der Trial-Banner sofort erscheint/verschwindet, ohne Logout/Neustart.
   const refreshUser = useCallback(async () => {
     const cached = getUser();
@@ -270,13 +299,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Router) — KEIN window.location-Reload (der zerschiesst im nativen Capacitor-
   // WebView die App: Token/aktive Org sind async in Preferences und der Reload
   // schneidet den Write ab -> "alles 0 + Switcher weg", siehe App.tsx-Kommentar).
-  const switchOrg = useCallback(async (orgId: number) => {
+  const switchOrg = useCallback(async (orgId: number): Promise<{ ok: boolean; type?: PushUserType }> => {
+    let switchedType: PushUserType | undefined;
+    // Ungesendetes der ALTEN Organisation JETZT noch zustellen — mit deren
+    // Token/Header. Nach dem Wechsel wird die Queue geleert (Schritt 4 unten);
+    // ohne diesen Flush verschwanden dabei ungesendete Chat-Nachrichten
+    // kommentarlos. Ein Versand NACH dem Wechsel waere falsch (falsche Org).
+    try {
+      await writeQueue.flush();
+    } catch { /* best-effort */ }
+    let verbleibendeChatNachrichten = 0;
+    try {
+      verbleibendeChatNachrichten = (await writeQueue.getAll())
+        .filter(item => item.metadata.type === 'chat').length;
+    } catch { /* best-effort */ }
     try {
       const res = await api.post('/auth/switch-org', { organization_id: orgId });
       if (!res?.data?.token) {
         throw new Error('Kein Token in switch-org Response');
       }
-      // 1. Neues Access-Token (traegt active_organization_id als Claim)
+      // 1. Neues Access-Token (trägt active_organization_id als Claim)
       await setToken(res.data.token);
 
       // 2. Aktive Org persistieren (oder entfernen, wenn es die Primaer-Org ist).
@@ -286,14 +328,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setActiveOrgIdState(isPrimary ? null : orgId);
 
       // 3. User-State auf die neue Org/Rolle umschreiben (Rolle steuert Routing!).
+      // Fallback auf die switch-org-Antwort: beim Kaltstart über einen Push-Tap
+      // ist die organizations-Liste oft noch nicht geladen — die Antwort trägt
+      // Typ, Rolle und Org-Namen der Ziel-Org.
+      switchedType = res.data.type as PushUserType | undefined;
       const target = organizations.find(o => o.id === orgId);
       const cached = getUser();
-      if (target && cached) {
+      if (cached) {
         const merged = {
           ...cached,
-          organization: target.display_name || target.name,
-          organization_id: target.id,
-          role_name: target.role_name
+          organization: target?.display_name || target?.name || res.data.organization?.name || cached.organization,
+          organization_id: orgId,
+          role_name: target?.role_name || res.data.role_name || cached.role_name,
+          // Typ steuert den Komponentenbaum (admin/teamer/konfi) — aus der
+          // Antwort übernehmen, die Rolle kann sich zwischen Orgs unterscheiden.
+          ...(switchedType && switchedType !== 'user' ? { type: switchedType } : {})
         };
         await persistUser(merged);
         setUser(merged);
@@ -303,9 +352,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       await offlineCache.clearAll();
       await writeQueue.clear();
 
+      // Konnte der Flush oben nicht alles zustellen, ist das Verwerfen hier
+      // ein Datenverlust — den sagen wir ehrlich, statt still zu leeren.
+      if (verbleibendeChatNachrichten > 0) {
+        setError(verbleibendeChatNachrichten === 1
+          ? 'Eine ungesendete Chat-Nachricht konnte vor dem Wechsel nicht mehr zugestellt werden'
+          : `${verbleibendeChatNachrichten} ungesendete Chat-Nachrichten konnten vor dem Wechsel nicht mehr zugestellt werden`);
+      }
+
       // AB HIER ist der Wechsel ERFOLGREICH abgeschlossen (Token + aktive Org +
       // User-State stehen). Die folgenden Schritte sind nur noch Revalidierung
-      // und duerfen NICHT mehr den Fehler-Toast ausloesen: durch das gleich
+      // und duerfen NICHT mehr den Fehler-Toast auslösen: durch das gleich
       // gefeuerte 'org:switched' starten viele parallele Requests, von denen
       // einer kurz in ein Token-Refresh-Race laufen kann. Frueher lag
       // loadOrganizations() im try-Block -> ein solcher transienter 401 warf
@@ -314,7 +371,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err) {
       console.error('Org-Wechsel fehlgeschlagen:', err);
       setError('Organisation konnte nicht gewechselt werden');
-      return;
+      return { ok: false };
+    }
+
+    // 4b. Socket mit dem NEUEN Token neu aufbauen. Ohne diesen Schritt lief der
+    // Socket mit dem Token der alten Organisation weiter: initializeWebSocket
+    // gibt einen bereits bestehenden Socket unverändert zurück, das frische
+    // Token aus switch-org erreichte die Verbindung also nie. Folge: in der
+    // Zweit-Organisation kamen gar keine Live-Updates an.
+    try {
+      const frischesToken = getToken();
+      if (frischesToken) reconnectWithToken(frischesToken);
+    } catch (socketErr) {
+      // Live-Updates sind Komfort — ein Fehler hier darf den bereits
+      // erfolgreichen Org-Wechsel nicht nachträglich als gescheitert melden.
+      console.error('Socket-Neuaufbau nach Org-Wechsel fehlgeschlagen:', socketErr);
     }
 
     // 5. window-Event 'org:switched' -> jede useOfflineQuery revalidiert frisch
@@ -329,10 +400,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Komponenten, die useOfflineQuery benutzen UND gerade gemountet sind. Alles,
     // was seine Daten im eigenen useState/useEffect haelt (oder im
     // IonRouterOutlet-Stack geparkt ist), behielt die Daten der alten Org — die
-    // Ansicht sah nach dem Umschalten unveraendert aus.
+    // Ansicht sah nach dem Umschalten unverändert aus.
     setOrgVersion(v => v + 1);
 
-    // 6. Switcher-Liste fuer die neue Org neu laden (Rollen/Namen koennen sich
+    // 6. Switcher-Liste für die neue Org neu laden (Rollen/Namen können sich
     // unterscheiden) — best-effort, Fehler hier sind unkritisch und duerfen den
     // bereits erfolgreichen Wechsel nicht als Fehlschlag melden.
     try {
@@ -340,11 +411,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (err) {
       console.warn('Org-Liste nach Wechsel nicht neu geladen (unkritisch):', err);
     }
+
+    return { ok: true, type: switchedType };
   }, [organizations, loadOrganizations]);
 
-  // Sauberes Abmelden — GARANTIERT zurueck zum Login, egal wie verkorkst der
+  // Immer-aktueller Zugriff auf switchOrg für den Push-Tap-Handler: dessen
+  // Effect hat nur [user] als Dependency — ein direkt eingeschlossenes
+  // switchOrg wäre eine stale Closure (veraltete organizations-Liste).
+  const switchOrgRef = useRef(switchOrg);
+  useEffect(() => {
+    switchOrgRef.current = switchOrg;
+  }, [switchOrg]);
+
+  // Sauberes Abmelden — GARANTIERT zurück zum Login, egal wie verkorkst der
   // Zustand ist. Kein window.location-Reload (zerschiesst den nativen WebView).
-  // Reihenfolge: aktive Org weg, logout() (best-effort, raeumt Token+Cache),
+  // Reihenfolge: aktive Org weg, logout() (best-effort, räumt Token+Cache),
   // dann IMMER setUser(null) -> AppContent rendert sofort die Login-Route.
   // Selbst wenn logout() wirft, kommt der User raus (clearAuth im catch).
   const signOut = useCallback(async () => {
@@ -457,11 +538,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // NetworkMonitor initialisieren und isOnline State synchronisieren
   useEffect(() => {
-    networkMonitor.init();
+    Promise.resolve(networkMonitor.init()).then(() => {
+      setIsOnline(networkMonitor.isOnline);
+      // Beim Kaltstart liegengebliebene Queue-Items direkt anstossen: die
+      // uebrigen Ausloeser (Online-Wechsel, Socket-Reconnect, App-Resume)
+      // feuern beim normalen App-Start nicht — eine offline geschriebene
+      // Nachricht blieb sonst bis zum naechsten Zufallsausloeser liegen.
+      if (networkMonitor.isOnline) {
+        writeQueue.flush();
+      }
+    });
     const unsubscribe = networkMonitor.subscribe((online) => {
       setIsOnline(online);
       // Beim Wiedererlangen der Verbindung (z.B. nach Netzwerkwechsel WLAN<->LTE)
-      // den WebSocket aktiv anstossen — er haengt sonst manchmal getrennt fest.
+      // den WebSocket aktiv anstossen — er hängt sonst manchmal getrennt fest.
       if (online) {
         ensureSocketConnected();
       }
@@ -505,7 +595,7 @@ useEffect(() => {
   // Hinweis: Das fruehere (App as any).fireRestoredResult()-Workaround zum
   // Antriggern des Token-Sends ist in Capacitor 8 entfernt und warf eine
   // unhandled Promise-Rejection ("not implemented on android"). Der Token-Send
-  // erfolgt ohnehin ueber das AppDelegate bei App-Aktivierung sowie ueber den
+  // erfolgt ohnehin über das AppDelegate bei App-Aktivierung sowie über den
   // 'fcmToken'-Listener oben — der Workaround ist damit ersatzlos entfallen.
 
 
@@ -557,16 +647,16 @@ useEffect(() => {
       stateChangeListener = await App.addListener('appStateChange', async ({ isActive }) => {
         if (isActive) {
           // Beim Wechsel in den Vordergrund zuerst den Socket aktiv anstossen:
-          // Nach laengerem Hintergrund (oder Deploy-Downtime) haengt er oft im
+          // Nach laengerem Hintergrund (oder Deploy-Downtime) hängt er oft im
           // getrennten Zustand fest, ohne von selbst neu zu verbinden. Der
-          // anschliessende Reconnect loest die 'sync:reconnect'-Sequenz (flush ->
+          // anschliessende Reconnect löst die 'sync:reconnect'-Sequenz (flush ->
           // invalidate -> Badge/View-Refresh) ohnehin aus.
           ensureSocketConnected();
 
           handleAppActive();
 
           // Admins bekommen ohnehin laufend Erinnerungen -> beim Aktiv-werden
-          // global aufraeumen. Konfis/Teamer NICHT (dort gezielt pro Bereich/
+          // global aufräumen. Konfis/Teamer NICHT (dort gezielt pro Bereich/
           // beim Antippen, damit ungelesene Erinnerungen nicht verschwinden).
           if (user?.type === 'admin') {
             removeAllDelivered();
@@ -637,81 +727,26 @@ useEffect(() => {
           // (bewusst geoeffnet -> wie bei den meisten Apps verschwindet sie).
           removeDeliveredById(action.notification.id);
 
+          const notificationData = action.notification.data as Record<string, unknown> | undefined;
           const notificationType = action.notification.data?.type;
-          const userType = user?.type || 'konfi';
-          const routePrefix = userType === 'admin' ? '/admin' : userType === 'teamer' ? '/teamer' : '/konfi';
 
           // Use timeout to ensure navigation happens after app is fully loaded
-          setTimeout(() => {
-            let targetUrl = '';
-
-            switch (notificationType) {
-              case 'chat':
-                // Direkt in den Raum: Die Route ist /chat/room/:roomId — der
-                // fruehere Query-Parameter (?room=) wurde von keiner Seite
-                // konsumiert, der Tap landete nur auf der Chat-Uebersicht.
-                if (action.notification.data?.roomId) {
-                  targetUrl = `${routePrefix}/chat/room/${action.notification.data.roomId}`;
-                } else {
-                  targetUrl = `${routePrefix}/chat`;
-                }
-                break;
-
-              case 'activity_request_status':
-              case 'new_activity_request':
-                // Navigate to requests page (Teamer hat keine Requests-Page, Dashboard stattdessen)
-                targetUrl = userType === 'admin' ? '/admin/requests' : userType === 'teamer' ? '/teamer/dashboard' : '/konfi/requests';
-                break;
-
-              case 'badge_earned':
-                // Navigate to badges page (Teamer hat keine Badges-Page, Profil stattdessen)
-                targetUrl = userType === 'admin' ? '/admin/badges' : userType === 'teamer' ? '/teamer/profile' : '/konfi/badges';
-                break;
-
-              case 'new_event': {
-                // "Anmeldung moeglich"-Push: direkt zum Event-Detail, wenn die ID
-                // mitkommt (Konfi hat eine Detail-Route). Sonst zur Events-Liste.
-                const evId = action.notification.data?.event_id || action.notification.data?.eventId;
-                if (evId && userType === 'konfi') {
-                  targetUrl = `/konfi/events/${evId}`;
-                } else {
-                  targetUrl = `${routePrefix}/events`;
-                }
-                break;
-              }
-
-              case 'event_registered':
-              case 'event_unregistered':
-              case 'waitlist_promotion':
-              case 'event_attendance':
-              case 'event_reminder':
-              case 'event_cancelled':
-                // Navigate to events page
-                targetUrl = `${routePrefix}/events`;
-                break;
-
-              case 'level_up':
-              case 'activity_assigned':
-              case 'bonus_points':
-                // Navigate to dashboard (points/level related)
-                targetUrl = userType === 'admin' ? '/admin/konfis' : `${routePrefix}/dashboard`;
-                break;
-
-              case 'event_unregistration':
-              case 'events_pending_approval':
-                // Navigate to events page (Admin: Event-Abmeldungen / ausstehende Verbuchungen)
-                targetUrl = userType === 'admin' ? '/admin/events' : `${routePrefix}/events`;
-                break;
-
-              case 'new_konfi_registration':
-                // Navigate to konfis page (Admin: neue Registrierung)
-                targetUrl = userType === 'admin' ? '/admin/konfis' : `${routePrefix}/dashboard`;
-                break;
-
-              default:
-                console.warn('Unbekannter Notification-Typ:', notificationType);
-                break;
-            }
+          setTimeout(async () => {
+            // Multi-Org: Der Push trägt die Organisation seines Inhalts. Weicht
+            // sie von der gerade aktiven Org ab, ERST über den bestehenden
+            // switchOrg-Flow wechseln und den Abschluss abwarten — der harte
+            // Reload unten würde die asynchronen Preferences-Writes sonst
+            // abschneiden. Frische Werte über die tokenStore-Getter, nicht aus
+            // dem Effect-Closure ([user]-Dependency -> stale). Fehlt die Org im
+            // Payload oder schlägt der Wechsel fehl, bleibt alles beim heutigen
+            // Verhalten (direkt navigieren).
+            const currentType = (getUser()?.type || user?.type || 'konfi') as PushUserType;
+            const effectiveType = await resolveOrgForPush(notificationData, currentType, {
+              getActiveOrgId,
+              getUserOrgId: () => getUser()?.organization_id ?? null,
+              switchOrg: (orgId) => switchOrgRef.current(orgId)
+            });
+            const targetUrl = buildPushTargetUrl(notificationType, notificationData, effectiveType);
 
             if (targetUrl) {
               // Hard navigation (intentional): App kommt aus Background/Killed-State,
@@ -770,7 +805,7 @@ useEffect(() => {
     signOut,
     setUser,
     refreshUser,
-    setError,
+    setError: setErrorTracked,
     setSuccess,
     clearMessages,
     requestPushPermissions,

@@ -11,14 +11,12 @@ import PunkteSlide from './slides/PunkteSlide';
 import EventsSlide from './slides/EventsSlide';
 import BadgesSlide from './slides/BadgesSlide';
 import AktivsterMonatSlide from './slides/AktivsterMonatSlide';
-import ChatSlide from './slides/ChatSlide';
+import ChallengeMomenteSlide from './slides/ChallengeMomenteSlide';
 import EndspurtSlide from './slides/EndspurtSlide';
 import KategorieSlide from './slides/KategorieSlide';
 import UeberDasZielSlide from './slides/UeberDasZielSlide';
 import AbschlussSlide from './slides/AbschlussSlide';
 import KonfirmationsSlide from './slides/KonfirmationsSlide';
-import PflichtSlide from './slides/PflichtSlide';
-import RankSlide from './slides/RankSlide';
 import TeamerIntroSlide from './slides/teamer/TeamerIntroSlide';
 import TeamerEventsSlide from './slides/teamer/TeamerEventsSlide';
 import TeamerKonfisSlide from './slides/teamer/TeamerKonfisSlide';
@@ -40,7 +38,7 @@ interface WrappedModalProps {
   displayName: string;
   jahrgangName?: string;
   wrappedType?: 'konfi' | 'teamer';
-  // Fuer Wiederansicht — wenn gesetzt, wird NICHT /api/wrapped/me geladen
+  // Für Wiederansicht — wenn gesetzt, wird NICHT /api/wrapped/me geladen
   initialData?: KonfiWrappedData | TeamerWrappedData;
   initialYear?: number;
 }
@@ -64,12 +62,6 @@ const FORMULIERUNGEN: Record<string, string[]> = {
     'Ausgezeichnet!',
     'Badge-Sammlung',
     'Verdient!'
-  ],
-  chat_titel: [
-    'Im Austausch',
-    'Deine Nachrichten',
-    'Voll vernetzt!',
-    'Chat-Bilanz'
   ],
   aktivster_monat_titel: [
     'Dein aktivster Monat',
@@ -148,11 +140,9 @@ const WrappedModal: React.FC<WrappedModalProps> = ({ onClose, displayName, jahrg
         case 'events': return { ...base, slideValue: `${k.slides.events.total_attended} Events besucht` };
         case 'badges': return { ...base, slideValue: `${k.slides.badges.total_earned} Badges verdient` };
         case 'aktivster-monat': return { ...base, slideValue: `Aktivster Monat: ${k.slides.aktivster_monat.monat_name}` };
-        case 'chat': return { ...base, slideValue: `${k.slides.chat.nachrichten_gesendet} Nachrichten` };
+        case 'challenge-momente': return { ...base, slideValue: 'Meine Challenge-Momente' };
         case 'endspurt': return { ...base, slideValue: `Noch ${k.slides.endspurt.fehlende_punkte} Punkte bis zum Ziel` };
         case 'kategorie': return { ...base, slideValue: `Dein Bereich: ${k.slides.kategorie?.top_kategorie || '-'}` };
-        case 'pflicht': return { ...base, slideValue: 'Pflichtveranstaltungen' };
-        case 'rank': return { ...base, slideValue: 'Jahrgangs-Ranking' };
         case 'konfirmation': return { ...base, slideValue: `Konfirmation: ${k.slides.zeitraum?.ende || ''}` };
         case 'ueber-das-ziel': return { ...base, slideValue: `${(k.slides.endspurt.aktuell_total - k.slides.endspurt.ziel_total)} Punkte über dem Ziel!` };
         case 'abschluss': return { ...base, slideValue: `${k.slides.punkte.total} Punkte, ${k.slides.events.total_attended} Events, ${k.slides.badges.total_earned} Badges` };
@@ -172,23 +162,28 @@ const WrappedModal: React.FC<WrappedModalProps> = ({ onClose, displayName, jahrg
     }
   };
 
-  // Konfi-Slides aufbauen mit Individualisierung (highlight_type + formulierung_seed)
+  // Konfi-Slides aufbauen.
+  //
+  // Ab Snapshot-Version 2 gibt es eine FESTE Reihenfolge (Challenge-Momente statt
+  // Highlight-Slot). Für aeltere Snapshots (Version 1 aus der History) bleibt die
+  // bisherige highlight_type-Logik als Fallback erhalten — allerdings ohne die
+  // entfernten Slides rank/chat/pflicht. Alte JSONB-Felder dieser Slides werden
+  // dabei einfach ignoriert und fuehren zu keinem Fehler.
   const buildKonfiSlides = (konfiData: KonfiWrappedData, slideYear: number) => {
     const slideKeys: Array<{ key: string; render: (isActive: boolean) => React.ReactNode }> = [];
     const highlightType = konfiData.highlight_type || 'events_held';
     const seed = konfiData.formulierung_seed || 0;
+    const version = konfiData.version || 1;
 
     // Alle moeglichen Slide-Renderer
     const renderers: Record<string, (isActive: boolean) => React.ReactNode> = {
       'intro': (a) => <IntroSlide isActive={a} displayName={displayName} jahrgangName={jahrgangName || ''} year={slideYear} />,
+      'challenge-momente': (a) => <ChallengeMomenteSlide isActive={a} momente={konfiData.slides.challenge_momente || []} />,
       'punkte': (a) => <PunkteSlide isActive={a} punkte={konfiData.slides.punkte} />,
       'events': (a) => <EventsSlide isActive={a} events={konfiData.slides.events} />,
-      'pflicht': (a) => <PflichtSlide isActive={a} pflichtBesucht={0} pflichtGesamt={0} seed={seed} />,
       'badges': (a) => <BadgesSlide isActive={a} badges={konfiData.slides.badges} />,
-      'rank': (a) => <RankSlide isActive={a} rank={0} totalInJahrgang={0} displayName={displayName} />,
       'kategorie': (a) => <KategorieSlide isActive={a} kategorie={konfiData.slides.kategorie} titel={getFormulierung('kategorie_titel', seed)} />,
       'aktivster-monat': (a) => <AktivsterMonatSlide isActive={a} aktivsterMonat={konfiData.slides.aktivster_monat} />,
-      'chat': (a) => <ChatSlide isActive={a} chat={konfiData.slides.chat} seed={seed} />,
       'endspurt': (a) => <EndspurtSlide isActive={a} endspurt={konfiData.slides.endspurt} />,
       'ueber-das-ziel': (a) => <UeberDasZielSlide isActive={a} endspurt={konfiData.slides.endspurt} />,
       'konfirmation': (a) => <KonfirmationsSlide isActive={a} zeitraumEnde={konfiData.slides.zeitraum.ende} displayName={displayName} />,
@@ -205,58 +200,85 @@ const WrappedModal: React.FC<WrappedModalProps> = ({ onClose, displayName, jahrg
 
     const maybeAdd = (key: string) => addSlide(key);
 
-    // Slide 1: IMMER Intro
-    addSlide('intro');
-
-    // Slide 2: Highlight-Slide basierend auf highlight_type
-    const highlightKeyMap: Record<string, string> = {
-      ueber_das_ziel: 'ueber-das-ziel',
-      events_held: 'events',
-      badge_collector: 'badges',
-      chat_champion: 'chat',
-      gottesdienst_treue: 'punkte',
-      gemeinde_aktiv: 'punkte',
-    };
-    addSlide(highlightKeyMap[highlightType] || 'events');
-
-    // Slides 3+: Restliche Slides ohne Duplikation des Highlights
-    maybeAdd('punkte');
-    maybeAdd('events');
-
-    // PflichtSlide nach Events (Dummy-Daten, wird spaeter vom Backend befuellt)
-    maybeAdd('pflicht');
-
-    maybeAdd('badges');
-
-    // RankSlide nach Badges (Dummy-Daten, wird spaeter vom Backend befuellt)
-    maybeAdd('rank');
-
-    // Kategorie: IMMER wenn Daten vorhanden
-    if (konfiData.slides.kategorie?.verteilung?.length > 0) {
-      maybeAdd('kategorie');
-    }
-
-    maybeAdd('aktivster-monat');
-    maybeAdd('chat');
-
-    // Endspurt / UeberDasZiel Logik
     const endspurt = konfiData.slides.endspurt;
-    if (highlightType !== 'ueber_das_ziel') {
-      if (endspurt.aktiv) {
-        addSlide('endspurt');
-      } else if (!endspurt.aktiv && endspurt.aktuell_total >= endspurt.ziel_total && endspurt.ziel_total > 0) {
-        maybeAdd('ueber-das-ziel');
+    const hatKategorien = (konfiData.slides.kategorie?.verteilung?.length || 0) > 0;
+    const hatKonfirmation = !!konfiData.slides.zeitraum?.ende;
+
+    if (version >= 2) {
+      // --- Version 2: feste Reihenfolge ---
+      addSlide('intro');
+
+      // Challenge-Momente nur, wenn der Konfi tatsaechlich etwas beigetragen hat.
+      if ((konfiData.slides.challenge_momente?.length || 0) > 0) {
+        addSlide('challenge-momente');
       }
-    }
 
-    // KonfirmationsSlide: nur wenn zeitraum.ende vorhanden
-    if (konfiData.slides.zeitraum?.ende) {
-      maybeAdd('konfirmation');
-    }
+      addSlide('events');
 
-    // Abschluss: IMMER letzter Slide
-    shown.delete('abschluss'); // Immer hinzufuegen, auch wenn key schon existiert
-    addSlide('abschluss');
+      if (hatKategorien) {
+        addSlide('kategorie');
+      }
+
+      addSlide('aktivster-monat');
+
+      // "Dein Weg": Punkte, danach Endspurt ODER (bei erreichtem Ziel) Über-das-Ziel.
+      addSlide('punkte');
+      if (endspurt?.aktiv) {
+        addSlide('endspurt');
+      } else if (endspurt && endspurt.aktuell_total >= endspurt.ziel_total && endspurt.ziel_total > 0) {
+        addSlide('ueber-das-ziel');
+      }
+
+      addSlide('badges');
+
+      if (hatKonfirmation) {
+        addSlide('konfirmation');
+      }
+
+      addSlide('abschluss');
+    } else {
+      // --- Version 1 (Alt-Snapshots): bisherige highlight_type-Logik ---
+      addSlide('intro');
+
+      // Slide 2: Highlight-Slide basierend auf highlight_type.
+      // 'chat_champion' hat keinen Renderer mehr und fällt auf 'events' zurück.
+      const highlightKeyMap: Record<string, string> = {
+        ueber_das_ziel: 'ueber-das-ziel',
+        events_held: 'events',
+        badge_collector: 'badges',
+        gottesdienst_treue: 'punkte',
+        gemeinde_aktiv: 'punkte',
+      };
+      addSlide(highlightKeyMap[highlightType] || 'events');
+
+      // Slides 3+: Restliche Slides ohne Duplikation des Highlights
+      maybeAdd('punkte');
+      maybeAdd('events');
+      maybeAdd('badges');
+
+      if (hatKategorien) {
+        maybeAdd('kategorie');
+      }
+
+      maybeAdd('aktivster-monat');
+
+      // Endspurt / UeberDasZiel Logik
+      if (highlightType !== 'ueber_das_ziel') {
+        if (endspurt?.aktiv) {
+          addSlide('endspurt');
+        } else if (endspurt && !endspurt.aktiv && endspurt.aktuell_total >= endspurt.ziel_total && endspurt.ziel_total > 0) {
+          maybeAdd('ueber-das-ziel');
+        }
+      }
+
+      if (hatKonfirmation) {
+        maybeAdd('konfirmation');
+      }
+
+      // Abschluss: IMMER letzter Slide
+      shown.delete('abschluss'); // Immer hinzufuegen, auch wenn key schon existiert
+      addSlide('abschluss');
+    }
 
     // Konvertiere zu finalen Slides mit korrektem isActive
     return slideKeys.map((s, idx) => ({

@@ -59,6 +59,7 @@ import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import api from '../../../services/api';
 import AdminPasswordResetModal from './AdminPasswordResetModal';
+import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 
 interface Organization {
   id: number;
@@ -126,7 +127,7 @@ interface OrganizationManagementModalProps {
 }
 
 // Tarif-Stufen wie auf der Website (landing.html / marketing-copy.md).
-// value als String fuer direkten Vergleich mit dem maxKonfis-Feld; '' = unbegrenzt.
+// value als String für direkten Vergleich mit dem maxKonfis-Feld; '' = unbegrenzt.
 const KONFI_TARIFE: { label: string; value: string }[] = [
   { label: 'Klein', value: '15' },
   { label: 'Standard', value: '50' },
@@ -149,7 +150,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
   onSuccess
 }) => {
   const { setError, isOnline, user } = useApp();
-  // Super-Admin ist das Flag is_super_admin (org_admins koennen es zusaetzlich haben),
+  // Super-Admin ist das Flag is_super_admin (org_admins können es zusaetzlich haben),
   // NICHT role_name==='super_admin' — sonst sieht ein org_admin mit Flag die Limit-Sektion nie.
   const isSuperAdmin = user?.is_super_admin === true || user?.role_name === 'super_admin';
   const { isSubmitting, guard } = useActionGuard();
@@ -212,7 +213,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
   const [trialEndsAt, setTrialEndsAt] = useState<string>('');
   // is_trial: true = Testphase (Dashboard-Hinweis), false = Lizenz/unbegrenzt (kein Hinweis)
   const [isTrial, setIsTrial] = useState<boolean>(false);
-  // "Eigenes Datum"-Modus fuer den Zeitraum (Datepicker statt Schnellauswahl)
+  // "Eigenes Datum"-Modus für den Zeitraum (Datepicker statt Schnellauswahl)
   const [isCustomTrialDate, setIsCustomTrialDate] = useState<boolean>(false);
 
   const handleTrialChange = (value: string) => {
@@ -242,11 +243,11 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
 
   const isEditMode = !!organizationId;
 
-  // View/Edit-Modus: bestehende Org startet als read-only Uebersicht ('view'),
+  // View/Edit-Modus: bestehende Org startet als read-only Übersicht ('view'),
   // neue Org direkt im Formular ('edit'). Bearbeiten-Button oben wechselt um.
   const [viewMode, setViewMode] = useState<'view' | 'edit'>(organizationId ? 'view' : 'edit');
 
-  // Neue Org: Default 30-Tage-Testphase vorbelegen (super_admin kann es aendern)
+  // Neue Org: Default 30-Tage-Testphase vorbelegen (super_admin kann es ändern)
   useEffect(() => {
     if (!organizationId) {
       setTrialEndsAt(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString());
@@ -255,13 +256,13 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
     }
   }, [organizationId]);
 
-  // maxKonfis-Aenderung markiert das Modal als dirty (aktiviert Speichern-Button)
+  // maxKonfis-Änderung markiert das Modal als dirty (aktiviert Speichern-Button)
   const handleMaxKonfisChange = (value: string) => {
     setMaxKonfis(value);
     if (initializedRef.current) setIsDirty(true);
   };
 
-  // Passwort-Aendern-Modal (useIonModal, Konventions-Muster)
+  // Passwort-Ändern-Modal (useIonModal, Konventions-Muster)
   const [presentPasswordModal, dismissPasswordModal] = useIonModal(AdminPasswordResetModal, {
     adminId: passwordAdmin?.id ?? 0,
     adminName: passwordAdmin?.display_name ?? '',
@@ -365,8 +366,21 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
         setError('Alle Administrator-Felder sind erforderlich');
         return;
       }
-      if (formData.admin_password.length < 6) {
-        setError('Das Passwort muss mindestens 6 Zeichen lang sein');
+      // Dieselbe Policy wie ueberall sonst: Hier galten
+      // bisher nur 6 Zeichen, obwohl der Server inzwischen die volle Policy
+      // erzwingt — ohne diese Prüfung kaeme die Ablehnung erst vom Server.
+      const pw = formData.admin_password;
+      const passwortFehler =
+        pw.length < 8 ? 'Das Passwort muss mindestens 8 Zeichen lang sein'
+        : /\s/.test(pw) ? 'Das Passwort darf keine Leerzeichen enthalten'
+        : !/[A-Z]/.test(pw) ? 'Das Passwort muss einen Großbuchstaben enthalten'
+        : !/[a-z]/.test(pw) ? 'Das Passwort muss einen Kleinbuchstaben enthalten'
+        : !/[0-9]/.test(pw) ? 'Das Passwort muss eine Zahl enthalten'
+        : !/[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\/~`]/.test(pw) ? 'Das Passwort muss ein Sonderzeichen enthalten'
+        : null;
+
+      if (passwortFehler) {
+        setError(passwortFehler);
         return;
       }
     }
@@ -448,7 +462,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
     });
   };
 
-  // Passwort aendern als eigenes Modal (useIonModal — Konventions-Muster mit
+  // Passwort ändern als eigenes Modal (useIonModal — Konventions-Muster mit
   // Anforderungs-Anzeige, Augen-Toggle und Vorschlag-Funktion).
   const openPasswordModal = (admin: OrgAdmin) => {
     if (!isOnline) {
@@ -492,7 +506,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
       const res = await api.get(`/organizations/${organizationId}/members`);
       setMembers(Array.isArray(res.data) ? res.data : []);
     } catch {
-      // still: Sektion zeigt dann "keine Mitglieder"; kein Stoer-Toast noetig
+      // still: Sektion zeigt dann "keine Mitglieder"; kein Stoer-Toast nötig
       setMembers([]);
     } finally {
       setMembersLoading(false);
@@ -563,7 +577,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
           <IonToolbar>
             <IonTitle>{isEditMode ? 'Organisation bearbeiten' : 'Neue Organisation'}</IonTitle>
             <IonButtons slot="start">
-              <IonButton onClick={handleClose} className="app-modal-close-btn"><IonIcon icon={closeOutline} /></IonButton>
+              <IonButton aria-label="Schließen" onClick={handleClose} className="app-modal-close-btn"><IonIcon icon={closeOutline} /></IonButton>
             </IonButtons>
           </IonToolbar>
         </IonHeader>
@@ -582,15 +596,15 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
         <IonToolbar>
           <IonTitle>{!isEditMode ? 'Neue Organisation' : viewMode === 'view' ? 'Organisation' : 'Organisation bearbeiten'}</IonTitle>
           <IonButtons slot="start">
-            <IonButton onClick={onClose} disabled={isSubmitting} className="app-modal-close-btn"><IonIcon icon={closeOutline} /></IonButton>
+            <IonButton aria-label="Schließen" onClick={onClose} disabled={isSubmitting} className="app-modal-close-btn"><IonIcon icon={closeOutline} /></IonButton>
           </IonButtons>
           <IonButtons slot="end">
             {isEditMode && viewMode === 'view' ? (
-              <IonButton onClick={() => setViewMode('edit')} className="app-modal-submit-btn app-modal-submit-btn--settings">
+              <IonButton aria-label="Organisation bearbeiten" onClick={() => setViewMode('edit')} className="app-modal-submit-btn app-modal-submit-btn--settings">
                 <IonIcon icon={createOutline} />
               </IonButton>
             ) : (
-              <IonButton onClick={handleSave} disabled={!isValid || isSubmitting || !isOnline} className="app-modal-submit-btn app-modal-submit-btn--settings">
+              <IonButton aria-label="Organisation speichern" onClick={handleSave} disabled={!isValid || isSubmitting || !isOnline} className="app-modal-submit-btn app-modal-submit-btn--settings">
                 {!isOnline ? <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</> : isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} />}
               </IonButton>
             )}
@@ -922,7 +936,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                   </IonItem>
                   <IonItem lines="none" style={{ '--background': 'transparent' }}>
                     <IonLabel position="stacked">Passwort *</IonLabel>
-                    <IonInput type="password" value={formData.admin_password} onIonInput={(e) => setFormData({ ...formData, admin_password: e.detail.value! })} placeholder="Mindestens 6 Zeichen" disabled={isSubmitting} />
+                    <IonInput type="password" value={formData.admin_password} onIonInput={(e) => setFormData({ ...formData, admin_password: e.detail.value! })} placeholder="Mind. 8 Zeichen, Groß/Klein, Zahl, Sonderzeichen" disabled={isSubmitting} />
                   </IonItem>
                 </IonList>
 
@@ -1187,7 +1201,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                       {/* Primaer-Org kann hier nicht entfernt werden (Server blockt ebenfalls) */}
                       {!m.is_primary && (
                         <IonItemOptions side="end" className="app-swipe-actions">
-                          <IonItemOption onClick={() => handleRemoveMember(m)} className="app-swipe-action">
+                          <IonItemOption onClick={() => { closeOpenSlidingItems(); handleRemoveMember(m); }} className="app-swipe-action" aria-label="Mitglied entfernen">
                             <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
                               <IonIcon icon={trash} />
                             </div>
@@ -1313,7 +1327,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                           setIsCustomTrialDate(true);
                           if (!trialEndsAt) handleTrialChange(new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString());
                         } else if (days === -2) {
-                          // no-op (Platzhalter fuer bereits gesetztes eigenes Datum)
+                          // no-op (Platzhalter für bereits gesetztes eigenes Datum)
                         } else if (days === 0) {
                           setIsCustomTrialDate(false);
                           handleTrialChange('');

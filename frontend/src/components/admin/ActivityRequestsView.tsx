@@ -21,6 +21,7 @@ import {
   returnUpBack
 } from 'ionicons/icons';
 import { SectionHeader, ListSection, StatusBadge } from '../shared';
+import { closeOpenSlidingItems } from '../../utils/slidingItems';
 
 interface ActivityRequest {
   id: number;
@@ -48,13 +49,17 @@ interface ActivityRequestsViewProps {
   onUpdate: () => void;
   onSelectRequest: (request: ActivityRequest) => void;
   onResetRequest: (request: ActivityRequest) => void;
+  // Zusaetzlicher Inhalt DIREKT UNTER dem SectionHeader (z.B. das Events|Aktivitäten-
+  // Hauptsegment der Page, analog zum Konfi-Pattern in KonfiEventsPage).
+  headerSlot?: React.ReactNode;
 }
 
 const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
   requests: requestsRaw,
   onUpdate,
   onSelectRequest,
-  onResetRequest
+  onResetRequest,
+  headerSlot
 }) => {
   // Defensive: bei kaputten/gecachten Responses (Object statt Array) auf [] fallen
   const requests: ActivityRequest[] = Array.isArray(requestsRaw) ? requestsRaw : [];
@@ -101,16 +106,19 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
   return (
     <>
       <SectionHeader
-        title="Anträge"
-        subtitle="Aktivitäts-Anträge verwalten"
+        title="Aktivitäten"
+        subtitle="Gemeldete Aktivitäten verwalten"
         icon={documentOutline}
         preset="activities"
         stats={[
-          { value: getPendingCount(), label: 'Offen' },
-          { value: getApprovedCount(), label: 'Genehmigt' },
-          { value: getRejectedCount(), label: 'Abgelehnt' }
+          // Die Kacheln entsprechen den drei Filter-Reitern und schalten dorthin.
+          { value: getPendingCount(), label: 'Offen', onClick: () => setStatusFilter('pending'), active: statusFilter === 'pending' },
+          { value: getApprovedCount(), label: 'Genehmigt', onClick: () => setStatusFilter('approved'), active: statusFilter === 'approved' },
+          { value: getRejectedCount(), label: 'Abgelehnt', onClick: () => setStatusFilter('rejected'), active: statusFilter === 'rejected' }
         ]}
       />
+
+      {headerSlot}
 
       {/* Tab Filter - wie bei Events */}
       <div style={{ margin: '16px 16px 8px 16px' }}>
@@ -129,15 +137,15 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
           </IonSegmentButton>
         </IonSegment>
       </div>
-      {/* Anträge Liste */}
+      {/* Aktivitäten-Liste */}
       <ListSection
         icon={documentOutline}
-        title="Anträge"
+        title="Aktivitäten"
         count={filteredAndSortedRequests.length}
         iconColorClass="success"
         isEmpty={filteredAndSortedRequests.length === 0}
         emptyIcon={documentOutline}
-        emptyTitle="Keine Anträge vorhanden"
+        emptyTitle="Keine Aktivitäten vorhanden"
         emptyMessage="Konfirmand:innen können Aktivitäten beantragen"
         emptyIconColor="#059669"
       >
@@ -184,7 +192,7 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
                                 <div
                                   className="app-corner-badge"
                                   style={{ backgroundColor: 'var(--app-color-teamer)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
-                                  title="Team-Antrag"
+                                  title="Team-Aktivität"
                                 >
                                   <IonIcon icon={people} style={{ color: '#fff', fontSize: '0.85rem' }} />
                                 </div>
@@ -269,7 +277,8 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
                         <IonItemOptions side="end" className="app-swipe-actions">
                           {/* Reset-Button für approved/rejected */}
                           <IonItemOption
-                            onClick={() => onResetRequest(request)}
+                            onClick={() => { closeOpenSlidingItems(); onResetRequest(request); }}
+                            aria-label="Aktivität zurücksetzen"
                             className="app-swipe-action"
                           >
                             <div className="app-icon-circle app-icon-circle--lg app-icon-circle--warning">

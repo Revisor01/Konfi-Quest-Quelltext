@@ -106,7 +106,7 @@ const QRScannerModal: React.FC<QRScannerModalProps> = ({ onClose, onSuccess }) =
         <IonHeader>
           <IonToolbar>
             <IonButtons slot="start">
-              <IonButton onClick={onClose}>
+              <IonButton onClick={onClose} aria-label="Schließen">
                 <IonIcon icon={closeOutline} slot="icon-only" />
               </IonButton>
             </IonButtons>
@@ -142,7 +142,7 @@ const QRScannerModal: React.FC<QRScannerModalProps> = ({ onClose, onSuccess }) =
       <IonHeader>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={onClose}>
+            <IonButton onClick={onClose} aria-label="Schließen">
               <IonIcon icon={closeOutline} slot="icon-only" />
             </IonButton>
           </IonButtons>

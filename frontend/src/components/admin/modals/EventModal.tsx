@@ -15,7 +15,7 @@ import { Event, Category, Timeslot, Jahrgang } from '../../../types/event';
 import {
   BasicInfoSection, CheckinSection,
   PointsParticipantsSection, CategoriesTargetSection,
-  WaitlistSection, SeriesSection
+  TeamerSection, SeriesSection
 } from './EventFormSections';
 import type { EventFormData } from './EventFormSections';
 import { safeUUID } from '../../../utils/uuid';
@@ -25,8 +25,8 @@ interface EventModalProps {
   onClose: () => void;
   onSuccess: () => void;
   dismiss?: () => void;
-  // Meldet den "ungespeicherte Aenderungen"-Stand nach aussen, damit die
-  // praesentierende Seite ueber canDismiss auch Swipe/Backdrop-Schliessen abfangen kann.
+  // Meldet den "ungespeicherte Änderungen"-Stand nach aussen, damit die
+  // praesentierende Seite über canDismiss auch Swipe/Backdrop-Schliessen abfangen kann.
   onDirtyChange?: (dirty: boolean) => void;
 }
 
@@ -45,21 +45,22 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
   // zeigt das IonDatetime-Wheel nur einen schmalen Bereich des laufenden Jahres.
   const datePickerMax = `${new Date().getFullYear() + 2}-12-31T23:59:59`;
 
-  // Schliessen anstossen. Die "ungespeicherte Aenderungen"-Nachfrage laeuft
-  // zentral ueber canDismiss der praesentierenden Seite (faengt X-Button, Swipe
+  // Schliessen anstossen. Die "ungespeicherte Änderungen"-Nachfrage läuft
+  // zentral über canDismiss der praesentierenden Seite (faengt X-Button, Swipe
   // UND Backdrop einheitlich ab) — daher hier keine zweite Abfrage.
   const handleClose = () => { doClose(); };
 
-  // isDirty-Stand nach aussen melden (fuer canDismiss der praesentierenden Seite).
+  // isDirty-Stand nach aussen melden (für canDismiss der praesentierenden Seite).
   useEffect(() => { onDirtyChange?.(isDirty); }, [isDirty, onDirtyChange]);
 
   const [formData, setFormData] = useState<EventFormData>({
     name: '', description: '', event_date: new Date().toISOString(), event_end_time: '',
-    location: '', points: 0, point_type: 'gemeinde', category_ids: [], jahrgang_ids: [],
+    location: '', points: 1, point_type: 'gemeinde', category_ids: [], jahrgang_ids: [],
     type: 'event', max_participants: 5, registration_opens_at: '', registration_closes_at: '',
     has_timeslots: false, waitlist_enabled: true, max_waitlist_size: 3,
     is_series: false, series_count: 1, series_interval: 'week',
-    mandatory: false, is_konfirmation: false, bring_items: '', checkin_window: 30
+    mandatory: false, is_konfirmation: false, bring_items: '', checkin_window: 30,
+    teamer_max_participants: 0, teamer_waitlist_enabled: true, teamer_max_waitlist_size: 3
   });
 
   const [timeslots, setTimeslots] = useState<Timeslot[]>([]);
@@ -105,7 +106,10 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
         mandatory: event.mandatory || false,
         is_konfirmation: event.is_konfirmation || false,
         bring_items: event.bring_items || '',
-        checkin_window: event.checkin_window || 30
+        checkin_window: event.checkin_window || 30,
+        teamer_max_participants: event.teamer_max_participants ?? 0,
+        teamer_waitlist_enabled: event.teamer_waitlist_enabled !== undefined ? event.teamer_waitlist_enabled : true,
+        teamer_max_waitlist_size: event.teamer_max_waitlist_size ?? 3
       });
       if (event.teamer_only) setTeamerAccess('teamer_only');
       else if (event.teamer_needed) setTeamerAccess('teamer_needed');
@@ -125,7 +129,6 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
       const roundedEventStart = roundToHalfHour(eventStart);
       const eventEnd = new Date(roundedEventStart);
       eventEnd.setHours(eventEnd.getHours() + 2);
-      const regOpens = roundToHalfHour(new Date());
       const regCloses = new Date(roundedEventStart);
       regCloses.setHours(regCloses.getHours() - 1);
       const toIonDatetimeISO = (date: Date) => {
@@ -134,13 +137,17 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
       };
       setFormData({
         name: '', description: '', event_date: toIonDatetimeISO(roundedEventStart),
-        event_end_time: toIonDatetimeISO(eventEnd), location: '', points: 0,
+        event_end_time: toIonDatetimeISO(eventEnd), location: '', points: 1,
         point_type: 'gemeinde', category_ids: [], jahrgang_ids: [], type: 'event',
-        max_participants: 5, registration_opens_at: toIonDatetimeISO(regOpens),
+        // Anmeldung standardmaessig AB SOFORT (leer = kein Startzeitpunkt) —
+        // der Normalfall ist "Event steht, Anmeldung läuft"; ein Startdatum in
+        // der Zukunft ist die Ausnahme und lässt sich per Schalter setzen.
+        max_participants: 5, registration_opens_at: '',
         registration_closes_at: toIonDatetimeISO(regCloses), has_timeslots: false,
         waitlist_enabled: true, max_waitlist_size: 3, is_series: false,
         series_count: 1, series_interval: 'week', mandatory: false, is_konfirmation: false, bring_items: '',
-        checkin_window: 30
+        checkin_window: 30,
+        teamer_max_participants: 0, teamer_waitlist_enabled: true, teamer_max_waitlist_size: 3
       });
       setTimeslots([]);
       setTeamerAccess('normal');
@@ -189,8 +196,20 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
   };
 
   const handleSubmit = async () => {
-    if (!formData.name.trim() || !formData.event_date) return;
-    await guard(async () => {
+    // Pflichtfelder prüfen und SAGEN, was fehlt. Vorher brach die Funktion
+    // hier stumm ab (return ohne Meldung) — man tippte auf Speichern und es
+    // passierte sichtbar nichts (User-Hinweis 10.08.).
+    if (!formData.name.trim()) { setError('Bitte gib dem Event einen Namen'); return; }
+    if (!formData.event_date) { setError('Bitte lege Datum und Uhrzeit fest'); return; }
+    if (teamerAccess !== 'teamer_only' && formData.mandatory && formData.jahrgang_ids.length === 0) {
+      setError('Pflicht-Events brauchen mindestens einen Jahrgang');
+      return;
+    }
+    // guard() wirft, wenn schon eine Speicherung läuft (Doppel-Tap). Dieser
+    // Wurf lag bisher außerhalb jedes catch -> unbehandelte Rejection, kein
+    // Hinweis an die Nutzerin. Hier abfangen statt durchschlagen lassen.
+    try {
+      await guard(async () => {
     setLoading(true);
     try {
       const toBackendTimestamp = (localTimeString: string) => {
@@ -203,27 +222,48 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
         event_date: toBackendTimestamp(formData.event_date),
         event_end_time: toBackendTimestamp(formData.event_end_time),
         location: formData.location.trim() || null,
-        points: (formData.mandatory || formData.is_konfirmation) ? 0 : formData.points,
+        // Reine Teamer-Events vergeben keine Konfi-Punkte (das Formular zeigt
+        // die Konfis-Karte dort gar nicht) — sonst bliebe ein alter Punktwert
+        // an einem umgestellten Event hängen.
+        points: (formData.mandatory || formData.is_konfirmation || isTeamerOnly) ? 0 : formData.points,
         point_type: isTeamerOnly ? 'gemeinde' : formData.point_type,
         category_ids: formData.category_ids,
         jahrgang_ids: isTeamerOnly ? [] : formData.jahrgang_ids,
         type: formData.type,
         max_participants: (formData.mandatory || isTeamerOnly) ? 0 : formData.max_participants,
-        registration_opens_at: formData.mandatory ? null : toBackendTimestamp(formData.registration_opens_at),
-        registration_closes_at: formData.mandatory ? null : toBackendTimestamp(formData.registration_closes_at),
+        // Kein Anmeldefenster bei Pflicht-Events (alle sind gesetzt) und bei
+        // reinen Teamer-Events (dort gilt es nicht) — sonst bliebe an einem
+        // umgestellten Event ein wirkungsloses Fenster stehen, das die
+        // Statusanzeige faelschlich auf "geschlossen" setzt.
+        registration_opens_at: (formData.mandatory || isTeamerOnly) ? null : toBackendTimestamp(formData.registration_opens_at),
+        registration_closes_at: (formData.mandatory || isTeamerOnly) ? null : toBackendTimestamp(formData.registration_closes_at),
         has_timeslots: (formData.mandatory || formData.is_konfirmation) ? false : formData.has_timeslots,
-        waitlist_enabled: (formData.mandatory || isTeamerOnly) ? false : formData.waitlist_enabled,
-        max_waitlist_size: (formData.mandatory || isTeamerOnly) ? 0 : formData.max_waitlist_size,
+        // Unbegrenzte Plaetze => keine Warteliste (das Formular zeigt den
+        // Schalter dann gar nicht, der Payload muss dazu passen).
+        waitlist_enabled: (formData.mandatory || isTeamerOnly || formData.max_participants === 0)
+          ? false : formData.waitlist_enabled,
+        max_waitlist_size: (formData.mandatory || isTeamerOnly || formData.max_participants === 0)
+          ? 0 : formData.max_waitlist_size,
         timeslots: (!formData.mandatory && !formData.is_konfirmation && formData.has_timeslots) ? timeslots.map(ts => ({
           ...ts, start_time: toBackendTimestamp(ts.start_time), end_time: toBackendTimestamp(ts.end_time)
         })) : [],
         is_series: formData.is_series,
         series_count: formData.is_series ? formData.series_count : undefined,
         series_interval: formData.is_series ? formData.series_interval : undefined,
-        mandatory: formData.mandatory, is_konfirmation: formData.is_konfirmation,
+        // "Nur Teamer:innen" schließt Pflicht-Event und Konfirmation aus
+        // (beides sind Konfi-Kategorien) — das Formular blendet sie dort aus,
+        // der Payload haelt es konsistent, auch bei umgestellten Bestands-Events.
+        mandatory: isTeamerOnly ? false : formData.mandatory,
+        is_konfirmation: isTeamerOnly ? false : formData.is_konfirmation,
         bring_items: formData.bring_items.trim() || null,
         checkin_window: formData.checkin_window,
-        teamer_needed: teamerAccess === 'teamer_needed', teamer_only: teamerAccess === 'teamer_only'
+        teamer_needed: teamerAccess === 'teamer_needed', teamer_only: teamerAccess === 'teamer_only',
+        teamer_max_participants: teamerAccess === 'normal' ? 0 : formData.teamer_max_participants,
+        // Auch hier: unbegrenzte Teamer-Plaetze => keine Warteliste.
+        teamer_waitlist_enabled: (teamerAccess === 'normal' || formData.teamer_max_participants === 0)
+          ? false : formData.teamer_waitlist_enabled,
+        teamer_max_waitlist_size: (teamerAccess === 'normal' || formData.teamer_max_participants === 0)
+          ? 0 : formData.teamer_max_waitlist_size
       };
 
       if (networkMonitor.isOnline) {
@@ -251,14 +291,26 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
           setSuccess('Event wird erstellt sobald du wieder online bist');
         }
       }
-      // Dirty-Stand SYNCHRON nach aussen melden, bevor onSuccess/doClose ueber
-      // canDismiss schliesst (sonst blockiert canDismiss -> Modal bleibt offen).
+      // Dirty-Stand SYNCHRON nach aussen melden, bevor onSuccess/doClose über
+      // canDismiss schließt (sonst blockiert canDismiss -> Modal bleibt offen).
       setIsDirty(false); onDirtyChange?.(false); onSuccess(); doClose();
     } catch (error: any) {
-      if (error.response?.data?.error) setError(error.response.data.error);
+      // Validierungsfehler des Backends kommen als { error, details: [...] } —
+      // ohne die details liest man nur "Validierungsfehler" und weiß nicht,
+      // welches Feld gemeint ist.
+      const data = error.response?.data;
+      const details = Array.isArray(data?.details)
+        ? data.details.map((d: any) => d.message).filter(Boolean).join(', ')
+        : '';
+      if (details) setError(details);
+      else if (data?.error) setError(data.error);
       else setError('Fehler beim Speichern des Events');
     } finally { setLoading(false); }
-    });
+      });
+    } catch {
+      // guard() hat abgelehnt: es läuft bereits eine Speicherung. Nichts tun —
+      // der Button ist ohnehin disabled, das ist kein Fehler für die Nutzerin.
+    }
   };
 
   const isFormValid = formData.name.trim().length > 0 && formData.event_date && (teamerAccess === 'teamer_only' || !formData.mandatory || formData.jahrgang_ids.length > 0);
@@ -269,12 +321,16 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
         <IonToolbar>
           <IonTitle>{event ? 'Event bearbeiten' : 'Neues Event'}</IonTitle>
           <IonButtons slot="start">
-            <IonButton onClick={handleClose} disabled={loading} className="app-modal-close-btn">
+            {/* NICHT an loading haengen: Bleibt der Ladezustand haengen,
+                waere das Modal sonst nur noch per Swipe zu verlassen.
+                Die Rueckfrage bei ungespeicherten Aenderungen laeuft
+                ueber canDismiss der Seite. */}
+            <IonButton aria-label="Schließen" onClick={handleClose} className="app-modal-close-btn">
               <IonIcon icon={closeOutline} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
-            <IonButton onClick={handleSubmit} disabled={!isFormValid || loading || isSubmitting}
+            <IonButton aria-label="Event speichern" onClick={handleSubmit} disabled={!isFormValid || loading || isSubmitting}
               className="app-modal-submit-btn app-modal-submit-btn--events">
               {loading ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} />}
             </IonButton>
@@ -283,12 +339,19 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
       </IonHeader>
 
       <IonContent className="app-gradient-background">
-        {/* EVENT GRUNDDATEN (inkl. Pflicht-Event, Mitbringen, Teamer-Zugang) */}
+        {/* Reihenfolge (User-Entscheid 08.08.): Grunddaten -> Kategorien &
+            Zielgruppe -> Datum & Zeit (+ Serie) -> Zeitfenster -> Konfis
+            (Plaetze + Warteliste + Punkte) -> Teamer:innen (Zugang +
+            Kontingent) -> QR-Check-in. */}
+
+        {/* EVENT GRUNDDATEN — inkl. "Fuer wen ist das Event?": diese Auswahl
+            steuert, welche Abschnitte weiter unten erscheinen. */}
         <BasicInfoSection formData={formData} setFormData={setFormData}
           teamerAccess={teamerAccess} setTeamerAccess={setTeamerAccess} loading={loading} />
 
-        {/* QR CHECK-IN FENSTER */}
-        <CheckinSection formData={formData} setFormData={setFormData} loading={loading} />
+        {/* KATEGORIEN & ZIELGRUPPE */}
+        <CategoriesTargetSection formData={formData} setFormData={setFormData}
+          categories={categories} jahrgaenge={jahrgaenge} teamerAccess={teamerAccess} loading={loading} />
 
         {/* DATUM & ZEIT */}
         <IonList inset={true} className="app-modal-section">
@@ -307,22 +370,84 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
                 <IonLabel position="stacked">Endzeit (optional)</IonLabel>
                 <IonDatetimeButton datetime="end-time-picker" />
               </IonItem>
-              {!formData.mandatory && (
+              {/* Anmeldefenster gilt NUR fuer Konfis: Teamer:innen duerfen sich
+                  jederzeit anmelden, sie begrenzt allein ihr Kontingent. Bei
+                  reinen Teamer-Events waeren die Felder daher wirkungslos —
+                  sie zu zeigen hat vorgegaukelt, sie wuerden greifen. */}
+              {!formData.mandatory && teamerAccess !== 'teamer_only' && (
                 <>
-                  <IonItem lines="none">
-                    <IonLabel position="stacked">Anmeldung ab</IonLabel>
-                    <IonDatetimeButton datetime="registration-opens-picker" />
-                  </IonItem>
-                  <IonItem lines="none">
-                    <IonLabel position="stacked">Anmeldeschluss</IonLabel>
-                    <IonDatetimeButton datetime="registration-closes-picker" />
-                  </IonItem>
+                  {/* Eigener, sichtbar abgesetzter Block: die Anmeldung ist eine
+                      andere Sache als der Termin selbst. Vorher stand der
+                      "ab sofort"-Schalter beziehungslos zwischen den
+                      Datums-Buttons (User-Hinweis 10.08.). Trennlinie +
+                      Ueberschrift wie im UserManagementModal. */}
+                  <div
+                    style={{
+                      marginTop: '8px',
+                      paddingTop: '14px',
+                      borderTop: '1px solid rgba(0,0,0,0.06)'
+                    }}
+                  >
+                    <h3
+                      style={{
+                        fontWeight: 600, margin: '0 0 2px 16px',
+                        fontSize: '0.95rem', color: '#3c3c43'
+                      }}
+                    >
+                      Anmeldung
+                    </h3>
+                    <p style={{ color: '#8e8e93', margin: '0 16px 4px 16px', fontSize: '0.8rem', lineHeight: 1.4 }}>
+                      {formData.registration_opens_at
+                        ? 'Konfis können sich ab dem gewählten Zeitpunkt anmelden.'
+                        : 'Konfis können sich sofort anmelden.'}
+                    </p>
+
+                    {/* "Ab sofort" = registration_opens_at NULL. Beide Detail-
+                        Ansichten zeigen dafuer "Sofort möglich". */}
+                    <IonItem lines="none">
+                      <IonLabel>Anmeldung ab sofort</IonLabel>
+                      <IonToggle
+                        slot="end"
+                        className="app-toggle--events"
+                        checked={!formData.registration_opens_at}
+                        disabled={loading}
+                        onIonChange={(e) => {
+                          if (e.detail.checked) {
+                            setFormData({ ...formData, registration_opens_at: '' });
+                          } else {
+                            // Zurück auf einen sinnvollen Startwert: jetzt.
+                            const now = new Date();
+                            const pad = (n: number) => n.toString().padStart(2, '0');
+                            setFormData({
+                              ...formData,
+                              registration_opens_at: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}:00`
+                            });
+                          }
+                        }}
+                      />
+                    </IonItem>
+                    {!!formData.registration_opens_at && (
+                      <IonItem lines="none">
+                        <IonLabel position="stacked">Anmeldung ab</IonLabel>
+                        <IonDatetimeButton datetime="registration-opens-picker" />
+                      </IonItem>
+                    )}
+                    <IonItem lines="none">
+                      <IonLabel position="stacked">Anmeldeschluss</IonLabel>
+                      <IonDatetimeButton datetime="registration-closes-picker" />
+                    </IonItem>
+                  </div>
                 </>
               )}
             </IonList>
           </IonCardContent>
           </IonCard>
         </IonList>
+
+        {/* SERIEN-EVENT — direkt bei Datum & Zeit (nur beim Anlegen) */}
+        {!event && (
+          <SeriesSection formData={formData} setFormData={setFormData} loading={loading} />
+        )}
 
         {/* ZEITFENSTER — nicht bei Pflicht-Events und nicht bei Konfirmationen
             (beide haben feste Termine fuer den ganzen Jahrgang) */}
@@ -369,7 +494,7 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
                 <span style={{ fontSize: '0.7rem', fontWeight: 'bold', color: 'white' }}>{index + 1}</span>
               </div>
               <IonLabel style={{ flex: 1 }}>Zeitfenster {index + 1}</IonLabel>
-              <IonButton fill="clear" color="danger" onClick={() => removeTimeslot(index)} disabled={loading} size="small">
+              <IonButton aria-label="Zeitfenster entfernen" fill="clear" color="danger" onClick={() => removeTimeslot(index)} disabled={loading} size="small">
                 <IonIcon icon={trash} />
               </IonButton>
             </IonListHeader>
@@ -424,24 +549,18 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
         ))}
         </>)}
 
-        {/* PUNKTE & TEILNEHMER */}
+        {/* KONFIS — Plaetze, Warteliste und Punkte in einer Karte */}
         {!formData.mandatory && teamerAccess !== 'teamer_only' && (
-          <PointsParticipantsSection formData={formData} setFormData={setFormData} loading={loading} />
+          <PointsParticipantsSection formData={formData} setFormData={setFormData} loading={loading} jahrgaenge={jahrgaenge} />
         )}
 
-        {/* KATEGORIEN & ZIELGRUPPE */}
-        <CategoriesTargetSection formData={formData} setFormData={setFormData}
-          categories={categories} jahrgaenge={jahrgaenge} teamerAccess={teamerAccess} loading={loading} />
-
-        {/* WARTELISTE */}
-        {!formData.mandatory && teamerAccess !== 'teamer_only' && (
-          <WaitlistSection formData={formData} setFormData={setFormData} loading={loading} />
+        {/* TEAMER:INNEN — Plaetze/Warteliste, nur wenn Teamer:innen teilnehmen */}
+        {teamerAccess !== 'normal' && (
+          <TeamerSection formData={formData} setFormData={setFormData} loading={loading} />
         )}
 
-        {/* SERIEN-EVENT */}
-        {!event && (
-          <SeriesSection formData={formData} setFormData={setFormData} loading={loading} />
-        )}
+        {/* QR CHECK-IN FENSTER */}
+        <CheckinSection formData={formData} setFormData={setFormData} loading={loading} />
       </IonContent>
 
       {/* DateTime Modals */}
@@ -456,10 +575,17 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
               return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
             };
             const endDate = new Date(eventDate); endDate.setHours(endDate.getHours() + 1);
-            const regOpens = new Date(); regOpens.setHours(9, 0, 0, 0);
             const regCloses = new Date(eventDate); regCloses.setHours(regCloses.getHours() - 24);
-            setFormData({ ...formData, event_date: selectedDate, event_end_time: toIonDatetimeISO(endDate),
-              registration_opens_at: toIonDatetimeISO(regOpens), registration_closes_at: toIonDatetimeISO(regCloses) });
+            // Anmeldezeiten NUR beim Neuanlegen mitziehen. Beim Bearbeiten
+            // wuerde ein Dreh am Datums-Wheel sonst still die vom Admin
+            // gesetzten Anmeldezeiten ueberschreiben (Datenverlust).
+            // "Ab sofort" (leeres registration_opens_at) bleibt immer erhalten.
+            setFormData({
+              ...formData,
+              event_date: selectedDate,
+              event_end_time: toIonDatetimeISO(endDate),
+              ...(event ? {} : { registration_closes_at: toIonDatetimeISO(regCloses) })
+            });
           }}
           presentation="date-time" minuteValues="0,15,30,45" firstDayOfWeek={1}
           style={{ '--background': '#f8f9fa', '--border-radius': '12px', '--box-shadow': '0 4px 16px rgba(0,0,0,0.1)' }} />

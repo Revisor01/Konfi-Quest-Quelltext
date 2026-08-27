@@ -45,13 +45,19 @@ import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
 import { compressForUpload } from '../../../services/mediaCompression';
+import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
+import { CACHE_TTL } from '../../../services/offlineCache';
 
 interface Activity {
   id: number;
   name: string;
   description?: string;
-  points: number;
-  type: 'gottesdienst' | 'gemeinde';
+  // Teamer-Aktivitäten haben KEINE Punkte und KEINEN Typ: points ist 0,
+  // type ist in der Datenbank NULL. Die Deklaration als non-nullable war
+  // schlicht falsch — genau dieses Muster (null dort annehmen, wo ein Wert
+  // versprochen wird) hat schon zweimal zum Absturz geführt.
+  points?: number | null;
+  type?: 'gottesdienst' | 'gemeinde' | null;
   category_names?: string;
 }
 
@@ -64,11 +70,9 @@ const TeamerActivityRequestModal: React.FC<TeamerActivityRequestModalProps> = ({
   onClose,
   onSuccess
 }) => {
-  const { setSuccess, setError, isOnline } = useApp();
+  const { setSuccess, setError, isOnline, user } = useApp();
   const [presentAlert] = useIonAlert();
 
-  const [activities, setActivities] = useState<Activity[]>([]);
-  const [loading, setLoading] = useState(true);
   const { isSubmitting, guard } = useActionGuard();
   const [uploadProgress, setUploadProgress] = useState(0);
 
@@ -81,22 +85,17 @@ const TeamerActivityRequestModal: React.FC<TeamerActivityRequestModalProps> = ({
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const accordionGroupRef = useRef<HTMLIonAccordionGroupElement>(null);
 
-  useEffect(() => {
-    loadActivities();
-  }, []);
-
-  const loadActivities = async () => {
-    setLoading(true);
-    try {
-      const response = await api.get('/teamer/activities');
-      setActivities(response.data);
-    } catch (err) {
-      setError('Fehler beim Laden der Aktivitäten');
- console.error('Error loading activities:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Aktivitaeten aus dem Cache statt per Direkt-Abruf: Der VERSAND einer
+  // Meldung ist laengst queue-faehig, aber die Auswahlliste lud per
+  // api.get — offline blieb sie leer und das Formular damit nutzlos
+  // Aktivitaeten sind Stammdaten und aendern
+  // sich selten, daher STAMMDATEN-TTL.
+  const { data: activitiesData, loading } = useOfflineQuery<Activity[]>(
+    'teamer:activities:' + user?.organization_id,
+    () => api.get('/teamer/activities').then(r => r.data),
+    { ttl: CACHE_TTL.STAMMDATEN }
+  );
+  const activities = activitiesData || [];
 
   const handlePhotoSelect = () => {
     const input = document.createElement('input');
@@ -165,7 +164,7 @@ const TeamerActivityRequestModal: React.FC<TeamerActivityRequestModalProps> = ({
     if (!formData.photo_file) {
       presentAlert({
         header: 'Kein Foto',
-        message: 'Anträge benötigen normalerweise ein Foto als Nachweis. Möchtest du trotzdem fortfahren?',
+        message: 'Aktivitäten benötigen normalerweise ein Foto als Nachweis. Möchtest du trotzdem fortfahren?',
         buttons: [
           { text: 'Abbrechen', role: 'cancel' },
           { text: 'Ohne Foto fortfahren', handler: () => submitRequest() }
@@ -202,10 +201,10 @@ const TeamerActivityRequestModal: React.FC<TeamerActivityRequestModalProps> = ({
 
           await api.post('/teamer/requests', requestData);
 
-          setSuccess('Antrag erfolgreich eingereicht!');
+          setSuccess('Aktivität erfolgreich eingereicht!');
           onSuccess();
         } catch (error: any) {
-          setError(error.response?.data?.error || error.message || 'Fehler beim Einreichen des Antrags');
+          setError(error.response?.data?.error || error.message || 'Fehler beim Einreichen der Aktivität');
         } finally {
           setUploadProgress(0);
         }
@@ -252,11 +251,11 @@ const TeamerActivityRequestModal: React.FC<TeamerActivityRequestModalProps> = ({
           metadata: {
             type: 'request',
             clientId,
-            label: 'Aktivitäts-Antrag',
+            label: 'Aktivität melden',
           },
         });
 
-        setSuccess('Antrag wird gesendet sobald du wieder online bist');
+        setSuccess('Aktivität wird gesendet sobald du wieder online bist');
         onSuccess();
       }
     });
@@ -275,14 +274,14 @@ const TeamerActivityRequestModal: React.FC<TeamerActivityRequestModalProps> = ({
     <IonPage>
       <IonHeader>
         <IonToolbar>
-          <IonTitle>Neuer Antrag</IonTitle>
+          <IonTitle>Neue Aktivität</IonTitle>
           <IonButtons slot="start">
-            <IonButton className="app-modal-close-btn" onClick={onClose} disabled={isSubmitting}>
+            <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose} disabled={isSubmitting}>
               <IonIcon icon={close} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
-            <IonButton className="app-modal-submit-btn app-modal-submit-btn--teamer" onClick={handleSubmit} disabled={isSubmitting || loading}>
+            <IonButton aria-label="Aktivität absenden" className="app-modal-submit-btn app-modal-submit-btn--teamer" onClick={handleSubmit} disabled={isSubmitting || loading}>
               <IonIcon icon={checkmark} />
             </IonButton>
           </IonButtons>
@@ -448,9 +447,9 @@ const TeamerActivityRequestModal: React.FC<TeamerActivityRequestModalProps> = ({
                 onClick={handlePhotoSelect}
                 style={{
                   padding: '16px',
-                  backgroundColor: photoPreview ? 'rgba(var(--app-color-gemeinde-rgb), 0.08)' : 'transparent',
+                  backgroundColor: photoPreview ? 'rgba(var(--app-color-teamer-rgb), 0.08)' : 'transparent',
                   borderRadius: '10px',
-                  border: photoPreview ? '1px solid rgba(var(--app-color-gemeinde-rgb), 0.2)' : '1px dashed #c7c7cc',
+                  border: photoPreview ? '1px solid rgba(var(--app-color-teamer-rgb), 0.2)' : '1px dashed #c7c7cc',
                   cursor: 'pointer',
                   transition: 'all 0.2s ease'
                 }}
@@ -460,14 +459,14 @@ const TeamerActivityRequestModal: React.FC<TeamerActivityRequestModalProps> = ({
                     <div className="app-settings-item" style={{ gap: '8px' }}>
                       <IonIcon
                         icon={checkmarkCircle}
-                        className="app-icon-color--gemeinde"
+                        className="app-icon-color--teamer"
                         style={{ fontSize: '1.2rem' }}
                       />
-                      <span style={{ fontWeight: '600', color: 'var(--app-color-gemeinde)' }}>
+                      <span style={{ fontWeight: '600', color: 'var(--app-color-teamer)' }}>
                         Foto ausgewählt
                       </span>
                     </div>
-                    <IonButton
+                    <IonButton aria-label="Foto entfernen"
                       fill="clear"
                       color="danger"
                       size="small"
@@ -483,7 +482,7 @@ const TeamerActivityRequestModal: React.FC<TeamerActivityRequestModalProps> = ({
                   <div className="app-settings-item" style={{ justifyContent: 'center' }}>
                     <IonIcon
                       icon={camera}
-                      className="app-icon-color--gemeinde"
+                      className="app-icon-color--teamer"
                       style={{ fontSize: '1.2rem' }}
                     />
                     <span style={{ fontWeight: '500', color: '#666' }}>

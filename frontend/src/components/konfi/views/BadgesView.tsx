@@ -17,130 +17,30 @@ import { SectionHeader, EmptyState } from '../../shared';
 import {
   trophy,
   trophyOutline,
-  medal,
   ribbon,
-  star,
   checkmarkCircle,
-  diamond,
-  shield,
   flame,
-  flash,
-  rocket,
-  sparkles,
-  thumbsUp,
-  heart,
   people,
-  personAdd,
-  chatbubbles,
   gift,
-  book,
-  school,
-  construct,
-  brush,
-  colorPalette,
   sunny,
-  moon,
-  leaf,
-  rose,
   calendar,
   calendarOutline,
-  today,
   time,
-  timer,
-  stopwatch,
-  restaurant,
-  fitness,
-  bicycle,
-  car,
-  airplane,
-  boat,
-  camera,
-  image,
-  musicalNote,
-  balloon,
-  home,
-  business,
-  location,
-  navigate,
-  compass,
-  pin,
-  flag,
-  informationCircle,
-  helpCircle,
-  alertCircle,
-  hammer,
   lockClosed,
   layersOutline,
   gridOutline,
   prismOutline,
   cubeOutline,
   handLeft,
+  shield,
   checkmark,
   search,
   filterOutline,
   eyeOff
 } from 'ionicons/icons';
+import { getIconFromString } from '../../../utils/badgeIcons';
 
-// Badge Icon Mapping
-const BADGE_ICONS: Record<string, { icon: string; name: string; category: string }> = {
-  trophy: { icon: trophy, name: 'Pokal', category: 'Erfolg' },
-  medal: { icon: medal, name: 'Medaille', category: 'Erfolg' },
-  ribbon: { icon: ribbon, name: 'Band', category: 'Erfolg' },
-  star: { icon: star, name: 'Stern', category: 'Erfolg' },
-  checkmarkCircle: { icon: checkmarkCircle, name: 'Bestanden', category: 'Erfolg' },
-  diamond: { icon: diamond, name: 'Diamant', category: 'Erfolg' },
-  shield: { icon: shield, name: 'Schild', category: 'Erfolg' },
-  flame: { icon: flame, name: 'Flamme', category: 'Engagement' },
-  flash: { icon: flash, name: 'Blitz', category: 'Engagement' },
-  rocket: { icon: rocket, name: 'Rakete', category: 'Engagement' },
-  sparkles: { icon: sparkles, name: 'Funken', category: 'Engagement' },
-  thumbsUp: { icon: thumbsUp, name: 'Daumen hoch', category: 'Engagement' },
-  heart: { icon: heart, name: 'Herz', category: 'Gemeinschaft' },
-  people: { icon: people, name: 'Gruppe', category: 'Gemeinschaft' },
-  personAdd: { icon: personAdd, name: 'Neue Person', category: 'Gemeinschaft' },
-  chatbubbles: { icon: chatbubbles, name: 'Chat', category: 'Gemeinschaft' },
-  gift: { icon: gift, name: 'Geschenk', category: 'Gemeinschaft' },
-  book: { icon: book, name: 'Buch', category: 'Lernen' },
-  school: { icon: school, name: 'Schule', category: 'Lernen' },
-  construct: { icon: construct, name: 'Werkzeug', category: 'Lernen' },
-  brush: { icon: brush, name: 'Pinsel', category: 'Lernen' },
-  colorPalette: { icon: colorPalette, name: 'Farbpalette', category: 'Lernen' },
-  sunny: { icon: sunny, name: 'Sonne', category: 'Natur' },
-  moon: { icon: moon, name: 'Mond', category: 'Natur' },
-  leaf: { icon: leaf, name: 'Blatt', category: 'Natur' },
-  rose: { icon: rose, name: 'Rose', category: 'Natur' },
-  calendar: { icon: calendar, name: 'Kalender', category: 'Zeit' },
-  today: { icon: today, name: 'Heute', category: 'Zeit' },
-  time: { icon: time, name: 'Uhr', category: 'Zeit' },
-  timer: { icon: timer, name: 'Timer', category: 'Zeit' },
-  stopwatch: { icon: stopwatch, name: 'Stoppuhr', category: 'Zeit' },
-  restaurant: { icon: restaurant, name: 'Restaurant', category: 'Aktivitäten' },
-  fitness: { icon: fitness, name: 'Fitness', category: 'Aktivitäten' },
-  bicycle: { icon: bicycle, name: 'Fahrrad', category: 'Aktivitäten' },
-  car: { icon: car, name: 'Auto', category: 'Aktivitäten' },
-  airplane: { icon: airplane, name: 'Flugzeug', category: 'Aktivitäten' },
-  boat: { icon: boat, name: 'Boot', category: 'Aktivitäten' },
-  camera: { icon: camera, name: 'Kamera', category: 'Aktivitäten' },
-  image: { icon: image, name: 'Bild', category: 'Aktivitäten' },
-  musicalNote: { icon: musicalNote, name: 'Musik', category: 'Aktivitäten' },
-  balloon: { icon: balloon, name: 'Ballon', category: 'Aktivitäten' },
-  home: { icon: home, name: 'Zuhause', category: 'Orte' },
-  business: { icon: business, name: 'Gebäude', category: 'Orte' },
-  location: { icon: location, name: 'Standort', category: 'Orte' },
-  navigate: { icon: navigate, name: 'Navigation', category: 'Orte' },
-  compass: { icon: compass, name: 'Kompass', category: 'Orte' },
-  pin: { icon: pin, name: 'Pin', category: 'Orte' },
-  flag: { icon: flag, name: 'Flagge', category: 'Orte' },
-  informationCircle: { icon: informationCircle, name: 'Info', category: 'Sonstiges' },
-  helpCircle: { icon: helpCircle, name: 'Hilfe', category: 'Sonstiges' },
-  alertCircle: { icon: alertCircle, name: 'Warnung', category: 'Sonstiges' },
-  hammer: { icon: hammer, name: 'Hammer', category: 'Sonstiges' }
-};
 
-// Helper function to get icon from string
-const getIconFromString = (iconName: string): string => {
-  return BADGE_ICONS[iconName]?.icon || trophy;
-};
 
 interface Badge {
   id: number;
@@ -159,9 +59,9 @@ interface Badge {
   progress_percentage?: number;
 }
 
-// Zeitfenster-Hinweis fuer zeitbasierte Badges (time_based) und Serien (streak).
-// Erklaert, ab wann / in welchem Zeitraum der Fortschritt zaehlt, damit der
-// schwankende Fortschritt (Aktivitaeten fallen aus dem Fenster) verstaendlich ist.
+// Zeitfenster-Hinweis für zeitbasierte Badges (time_based) und Serien (streak).
+// Erklaert, ab wann / in welchem Zeitraum der Fortschritt zählt, damit der
+// schwankende Fortschritt (Aktivitäten fallen aus dem Fenster) verstaendlich ist.
 const getTimeWindowHint = (badge: Badge): string | null => {
   const fmt = (d: Date) => d.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' });
   if (badge.criteria_type === 'time_based') {
@@ -377,6 +277,11 @@ const BadgesView: React.FC<BadgesViewProps> = ({
       { key: 'streak', title: 'Serien-Champion', icon: flame, color: '#eb445a', badges: filtered.filter(b => b.criteria_type === 'streak').sort((a, b) => a.criteria_value - b.criteria_value) },
       { key: 'time_based', title: 'Zeitreisender', icon: time, color: '#8e8e93', badges: filtered.filter(b => b.criteria_type === 'time_based').sort((a, b) => a.criteria_value - b.criteria_value) },
       { key: 'event_count', title: 'Event-Champion', icon: calendar, color: '#e63946', badges: filtered.filter(b => b.criteria_type === 'event_count').sort((a, b) => a.criteria_value - b.criteria_value) },
+      // Fehlte hier, obwohl der Typ ueberall sonst gepflegt ist: Das Abzeichen
+      // wurde vergeben und die Meldung kam, aber in der Liste tauchte es nie
+      // auf, weil ohne passende Kategorie nichts angezeigt wird
+      // 
+      { key: 'mandatory_event_count', title: 'Immer dabei', icon: shield, color: '#b91c1c', badges: filtered.filter(b => b.criteria_type === 'mandatory_event_count').sort((a, b) => a.criteria_value - b.criteria_value) },
       { key: 'teamer_year', title: 'Erfahrung', icon: ribbon, color: '#5b21b6', badges: filtered.filter(b => b.criteria_type === 'teamer_year').sort((a, b) => a.criteria_value - b.criteria_value) },
       { key: 'collection', title: 'Sammler', icon: trophy, color: '#ffd700', badges: filtered.filter(b => b.criteria_type === 'collection').sort((a, b) => a.criteria_value - b.criteria_value) },
       { key: 'yearly', title: 'Jahres-Badges', icon: calendarOutline, color: '#8e8e93', badges: filtered.filter(b => b.criteria_type === 'yearly').sort((a, b) => a.criteria_value - b.criteria_value) }

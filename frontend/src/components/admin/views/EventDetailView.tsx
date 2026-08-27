@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   IonPage, IonHeader, IonToolbar, IonTitle, IonContent,
   IonButtons, IonButton, IonIcon, IonCard, IonCardContent,
@@ -14,14 +14,13 @@ import {
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
-import { parseLocalTime, getLocalNow } from '../../../utils/dateUtils';
-import { SectionHeader, formatEventDateLong as formatDate, formatEventTime as formatTime } from '../../shared';
+import { SectionHeader, formatEventDateLong as formatDate, formatEventTime as formatTime, istVergangen } from '../../shared';
 import { getStatusIcon } from '../../shared/StatusBadge';
 import EventModal from '../modals/EventModal';
 import ParticipantManagementModal from '../modals/ParticipantManagementModal';
-import QRDisplayModal from '../modals/QRDisplayModal';
+import QRDisplayModal from '../../shared/QRDisplayModal';
 import TeamerMaterialDetailPage from '../../teamer/pages/TeamerMaterialDetailPage';
-import { useLiveUpdate } from '../../../contexts/LiveUpdateContext';
+import { useLiveUpdate, useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import {
   EventInfoCard, DescriptionSection, SeriesEventsSection,
   UnregistrationsSection, EventMaterialSection, EventActionsSection,
@@ -29,6 +28,7 @@ import {
 } from './EventDetailSections';
 import type { Participant, Unregistration } from './EventDetailSections';
 import { triggerPullHaptic } from '../../../utils/haptics';
+import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 
 interface Category {
   id: number;
@@ -62,6 +62,10 @@ interface Event {
   bring_items?: string;
   teamer_needed?: boolean;
   teamer_only?: boolean;
+  teamer_max_participants?: number;
+  teamer_waitlist_enabled?: boolean;
+  teamer_max_waitlist_size?: number;
+  teamer_waitlist_count?: number;
   is_series?: boolean;
   series_id?: string;
   series_events?: Event[];
@@ -87,7 +91,7 @@ interface EventDetailViewProps {
   eventId: number;
   onBack: () => void;
   // Im iPad-Split-View ist die Liste links dauerhaft sichtbar -> kein
-  // Zurueck-Button noetig.
+  // Zurück-Button nötig.
   hideBackButton?: boolean;
 }
 
@@ -115,7 +119,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
   });
 
   // Event Modal mit useIonModal Hook
-  // Haelt den "ungespeicherte Aenderungen"-Stand des EventModals fuer canDismiss.
+  // Haelt den "ungespeicherte Änderungen"-Stand des EventModals für canDismiss.
   const eventModalDirtyRef = useRef(false);
 
   const [presentEventModalHook, dismissEventModalHook] = useIonModal(EventModal, {
@@ -130,7 +134,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
   });
 
   // Faengt JEDEN Schliess-Weg ab (Swipe, Backdrop): bei ungespeicherten
-  // Aenderungen erst nachfragen, sonst direkt schliessen lassen.
+  // Änderungen erst nachfragen, sonst direkt schliessen lassen.
   const eventModalCanDismiss = async (): Promise<boolean> => {
     if (!eventModalDirtyRef.current) return true;
     return new Promise<boolean>((resolve) => {
@@ -144,7 +148,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           { text: 'Abbrechen', role: 'cancel', handler: () => decide(false) },
           { text: 'Verwerfen', role: 'destructive', handler: () => decide(true) }
         ],
-        // Fallback: schliesst der Alert ohne Button, Promise nie haengen lassen.
+        // Fallback: schließt der Alert ohne Button, Promise nie hängen lassen.
         onDidDismiss: () => { if (!decided) resolve(false); }
       });
     });
@@ -201,8 +205,18 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     setPresentingElement(pageRef.current);
   }, []);
 
-  const loadEventData = async () => {
-    setLoading(true);
+  // Live-Ereignisse empfangen. Die Termin-Detailseite hoerte bisher auf nichts,
+  // obwohl das Backend fuer Termine 32 Ereignisse sendet — darunter jeder
+  // QR-Check-in (events.js): Der Zaehler auf dem offenen QR-Code stand still
+  // 
+  useLiveRefresh(['events', 'konfis'], useCallback(() => {
+    loadEventData(true);
+  }, [eventId]));
+
+  const loadEventData = async (stillLaden = false) => {
+    // stillLaden: bei Live-Ereignissen ohne Ladebalken nachladen, sonst
+    // flackert die Teilnehmerliste bei jedem QR-Scan.
+    if (!stillLaden) setLoading(true);
     try {
       const eventRes = await api.get(`/events/${eventId}`);
       setEventData(eventRes.data);
@@ -226,25 +240,21 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     (event.target as HTMLIonRefresherElement).complete();
   };
 
-  const calculateRegistrationStatus = (event: Event): 'upcoming' | 'open' | 'closed' => {
-    const now = getLocalNow();
-    if (event.registration_opens_at) {
-      const opensAt = parseLocalTime(event.registration_opens_at);
-      if (now < opensAt) return 'upcoming';
-    }
-    if (event.registration_closes_at) {
-      const closesAt = parseLocalTime(event.registration_closes_at);
-      if (now > closesAt) return 'closed';
-    }
-    if (event.max_participants > 0 && event.registered_count >= event.max_participants) return 'closed';
-    return 'open';
-  };
+  // Wert vom Backend, wie in der Leitungs-Liste (`admin/EventsView.tsx`).
+  // Vorher rechnete das Detail selbst und wich in drei Faellen von der Liste
+  // ab: ein Pflichttermin galt hier als 'open' statt 'mandatory', ein
+  // abgesagter ebenfalls als 'open' (nur die Zeilen darueber fingen
+  // 'cancelled' vorher ab), und ein ausgebuchter Termin MIT freier Warteliste
+  // galt als 'closed', obwohl die Anmeldung auf die Warteliste offen ist.
+  // Die Berechnung steht in `events.js:124-133`.
+  const calculateRegistrationStatus = (event: Event): 'upcoming' | 'open' | 'closed' | 'cancelled' | 'mandatory' =>
+    event.registration_status as 'upcoming' | 'open' | 'closed' | 'cancelled' | 'mandatory';
 
   const handleEditSuccess = () => { onBack(); };
 
   const getStatusColors = (): { primary: string; secondary: string } => {
     // Alle Status-Farben kommen aus globalen CSS-Token (--app-color-*).
-    // Aenderung der Domain-Farbe im CSS wirkt hier automatisch.
+    // Änderung der Domain-Farbe im CSS wirkt hier automatisch.
     const events = { primary: 'var(--app-color-events)', secondary: 'var(--app-color-events)' };
     const danger = { primary: 'var(--app-color-danger)', secondary: 'var(--app-color-danger)' };
     const konfirm = { primary: 'var(--app-color-konfis)', secondary: 'var(--app-color-konfis)' }; // Konfirmation = lila
@@ -255,7 +265,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     const upcoming = { primary: 'var(--app-color-bonus)', secondary: 'var(--app-color-bonus)' };
 
     if (!eventData) return events;
-    const isPastEvent = new Date(eventData.event_date) < new Date();
+    const isPastEvent = istVergangen(eventData);
     const isKonfirmationEvent = eventData.is_konfirmation;
     const isCancelledStatus = eventData.registration_status === 'cancelled' as string;
     const hasUnprocessedBookings = isPastEvent && eventData.registered_count > 0 &&
@@ -267,8 +277,14 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     if (isPastEvent) return past;
 
     const regStatus = calculateRegistrationStatus(eventData);
-    if (regStatus === 'closed' && eventData.max_participants > 0 && eventData.registered_count >= eventData.max_participants && (eventData as any).waitlist_enabled) return waitlist;
-    if (regStatus === 'closed' && eventData.max_participants > 0 && eventData.registered_count >= eventData.max_participants) return danger;
+    // Pflichttermine: Anmeldung entfaellt, die Farbe der Domain passt.
+    if (regStatus === 'mandatory') return events;
+    // Ausgebucht wird an der Kapazitaet erkannt, nicht am Status: das Backend
+    // meldet bei freier Warteliste weiterhin 'open' (`events.js:129-131`).
+    const istVoll = eventData.max_participants > 0
+      && eventData.registered_count >= eventData.max_participants;
+    if (istVoll && (eventData as any).waitlist_enabled) return waitlist;
+    if (istVoll) return danger;
     if (regStatus === 'open') return success;
     if (regStatus === 'upcoming') return upcoming;
     return events;
@@ -276,7 +292,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
 
   const getStatusText = () => {
     if (!eventData) return 'Event';
-    const isPastEvent = new Date(eventData.event_date) < new Date();
+    const isPastEvent = istVergangen(eventData);
     const isKonfirmationEvent = eventData.is_konfirmation;
     const isCancelledStatus = eventData.registration_status === 'cancelled' as string;
     const hasUnprocessedBookings = isPastEvent && eventData.registered_count > 0 &&
@@ -288,8 +304,11 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     if (isPastEvent && !hasUnprocessedBookings) return 'Verbucht';
 
     const regStatus = calculateRegistrationStatus(eventData);
-    if (regStatus === 'closed' && eventData.max_participants > 0 && eventData.registered_count >= eventData.max_participants && (eventData as any).waitlist_enabled) return 'Warteliste';
-    if (regStatus === 'closed' && eventData.max_participants > 0 && eventData.registered_count >= eventData.max_participants) return 'Ausgebucht';
+    if (regStatus === 'mandatory') return 'Pflichttermin';
+    const istVoll = eventData.max_participants > 0
+      && eventData.registered_count >= eventData.max_participants;
+    if (istVoll && (eventData as any).waitlist_enabled) return 'Warteliste';
+    if (istVoll) return 'Ausgebucht';
     if (regStatus === 'open') return 'Offen';
     if (regStatus === 'upcoming') return 'Bald';
     return 'Geschlossen';
@@ -350,25 +369,31 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     }
   };
 
-  // "Alle bestätigen" = Bulk-VERBUCHUNG: alle angemeldeten (bestätigten) Konfis
-  // ohne Anwesenheits-Status werden als anwesend verbucht (inkl. Punkte/Badges,
-  // identisch zum Einzel-Verbuchen). Die Warteliste bleibt bewusst unberührt —
-  // Nachrücken läuft automatisch (FIFO bei Absagen) bzw. einzeln per Swipe.
-  const handleConfirmAllAttendance = async (unprocessedCount: number, waitlistCount: number) => {
+  const handleConfirmAllAttendance = async (
+    unprocessedCount: number,
+    waitlistCount: number,
+    rolle: 'konfi' | 'teamer' = 'konfi'
+  ) => {
     if (!isOnline) return;
     const waitlistHint = waitlistCount > 0
       ? ` Die Warteliste (${waitlistCount}) bleibt unberührt.`
       : '';
+    const wen = rolle === 'teamer' ? 'Teamer:in(nen)' : 'Teilnehmer:in(nen)';
+    // Punkte gibt es nur bei Konfis -- das gehoert in die Rueckfrage, sonst
+    // erwartet die Leitung bei Teamer:innen eine Punktevergabe, die ausbleibt.
+    const punkteHinweis = rolle === 'teamer'
+      ? ' Teamer:innen bekommen dabei keine Punkte.'
+      : ' (inkl. Punktevergabe)';
     presentAlert({
       header: 'Alle bestätigen?',
-      message: `${unprocessedCount} angemeldete Teilnehmer:in(nen) werden als anwesend verbucht (inkl. Punktevergabe). Bereits Verbuchte bleiben unverändert.${waitlistHint}`,
+      message: `${unprocessedCount} angemeldete ${wen} werden als anwesend verbucht${punkteHinweis}. Bereits Verbuchte bleiben unverändert.${waitlistHint}`,
       buttons: [
         { text: 'Abbrechen', role: 'cancel' },
         {
           text: 'Alle bestätigen',
           handler: async () => {
             try {
-              const res = await api.put(`/events/${eventId}/participants/attendance-all`);
+              const res = await api.put(`/events/${eventId}/participants/attendance-all`, { rolle });
               await loadEventData();
               triggerRefresh('events');
               setSuccess(res.data?.message || 'Teilnahmen verbucht');
@@ -382,29 +407,57 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     });
   };
 
-  const handleDemoteParticipant = async (participant: Participant) => {
+  const demoteParticipant = async (participant: Participant) => {
     try {
       await api.put(`/events/${eventId}/participants/${participant.id}/status`, { status: 'waitlist' });
       const slidingItem = slidingRefs.current.get(participant.id);
       if (slidingItem) await slidingItem.close();
       await loadEventData();
       triggerRefresh('events');
-    } catch (error) {
- console.error('Demote participant error:', error);
-      setError('Fehler beim Verschieben auf Warteliste');
+    } catch (error: any) {
+      console.error('Demote participant error:', error);
+      setError(error.response?.data?.error || 'Fehler beim Verschieben auf Warteliste');
     }
   };
 
-  const handleRemoveParticipant = async (participant: Participant) => {
-    if (!isOnline) return;
+  // Rueckfrage vor dem Verschieben auf die Warteliste: ausgelöst wird das per
+  // Wisch-Geste, ein Fehlwisch hätte sonst still eine Anmeldung zurueckgestuft
+  // Das Absagen des Events fragt hier laengst nach.
+  const handleDemoteParticipant = (participant: Participant) => {
+    presentAlert({
+      header: 'Auf die Warteliste setzen?',
+      message: `${participant.participant_name || 'Diese Person'} verliert den festen Platz und rückt auf die Warteliste.`,
+      buttons: [
+        { text: 'Abbrechen', role: 'cancel', handler: () => { slidingRefs.current.get(participant.id)?.close(); } },
+        { text: 'Auf Warteliste', handler: () => { demoteParticipant(participant); } }
+      ]
+    });
+  };
+
+  const removeParticipant = async (participant: Participant) => {
     try {
       await api.delete(`/events/${eventId}/bookings/${participant.id}`);
+      const slidingItem = slidingRefs.current.get(participant.id);
+      if (slidingItem) await slidingItem.close();
       await loadEventData();
       triggerRefresh('events');
-    } catch (error) {
- console.error('Delete participant error:', error);
-      setError('Fehler beim Entfernen des Teilnehmers');
+    } catch (error: any) {
+      console.error('Delete participant error:', error);
+      setError(error.response?.data?.error || 'Fehler beim Entfernen des Teilnehmers');
     }
+  };
+
+  // Ebenfalls per Wisch-Geste erreichbar und nicht umkehrbar -> Rueckfrage.
+  const handleRemoveParticipant = (participant: Participant) => {
+    if (!isOnline) return;
+    presentAlert({
+      header: 'Anmeldung entfernen?',
+      message: `${participant.participant_name || 'Diese Person'} wird von diesem Event abgemeldet. Ein frei werdender Platz geht an die Warteliste.`,
+      buttons: [
+        { text: 'Abbrechen', role: 'cancel', handler: () => { slidingRefs.current.get(participant.id)?.close(); } },
+        { text: 'Entfernen', role: 'destructive', handler: () => { removeParticipant(participant); } }
+      ]
+    });
   };
 
   const isCancelled = eventData?.cancelled || eventData?.registration_status === ('cancelled' as string);
@@ -556,13 +609,13 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
         {(participant.role_name === 'teamer' || !eventData?.mandatory) && (
         <IonItemOptions className="app-swipe-actions" side="end">
           {participant.role_name !== 'teamer' && participant.status === 'confirmed' && (
-            <IonItemOption className="app-swipe-action" onClick={() => handleDemoteParticipant(participant)}>
+            <IonItemOption className="app-swipe-action" onClick={() => { closeOpenSlidingItems(); handleDemoteParticipant(participant); }} aria-label="Auf Warteliste setzen">
               <div className="app-icon-circle app-icon-circle--lg app-icon-circle--warning">
                 <IonIcon icon={returnUpBack} />
               </div>
             </IonItemOption>
           )}
-          <IonItemOption className="app-swipe-action" onClick={() => handleRemoveParticipant(participant)}>
+          <IonItemOption className="app-swipe-action" onClick={() => { closeOpenSlidingItems(); handleRemoveParticipant(participant); }} aria-label="Teilnahme entfernen">
             <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
               <IonIcon icon={trash} />
             </div>
@@ -579,18 +632,18 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
         <IonToolbar>
           {!hideBackButton && (
             <IonButtons slot="start">
-              <IonButton onClick={onBack}><IonIcon icon={arrowBack} /></IonButton>
+              <IonButton aria-label="Zurück" onClick={onBack}><IonIcon icon={arrowBack} /></IonButton>
             </IonButtons>
           )}
           <IonTitle>{eventData?.name || 'Event Details'}</IonTitle>
           <IonButtons slot="end">
-            <IonButton onClick={handleChatButtonClick}>
+            <IonButton aria-label="Event-Chat öffnen" onClick={handleChatButtonClick}>
               <IonIcon icon={chatbubbleOutline} />
             </IonButton>
-            <IonButton onClick={() => presentQRDisplayModal({ presentingElement: presentingElement || undefined })}>
+            <IonButton aria-label="QR-Code anzeigen" onClick={() => presentQRDisplayModal({ presentingElement: presentingElement || undefined })}>
               <IonIcon icon={qrCodeOutline} />
             </IonButton>
-            <IonButton onClick={() => presentEventModalHook({ presentingElement: presentingElement || undefined, canDismiss: eventModalCanDismiss, backdropDismiss: false })}>
+            <IonButton aria-label="Event bearbeiten" onClick={() => presentEventModalHook({ presentingElement: presentingElement || undefined, canDismiss: eventModalCanDismiss, backdropDismiss: false })}>
               <IonIcon icon={createOutline} />
             </IonButton>
           </IonButtons>
@@ -617,25 +670,52 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           stats={(() => {
             const konfiOnly = participants.filter(p => p.role_name !== 'teamer');
             const teamerOnly = participants.filter(p => p.role_name === 'teamer');
-            const hasTeamer = (eventData?.teamer_needed || eventData?.teamer_only) && teamerOnly.length > 0;
+            const teamerConfirmedCount = teamerOnly.filter(p => p.status === 'confirmed').length;
+            const teamerWaitlistCount = teamerOnly.filter(p => p.status === 'waitlist').length;
+            // Teamer-Kontingent gilt, sobald das Event Teamer zulaesst \u2014 NICHT
+            // erst, wenn sich schon jemand angemeldet hat (sonst zeigt ein
+            // frisches "Nur Teamer"-Event Konfi-Zahlen).
+            const teamerMax = (eventData?.teamer_max_participants || 0) > 0
+              ? eventData?.teamer_max_participants : '\u221E';
             const presentCount = konfiOnly.filter(p => p.attendance_status === 'present').length;
-            const absentCount = konfiOnly.filter(p => p.attendance_status === 'absent' || p.status === 'opted_out').length;
             const konfiConfirmed = konfiOnly.filter(p => p.status === 'confirmed').length;
+            const konfiOptedOut = konfiOnly.filter(p => p.status === 'opted_out').length;
+
+            // "Nur Teamer:innen": es gibt gar keine Konfi-Teilnahme -> die
+            // Kacheln müssen komplett vom Team erzaehlen (vorher stand hier
+            // "0 von 0 TN" und die Teamer tauchten nirgends auf).
+            if (eventData?.teamer_only) {
+              const teamerPresent = teamerOnly.filter(p => p.attendance_status === 'present').length;
+              return [
+                { value: teamerConfirmedCount, label: `von ${teamerMax} Team` },
+                { value: teamerPresent, label: 'Anwesend' },
+                { value: teamerWaitlistCount, label: 'Warteliste' }
+              ];
+            }
+
+            const hasTeamer = !!eventData?.teamer_needed;
             if (eventData?.mandatory) {
               return [
-                { value: presentCount, label: `von ${konfiOnly.length} TN` },
-                { value: absentCount, label: 'Abwesend' },
+                { value: konfiConfirmed, label: `von ${konfiConfirmed + konfiOptedOut} TN` },
+                { value: presentCount, label: 'Anwesend' },
                 hasTeamer
-                  ? { value: teamerOnly.length, label: 'Team' }
-                  : { value: konfiOnly.filter(p => p.status === 'opted_out').length, label: 'Abgemeldet' }
+                  ? { value: teamerConfirmedCount, label: 'Team' }
+                  : { value: konfiOptedOut, label: 'Abgemeldet' }
               ];
             }
             const maxP = (eventData?.max_participants || 0) > 0 ? eventData?.max_participants : '\u221E';
             return [
               { value: konfiConfirmed, label: `von ${maxP} TN` },
+              // Ohne Team-Kontingent zeigt die mittlere Kachel die Punkte —
+              // aber nur, wenn es welche gibt. Bei Pflichtterminen und
+              // Konfirmationen stand hier sonst "Punkte 0"; Konfi- und
+              // Teamer-Ansicht blenden ihre Punkte-Kachel dort aus. Statt der
+              // Null die Abgemeldeten, wie bei vergangenen Terminen.
               hasTeamer
-                ? { value: teamerOnly.length, label: 'Team' }
-                : { value: eventData?.points || 0, label: 'Punkte' },
+                ? { value: teamerConfirmedCount, label: `von ${teamerMax} Team` }
+                : ((eventData?.points || 0) > 0
+                    ? { value: eventData?.points || 0, label: 'Punkte' }
+                    : { value: konfiOptedOut, label: 'Abgemeldet' }),
               { value: konfiOnly.filter(p => p.status === 'waitlist').length, label: 'Warteliste' }
             ];
           })()}
@@ -699,16 +779,30 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           const hasWaitlist = (eventData as any)?.waitlist_enabled && waitlistParticipants.length > 0;
           const hasUnassigned = unassignedParticipants.length > 0;
 
+          // Noch niemand angemeldet: nur die Hinzufuegen-Buttons zeigen — aber
+          // die passenden. Bei "Nur Teamer:innen" gibt es keine Konfi-Teilnahme
+          // (vorher stand hier ausschliesslich "Konfi hinzufügen", und die
+          // Teamer-Sektion darunter wurde durch den Return nie erreicht).
           if (displayParticipants.length === 0 && teamerParticipants.length === 0) {
+            const teamerErlaubt = !!(eventData?.teamer_needed || eventData?.teamer_only);
             return (
               <IonList className="app-section-inset" inset={true}>
                 <IonCard className="app-card">
                   <IonCardContent className="app-card-content">
-                    <IonButton expand="block" fill="outline"
-                      onClick={() => presentKonfiModal({ presentingElement: presentingElement || undefined })}>
-                      <IonIcon icon={personAdd} className="app-event-detail__icon-gap" />
-                      Konfi hinzufügen
-                    </IonButton>
+                    {!eventData?.teamer_only && (
+                      <IonButton expand="block" fill="outline"
+                        onClick={() => presentKonfiModal({ presentingElement: presentingElement || undefined })}>
+                        <IonIcon icon={personAdd} className="app-event-detail__icon-gap" />
+                        Konfi hinzufügen
+                      </IonButton>
+                    )}
+                    {teamerErlaubt && (
+                      <IonButton expand="block" fill="outline"
+                        onClick={() => presentTeamerModal({ presentingElement: presentingElement || undefined })}>
+                        <IonIcon icon={personAdd} className="app-event-detail__icon-gap" />
+                        Teamer:in hinzufügen
+                      </IonButton>
+                    )}
                   </IonCardContent>
                 </IonCard>
               </IonList>
@@ -726,9 +820,21 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
             konfiHeaderText = `Konfis (${confirmedParticipants.length}${waitlistParticipants.length > 0 ? ` + ${waitlistParticipants.length}` : ''})`;
           }
 
+          const teamerConfirmed = teamerParticipants.filter(p => p.status === 'confirmed');
+          const teamerWaitlist = teamerParticipants.filter(p => p.status === 'waitlist');
+          const teamerAbgesagt = teamerParticipants.filter(p => p.status === 'opted_out');
+          const teamerHeaderText = `Teamer:innen (${teamerConfirmed.length}`
+            + (teamerWaitlist.length > 0 ? ` + ${teamerWaitlist.length}` : '')
+            + (teamerAbgesagt.length > 0 ? `, ${teamerAbgesagt.length} abgesagt` : '')
+            + ')';
+
+          // Bei "Nur Teamer:innen" gibt es keine Konfi-Teilnahme — dann darf
+          // weder die Konfi-Liste noch ein "Konfi hinzufügen" erscheinen.
+          const isTeamerOnlyEvent = !!eventData?.teamer_only;
+
           return (
             <>
-              {displayParticipants.length > 0 && (
+              {!isTeamerOnlyEvent && displayParticipants.length > 0 && (
                 <IonList className="app-section-inset" inset={true}>
                   <IonListHeader>
                     <div className="app-section-icon app-section-icon--events"><IonIcon icon={people} /></div>
@@ -767,7 +873,24 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                 <IonList className="app-section-inset" inset={true}>
                   <IonListHeader>
                     <div className="app-section-icon app-section-icon--events"><IonIcon icon={people} /></div>
-                    <IonLabel>Teamer:innen ({teamerParticipants.length})</IonLabel>
+                    <IonLabel>{teamerHeaderText}</IonLabel>
+                    {(() => {
+                      // Gleiches Muster wie bei den Konfis oben, aber mit
+                      // rolle='teamer': nur angemeldete Teamer:innen ohne
+                      // Anwesenheits-Status. Ohne diesen Knopf musste die
+                      // Leitung sie einzeln verbuchen, und der Termin blieb
+                      // im "Verbuchen"-Reiter stehen -- pending_bookings_count
+                      // zaehlt beide Rollen (events.js:270-274).
+                      const unprocessedTeamer = teamerConfirmed.filter(p => !p.attendance_status).length;
+                      if (unprocessedTeamer === 0) return null;
+                      return (
+                        <IonButton fill="clear" size="small" disabled={!isOnline}
+                          onClick={() => handleConfirmAllAttendance(unprocessedTeamer, teamerWaitlist.length, 'teamer')}>
+                          <IonIcon icon={checkmark} slot="start" />
+                          Alle bestätigen ({unprocessedTeamer})
+                        </IonButton>
+                      );
+                    })()}
                   </IonListHeader>
                   <IonCard className="app-card">
                     <IonCardContent style={{ padding: teamerParticipants.length === 0 ? '16px' : '12px' }}>
@@ -785,7 +908,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                   </IonCard>
                 </IonList>
               )}
-              {displayParticipants.length === 0 && teamerParticipants.length > 0 && (
+              {!isTeamerOnlyEvent && displayParticipants.length === 0 && teamerParticipants.length > 0 && (
                 <IonList className="app-section-inset" inset={true}>
                   <IonCard className="app-card">
                     <IonCardContent className="app-card-content">

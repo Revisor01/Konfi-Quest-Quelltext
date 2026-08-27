@@ -9,20 +9,20 @@ export interface InfoModalProps {
   onClose: () => void;
   title: string;
   icon: string;
-  // CSS-Farbe (z.B. var(--app-color-jahrgang)) fuer Icon-Kreis + Akzent.
+  // CSS-Farbe (z.B. var(--app-color-jahrgang)) für Icon-Kreis + Akzent.
   color?: string;
   // Absatzweise Erklaerung. Jeder Eintrag wird als eigener Absatz gerendert.
   paragraphs: string[];
 }
 
-// Schlichtes, wiederverwendbares Info-/Erklaer-Modal. Wird ueber das (i)-Symbol
-// an Eintraegen der "Mehr"-Seite geoeffnet und erklaert einen Bereich genauer.
+// Schlichtes, wiederverwendbares Info-/Erklaer-Modal. Wird über das (i)-Symbol
+// an Eintraegen der "Mehr"-Seite geoeffnet und erklärt einen Bereich genauer.
 const InfoModal: React.FC<InfoModalProps> = ({ onClose, title, icon, color = 'var(--app-color-info)', paragraphs }) => (
   <IonPage>
     <IonHeader>
       <IonToolbar>
         <IonButtons slot="start">
-          <IonButton className="app-modal-close-btn" onClick={onClose}>
+          <IonButton className="app-modal-close-btn" onClick={onClose} aria-label="Schließen">
             <IonIcon icon={closeOutline} slot="icon-only" />
           </IonButton>
         </IonButtons>

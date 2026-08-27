@@ -51,7 +51,10 @@ export const ModalProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     else if (currentPath.includes('/admin/activities')) currentTabId = 'admin-activities';
     else if (currentPath.includes('/admin/events')) currentTabId = 'admin-events';
     else if (currentPath.includes('/admin/badges')) currentTabId = 'admin-badges';
-    else if (currentPath.includes('/admin/requests')) currentTabId = 'admin-requests';
+    // Aktivitäten sind seit dem Tab-Umbau ein Segment im Events-Tab — die alte
+    // Route /admin/requests leitet dorthin um, deshalb dasselbe Presenting-Element.
+    else if (currentPath.includes('/admin/requests')) currentTabId = 'admin-events';
+    else if (currentPath.includes('/admin/challenges')) currentTabId = 'admin-challenges';
     else if (currentPath.includes('/admin/users')) currentTabId = 'admin-users';
     else if (currentPath.includes('/admin/organizations')) currentTabId = 'admin-organizations';
     else if (currentPath.includes('/admin/profile')) currentTabId = 'admin-profile';
@@ -65,16 +68,23 @@ export const ModalProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     // Konfi Routes
     else if (currentPath.includes('/konfi/dashboard')) currentTabId = 'dashboard';
     else if (currentPath.includes('/konfi/events')) currentTabId = 'events';
-    else if (currentPath.includes('/konfi/requests')) currentTabId = 'requests';
+    // Aktivitäten sind seit dem Tab-Umbau ein Segment im Events-Tab — die alte
+    // Route /konfi/requests leitet dorthin um, deshalb dasselbe Presenting-Element.
+    else if (currentPath.includes('/konfi/requests')) currentTabId = 'events';
+    else if (currentPath.includes('/konfi/challenges')) currentTabId = 'konfi-challenges';
     else if (currentPath.includes('/konfi/badges')) currentTabId = 'badges';
     else if (currentPath.includes('/konfi/chat')) currentTabId = 'chat';
     else if (currentPath.includes('/konfi/profile')) currentTabId = 'profile';
     // Teamer Routes
     else if (currentPath.includes('/teamer/material')) currentTabId = 'teamer-material';
     else if (currentPath.includes('/teamer/events')) currentTabId = 'teamer-events';
+    // Aktivitäten sind seit dem Tab-Umbau ein Segment im Events-Tab —
+    // die alte Route /teamer/requests leitet dorthin um.
+    else if (currentPath.includes('/teamer/requests')) currentTabId = 'teamer-events';
     else if (currentPath.includes('/teamer/dashboard')) currentTabId = 'teamer-dashboard';
     else if (currentPath.includes('/teamer/chat')) currentTabId = 'teamer-chat';
     else if (currentPath.includes('/teamer/badges')) currentTabId = 'teamer-badges';
+    else if (currentPath.includes('/teamer/challenges')) currentTabId = 'teamer-challenges';
     else if (currentPath.includes('/teamer/profile')) currentTabId = 'teamer-profile';
 
     return tabPresentingElements.get(currentTabId);

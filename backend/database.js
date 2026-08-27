@@ -15,17 +15,17 @@ const pool = new Pool({
   connectionTimeoutMillis: parseInt(process.env.PG_CONN_TIMEOUT || '5000', 10),
 });
 
-// App-weite Lock-ID fuer den Migrations-Advisory-Lock (beliebig, aber fest).
+// App-weite Lock-ID für den Migrations-Advisory-Lock (beliebig, aber fest).
 const MIGRATION_ADVISORY_LOCK_ID = 723001;
 
 async function runMigrations(pool) {
   // Advisory-Lock: Beide Backend-Replikas starten beim Deploy
   // PARALLEL und rasten sonst um neue Migrationen (beobachtet bei Migration 109:
   // eine Replika gewann, die andere warf duplicate-key auf pg_type). Der Lock
-  // serialisiert die Laeufe; die zweite Replika liest danach die frisch
+  // serialisiert die Läufe; die zweite Replika liest danach die frisch
   // eingetragenen schema_migrations und ueberspringt sauber.
   // Session-Lock auf dedizierter Connection — wird im finally freigegeben,
-  // bei Prozess-Tod raeumt Postgres den Lock automatisch.
+  // bei Prozess-Tod räumt Postgres den Lock automatisch.
   const lockClient = await pool.connect();
   try {
     await lockClient.query('SELECT pg_advisory_lock($1)', [MIGRATION_ADVISORY_LOCK_ID]);
@@ -104,7 +104,15 @@ pool.query('SELECT NOW()')
   .then(() => runMigrations(pool))
   .catch(err => {
     console.error('Database startup failed (DB nicht erreichbar):', err);
-    process.exit(1);
+    // In Tests NICHT den Prozess killen: Dieser Selbsttest laeuft beim
+    // MODUL-LADEN als unbeaufsichtigter Promise. utils/liveUpdate.js laedt das
+    // Singleton lazy mitten im Testlauf; schlaegt der Test dann fehl (z.B.
+    // weil globalTeardown die Test-DB gerade droppt), riss process.exit(1)
+    // den ganzen vitest-Worker mit — etwa jeder vierte Lauf brach so ohne
+    // Fehlermeldung ab. In Produktion bleibt der harte Abbruch gewollt.
+    if (process.env.NODE_ENV !== 'test') {
+      process.exit(1);
+    }
   });
 
 module.exports = {

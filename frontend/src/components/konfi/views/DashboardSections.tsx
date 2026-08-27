@@ -8,119 +8,14 @@ import {
   location,
   calendar,
   eyeOff,
-  star,
   trophy,
-  medal,
-  ribbon,
   checkmarkCircle,
-  diamond,
-  shield,
-  flame,
-  flash,
-  rocket,
-  sparkles,
-  thumbsUp,
-  heart,
-  people,
-  personAdd,
-  chatbubbles,
-  gift,
-  book,
-  school,
-  construct,
-  brush,
-  colorPalette,
-  sunny,
-  moon,
-  leaf,
-  rose,
-  today,
-  timer,
-  stopwatch,
-  restaurant,
-  fitness,
-  bicycle,
-  car,
-  airplane,
-  boat,
-  camera,
-  image,
-  musicalNote,
-  balloon,
-  home,
-  business,
-  navigate,
-  compass,
-  pin,
-  flag,
-  informationCircle,
-  helpCircle,
-  alertCircle,
-  hammer
+  people
 } from 'ionicons/icons';
 import { Badge } from '../../../types/dashboard';
 
 // Badge Icon Mapping
-export const BADGE_ICONS: Record<string, { icon: string; name: string; category: string }> = {
-  trophy: { icon: trophy, name: 'Pokal', category: 'Erfolg' },
-  medal: { icon: medal, name: 'Medaille', category: 'Erfolg' },
-  ribbon: { icon: ribbon, name: 'Band', category: 'Erfolg' },
-  star: { icon: star, name: 'Stern', category: 'Erfolg' },
-  checkmarkCircle: { icon: checkmarkCircle, name: 'Bestanden', category: 'Erfolg' },
-  diamond: { icon: diamond, name: 'Diamant', category: 'Erfolg' },
-  shield: { icon: shield, name: 'Schild', category: 'Erfolg' },
-  flame: { icon: flame, name: 'Flamme', category: 'Engagement' },
-  flash: { icon: flash, name: 'Blitz', category: 'Engagement' },
-  rocket: { icon: rocket, name: 'Rakete', category: 'Engagement' },
-  sparkles: { icon: sparkles, name: 'Funken', category: 'Engagement' },
-  thumbsUp: { icon: thumbsUp, name: 'Daumen hoch', category: 'Engagement' },
-  heart: { icon: heart, name: 'Herz', category: 'Gemeinschaft' },
-  people: { icon: people, name: 'Gruppe', category: 'Gemeinschaft' },
-  personAdd: { icon: personAdd, name: 'Neue Person', category: 'Gemeinschaft' },
-  chatbubbles: { icon: chatbubbles, name: 'Chat', category: 'Gemeinschaft' },
-  gift: { icon: gift, name: 'Geschenk', category: 'Gemeinschaft' },
-  book: { icon: book, name: 'Buch', category: 'Lernen' },
-  school: { icon: school, name: 'Schule', category: 'Lernen' },
-  construct: { icon: construct, name: 'Werkzeug', category: 'Lernen' },
-  brush: { icon: brush, name: 'Pinsel', category: 'Lernen' },
-  colorPalette: { icon: colorPalette, name: 'Farbpalette', category: 'Lernen' },
-  sunny: { icon: sunny, name: 'Sonne', category: 'Natur' },
-  moon: { icon: moon, name: 'Mond', category: 'Natur' },
-  leaf: { icon: leaf, name: 'Blatt', category: 'Natur' },
-  rose: { icon: rose, name: 'Rose', category: 'Natur' },
-  calendar: { icon: calendar, name: 'Kalender', category: 'Zeit' },
-  today: { icon: today, name: 'Heute', category: 'Zeit' },
-  time: { icon: time, name: 'Uhr', category: 'Zeit' },
-  timer: { icon: timer, name: 'Timer', category: 'Zeit' },
-  stopwatch: { icon: stopwatch, name: 'Stoppuhr', category: 'Zeit' },
-  restaurant: { icon: restaurant, name: 'Restaurant', category: 'Aktivitäten' },
-  fitness: { icon: fitness, name: 'Fitness', category: 'Aktivitäten' },
-  bicycle: { icon: bicycle, name: 'Fahrrad', category: 'Aktivitäten' },
-  car: { icon: car, name: 'Auto', category: 'Aktivitäten' },
-  airplane: { icon: airplane, name: 'Flugzeug', category: 'Aktivitäten' },
-  boat: { icon: boat, name: 'Boot', category: 'Aktivitäten' },
-  camera: { icon: camera, name: 'Kamera', category: 'Aktivitäten' },
-  image: { icon: image, name: 'Bild', category: 'Aktivitäten' },
-  musicalNote: { icon: musicalNote, name: 'Musik', category: 'Aktivitäten' },
-  balloon: { icon: balloon, name: 'Ballon', category: 'Aktivitäten' },
-  home: { icon: home, name: 'Zuhause', category: 'Orte' },
-  business: { icon: business, name: 'Gebäude', category: 'Orte' },
-  location: { icon: location, name: 'Standort', category: 'Orte' },
-  navigate: { icon: navigate, name: 'Navigation', category: 'Orte' },
-  compass: { icon: compass, name: 'Kompass', category: 'Orte' },
-  pin: { icon: pin, name: 'Pin', category: 'Orte' },
-  flag: { icon: flag, name: 'Flagge', category: 'Orte' },
-  informationCircle: { icon: informationCircle, name: 'Info', category: 'Sonstiges' },
-  helpCircle: { icon: helpCircle, name: 'Hilfe', category: 'Sonstiges' },
-  alertCircle: { icon: alertCircle, name: 'Warnung', category: 'Sonstiges' },
-  hammer: { icon: hammer, name: 'Hammer', category: 'Sonstiges' }
-};
 
-// Helper function to get icon from string
-export const getIconFromString = (iconName: string | undefined): string => {
-  if (!iconName) return trophy;
-  return BADGE_ICONS[iconName]?.icon || trophy;
-};
 
 // Level Popover Content Komponente
 export interface LevelPopoverData {
@@ -481,6 +376,9 @@ export const EventCard = React.memo<EventCardProps>(({ event, onClick }) => {
 
 // --- RankingSection ---
 import { RankingEntry as RankingEntryType } from '../../../types/dashboard';
+import { getIconFromString } from '../../../utils/badgeIcons';
+// Re-Export für bestehende Verwender (Wrapped-Slides, KonfiDetailSections).
+export { getIconFromString };
 
 interface RankingSectionProps {
   ranking: RankingEntryType[];
@@ -532,13 +430,16 @@ export const RankingSection = React.memo<RankingSectionProps>(({
           isCurrentUser: true
         });
       } else {
+        // Nachbarplaetze OHNE Punktzahl: die Punkte der anderen Konfis liefert
+        // das Backend nicht, sie wurden hier früher aus dem eigenen Stand
+        // hochgerechnet — also frei erfunden. Zusammen mit "??" als Initialen
+        // sah das aus wie ein Ladefehler. Jetzt steht dort nur
+        // der Platz, und der stimmt.
         playersToShow.push({
           id: `neighbor-${rank}`,
           display_name: rank === startRank ? 'Konfi vor dir' : 'Konfi nach dir',
-          points: rank < currentUserRank ?
-            (konfiGottesdienstPoints || 0) + (konfiGemeindePoints || 0) + (currentUserRank - rank) :
-            Math.max(0, (konfiGottesdienstPoints || 0) + (konfiGemeindePoints || 0) - (rank - currentUserRank)),
-          initials: '??',
+          points: null,
+          initials: '',
           actualRank: rank,
           isNeighbor: true
         });
@@ -609,7 +510,7 @@ export const RankingSection = React.memo<RankingSectionProps>(({
               );
             }
 
-            const entry = item as { id?: number | string; display_name?: string; points?: number; initials?: string; actualRank?: number; rank?: number; isCurrentUser?: boolean; isNeighbor?: boolean };
+            const entry = item as { id?: number | string; display_name?: string; points?: number | null; initials?: string; actualRank?: number; rank?: number; isCurrentUser?: boolean; isNeighbor?: boolean };
             const isCurrentUser = entry.isCurrentUser || entry.id === konfiId;
             const rank = entry.actualRank ?? entry.rank ?? 0;
 
@@ -665,7 +566,9 @@ export const RankingSection = React.memo<RankingSectionProps>(({
                   fontSize: '0.9rem',
                   backdropFilter: 'blur(10px)'
                 }}>
-                  {entry.initials}
+                  {entry.isNeighbor
+                    ? <IonIcon icon={people} style={{ fontSize: '1.1rem', opacity: 0.8 }} />
+                    : entry.initials}
                 </div>
 
                 <div style={{ flex: 1 }}>
@@ -677,11 +580,15 @@ export const RankingSection = React.memo<RankingSectionProps>(({
                   }}>
                     {entry.display_name}
                   </div>
+                  {/* Punktzahl nur, wenn sie echt ist — Nachbarplaetze zeigen
+                      stattdessen den Platz (Punkte anderer kennt die App nicht). */}
                   <div style={{
                     fontSize: '0.75rem',
                     color: 'rgba(255, 255, 255, 0.7)'
                   }}>
-                    {entry.points} Punkte
+                    {entry.points === null || entry.points === undefined
+                      ? `Platz ${entry.actualRank}`
+                      : `${entry.points} Punkte`}
                   </div>
                 </div>
               </div>

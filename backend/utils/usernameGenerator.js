@@ -7,10 +7,22 @@ const UMLAUT_MAP = {
   'ä': 'ae', 'ö': 'oe', 'ü': 'ue', 'ß': 'ss'
 };
 
+// Buchstaben, die keine Akzentzeichen tragen und deshalb von der
+// Unicode-Normalisierung nicht zerlegt werden.
+const SONDERBUCHSTABEN = {
+  'ø': 'o', 'æ': 'ae', 'œ': 'oe', 'å': 'a', 'đ': 'd', 'ð': 'd', 'þ': 'th', 'ł': 'l'
+};
+
 function generateUsernameFromName(name) {
   const s = String(name)
     .toLowerCase()
+    // Deutsche Umlaute ZUERST: sie werden ausgeschrieben (ä->ae), nicht auf den
+    // Grundbuchstaben reduziert. Die Normalisierung unten wuerde sonst ein
+    // blosses "a" daraus machen.
     .replace(/[äöüß]/g, (c) => UMLAUT_MAP[c])
+    .replace(/[øæœåđðþł]/g, (c) => SONDERBUCHSTABEN[c])
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, '.')
     .replace(/[^a-z0-9.-]/g, '')
     .replace(/\.{2,}/g, '.');

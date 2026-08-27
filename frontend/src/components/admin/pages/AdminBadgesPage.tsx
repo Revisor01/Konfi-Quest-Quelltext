@@ -15,6 +15,7 @@ import {
 } from '@ionic/react';
 import { add, arrowBack } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import api from '../../../services/api';
@@ -48,7 +49,7 @@ const AdminBadgesPage: React.FC = () => {
   const [selectedRole, setSelectedRole] = useState<'konfi' | 'teamer'>('konfi');
 
   // Offline-Query: Badges (key enthält selectedRole)
-  const { data: badges, loading, refresh: refreshBadges } = useOfflineQuery<Badge[]>(
+  const { data: badges, loading, refresh: refreshBadges, refreshLive: refreshBadgesLive } = useOfflineQuery<Badge[]>(
     `admin:badges:${user?.organization_id}:${selectedRole}`,
     async () => { const res = await api.get(`/admin/badges?target_role=${selectedRole}`); return res.data; },
     { ttl: CACHE_TTL.STAMMDATEN }
@@ -62,7 +63,7 @@ const AdminBadgesPage: React.FC = () => {
   const [presentAlert] = useIonAlert();
 
   // Modal mit useIonModal Hook
-  // Haelt den "ungespeicherte Aenderungen"-Stand des Badge-Modals, damit canDismiss
+  // Haelt den "ungespeicherte Änderungen"-Stand des Badge-Modals, damit canDismiss
   // auch Swipe-/Backdrop-Schliessen abfangen und nachfragen kann (nicht nur der X-Button).
   const badgeModalDirtyRef = useRef(false);
 
@@ -84,7 +85,7 @@ const AdminBadgesPage: React.FC = () => {
   });
 
   // Faengt JEDEN Schliess-Weg ab (Swipe, Backdrop): bei ungespeicherten
-  // Aenderungen erst nachfragen, sonst direkt schliessen lassen.
+  // Änderungen erst nachfragen, sonst direkt schliessen lassen.
   const badgeModalCanDismiss = async (): Promise<boolean> => {
     if (!badgeModalDirtyRef.current) return true;
     return new Promise<boolean>((resolve) => {
@@ -98,17 +99,17 @@ const AdminBadgesPage: React.FC = () => {
           { text: 'Abbrechen', role: 'cancel', handler: () => decide(false) },
           { text: 'Verwerfen', role: 'destructive', handler: () => decide(true) }
         ],
-        // Fallback: schliesst der Alert ohne Button, Promise nie haengen lassen.
+        // Fallback: schließt der Alert ohne Button, Promise nie hängen lassen.
         onDidDismiss: () => { if (!decided) resolve(false); }
       });
     });
   };
 
   // Subscribe to live updates for badges
-  useLiveRefresh('badges', refreshBadges);
+  useLiveRefresh('badges', refreshBadgesLive);
 
   const handleDeleteBadge = async (badge: Badge) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Badge löschen',
       message: `Badge "${badge.name}" wirklich löschen?`,
@@ -163,13 +164,13 @@ const AdminBadgesPage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()}>
+            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
               <IonIcon icon={arrowBack} />
             </IonButton>
           </IonButtons>
           <IonTitle>Badges</IonTitle>
           <IonButtons slot="end">
-            <IonButton onClick={presentBadgeModal}>
+            <IonButton aria-label="Neues Badge anlegen" onClick={presentBadgeModal}>
               <IonIcon icon={add} />
             </IonButton>
           </IonButtons>

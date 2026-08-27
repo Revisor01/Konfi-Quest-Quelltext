@@ -1,7 +1,7 @@
-// Orphan-Cleanup: loescht Medien-Dateien in uploads/requests/ und uploads/chat/,
+// Orphan-Cleanup: löscht Medien-Dateien in uploads/requests/ und uploads/chat/,
 // die in KEINER DB-Spalte mehr referenziert sind (activity_requests.photo_filename
-// bzw. chat_messages.file_path) — z.B. Reste aus der Zeit, bevor das Loeschen
-// beim Antrag-/User-/Nachrichten-Loeschen implementiert war.
+// bzw. chat_messages.file_path) — z.B. Reste aus der Zeit, bevor das Löschen
+// beim Antrag-/User-/Nachrichten-Löschen implementiert war.
 //
 // Eigener Pool (NICHT database.js importieren — das wuerde Migrationen starten).
 //

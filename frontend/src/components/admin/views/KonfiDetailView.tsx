@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   IonPage,
   IonHeader,
@@ -10,40 +10,49 @@ import {
   IonIcon,
   IonRefresher,
   IonRefresherContent,
+  IonList,
+  IonCard,
+  IonCardContent,
   useIonModal,
   useIonAlert
 } from '@ionic/react';
 import {
   arrowBack,
   key,
-  close
+  close,
+  timeOutline,
+  createOutline
 } from 'ionicons/icons';
 import api from '../../../services/api';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
 import ActivityModal from '../modals/ActivityModal';
 import BonusModal from '../modals/BonusModal';
 import CertificateAssignModal from '../modals/CertificateAssignModal';
 import AttendanceMatrixModal from '../modals/AttendanceMatrixModal';
-import { useLiveUpdate } from '../../../contexts/LiveUpdateContext';
+import { useLiveUpdate, useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import {
   KonfiHeaderCard, BonusSection, EventPointsSection,
   TeamerEventsSection, ActivitiesSection, CertificatesSection,
   TeamerSinceSection, KonfiHistorySection, PromoteSection, KonfispruchSection
 } from './KonfiDetailSections';
+import KonfiModal from '../modals/KonfiModal';
 import type { Konfi, Activity } from './KonfiDetailSections';
 import KonfiBadgesSection from './KonfiBadgesSection';
+import WrappedModal from '../../wrapped/WrappedModal';
+import type { WrappedHistoryEntry } from '../../../types/wrapped';
 import { triggerPullHaptic } from '../../../utils/haptics';
 
 interface KonfiDetailViewProps {
   konfiId: number;
   onBack: () => void;
   // Im iPad-Split-View ist die Liste links dauerhaft sichtbar -> kein
-  // Zurueck-Button noetig.
+  // Zurück-Button nötig.
   hideBackButton?: boolean;
 }
 
 const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hideBackButton }) => {
-  const { setSuccess, setError, isOnline } = useApp();
+  const { setSuccess, setError, isOnline, user } = useApp();
   const { triggerRefresh } = useLiveUpdate();
   const [presentAlert] = useIonAlert();
   const pageRef = React.useRef<HTMLElement>(null);
@@ -55,6 +64,11 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
   const [currentKonfi, setCurrentKonfi] = useState<Konfi | null>(null);
   const [loading, setLoading] = useState(true);
   const [targetRole, setTargetRole] = useState<string>('konfi');
+  // Fuer das Bearbeiten-Modal: alle Jahrgaenge der Organisation (mit ihren
+  // Punktearten, damit die Warnung stimmt) und die eigenen Zuweisungen.
+  const [alleJahrgaenge, setAlleJahrgaenge] = useState<Array<{
+    id: number; name: string; gottesdienst_enabled?: boolean; gemeinde_enabled?: boolean;
+  }>>([]);
   const isTeamer = targetRole === 'teamer';
   const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
   const [teamerEvents, setTeamerEvents] = useState<Array<{
@@ -104,6 +118,14 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
   const [presentActivityModalHook, dismissActivityModalHook] = useIonModal(ActivityModal, {
     konfiId: konfiId,
     targetRole: targetRole,
+    // Wie beim BonusModal: ohne die Schalter stuenden auch Aktivitaeten einer
+    // abgeschalteten Punkteart zur Auswahl.
+    punkteartFlags: currentKonfi
+      ? {
+          gottesdienst_enabled: currentKonfi.gottesdienst_enabled,
+          gemeinde_enabled: currentKonfi.gemeinde_enabled,
+        }
+      : undefined,
     onClose: () => dismissActivityModalHook(),
     onSave: async () => {
       await loadKonfiData();
@@ -115,6 +137,14 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
   // Bonus Modal mit useIonModal Hook
   const [presentBonusModalHook, dismissBonusModalHook] = useIonModal(BonusModal, {
     konfiId: konfiId,
+    // Punktearten-Schalter des Jahrgangs mitgeben: sonst bietet das Modal auch
+    // eine abgeschaltete Art an und das Speichern scheitert erst am Server.
+    punkteartFlags: currentKonfi
+      ? {
+          gottesdienst_enabled: currentKonfi.gottesdienst_enabled,
+          gemeinde_enabled: currentKonfi.gemeinde_enabled,
+        }
+      : undefined,
     onClose: () => dismissBonusModalHook(),
     onSave: async () => {
       await loadKonfiData();
@@ -130,7 +160,7 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
         <IonToolbar>
           <IonTitle>Foto</IonTitle>
           <IonButtons slot="start">
-            <IonButton onClick={onClose}>
+            <IonButton aria-label="Schließen" onClick={onClose}>
               <IonIcon icon={close} />
             </IonButton>
           </IonButtons>
@@ -179,6 +209,46 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
     }
   });
 
+  const [konfiWrapped, setKonfiWrapped] = useState<WrappedHistoryEntry | null>(null);
+
+  useEffect(() => {
+    if (isTeamer) {
+      setKonfiWrapped(null);
+      return;
+    }
+    let abgebrochen = false;
+    api.get(`/wrapped/history/${konfiId}`)
+      .then(res => {
+        if (abgebrochen) return;
+        const entries: WrappedHistoryEntry[] = res.data || [];
+        const konfiEntry = entries.find(e => e.wrapped_type === 'konfi');
+        setKonfiWrapped(konfiEntry || null);
+      })
+      .catch(() => {
+        // Kein Wrapped vorhanden oder offline: Die Karte bleibt einfach weg.
+        if (!abgebrochen) setKonfiWrapped(null);
+      });
+    return () => { abgebrochen = true; };
+  }, [konfiId, isTeamer]);
+
+  const [wrappedModalData, setWrappedModalData] = useState<WrappedHistoryEntry | null>(null);
+  const [presentWrappedModal, dismissWrappedModal] = useIonModal(WrappedModal, {
+    onClose: () => {
+      setWrappedModalData(null);
+      dismissWrappedModal();
+    },
+    displayName: currentKonfi?.display_name || currentKonfi?.name || '',
+    wrappedType: 'konfi' as const,
+    initialData: wrappedModalData?.data,
+    initialYear: wrappedModalData?.year
+  });
+
+  useEffect(() => {
+    if (wrappedModalData) {
+      presentWrappedModal({ cssClass: 'wrapped-modal-fullscreen' });
+    }
+  }, [wrappedModalData]);
+
   // Anwesenheitsmatrix-Modal (geoeffnet aus der Konfirmations-Karte, auf den Jahrgang des Konfis vorausgewaehlt)
   const konfiJahrgang = currentKonfi?.jahrgang_id
     ? [{ id: currentKonfi.jahrgang_id, name: currentKonfi.jahrgang_name || 'Jahrgang' }]
@@ -189,16 +259,66 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
     onClose: () => dismissMatrixModal()
   });
 
+  // Bearbeiten-Modal. Dasselbe Modal wie beim Anlegen, nur mit `konfi`
+  // vorbelegt — zwei Dateien waeren genau die Kopie, die in diesem Projekt
+  // regelmaessig auseinanderlaeuft.
+  const [presentBearbeitenModal, dismissBearbeitenModal] = useIonModal(KonfiModal, {
+    jahrgaenge: alleJahrgaenge,
+    konfi: currentKonfi ? {
+      id: currentKonfi.id,
+      display_name: currentKonfi.display_name || currentKonfi.name,
+      jahrgang_id: currentKonfi.jahrgang_id ?? null,
+      gottesdienst_points: currentKonfi.gottesdienst_points ?? currentKonfi.points?.gottesdienst,
+      gemeinde_points: currentKonfi.gemeinde_points ?? currentKonfi.points?.gemeinde
+    } : undefined,
+    // Nur fuer `admin` von Bedeutung: org_admin sieht ohnehin alle Jahrgaenge,
+    // die Warnung waere dort schlicht falsch.
+    eigeneJahrgangIds: user?.role_name === 'admin'
+      ? (user.assigned_jahrgaenge || []).filter((j) => j.can_view !== false).map((j) => j.id)
+      : undefined,
+    onClose: () => dismissBearbeitenModal(),
+    dismiss: () => dismissBearbeitenModal(),
+    onSave: async (daten: { name: string; jahrgang_id: number }) => {
+      await api.put(`/admin/konfis/${konfiId}`, daten);
+      dismissBearbeitenModal();
+      setSuccess('Änderungen gespeichert');
+      await loadKonfiData();
+      triggerRefresh('konfis');
+    }
+  });
+
   useEffect(() => {
     loadKonfiData();
   }, [konfiId]);
+
+  // Jahrgaenge fuer das Bearbeiten-Modal. Einmal beim Oeffnen der Seite; die
+  // Liste enthaelt dank SELECT j.* auch die Punktearten, aus denen die Warnung
+  // beim Wechsel gebaut wird. Faellt der Abruf aus, bleibt die Liste leer und
+  // das Modal zeigt "Keine Jahrgänge verfügbar" — die Seite selbst stoert das
+  // nicht.
+  useEffect(() => {
+    if (isTeamer) return;
+    api.get('/jahrgaenge')
+      .then((res) => setAlleJahrgaenge(res.data || []))
+      .catch(() => setAlleJahrgaenge([]));
+  }, [isTeamer]);
 
   useEffect(() => {
     setPresentingElement(pageRef.current);
   }, []);
 
-  const loadKonfiData = async () => {
-    setLoading(true);
+  // Live-Ereignisse empfangen. Diese Ansicht hatte bisher NUR triggerRefresh
+  // (Senden) und hoerte selbst auf nichts — ausgerechnet die Seite, auf der
+  // Punkte vergeben werden. Vergab eine zweite Person Punkte oder gab einen
+  // Antrag frei, blieb hier der alte Stand stehen.
+  useLiveRefresh(['konfis', 'points', 'requests', 'badges'], useCallback(() => {
+    loadKonfiData(true);
+  }, [konfiId]));
+
+  const loadKonfiData = async (stillLaden = false) => {
+    // stillLaden: bei Live-Ereignissen NICHT den Ladebalken zeigen — die
+    // Ansicht wuerde bei jeder fremden Punktvergabe kurz leer flackern.
+    if (!stillLaden) setLoading(true);
     try {
       const konfiRes = await api.get(`/admin/konfis/${konfiId}`);
 
@@ -215,11 +335,18 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
       // Rolle setzen für bedingte Anzeige
       setTargetRole(konfiData.role_name || 'konfi');
 
-      // Teamer-Daten aus dem Detail-Response
+      // Teamer-Daten aus dem Detail-Response. IMMER setzen, auch auf leer:
+      // Vorher wurde nur bei vorhandenen Daten geschrieben, nie zurückgesetzt —
+      // beim Wechsel zwischen zwei Personen blieben die Werte der vorigen
+      // stehen (Teamer ohne Konfi-Zeit erbte die Historie des vorigen).
       if (konfiData.role_name === 'teamer') {
-        if (konfiData.certificates) setCertificates(konfiData.certificates);
-        if (konfiData.teamerEvents) setTeamerEvents(konfiData.teamerEvents);
-        if (konfiData.konfiHistory) setKonfiHistory(konfiData.konfiHistory);
+        setCertificates(konfiData.certificates || []);
+        setTeamerEvents(konfiData.teamerEvents || []);
+        setKonfiHistory(konfiData.konfiHistory || null);
+      } else {
+        setCertificates([]);
+        setTeamerEvents([]);
+        setKonfiHistory(null);
       }
 
       // Zertifikat-Typen laden (für die Zuweisung)
@@ -264,7 +391,7 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
         .filter((req: any) => req.konfi_id === konfiId && req.status === 'pending')
         .map((req: any) => ({
           id: `request-${req.id}`,
-          name: `${req.activity_name} (Antrag)`,
+          name: `${req.activity_name} (gemeldet)`,
           points: req.activity_points,
           type: 'pending',
           date: req.requested_date,
@@ -311,7 +438,7 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
   };
 
   const handlePasswordAction = () => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Einmalpasswort generieren',
       message: 'Es wird ein neues temporäres Passwort erstellt. Das aktuelle Passwort wird überschrieben.',
@@ -328,7 +455,7 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
   };
 
   const handleDeleteActivity = async (activity: Activity) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Aktivität löschen',
       message: `Aktivität "${activity.name}" wirklich löschen?`,
@@ -352,7 +479,7 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
   };
 
   const handleDeleteBonus = async (bonus: any) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Bonuspunkte löschen',
       message: `Bonuspunkte "${bonus.description}" wirklich löschen?`,
@@ -425,7 +552,7 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
   };
 
   const handleAssignCertificate = () => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
 
     if (availableTypes.length === 0) {
       setError('Keine verfügbaren Zertifikat-Typen mehr');
@@ -436,7 +563,7 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
   };
 
   const handleDeleteCertificate = (cert: { id: number; name: string }) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Zertifikat entfernen',
       message: `"${cert.name}" wirklich entfernen?`,
@@ -459,7 +586,7 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
   };
 
   const handlePromoteToTeamer = async () => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     if (!currentKonfi) return;
     presentAlert({
       header: 'Zur Teamer:in befördern',
@@ -467,7 +594,7 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
         `<strong>Punkte:</strong> ${getGottesdienstPoints()} Gottesdienst, ${getGemeindePoints()} Gemeinde<br>` +
         `<strong>Badges:</strong> ${currentKonfi.badgeCount || 0}<br><br>` +
         `Konfi-Punkte und Badges bleiben als Historie erhalten. ` +
-        `Event-Buchungen und offene Anträge werden gelöscht.<br><br>` +
+        `Event-Buchungen und offene Aktivitäten werden gelöscht.<br><br>` +
         `<strong>Diese Aktion kann nicht rückgängig gemacht werden.</strong>`,
       buttons: [
         { text: 'Abbrechen', role: 'cancel' },
@@ -494,14 +621,25 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
         <IonToolbar>
           {!hideBackButton && (
             <IonButtons slot="start">
-              <IonButton onClick={onBack}>
+              <IonButton aria-label="Zurück" onClick={onBack}>
                 <IonIcon icon={arrowBack} />
               </IonButton>
             </IonButtons>
           )}
           <IonTitle>{currentKonfi?.name || (isTeamer ? 'Teamer:in Details' : 'Konfi Details')}</IonTitle>
           <IonButtons slot="end">
-            <IonButton disabled={!isOnline} onClick={handlePasswordAction}>
+            {/* Bearbeiten nur bei Konfis: Teamer:innen haben keinen einzelnen
+                Jahrgang, ihre Stammdaten liegen in der Benutzerverwaltung. */}
+            {!isTeamer && (
+              <IonButton
+                aria-label="Konfi bearbeiten"
+                disabled={!isOnline || !currentKonfi}
+                onClick={() => presentBearbeitenModal({ presentingElement: presentingElement || undefined })}
+              >
+                <IonIcon icon={createOutline} />
+              </IonButton>
+            )}
+            <IonButton aria-label="Passwort zurücksetzen" disabled={!isOnline} onClick={handlePasswordAction}>
               <IonIcon icon={key} />
             </IonButton>
           </IonButtons>
@@ -564,14 +702,47 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
           />
         )}
 
-        {/* Badges - nur für Konfis (gleiche Wertung wie Konfi-Ansicht) */}
+        {!isTeamer && konfiWrapped && (
+          <IonList inset={true} style={{ margin: '16px' }}>
+            <IonCard className="app-card">
+              <IonCardContent style={{ padding: '16px' }}>
+                <div
+                  className="app-list-item"
+                  style={{ width: '100%', cursor: 'pointer', borderLeftColor: 'var(--app-color-konfis)' }}
+                  onClick={() => setWrappedModalData(konfiWrapped)}
+                >
+                  <div className="app-list-item__row">
+                    <div className="app-list-item__main">
+                      <div className="app-icon-circle" style={{ backgroundColor: 'var(--app-color-konfis)' }}>
+                        <IonIcon icon={timeOutline} />
+                      </div>
+                      <div className="app-list-item__content">
+                        <div className="app-list-item__title">
+                          Jahresrückblick {konfiWrapped.year}
+                        </div>
+                        <div className="app-list-item__meta">
+                          <span className="app-list-item__meta-item">
+                            Der Rückblick, den diese Konfi sieht
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </IonCardContent>
+            </IonCard>
+          </IonList>
+        )}
+
+        {/* Badges der Konfis — bei Teamer:innen steht der Abschnitt weiter
+            unten, nach Events und Aktivitaeten (User-Hinweis 11.08.). */}
         {!isTeamer && currentKonfi?.role_name === 'konfi' && (
           <KonfiBadgesSection konfiId={konfiId} />
         )}
 
-
-        {/* Teamer Events */}
-        {isTeamer && teamerEvents.length > 0 && (
+        {/* Teamer Events — auch leer anzeigen: sonst ist "war bei keinem
+            Termin" nicht von "nicht geladen" zu unterscheiden. */}
+        {isTeamer && (
           <TeamerEventsSection
             teamerEvents={teamerEvents}
             formatDate={formatDate}
@@ -591,6 +762,12 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
           presentActivityModal={presentActivityModalHook}
           presentingElement={presentingElement}
         />
+
+        {/* Badges der Teamer:innen — nach Events und Aktivitaeten, so wie
+            die Konfi-Badges auch unter ihren Listen stehen. */}
+        {isTeamer && (
+          <KonfiBadgesSection konfiId={konfiId} role="teamer" />
+        )}
 
         {/* Zertifikate - nur für Teamer */}
         {isTeamer && (

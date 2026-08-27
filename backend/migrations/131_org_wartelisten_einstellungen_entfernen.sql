@@ -1,0 +1,14 @@
+-- 131_org_wartelisten_einstellungen_entfernen.sql
+--
+-- Anders als bei den Termin-Feldern sind das KEINE Spalten, sondern Zeilen in
+-- der key/value-Tabelle settings. Entfernt wird deshalb per DELETE.
+--
+-- Vor dem Entfernen in Produktion nachgemessen:
+--   settings WHERE key IN ('waitlist_enabled','max_waitlist_size'): 0 Zeilen
+-- Es hat also nie jemand einen Wert gesetzt -- es geht nichts verloren.
+--
+-- WICHTIG: Die gleichnamigen Spalten an der Tabelle events
+-- (events.waitlist_enabled, events.max_waitlist_size sowie die
+-- teamer_-Varianten) bleiben unangetastet. An ihnen haengt die produktive
+-- Wartelisten-Logik.
+DELETE FROM settings WHERE key IN ('waitlist_enabled', 'max_waitlist_size');

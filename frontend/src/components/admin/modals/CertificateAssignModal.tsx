@@ -199,13 +199,13 @@ const CertificateAssignModal: React.FC<CertificateAssignModalProps> = ({
       <IonHeader>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={onClose} disabled={isSubmitting}>
+            <IonButton aria-label="Schließen" onClick={onClose} disabled={isSubmitting}>
               <IonIcon icon={closeOutline} />
             </IonButton>
           </IonButtons>
           <IonTitle>Zertifikat zuweisen</IonTitle>
           <IonButtons slot="end">
-            <IonButton
+            <IonButton aria-label="Zertifikat zuweisen"
               onClick={handleSave}
               disabled={!selectedTypeId || isSubmitting}
             >

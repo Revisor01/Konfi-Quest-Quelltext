@@ -179,11 +179,11 @@ const AdminMetricsPage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()}><IonIcon icon={arrowBack} /></IonButton>
+            <IonButton aria-label="Zurück" onClick={() => window.history.back()}><IonIcon icon={arrowBack} /></IonButton>
           </IonButtons>
           <IonTitle>Performance</IonTitle>
           <IonButtons slot="end">
-            <IonButton onClick={() => load(true)}><IonIcon icon={refreshOutline} /></IonButton>
+            <IonButton aria-label="Daten neu laden" onClick={() => load(true)}><IonIcon icon={refreshOutline} /></IonButton>
           </IonButtons>
         </IonToolbar>
       </IonHeader>

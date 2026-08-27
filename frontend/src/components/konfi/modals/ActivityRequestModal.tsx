@@ -46,6 +46,8 @@ import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
 import { compressForUpload } from '../../../services/mediaCompression';
+import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
+import { CACHE_TTL } from '../../../services/offlineCache';
 
 interface Activity {
   id: number;
@@ -65,11 +67,9 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
   onClose,
   onSuccess
 }) => {
-  const { setSuccess, setError, isOnline } = useApp();
+  const { setSuccess, setError, isOnline, user } = useApp();
   const [presentAlert] = useIonAlert();
 
-  const [activities, setActivities] = useState<Activity[]>([]);
-  const [loading, setLoading] = useState(true);
   const { isSubmitting, guard } = useActionGuard();
   const [uploadProgress, setUploadProgress] = useState(0);
 
@@ -82,22 +82,17 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const accordionGroupRef = useRef<HTMLIonAccordionGroupElement>(null);
 
-  useEffect(() => {
-    loadActivities();
-  }, []);
-
-  const loadActivities = async () => {
-    setLoading(true);
-    try {
-      const response = await api.get('/konfi/activities');
-      setActivities(response.data);
-    } catch (err) {
-      setError('Fehler beim Laden der Aktivitäten');
- console.error('Error loading activities:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Aktivitaeten aus dem Cache statt per Direkt-Abruf: Der VERSAND einer
+  // Meldung ist laengst queue-faehig, aber die Auswahlliste lud per
+  // api.get — offline blieb sie leer und das Formular damit nutzlos
+  // Aktivitaeten sind Stammdaten und aendern
+  // sich selten, daher STAMMDATEN-TTL.
+  const { data: activitiesData, loading } = useOfflineQuery<Activity[]>(
+    'konfi:activities:' + user?.organization_id,
+    () => api.get('/konfi/activities').then(r => r.data),
+    { ttl: CACHE_TTL.STAMMDATEN }
+  );
+  const activities = activitiesData || [];
 
   const handlePhotoSelect = () => {
     const input = document.createElement('input');
@@ -166,7 +161,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
     if (!formData.photo_file) {
       presentAlert({
         header: 'Kein Foto',
-        message: 'Anträge benötigen normalerweise ein Foto als Nachweis. Möchtest du trotzdem fortfahren?',
+        message: 'Normalerweise gehört ein Foto dazu, damit dein Team sieht, dass du dabei warst. Trotzdem abschicken?',
         buttons: [
           { text: 'Abbrechen', role: 'cancel' },
           { text: 'Ohne Foto fortfahren', handler: () => submitRequest() }
@@ -203,10 +198,10 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
 
           await api.post('/konfi/requests', requestData);
 
-          setSuccess('Antrag erfolgreich eingereicht!');
+          setSuccess('Aktivität erfolgreich eingereicht!');
           onSuccess();
         } catch (error: any) {
-          setError(error.response?.data?.error || error.message || 'Fehler beim Einreichen des Antrags');
+          setError(error.response?.data?.error || error.message || 'Fehler beim Einreichen der Aktivität');
         } finally {
           setUploadProgress(0);
         }
@@ -253,11 +248,11 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
           metadata: {
             type: 'request',
             clientId,
-            label: 'Aktivitäts-Antrag',
+            label: 'Aktivität melden',
           },
         });
 
-        setSuccess('Antrag wird gesendet sobald du wieder online bist');
+        setSuccess('Aktivität wird gesendet sobald du wieder online bist');
         onSuccess();
       }
     });
@@ -276,14 +271,14 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
     <IonPage>
       <IonHeader>
         <IonToolbar>
-          <IonTitle>Neuer Antrag</IonTitle>
+          <IonTitle>Neue Aktivität</IonTitle>
           <IonButtons slot="start">
-            <IonButton className="app-modal-close-btn" onClick={onClose} disabled={isSubmitting}>
+            <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose} disabled={isSubmitting}>
               <IonIcon icon={close} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
-            <IonButton className="app-modal-submit-btn app-modal-submit-btn--konfi" onClick={handleSubmit} disabled={isSubmitting || loading}>
+            <IonButton aria-label="Aktivität absenden" className="app-modal-submit-btn app-modal-submit-btn--konfi" onClick={handleSubmit} disabled={isSubmitting || loading}>
               <IonIcon icon={checkmark} />
             </IonButton>
           </IonButtons>
@@ -499,7 +494,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                         Foto ausgewählt
                       </span>
                     </div>
-                    <IonButton
+                    <IonButton aria-label="Foto entfernen"
                       fill="clear"
                       color="danger"
                       size="small"

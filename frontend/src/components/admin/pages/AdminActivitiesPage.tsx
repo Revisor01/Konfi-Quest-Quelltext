@@ -15,6 +15,7 @@ import {
 } from '@ionic/react';
 import { add, arrowBack } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import api from '../../../services/api';
@@ -44,7 +45,7 @@ const AdminActivitiesPage: React.FC = () => {
   const [selectedRole, setSelectedRole] = useState<'konfi' | 'teamer'>('konfi');
 
   // Offline-Query: Activities (key enthält selectedRole)
-  const { data: activities, loading, refresh: refreshActivities } = useOfflineQuery<Activity[]>(
+  const { data: activities, loading, refresh: refreshActivities, refreshLive: refreshActivitiesLive } = useOfflineQuery<Activity[]>(
     `admin:activities:${user?.organization_id}:${selectedRole}`,
     async () => { const res = await api.get(`/admin/activities?target_role=${selectedRole}`); return res.data; },
     { ttl: CACHE_TTL.STAMMDATEN }
@@ -69,10 +70,10 @@ const AdminActivitiesPage: React.FC = () => {
   });
 
   // Subscribe to live updates for activities
-  useLiveRefresh('activities', refreshActivities);
+  useLiveRefresh('activities', refreshActivitiesLive);
 
   const handleDeleteActivity = async (activity: Activity) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Aktivität löschen',
       message: `Aktivität "${activity.name}" wirklich löschen?`,
@@ -126,14 +127,14 @@ const AdminActivitiesPage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()}>
+            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
               <IonIcon icon={arrowBack} />
             </IonButton>
           </IonButtons>
           <IonTitle>Aktivitäten</IonTitle>
           {canCreate && (
             <IonButtons slot="end">
-              <IonButton onClick={presentActivityModal}>
+              <IonButton aria-label="Neue Aktivität anlegen" onClick={presentActivityModal}>
                 <IonIcon icon={add} />
               </IonButton>
             </IonButtons>

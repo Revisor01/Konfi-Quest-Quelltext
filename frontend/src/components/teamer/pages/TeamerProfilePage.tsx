@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   IonPage,
   IonHeader,
@@ -36,26 +36,37 @@ import {
   arrowBack,
   imagesOutline,
   bookOutline,
+  compassOutline,
+  sparklesOutline,
+  chevronForwardOutline,
   document as documentIcon
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { useModalPage } from '../../../contexts/ModalContext';
 import api from '../../../services/api';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
+import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import { CACHE_TTL } from '../../../services/offlineCache';
 import { setUser as setTokenStoreUser } from '../../../services/tokenStore';
-import ChangeEmailModal from '../../konfi/modals/ChangeEmailModal';
-import ChangePasswordModal from '../../konfi/modals/ChangePasswordModal';
+import ChangeEmailModal from '../../shared/ChangeEmailModal';
+import ChangePasswordModal from '../../shared/ChangePasswordModal';
 import ChangeRoleTitleModal from '../../admin/modals/ChangeRoleTitleModal';
 import DeleteAccountModal from '../../shared/DeleteAccountModal';
 import SpiritFooter from '../../shared/SpiritFooter';
+import TeamerOnboardingModal from '../modals/TeamerOnboardingModal';
+import TeamerUpdateWalkthroughModal from '../modals/TeamerUpdateWalkthroughModal';
 import WrappedModal from '../../wrapped/WrappedModal';
 import type { WrappedHistoryEntry } from '../../../types/wrapped';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { useMediaCacheControl } from '../../../hooks/useMediaCacheControl';
+import BiometrieSchalter from '../../shared/BiometrieSchalter';
 import BibleTranslationModal, { getTranslationName } from '../../shared/BibleTranslationModal';
 import { networkMonitor } from '../../../services/networkMonitor';
+import { writeQueue } from '../../../services/writeQueue';
+import { safeUUID } from '../../../utils/uuid';
+import NeuerungenBanner from '../../shared/NeuerungenBanner';
+import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
 
 interface TeamerProfile {
   user: {
@@ -89,11 +100,14 @@ const TeamerProfilePage: React.FC = () => {
   const router = useIonRouter();
 
   // Offline-Query: Profil
-  const { data: profile, loading, refresh } = useOfflineQuery<TeamerProfile>(
+  const { data: profile, loading, refresh, refreshLive } = useOfflineQuery<TeamerProfile>(
     'teamer:profile:' + user?.id,
     async () => { const res = await api.get('/teamer/profile'); return res.data; },
     { ttl: CACHE_TTL.PROFILE }
   );
+
+  // Eigene Punkte und Abzeichen im Profil aktuell halten.
+  useLiveRefresh(['points', 'badges', 'dashboard'], useCallback(() => { refreshLive(); }, [refreshLive]));
 
   // Bibeluebersetzung (Tageslosung) — Auswahl + Speichern
   const [selectedTranslation, setSelectedTranslation] = useState<string>('LUT');
@@ -102,8 +116,20 @@ const TeamerProfilePage: React.FC = () => {
   }, [profile?.user?.bible_translation]);
 
   const handleTranslationChange = async (translation: string) => {
+    if (!networkMonitor.isOnline) {
+      setSelectedTranslation(translation);
+      writeQueue.enqueue({
+        method: 'PUT',
+        url: '/teamer/bible-translation',
+        body: { translation },
+        maxRetries: 3,
+        hasFileUpload: false,
+        metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Bibelübersetzung' },
+      });
+      return;
+    }
+
     setSelectedTranslation(translation); // optimistisch
-    if (!networkMonitor.isOnline) return;
     try {
       await api.put('/teamer/bible-translation', { translation });
       refresh();
@@ -138,16 +164,13 @@ const TeamerProfilePage: React.FC = () => {
         console.error('Error refreshing user:', err);
       }
     },
-    sectionIconClass: 'app-section-icon--teamer',
-    submitBtnClass: 'app-modal-submit-btn--teamer',
-    infoBoxClass: 'app-info-box--teamer'
+    variante: 'teamer'
   });
 
   const [presentPasswordModal, dismissPasswordModal] = useIonModal(ChangePasswordModal, {
     onClose: () => dismissPasswordModal(),
     onSuccess: () => dismissPasswordModal(),
-    sectionIconClass: 'app-section-icon--teamer',
-    submitBtnClass: 'app-modal-submit-btn--teamer'
+    variante: 'teamer'
   });
 
   const [presentRoleTitleModal, dismissRoleTitleModal] = useIonModal(ChangeRoleTitleModal, {
@@ -162,13 +185,17 @@ const TeamerProfilePage: React.FC = () => {
     infoBoxClass: 'app-info-box--teamer'
   });
 
-  // Account-Loeschung
+  // Account-Löschung
   const [presentDeleteAccount, dismissDeleteAccount] = useIonModal(DeleteAccountModal, {
     onClose: () => dismissDeleteAccount()
   });
 
   // Wrapped-Historie
   const [wrappedHistory, setWrappedHistory] = useState<WrappedHistoryEntry[]>([]);
+  // Tour und Update-Hinweis jederzeit erneut aufrufbar (Vollbild-Overlays).
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showUpdateWalkthrough, setShowUpdateWalkthrough] = useState(false);
+  const [showMitmachenErklaerung, setShowMitmachenErklaerung] = useState(false);
 
   React.useEffect(() => {
     if (!user?.id) return;
@@ -203,7 +230,7 @@ const TeamerProfilePage: React.FC = () => {
           text: 'Abmelden',
           role: 'destructive',
           handler: async () => {
-            // signOut() ist failsafe -> garantiert zurueck zur Login-Route.
+            // signOut() ist failsafe -> garantiert zurück zur Login-Route.
             await signOut();
           }
         }
@@ -252,7 +279,7 @@ const TeamerProfilePage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()}>
+            <IonButton onClick={() => window.history.back()} aria-label="Zurück">
               <IonIcon icon={arrowBack} slot="icon-only" />
             </IonButton>
           </IonButtons>
@@ -275,8 +302,8 @@ const TeamerProfilePage: React.FC = () => {
 
         {/* A. Detail-Header mit Bubble-Effekt */}
         <div className="app-detail-header" style={{
-          background: 'linear-gradient(135deg, #ec4899 0%, #be185d 50%, #9d174d 100%)',
-          boxShadow: '0 20px 40px rgba(190, 24, 93, 0.35)',
+          background: 'var(--app-gradient-teamer)',
+          boxShadow: '0 20px 40px rgba(var(--app-color-teamer-rgb), 0.35)',
           position: 'relative',
           overflow: 'hidden'
         }}>
@@ -317,10 +344,15 @@ const TeamerProfilePage: React.FC = () => {
           </div>
         </div>
 
+      <NeuerungenBanner
+        onUpdateOeffnen={() => setShowUpdateWalkthrough(true)}
+        onMitmachenOeffnen={() => setShowMitmachenErklaerung(true)}
+      />
+
         {/* B. Konto-Einstellungen */}
         <IonList inset={true} style={{ margin: '16px' }}>
           <IonListHeader>
-            <div className="app-section-icon" style={{ backgroundColor: 'var(--app-color-teamer)' }}>
+            <div className="app-section-icon app-section-icon--teamer">
               <IonIcon icon={settingsOutline} />
             </div>
             <IonLabel>Konto-Einstellungen</IonLabel>
@@ -336,10 +368,10 @@ const TeamerProfilePage: React.FC = () => {
                   lines="none"
                   style={{ ...itemStyle, marginBottom: '8px' } as any}
                 >
-                  <div className="app-list-item" style={{ width: '100%', borderLeftColor: 'var(--app-color-teamer)' }}>
+                  <div className="app-list-item app-list-item--teamer" style={{ width: '100%' }}>
                     <div className="app-list-item__row">
                       <div className="app-list-item__main">
-                        <div className="app-icon-circle" style={{ backgroundColor: 'var(--app-color-teamer)' }}>
+                        <div className="app-icon-circle app-icon-circle--teamer">
                           <IonIcon icon={briefcaseOutline} />
                         </div>
                         <div className="app-list-item__content">
@@ -363,10 +395,10 @@ const TeamerProfilePage: React.FC = () => {
                   lines="none"
                   style={{ ...itemStyle, marginBottom: '8px' } as any}
                 >
-                  <div className="app-list-item" style={{ width: '100%', borderLeftColor: 'var(--app-color-teamer)' }}>
+                  <div className="app-list-item app-list-item--teamer" style={{ width: '100%' }}>
                     <div className="app-list-item__row">
                       <div className="app-list-item__main">
-                        <div className="app-icon-circle" style={{ backgroundColor: 'var(--app-color-teamer)' }}>
+                        <div className="app-icon-circle app-icon-circle--teamer">
                           <IonIcon icon={mailOutline} />
                         </div>
                         <div className="app-list-item__content">
@@ -390,10 +422,10 @@ const TeamerProfilePage: React.FC = () => {
                   lines="none"
                   style={{ ...itemStyle, marginBottom: '8px' } as any}
                 >
-                  <div className="app-list-item" style={{ width: '100%', borderLeftColor: 'var(--app-color-teamer)' }}>
+                  <div className="app-list-item app-list-item--teamer" style={{ width: '100%' }}>
                     <div className="app-list-item__row">
                       <div className="app-list-item__main">
-                        <div className="app-icon-circle" style={{ backgroundColor: 'var(--app-color-teamer)' }}>
+                        <div className="app-icon-circle app-icon-circle--teamer">
                           <IonIcon icon={keyOutline} />
                         </div>
                         <div className="app-list-item__content">
@@ -415,10 +447,10 @@ const TeamerProfilePage: React.FC = () => {
                   lines="none"
                   style={{ ...itemStyle, marginBottom: '8px' } as any}
                 >
-                  <div className="app-list-item" style={{ width: '100%', borderLeftColor: 'var(--app-color-teamer)' }}>
+                  <div className="app-list-item app-list-item--teamer" style={{ width: '100%' }}>
                     <div className="app-list-item__row">
                       <div className="app-list-item__main">
-                        <div className="app-icon-circle" style={{ backgroundColor: 'var(--app-color-teamer)' }}>
+                        <div className="app-icon-circle app-icon-circle--teamer">
                           <IonIcon icon={bookOutline} />
                         </div>
                         <div className="app-list-item__content">
@@ -432,6 +464,10 @@ const TeamerProfilePage: React.FC = () => {
                   </div>
                 </IonItem>
 
+                {/* Biometrische Anmeldung (blendet sich selbst aus, wenn das
+                    Geraet keine eingerichtete Biometrie hat) */}
+                <BiometrieSchalter variante="teamer" />
+
                 {/* Medien-Cache leeren */}
                 <IonItem
                   button
@@ -440,10 +476,10 @@ const TeamerProfilePage: React.FC = () => {
                   lines="none"
                   style={itemStyle as any}
                 >
-                  <div className="app-list-item" style={{ width: '100%', borderLeftColor: 'var(--app-color-teamer)' }}>
+                  <div className="app-list-item app-list-item--teamer" style={{ width: '100%' }}>
                     <div className="app-list-item__row">
                       <div className="app-list-item__main">
-                        <div className="app-icon-circle" style={{ backgroundColor: 'var(--app-color-teamer)' }}>
+                        <div className="app-icon-circle app-icon-circle--teamer">
                           <IonIcon icon={imagesOutline} />
                         </div>
                         <div className="app-list-item__content">
@@ -464,7 +500,7 @@ const TeamerProfilePage: React.FC = () => {
         {/* C. Inhalt */}
         <IonList inset={true} style={{ margin: '16px' }}>
           <IonListHeader>
-            <div className="app-section-icon" style={{ backgroundColor: 'var(--app-color-teamer)' }}>
+            <div className="app-section-icon app-section-icon--teamer">
               <IonIcon icon={ribbon} />
             </div>
             <IonLabel>Inhalt</IonLabel>
@@ -472,32 +508,64 @@ const TeamerProfilePage: React.FC = () => {
           <IonCard className="app-card">
             <IonCardContent>
               <div
-                className="app-list-item app-settings-item app-list-item--material"
+                className="app-list-item app-list-item--material"
                 onClick={() => router.push('/teamer/profile/material')}
               >
-                <div className="app-icon-circle app-icon-circle--lg app-icon-circle--material">
-                  <IonIcon icon={documentIcon} />
-                </div>
-                <div className="app-flex-fill">
-                  <h2 className="app-settings-item__title">Material</h2>
-                  <p className="app-settings-item__subtitle">Materialien und Dateien</p>
+                <div className="app-list-item__row">
+                  <div className="app-list-item__main">
+                    <div className="app-icon-circle app-icon-circle--material">
+                      <IonIcon icon={documentIcon} />
+                    </div>
+                    <div className="app-list-item__content">
+                      <div className="app-list-item__title">Material</div>
+                      <div className="app-list-item__meta">
+                        <span className="app-list-item__meta-item">Materialien und Dateien</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
               {profile.konfi_data?.jahrgang_name && (
                 <div
-                  className="app-list-item app-settings-item app-list-item--konfi"
+                  className="app-list-item app-list-item--konfi"
                   onClick={() => router.push('/teamer/profile/konfi-stats')}
                 >
-                  <div className="app-icon-circle app-icon-circle--lg app-icon-circle--konfi">
-                    <IonIcon icon={schoolOutline} />
-                  </div>
-                  <div className="app-flex-fill">
-                    <h2 className="app-settings-item__title">Konfi-Historie</h2>
-                    <p className="app-settings-item__subtitle">Konfi-Punkte und Badges</p>
+                  <div className="app-list-item__row">
+                    <div className="app-list-item__main">
+                      <div className="app-icon-circle app-icon-circle--konfi">
+                        <IonIcon icon={schoolOutline} />
+                      </div>
+                      <div className="app-list-item__content">
+                        <div className="app-list-item__title">Konfi-Historie</div>
+                        <div className="app-list-item__meta">
+                          <span className="app-list-item__meta-item">Konfi-Punkte und Badges</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
+
+              {/* App-Tour und Neuerungen jederzeit erneut ansehen */}
+              <div
+                className="app-list-item app-list-item--teamer"
+                onClick={() => setShowOnboarding(true)}
+              >
+                <div className="app-list-item__row">
+                  <div className="app-list-item__main">
+                    <div className="app-icon-circle app-icon-circle--teamer">
+                      <IonIcon icon={compassOutline} />
+                    </div>
+                    <div className="app-list-item__content">
+                      <div className="app-list-item__title">App-Tour ansehen</div>
+                      <div className="app-list-item__meta">
+                        <span className="app-list-item__meta-item">Kurze Einführung durch die App</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </IonCardContent>
           </IonCard>
         </IonList>
@@ -506,7 +574,7 @@ const TeamerProfilePage: React.FC = () => {
         {wrappedHistory.length > 0 && (
           <IonList inset={true} style={{ margin: '16px' }}>
             <IonListHeader>
-              <div className="app-section-icon" style={{ backgroundColor: 'var(--app-color-teamer)' }}>
+              <div className="app-section-icon app-section-icon--teamer">
                 <IonIcon icon={timeOutline} />
               </div>
               <IonLabel>Meine Wrappeds</IonLabel>
@@ -524,7 +592,7 @@ const TeamerProfilePage: React.FC = () => {
                   >
                     <div className="app-list-item__row">
                       <div className="app-list-item__main">
-                        <div className="app-icon-circle" style={{ backgroundColor: 'var(--app-color-teamer)' }}>
+                        <div className="app-icon-circle app-icon-circle--teamer">
                           <IonIcon icon={timeOutline} />
                         </div>
                         <div className="app-list-item__content">
@@ -584,6 +652,24 @@ const TeamerProfilePage: React.FC = () => {
 
         <div style={{ height: '32px' }} />
       </IonContent>
+
+      {showOnboarding && (
+        <TeamerOnboardingModal
+          onClose={() => setShowOnboarding(false)}
+          displayName={(user?.display_name || '').split(' ')[0]}
+        />
+      )}
+
+      {showUpdateWalkthrough && (
+        <TeamerUpdateWalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
+      )}
+
+      {showMitmachenErklaerung && (
+        <MitmachenErklaerungModal
+          rolle="teamer"
+          onClose={() => setShowMitmachenErklaerung(false)}
+        />
+      )}
     </IonPage>
   );
 };

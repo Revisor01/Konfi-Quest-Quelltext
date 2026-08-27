@@ -90,6 +90,7 @@ import {
   chevronDownOutline
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
 import api from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
@@ -100,6 +101,7 @@ import LoadingSpinner from '../../common/LoadingSpinner';
 import { SectionHeader, ListSection } from '../../shared';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { safeUUID } from '../../../utils/uuid';
+import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 
 const CERT_ICONS: Record<string, { icon: any; name: string; category: string }> = {
   ribbon: { icon: ribbon, name: 'Band', category: 'Erfolg' },
@@ -251,7 +253,7 @@ const CertificateModal: React.FC<CertificateModalProps> = ({
       <IonHeader>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={handleClose} disabled={loading}>
+            <IonButton aria-label="Schließen" onClick={handleClose} disabled={loading}>
               <IonIcon icon={closeOutline} />
             </IonButton>
           </IonButtons>
@@ -259,7 +261,7 @@ const CertificateModal: React.FC<CertificateModalProps> = ({
             {certificateType ? 'Zertifikat bearbeiten' : 'Neues Zertifikat'}
           </IonTitle>
           <IonButtons slot="end">
-            <IonButton
+            <IonButton aria-label="Zertifikat speichern"
               onClick={handleSubmit}
               disabled={!name.trim() || loading}
             >
@@ -401,7 +403,7 @@ const AdminCertificatesPage: React.FC = () => {
   };
 
   const handleDelete = async (certType: CertificateType) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Zertifikat löschen',
       message: `"${certType.name}" wirklich löschen?`,
@@ -459,14 +461,14 @@ const AdminCertificatesPage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()}>
+            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
               <IonIcon icon={arrowBack} />
             </IonButton>
           </IonButtons>
           <IonTitle>Zertifikate</IonTitle>
           {isAdmin && (
             <IonButtons slot="end">
-              <IonButton onClick={openCreateModal}>
+              <IonButton aria-label="Neues Zertifikat anlegen" onClick={openCreateModal}>
                 <IonIcon icon={add} />
               </IonButton>
             </IonButtons>
@@ -557,7 +559,8 @@ const AdminCertificatesPage: React.FC = () => {
               {isAdmin && (
                 <IonItemOptions side="end" className="app-swipe-actions">
                   <IonItemOption
-                    onClick={() => handleDelete(certType)}
+                    onClick={() => { closeOpenSlidingItems(); handleDelete(certType); }}
+                    aria-label="Zertifikat löschen"
                     className="app-swipe-action"
                   >
                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">

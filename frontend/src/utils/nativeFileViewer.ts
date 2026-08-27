@@ -4,8 +4,8 @@ import { FileOpener } from '@capacitor-community/file-opener';
 import { FileViewer } from '@capacitor/file-viewer';
 
 /**
- * Oeffnet eine Datei nativ ueber FileOpener (Bilder) oder FileViewer (Dokumente).
- * Gibt true zurueck bei Erfolg auf nativer Plattform, false auf Web oder bei Fehler.
+ * Oeffnet eine Datei nativ über FileOpener (Bilder) oder FileViewer (Dokumente).
+ * Gibt true zurück bei Erfolg auf nativer Plattform, false auf Web oder bei Fehler.
  * Bei false kann der Caller das FileViewerModal als Web-Fallback nutzen.
  */
 export async function openFileNatively(
@@ -55,11 +55,11 @@ export async function openFileNatively(
 
     const fileUri = await Filesystem.getUri({ directory: Directory.Documents, path: tempPath });
 
-    // Bilder ueber FileOpener (bessere native Anzeige)
+    // Bilder über FileOpener (bessere native Anzeige)
     if (mimeType.startsWith('image/')) {
       await FileOpener.open({ filePath: fileUri.uri, contentType: mimeType });
     } else {
-      // Dokumente, Videos, PDFs etc. ueber FileViewer
+      // Dokumente, Videos, PDFs etc. über FileViewer
       await FileViewer.openDocumentFromLocalPath({ path: fileUri.uri });
     }
 

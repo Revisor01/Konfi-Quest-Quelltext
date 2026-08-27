@@ -48,6 +48,7 @@ import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import FileViewerModal from '../../shared/FileViewerModal';
 import { safeUUID } from '../../../utils/uuid';
+import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 
 interface MaterialFile {
   id: number;
@@ -313,13 +314,13 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, onClose
       <IonHeader>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={onClose}>
+            <IonButton onClick={onClose} aria-label="Schließen">
               <IonIcon icon={closeOutline} slot="icon-only" />
             </IonButton>
           </IonButtons>
           <IonTitle>{material ? 'Material bearbeiten' : 'Neues Material'}</IonTitle>
           <IonButtons slot="end">
-            <IonButton onClick={handleSave} disabled={isSubmitting}>
+            <IonButton onClick={handleSave} disabled={isSubmitting} aria-label="Material speichern">
               {isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} slot="icon-only" />}
             </IonButton>
           </IonButtons>
@@ -437,8 +438,8 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, onClose
                       </h3>
                       <p style={{ fontSize: '0.85rem', color: '#6b7280', margin: '0', fontWeight: '400' }}>
                         {jahrgangIds.length > 0
-                          ? `${jahrgangIds.length} ${jahrgangIds.length === 1 ? 'Jahrgang' : 'Jahrgänge'} ausgewählt`
-                          : 'Keine Jahrgänge zugeordnet'}
+                          ? `Nur Teamer:innen dieser ${jahrgangIds.length === 1 ? 'Jahrgang' : 'Jahrgänge'} sehen das Material`
+                          : 'Ohne Zuordnung sehen alle Teamer:innen das Material'}
                       </p>
                     </IonLabel>
                   </IonItem>
@@ -524,7 +525,8 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, onClose
                       <IonItemOptions className="app-swipe-actions" side="end">
                         <IonItemOption
                           className="app-swipe-action"
-                          onClick={() => handleDeleteExistingFile(file)}
+                          onClick={() => { closeOpenSlidingItems(); handleDeleteExistingFile(file); }}
+                          aria-label="Datei löschen"
                         >
                           <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
                             <IonIcon icon={trash} />
@@ -583,7 +585,8 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, onClose
                       <IonItemOptions className="app-swipe-actions" side="end">
                         <IonItemOption
                           className="app-swipe-action"
-                          onClick={() => removeNewFile(index)}
+                          onClick={() => { closeOpenSlidingItems(); removeNewFile(index); }}
+                          aria-label="Datei entfernen"
                         >
                           <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
                             <IonIcon icon={trash} />

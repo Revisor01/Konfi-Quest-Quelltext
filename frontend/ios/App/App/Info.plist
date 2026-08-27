@@ -29,13 +29,15 @@
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Diese App benötigt Zugriff auf die Kamera, um Fotos für Chat-Nachrichten aufzunehmen.</string>
+	<string>Diese App benötigt Zugriff auf die Kamera, um Fotos für Chat-Nachrichten und Challenge-Beiträge aufzunehmen.</string>
 	<key>NSDocumentsFolderUsageDescription</key>
 	<string>Diese App benötigt Zugriff auf Dokumente, um Dateien für Chat-Nachrichten auszuwählen und zu teilen.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>Konfi Quest nutzt Face ID, damit du dich ohne Passwort anmelden kannst.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Diese App benötigt Zugriff auf das Mikrofon, um Videos mit Ton für Chat-Nachrichten aufzunehmen.</string>
+	<string>Diese App benötigt Zugriff auf das Mikrofon, um Videos mit Ton aufzunehmen und Sprachaufnahmen für Challenge-Beiträge zu erstellen.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Diese App benötigt Zugriff auf die Fotobibliothek, um Bilder für Chat-Nachrichten auszuwählen.</string>
+	<string>Diese App benötigt Zugriff auf die Fotobibliothek, um Bilder und Videos für Chat-Nachrichten und Challenge-Beiträge auszuwählen.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>

@@ -21,6 +21,7 @@ import {
 import { person, closeOutline, checkmarkOutline, personAdd, search, filterOutline, time, calendarOutline, cloudOfflineOutline } from 'ionicons/icons';
 import api from '../../../services/api';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 
 interface Konfi {
@@ -209,7 +210,11 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
       return;
     }
 
-    await guard(async () => {
+    // guard() wirft bei Doppel-Tap ('Aktion läuft bereits'). Ungefangen
+    // bliebe loading auf true hängen — dann liess sich das Modal nur
+    // noch per Swipe schliessen (User-Hinweis 12.08.).
+    try {
+      await guard(async () => {
       setLoading(true);
       try {
         // Add each selected konfi as participant
@@ -239,11 +244,15 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
       } finally {
         setLoading(false);
       }
-    });
+      });
+    } catch {
+      // Zweiter Aufruf verworfen — Ladezustand sicher zuruecknehmen.
+      setLoading(false);
+    }
   };
 
   const handleRemoveParticipant = async (participantId: number) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     try {
       await api.delete(`/events/${eventId}/bookings/${participantId}`);
       // Participants und verfügbare Konfis neu laden
@@ -263,13 +272,17 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
         <IonToolbar>
           <IonTitle>{filterRole === 'teamer' ? 'Teamer:in hinzufügen' : filterRole === 'konfi' ? 'Kind hinzufügen' : 'Teilnehmer:innen verwalten'}</IonTitle>
           <IonButtons slot="start">
-            <IonButton onClick={handleClose} disabled={loading} className="app-modal-close-btn">
+            {/* NICHT an loading haengen: Bleibt der Ladezustand haengen,
+                waere das Modal sonst nur noch per Swipe zu verlassen.
+                Die Rueckfrage bei ungespeicherten Aenderungen laeuft
+                ueber canDismiss der Seite. */}
+            <IonButton onClick={handleClose} className="app-modal-close-btn" aria-label="Schließen">
               <IonIcon icon={closeOutline} slot="icon-only" />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
             {selectedKonfis.length > 0 && (
-              <IonButton onClick={handleAddParticipants} disabled={loading || isSubmitting || !isOnline} className="app-modal-submit-btn app-modal-submit-btn--events">
+              <IonButton onClick={handleAddParticipants} disabled={loading || isSubmitting || !isOnline} className="app-modal-submit-btn app-modal-submit-btn--events" aria-label="Teilnehmer:innen hinzufügen">
                 {!isOnline ? <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</> : <IonIcon icon={checkmarkOutline} slot="icon-only" />}
               </IonButton>
             )}

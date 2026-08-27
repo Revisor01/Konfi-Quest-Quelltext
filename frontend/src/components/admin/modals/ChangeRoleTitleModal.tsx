@@ -86,12 +86,12 @@ const ChangeRoleTitleModal: React.FC<ChangeRoleTitleModalProps> = ({
         <IonToolbar>
           <IonTitle>Funktionsbeschreibung</IonTitle>
           <IonButtons slot="start">
-            <IonButton onClick={onClose} disabled={isSubmitting} className="app-modal-close-btn">
+            <IonButton aria-label="Schließen" onClick={onClose} disabled={isSubmitting} className="app-modal-close-btn">
               <IonIcon icon={closeOutline} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
-            <IonButton onClick={handleSave} disabled={isSubmitting || !isOnline} className={`app-modal-submit-btn ${submitBtnClass}`}>
+            <IonButton aria-label="Rollentitel speichern" onClick={handleSave} disabled={isSubmitting || !isOnline} className={`app-modal-submit-btn ${submitBtnClass}`}>
               {!isOnline ? <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</> : isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} />}
             </IonButton>
           </IonButtons>

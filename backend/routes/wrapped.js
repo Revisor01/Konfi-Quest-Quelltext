@@ -58,7 +58,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
     );
     const gottesdienstCount = parseInt(gdCountRow.count, 10) || 0;
 
-    // Kategorie-Verteilung (Aktivitaeten nach Kategorie)
+    // Kategorie-Verteilung (Aktivitäten nach Kategorie)
     const { rows: kategorieVerteilung } = await client.query(
       `SELECT COALESCE(a.category, a.type) as kategorie, COUNT(*) as count
        FROM user_activities ua
@@ -69,7 +69,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       [userId, orgId]
     );
 
-    // Gesamt-Events verfuegbar fuer diesen Jahrgang
+    // Gesamt-Events verfuegbar für diesen Jahrgang
     const { rows: [totalEventsRow] } = await client.query(
       `SELECT COUNT(DISTINCT e.id) as count FROM events e
        JOIN event_jahrgang_assignments eja ON e.id = eja.event_id AND eja.jahrgang_id = $2
@@ -105,31 +105,6 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
     );
     const totalBadgesAvailable = parseInt(totalBadgesRow.count, 10) || 0;
 
-    // Badge-Perzentil im Jahrgang
-    const { rows: allKonfisInJahrgang } = await client.query(
-      `SELECT kp.user_id,
-              (SELECT COUNT(*) FROM user_badges ub WHERE ub.user_id = kp.user_id AND ub.organization_id = $2) as badge_count
-       FROM konfi_profiles kp
-       WHERE kp.jahrgang_id = $1`,
-      [jahrgangId, orgId]
-    );
-    const totalKonfisInJahrgang = allKonfisInJahrgang.length;
-    const myBadgeCount = badgeRows.length;
-    const konfisWithFewerBadges = allKonfisInJahrgang.filter(k => k.badge_count < myBadgeCount).length;
-    const badgePercentile = totalKonfisInJahrgang > 1
-      ? Math.round((konfisWithFewerBadges / (totalKonfisInJahrgang - 1)) * 100)
-      : 100;
-
-    // Rang im Jahrgang
-    const { rows: jahrgangRanking } = await client.query(
-      `SELECT kp.user_id, (kp.gottesdienst_points + kp.gemeinde_points) as total
-       FROM konfi_profiles kp
-       WHERE kp.jahrgang_id = $1
-       ORDER BY total DESC`,
-      [jahrgangId]
-    );
-    const rank = jahrgangRanking.findIndex(r => r.user_id === userId) + 1;
-
     // Pflicht-Events
     const { rows: [pflichtRow] } = await client.query(
       `SELECT
@@ -152,16 +127,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
     );
     const eventAbgesagt = parseInt(cancelRow.count, 10) || 0;
 
-    // Chat-Nachrichten
-    const { rows: [chatCount] } = await client.query(
-      `SELECT COUNT(*) as count FROM chat_messages cm
-       JOIN chat_rooms cr ON cm.room_id = cr.id
-       WHERE cm.user_id = $1 AND cr.organization_id = $2`,
-      [userId, orgId]
-    );
-    const nachrichtenGesendet = parseInt(chatCount.count, 10) || 0;
-
-    // Aktivster Monat (Aktivitaeten + Events kombiniert)
+    // Aktivster Monat (Aktivitäten + Events kombiniert)
     const { rows: monatRows } = await client.query(
       `SELECT monat, COUNT(*) as count FROM (
          SELECT EXTRACT(MONTH FROM completed_date)::int as monat
@@ -221,7 +187,6 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       const candidates = [
         { type: 'events_held', value: totalAttended },
         { type: 'badge_collector', value: badgeRows.length },
-        { type: 'chat_champion', value: nachrichtenGesendet },
         { type: 'gottesdienst_treue', value: gottesdienstCount },
         { type: 'gemeinde_aktiv', value: gemeinde }
       ];
@@ -246,11 +211,58 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       ? new Date(konfirmationTermin).toISOString().split('T')[0]
       : `${year}-07-31`;
 
+    // Challenge-Momente: eigene Beitraege im Wrapped-Zeitraum (max 12, neueste zuerst).
+    // Defensiv: Auf Alt-Deployments ohne Challenge-Tabellen liefern wir ein leeres Array
+    // statt die gesamte Snapshot-Generierung scheitern zu lassen.
+    let challengeMomente = [];
+    try {
+      const { rows: submissionRows } = await client.query(
+        `SELECT c.title AS challenge_title,
+                c.badge_icon,
+                cs.media_type,
+                cs.file_path,
+                cs.file_name,
+                cs.text_content,
+                cs.link_url,
+                cs.link_title,
+                cs.link_author,
+                cs.created_at
+           FROM challenge_submissions cs
+           JOIN challenges c ON cs.challenge_id = c.id
+          WHERE cs.user_id = $1
+            AND cs.organization_id = $2
+            AND cs.moderation_status <> 'hidden'
+            AND cs.created_at >= $3::date
+            AND cs.created_at < ($4::date + INTERVAL '1 day')
+          ORDER BY cs.created_at DESC
+          LIMIT 12`,
+        [userId, orgId, zeitraumStart, zeitraumEnde]
+      );
+      challengeMomente = submissionRows.map(s => ({
+        challenge_title: s.challenge_title,
+        badge_icon: s.badge_icon,
+        media_type: s.media_type,
+        file_path: s.file_path,
+        file_name: s.file_name,
+        text_content: s.text_content
+          ? (s.text_content.length > 200 ? `${s.text_content.slice(0, 200)}...` : s.text_content)
+          : null,
+        link_url: s.link_url,
+        link_title: s.link_title,
+        link_author: s.link_author,
+        created_at: s.created_at
+      }));
+    } catch (challengeErr) {
+      console.warn('Wrapped: Challenge-Momente konnten nicht geladen werden:', challengeErr.message);
+      challengeMomente = [];
+    }
+
     return {
-      version: 1,
+      version: 2,
       highlight_type: highlightType,
       formulierung_seed: formulierungSeed,
       slides: {
+        challenge_momente: challengeMomente,
         punkte: {
           gottesdienst,
           gemeinde,
@@ -266,21 +278,13 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
         badges: {
           total_earned: badgeRows.length,
           total_available: totalBadgesAvailable,
-          badges: badgeRows.map(b => ({ name: b.name, icon: b.icon, color: b.color })),
-          percentile: badgePercentile
+          badges: badgeRows.map(b => ({ name: b.name, icon: b.icon, color: b.color }))
         },
         pflicht: {
           besucht: pflichtBesucht,
           gesamt: pflichtGesamt
         },
-        rank: {
-          position: rank,
-          total_in_jahrgang: totalKonfisInJahrgang
-        },
         aktivster_monat: aktivsterMonat,
-        chat: {
-          nachrichten_gesendet: nachrichtenGesendet
-        },
         endspurt: {
           aktiv: endspurtAktiv,
           fehlende_punkte: fehlendePunkte,
@@ -330,7 +334,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       ? { name: topEventRows[0].name, count: parseInt(topEventRows[0].teilnehmer, 10) }
       : null;
 
-    // Konfis betreut (ueber zugewiesene Jahrgaenge)
+    // Konfis betreut (über zugewiesene Jahrgänge)
     const { rows: konfiRows } = await client.query(
       `SELECT COUNT(DISTINCT kp.user_id) as total,
               ARRAY_AGG(DISTINCT j.name) as jahrgaenge
@@ -405,7 +409,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
 
   /**
    * Parallele Hilfsfunktion: Generiert und speichert einen Konfi-Snapshot.
-   * Holt eigenen DB-Client aus dem Pool (kein geteilter Client fuer parallele Queries).
+   * Holt eigenen DB-Client aus dem Pool (kein geteilter Client für parallele Queries).
    */
   async function generateAndSaveKonfiSnapshot(dbRef, userId, orgId, jahrgangId, year) {
     const konfiClient = await dbRef.getClient();
@@ -449,6 +453,22 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
         return res.status(404).json({ error: 'Kein Wrapped-Snapshot vorhanden' });
       }
 
+      if (roleName === 'konfi') {
+        const { rows: [gate] } = await db.query(
+          `SELECT EXISTS(
+             SELECT 1 FROM jahrgaenge j
+             JOIN konfi_profiles kp ON kp.jahrgang_id = j.id
+             WHERE kp.user_id = $1
+               AND j.wrapped_released_at IS NOT NULL
+               AND j.wrapped_released_at <= NOW()
+           ) AS released`,
+          [req.user.id]
+        );
+        if (!gate || !gate.released) {
+          return res.status(403).json({ error: 'Wrapped ist noch nicht freigegeben' });
+        }
+      }
+
       res.json({
         data: rows[0].data,
         computed_at: rows[0].computed_at,
@@ -461,7 +481,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
     }
   });
 
-  // POST /generate/:jahrgangId - Konfi-Snapshots fuer alle Konfis eines Jahrgangs generieren
+  // POST /generate/:jahrgangId - Konfi-Snapshots für alle Konfis eines Jahrgangs generieren
   router.post('/generate/:jahrgangId',
     rbacVerifier,
     requireAdmin,
@@ -472,7 +492,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       try {
         const jahrgangId = parseInt(req.params.jahrgangId, 10);
 
-        // Jahrgang validieren: gehoert zur Org des Admins
+        // Jahrgang validieren: gehört zur Org des Admins
         const { rows: [jahrgang] } = await client.query(
           `SELECT id, name FROM jahrgaenge WHERE id = $1 AND organization_id = $2`,
           [jahrgangId, req.user.organization_id]
@@ -512,11 +532,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
         // Push-Notification an alle Konfis
         try {
           const konfiIds = konfis.map(k => k.user_id);
-          await PushService.sendToMultipleUsers(db, konfiIds, {
-            title: 'Dein Konfi-Jahr ist da!',
-            body: 'Schau dir jetzt deinen persönlichen Jahresrückblick an!',
-            data: { type: 'wrapped', wrappedType: 'konfi' }
-          });
+          await PushService.sendWrappedReleased(db, konfiIds, 'konfi', req.user.organization_id);
         } catch (pushErr) {
           console.error('Push-Notification für Konfi-Wrapped fehlgeschlagen:', pushErr);
         }
@@ -538,7 +554,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
     }
   );
 
-  // POST /generate-teamer - Teamer-Snapshots fuer alle Teamer der Organisation generieren
+  // POST /generate-teamer - Teamer-Snapshots für alle Teamer der Organisation generieren
   router.post('/generate-teamer',
     rbacVerifier,
     requireOrgAdmin,
@@ -583,11 +599,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
         // Push-Notification an alle Teamer:innen
         try {
           const teamerIds = teamers.map(t => t.user_id);
-          await PushService.sendToMultipleUsers(db, teamerIds, {
-            title: 'Dein Teamer-Jahr ist da!',
-            body: 'Schau dir jetzt deinen persönlichen Jahresrückblick an!',
-            data: { type: 'wrapped', wrappedType: 'teamer' }
-          });
+          await PushService.sendWrappedReleased(db, teamerIds, 'teamer', req.user.organization_id);
         } catch (pushErr) {
           console.error('Push-Notification für Teamer-Wrapped fehlgeschlagen:', pushErr);
         }
@@ -608,7 +620,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
     }
   );
 
-  // DELETE /:jahrgangId - Wrapped-Snapshots fuer einen Jahrgang loeschen
+  // DELETE /:jahrgangId - Wrapped-Snapshots für einen Jahrgang löschen
   router.delete('/:jahrgangId',
     rbacVerifier,
     requireOrgAdmin,
@@ -666,7 +678,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
           if (roleName !== 'admin' && roleName !== 'org_admin') {
             return res.status(403).json({ error: 'Keine Berechtigung' });
           }
-          // Admin: Pruefen ob User zur gleichen Org gehoert
+          // Admin: Pruefen ob User zur gleichen Org gehört
           const { rows: [targetUser] } = await db.query(
             'SELECT organization_id FROM users WHERE id = $1', [targetUserId]
           );
@@ -692,11 +704,11 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
   );
 
   // ====================================================================
-  // BATCH-GENERIERUNG (fuer backgroundService Cron)
+  // BATCH-GENERIERUNG (für backgroundService Cron)
   // ====================================================================
 
   /**
-   * Generiert Konfi-Wrapped fuer alle Konfis eines Jahrgangs.
+   * Generiert Konfi-Wrapped für alle Konfis eines Jahrgangs.
    * Wird vom Cron oder Admin-Endpoint aufgerufen.
    */
   router.generateAllKonfiWrapped = async (dbRef, jahrgangId, orgId, year) => {
@@ -730,11 +742,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       // Push (fire-and-forget, dbRef statt client da client released wird)
       try {
         const konfiIds = konfis.map(k => k.user_id);
-        await PushService.sendToMultipleUsers(dbRef, konfiIds, {
-          title: 'Dein Konfi-Jahr ist da!',
-          body: 'Schau dir jetzt deinen persönlichen Jahresrückblick an!',
-          data: { type: 'wrapped', wrappedType: 'konfi' }
-        });
+        await PushService.sendWrappedReleased(dbRef, konfiIds, 'konfi', orgId);
       } catch (pushErr) {
         console.error('Wrapped-Cron Push fehlgeschlagen:', pushErr);
       }
@@ -749,7 +757,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
   };
 
   /**
-   * Generiert Teamer-Wrapped fuer alle Teamer einer Organisation.
+   * Generiert Teamer-Wrapped für alle Teamer einer Organisation.
    * Wird vom Cron oder Admin-Endpoint aufgerufen.
    */
   router.generateAllTeamerWrapped = async (dbRef, orgId, year) => {
@@ -789,11 +797,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       // Push (fire-and-forget)
       try {
         const teamerIds = teamers.map(t => t.user_id);
-        await PushService.sendToMultipleUsers(dbRef, teamerIds, {
-          title: 'Dein Teamer-Jahr ist da!',
-          body: 'Schau dir jetzt deinen persönlichen Jahresrückblick an!',
-          data: { type: 'wrapped', wrappedType: 'teamer' }
-        });
+        await PushService.sendWrappedReleased(dbRef, teamerIds, 'teamer', orgId);
       } catch (pushErr) {
         console.error('Wrapped-Cron Push fehlgeschlagen:', pushErr);
       }

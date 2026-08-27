@@ -104,15 +104,42 @@ const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
             </>
           );
 
-        case 'chat':
+        // Challenge-Momente: BEWUSST nur Text und Challenge-Titel. Fotos, Audio
+        // und Video der Konfis werden NIE in ein Teilen-Bild eingebettet
+        // (Datenschutz — das Bild verlässt die App).
+        case 'challenge-momente': {
           if (!konfi) return null;
+          const momente = (konfi.slides.challenge_momente || []).slice(0, 4);
           return (
             <>
-              <div className="share-label">Chat</div>
-              <div className="share-big-number">{konfi.slides.chat.nachrichten_gesendet}</div>
-              <div className="share-subtitle">Nachrichten gesendet</div>
+              <div className="share-label">Challenges</div>
+              <div style={{ fontSize: 84, fontWeight: 800, lineHeight: 1.1 }}>Meine Momente</div>
+              {momente.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 24, marginTop: 48, maxWidth: 820, width: '100%' }}>
+                  {momente.map((m, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        padding: '24px 32px',
+                        background: 'rgba(190,24,93,0.18)',
+                        border: '1px solid rgba(190,24,93,0.4)',
+                        borderRadius: 24,
+                        textAlign: 'left',
+                      }}
+                    >
+                      <div style={{ fontSize: 26, color: 'rgba(255,255,255,0.6)' }}>{m.challenge_title}</div>
+                      {m.text_content && (
+                        <div style={{ fontSize: 32, fontWeight: 500, marginTop: 8, lineHeight: 1.3 }}>
+                          {m.text_content.length > 110 ? m.text_content.slice(0, 110).trimEnd() + '…' : m.text_content}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </>
           );
+        }
 
         case 'endspurt':
           if (!konfi) return null;

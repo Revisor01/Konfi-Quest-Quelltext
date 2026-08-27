@@ -60,8 +60,8 @@ export const setRefreshToken = async (token: string): Promise<void> => {
   await Preferences.set({ key: 'konfi_refresh_token', value: token });
 };
 
-// Aktive Org setzen (null = zurueck zur Primaer-Org). Synchroner Memory-Write
-// fuer den Request-Interceptor + async Persistenz.
+// Aktive Org setzen (null = zurück zur Primaer-Org). Synchroner Memory-Write
+// für den Request-Interceptor + async Persistenz.
 export const setActiveOrgId = async (orgId: number | null): Promise<void> => {
   _activeOrgId = orgId;
   if (orgId === null) {
@@ -79,7 +79,7 @@ export const clearAuth = async (): Promise<void> => {
   _refreshToken = null;
   _activeOrgId = null;
   // Push-Sendefenster zuruecksetzen: Nach Logout+Login muss der FCM-Token
-  // SOFORT neu registriert werden koennen (Server haengt ihn dann an den neuen
+  // SOFORT neu registriert werden können (Server hängt ihn dann an den neuen
   // User um) — sonst blockt das 12h-Fenster und der alte Account bekommt
   // weiter Pushes auf diesem Geraet.
   _pushTokenTimestamp = 0;

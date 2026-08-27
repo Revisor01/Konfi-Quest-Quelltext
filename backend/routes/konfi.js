@@ -6,13 +6,14 @@ const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
-const { fetchTageslosung } = require('../services/losungService');
+const { fetchTageslosung, tageslosungFallback } = require('../services/losungService');
 const { encryptBuffer, decryptBuffer } = require('../utils/photoCrypto');
 const { deletePhotoFile } = require('../utils/photoStorage');
 const { checkExistingBooking, getEventWithCounts, validateRegistrationWindow, determineBookingStatus, promoteFromWaitlist } = require('../utils/bookingUtils');
+const { removeFromEventChat, addToEventChat } = require('../utils/eventChat');
 const { computeCurrentStreak } = require('../utils/streakCalculation');
 const { getKonfiBadgeProgress } = require('../utils/konfiBadgeProgress');
-// Single Source of Truth: welche Events zaehlen fuer Konfi-Badges (kein Pflicht/Konfirmation).
+// Single Source of Truth: welche Events zählen für Konfi-Badges (kein Pflicht/Konfirmation).
 const { KONFI_BADGE_EVENT_CONDITION } = require('../utils/badgeEventRule');
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -87,7 +88,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
                         + (konfi.gemeinde_enabled ? (konfi.gemeinde_points || 0) : 0);
 
 
-      // SQL-Konstanten fuer die parallelen Queries
+      // SQL-Konstanten für die parallelen Queries
       const badgeCountSql =
         'SELECT COUNT(*) as count FROM user_badges kb JOIN users u ON kb.user_id = u.id WHERE kb.user_id = $1 AND kb.organization_id = $2';
       const badgesSql = `
@@ -154,9 +155,22 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
       `;
       const dashboardSettingsSql =
         "SELECT key, value FROM settings WHERE organization_id = $1 AND (key LIKE 'dashboard_show_%' OR key = 'dashboard_section_order')";
+      // Nachgemessen: Bei gesetzter Freigabe ohne Snapshot
+      // lieferte das Dashboard has_wrapped=true, GET /wrapped/me aber 404 --
+      // die Konfi sah den Einstieg und tippte ins Leere.
+      //
+      // Das kann wirklich passieren: Die Snapshot-Erzeugung laeuft ueber
+      // Promise.allSettled (wrapped.js:735-739), zaehlt Fehler mit und setzt
+      // die Freigabe TROTZDEM. Scheitert sie fuer eine einzelne Konfi, hat
+      // genau diese eine Freigabe ohne eigenen Snapshot.
+      //
+      // Jetzt muessen beide Bedingungen gelten -- dieselbe Kombination, die
+      // auch GET /wrapped/me prueft.
       const wrappedSql = `SELECT EXISTS(
           SELECT 1 FROM jahrgaenge j
           JOIN konfi_profiles kp ON kp.jahrgang_id = j.id
+          JOIN wrapped_snapshots ws ON ws.user_id = kp.user_id
+                                   AND ws.wrapped_type = 'konfi'
           WHERE kp.user_id = $1
             AND j.wrapped_released_at IS NOT NULL
             AND j.wrapped_released_at <= NOW()
@@ -290,16 +304,21 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         show_losung: dashboardMap.dashboard_show_losung !== undefined ? dashboardMap.dashboard_show_losung : true,
         show_badges: dashboardMap.dashboard_show_badges !== undefined ? dashboardMap.dashboard_show_badges : true,
         show_ranking: dashboardMap.dashboard_show_ranking !== undefined ? dashboardMap.dashboard_show_ranking : true,
-        section_order: sectionOrder || ['konfirmation', 'konfispruch', 'events', 'losung', 'badges', 'ranking']
+        // Der Challenges-Schalter existierte in den Einstellungen längst —
+        // wurde hier aber nie durchgereicht, die Karte lud deshalb immer.
+        show_challenges: dashboardMap.dashboard_show_challenges !== undefined ? dashboardMap.dashboard_show_challenges : true,
+        section_order: sectionOrder || ['konfirmation', 'challenges', 'konfispruch', 'events', 'losung', 'badges', 'ranking']
       };
 
-      // Wrapped-Verfuegbarkeit (ueber wrapped_released_at auf Jahrgang) — bereits
+      // Wrapped-Verfuegbarkeit (über wrapped_released_at auf Jahrgang) — bereits
       // im Promise.all oben geladen.
       const has_wrapped = wrappedRes.rows[0]?.has_wrapped || false;
 
       // Konfispruch-Sichtbarkeit (Backend-Gate, SPRUCH-07): Flag aus
-      // jahrgaenge.konfspruch_enabled. Frontend rendert die Card nur bei true.
-      const konfspruch_visible = konfi.konfspruch_enabled === true;
+      // jahrgaenge.konfspruch_enabled UND dem Dashboard-Schalter der Leitung
+      // (dashboard_show_konfispruch). Frontend rendert die Card nur bei true.
+      const konfspruch_visible = konfi.konfspruch_enabled === true
+        && dashboardMap.dashboard_show_konfispruch !== false;
 
       // Return dashboard data
       res.json({
@@ -363,7 +382,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
       
       const query = `
         SELECT u.id, u.display_name, u.email, u.username, u.created_at, kp.gottesdienst_points, kp.gemeinde_points,
-               kp.jahrgang_id, kp.bible_translation, kp.konfspruch_translation,
+               kp.jahrgang_id, u.bible_translation, kp.konfspruch_translation,
                kp.konfspruch_id, kp.konfspruch_freitext, kp.konfspruch_freitext_referenz,
                j.name as jahrgang_name,
                j.gottesdienst_enabled, j.gemeinde_enabled
@@ -656,6 +675,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         FROM activity_requests ar
         LEFT JOIN activities a ON ar.activity_id = a.id
         WHERE ar.user_id = $1 AND ar.organization_id = $2
+          AND (a.id IS NULL OR a.target_role = 'konfi')
         ORDER BY ar.created_at DESC
       `;
       const { rows: requests } = await db.query(query, [konfiId, req.user.organization_id]);
@@ -692,9 +712,8 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
       
       const date = requested_date || new Date().toISOString().split('T')[0];
       
-      // Get activity details for notification
       const { rows: [activity] } = await db.query(
-        "SELECT name, points FROM activities WHERE id = $1 AND organization_id = $2",
+        "SELECT name, points FROM activities WHERE id = $1 AND organization_id = $2 AND target_role = 'konfi'",
         [activity_id, req.user.organization_id]
       );
 
@@ -731,13 +750,27 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         // Don't fail the request if notification fails
       }
 
-      // Send notification to all admins about new request
+      res.status(201).json({
+        id: newRequest.id,
+        message: 'Antrag erfolgreich eingereicht'
+      });
+
+      // Admin-Benachrichtigungen NACH der Antwort:
+      // Der Push-Versand läuft seriell über alle Admins und deren Geraete —
+      // je Token ein FCM-Roundtrip. Lief das vor res.json(), wartete der Konfi
+      // darauf (gemessen ~1,5 s p95 auf dem haeufigsten Antrags-Endpunkt).
+      // Muster wie in routes/chat.js: Block in eine selbst aufgerufene
+      // async-Funktion, Fehler nur loggen — die Antwort ist bereits raus.
+      (async () => {
       try {
+        // In-App-Mitteilung an die GESAMTE Leitung (admin UND org_admin) —
+        // identisch zum Push-Versand in PushService.sendNewActivityRequestToAdmins.
+        // Vorher stand hier nur r.name='admin', org_admin ging leer aus (M6).
         const { rows: admins } = await db.query(
-          `SELECT u.id, u.display_name 
-           FROM users u 
-           JOIN roles r ON u.role_id = r.id 
-           WHERE r.name = 'admin' AND u.organization_id = $1`,
+          `SELECT u.id, u.display_name
+           FROM users u
+           JOIN roles r ON u.role_id = r.id
+           WHERE r.name IN ('admin', 'org_admin') AND u.organization_id = $1`,
           [req.user.organization_id]
         );
 
@@ -778,14 +811,10 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
           activity.points
         );
       } catch (notifErr) {
- console.error('Error sending admin notifications:', notifErr);
+        console.error('Error sending admin notifications:', notifErr);
         // Don't fail the request if notification fails
       }
-
-      res.status(201).json({
-        id: newRequest.id,
-        message: 'Antrag erfolgreich eingereicht'
-      });
+      })();
 
       // Live-Update an alle Admins über neuen Antrag senden
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'requests', 'create');
@@ -806,7 +835,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
     }
   });
 
-  // Upload photo for activity request (AES-256-GCM verschluesselt at-rest)
+  // Upload photo for activity request (AES-256-GCM verschlüsselt at-rest)
   // memoryStorage liefert req.file.buffer; wir validieren die Magic Bytes auf
   // dem Buffer, verschluesseln und schreiben dann erst auf die Platte.
   router.post('/upload-photo', verifyTokenRBAC, requestUpload.single('photo'), async (req, res) => {
@@ -819,7 +848,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         return res.status(400).json({ error: 'Kein Foto hochgeladen' });
       }
 
-      // Magic-Bytes-Pruefung direkt auf dem Buffer (nur echte Bilder zulassen)
+      // Magic-Bytes-Prüfung direkt auf dem Buffer (nur echte Bilder zulassen)
       const { fileTypeFromBuffer } = await import('file-type');
       const detected = await fileTypeFromBuffer(req.file.buffer);
       if (!detected || !detected.mime.startsWith('image/')) {
@@ -879,7 +908,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
 
       // Status-Gate: Konfi/Teamer (Eigentuemer) sehen das Nachweisfoto NUR
       // solange der Antrag offen ist. Nach Bearbeitung (verbucht/abgelehnt)
-      // bleibt das Foto allein fuer Admins sichtbar (eigene Admin-Route).
+      // bleibt das Foto allein für Admins sichtbar (eigene Admin-Route).
       if (!isAdmin && request.status !== 'pending') {
         return res.status(403).json({ error: 'Foto nach Bearbeitung nicht mehr verfügbar' });
       }
@@ -892,7 +921,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         return res.status(404).json({ error: 'Foto-Datei nicht gefunden' });
       }
 
-      // Datei lesen und (falls verschluesselt) entschluesseln, dann senden
+      // Datei lesen und (falls verschlüsselt) entschluesseln, dann senden
       const fileBuffer = await fs.promises.readFile(photoPath);
       let imageBuffer;
       try {
@@ -964,7 +993,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
     
     try {
       // Jahrgang-Config des Konfis: nur AKTIVIERTE Punkt-Typen anbieten, sonst
-      // koennte der Konfi eine Aktivitaet einreichen, die der Admin nie genehmigen
+      // könnte der Konfi eine Aktivität einreichen, die der Admin nie genehmigen
       // kann (Punkt-Typ im Jahrgang deaktiviert -> 400 beim Genehmigen).
       const { rows: [cfg] } = await db.query(
         `SELECT COALESCE(j.gottesdienst_enabled, true) AS gottesdienst_enabled,
@@ -1024,19 +1053,14 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
     
     try {
       const konfiId = req.user.id;
-      const checkBadgesTableQuery = "SELECT to_regclass('public.custom_badges')";
-      const { rows: [tableExistsResult] } = await db.query(checkBadgesTableQuery);
-      
-      if (!tableExistsResult || !tableExistsResult.to_regclass) {
-        return res.json({ total_badges: 0, earned_badges: 0 });
-      }
-
       const statsQuery = `
         SELECT
           (SELECT COUNT(*) FROM custom_badges WHERE organization_id = $2 AND target_role = 'konfi' AND is_active = TRUE) as total_badges,
           COUNT(kb.badge_id) as earned_badges
         FROM user_badges kb
+        JOIN custom_badges cb ON kb.badge_id = cb.id
         WHERE kb.user_id = $1 AND kb.organization_id = $2
+          AND cb.target_role = 'konfi'
       `;
       const { rows: [stats] } = await db.query(statsQuery, [konfiId, req.user.organization_id]);
       res.json({
@@ -1097,9 +1121,9 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         : "AND e.event_date >= NOW() - INTERVAL '1 year'";
 
       // Restrukturierte Query:
-      // Keine Join-Explosion mehr ueber bookings/users/roles/categories.
+      // Keine Join-Explosion mehr über bookings/users/roles/categories.
       // Buchungs-Statistik und Wartelisten-Position als LATERAL-Aggregate,
-      // eigene Buchung als LEFT JOIN LATERAL mit LIMIT 1 — kein GROUP BY noetig.
+      // eigene Buchung als LEFT JOIN LATERAL mit LIMIT 1 — kein GROUP BY nötig.
       const query = `
         SELECT e.*,
                bstats.registered_count,
@@ -1111,11 +1135,26 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
                END as max_participants,
                cats.category_ids,
                cats.category_names,
+               event_chat.id as chat_room_id,
                CASE
                  WHEN e.cancelled = true THEN 'cancelled'
+                 -- 'mandatory' wie in der Admin-Liste:
+                 -- Pflichttermine haben immer max=0 + Warteliste aus und fielen
+                 -- ohne diesen Zweig in den Ausgebucht-Fall ('closed').
+                 WHEN e.mandatory THEN 'mandatory'
                  WHEN NOW() < e.registration_opens_at THEN 'upcoming'
                  WHEN NOW() > e.registration_closes_at THEN 'closed'
-                 WHEN bstats.registered_count >=
+                 -- max_participants = 0 heißt unbegrenzt. Der > 0-Guard der
+                 -- Admin-Liste fehlte hier:
+                 -- 0 >= 0 war immer wahr, unbegrenzte Events ohne
+                 -- Warteliste galten fälschlich als 'closed' und der
+                 -- Anmelden-Knopf verschwand.
+                 WHEN (
+                   CASE
+                     WHEN e.has_timeslots THEN COALESCE(timeslot_capacity.total_capacity, e.max_participants)
+                     ELSE e.max_participants
+                   END
+                 ) > 0 AND bstats.registered_count >=
                    CASE
                      WHEN e.has_timeslots THEN COALESCE(timeslot_capacity.total_capacity, e.max_participants)
                      ELSE e.max_participants
@@ -1146,8 +1185,13 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         INNER JOIN event_jahrgang_assignments eja ON e.id = eja.event_id
         LEFT JOIN LATERAL (
           SELECT
-            COUNT(*) FILTER (WHERE eb_all.status = 'confirmed') as registered_count,
-            COUNT(*) FILTER (WHERE eb_all.status = 'waitlist') as waitlist_count,
+            -- Konfi-Sicht: registered_count UND waitlist_count zählen NUR
+            -- Konfis. Teamer haben ein eigenes Kontingent mit eigener
+            -- Warteliste (Migration 120) — sie mitzuzaehlen liesse Plaetze und
+            -- Warteliste voll erscheinen, obwohl für Konfis noch frei ist,
+            -- und die Anmeldung galt faelschlich als geschlossen.
+            COUNT(*) FILTER (WHERE eb_all.status = 'confirmed' AND COALESCE(r_book.name, '') <> 'teamer') as registered_count,
+            COUNT(*) FILTER (WHERE eb_all.status = 'waitlist' AND COALESCE(r_book.name, '') <> 'teamer') as waitlist_count,
             COUNT(*) FILTER (WHERE eb_all.status = 'confirmed' AND r_book.name = 'teamer') as teamer_count
           FROM event_bookings eb_all
           LEFT JOIN users u_book ON eb_all.user_id = u_book.id
@@ -1181,6 +1225,19 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
           FROM event_timeslots
           WHERE event_id = e.id
         ) timeslot_capacity ON true
+        -- Event-Chat: nur, wenn diese Konfi auch Mitglied des Raums ist. Damit
+        -- bildet der Einstieg in der Detailansicht genau die Berechtigung ab,
+        -- die darfRaumOeffnen (chat.js:273) durchsetzt — ein Knopf, der ins
+        -- 403 fuehrt, entsteht so gar nicht erst. Beim Buchen wird die Konfi
+        -- Mitglied (addToEventChat).
+        LEFT JOIN LATERAL (
+          SELECT cr.id
+          FROM chat_rooms cr
+          JOIN chat_participants cp
+            ON cp.room_id = cr.id AND cp.user_id = $2 AND cp.user_type = 'konfi'
+          WHERE cr.event_id = e.id AND cr.organization_id = $1
+          LIMIT 1
+        ) event_chat ON true
         WHERE e.organization_id = $1
           AND eja.jahrgang_id = $3
           AND e.teamer_only IS NOT TRUE
@@ -1237,34 +1294,50 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
 
       // Get event details with same logic as events API
       const { rows: [event] } = await db.query(`
-        SELECT e.*, 
-               COUNT(DISTINCT CASE WHEN eb.status = 'confirmed' THEN eb.id END) as registered_count,
-               COUNT(DISTINCT CASE WHEN eb.status = 'waitlist' THEN eb.id END) as waitlist_count,
+        SELECT e.*,
+               -- Konfi-rein wie in der Liste: Teamer
+               -- haben ein eigenes Kontingent (Migration 120); ohne den
+               -- Rollenfilter belegte ein gebuchter Teamer rechnerisch einen
+               -- Konfi-Platz und schloss das Event.
+               COUNT(DISTINCT CASE WHEN eb.status = 'confirmed' AND COALESCE(r_book.name, '') <> 'teamer' THEN eb.id END) as registered_count,
+               COUNT(DISTINCT CASE WHEN eb.status = 'waitlist' AND COALESCE(r_book.name, '') <> 'teamer' THEN eb.id END) as waitlist_count,
                CASE 
                  WHEN e.has_timeslots THEN COALESCE(timeslot_capacity.total_capacity, e.max_participants)
                  ELSE e.max_participants
                END as max_participants,
-               CASE 
+               CASE
+                 WHEN e.cancelled = true THEN 'cancelled'
+                 -- 'mandatory' wie in der Admin-Liste
+                 WHEN e.mandatory THEN 'mandatory'
                  WHEN NOW() < e.registration_opens_at THEN 'upcoming'
                  WHEN NOW() > e.registration_closes_at THEN 'closed'
-                 WHEN COUNT(DISTINCT CASE WHEN eb.status = 'confirmed' THEN eb.id END) >= 
+                 -- > 0-Guard: max=0 heißt unbegrenzt
+                 WHEN (
+                   CASE
+                     WHEN e.has_timeslots THEN COALESCE(timeslot_capacity.total_capacity, e.max_participants)
+                     ELSE e.max_participants
+                   END
+                 ) > 0 AND COUNT(DISTINCT CASE WHEN eb.status = 'confirmed' AND COALESCE(r_book.name, '') <> 'teamer' THEN eb.id END) >=
                    CASE 
                      WHEN e.has_timeslots THEN COALESCE(timeslot_capacity.total_capacity, e.max_participants)
                      ELSE e.max_participants
                    END AND 
-                      (NOT e.waitlist_enabled OR COUNT(DISTINCT CASE WHEN eb.status = 'waitlist' THEN eb.id END) >= COALESCE(e.max_waitlist_size, 0)) THEN 'closed'
+                      (NOT e.waitlist_enabled OR COUNT(DISTINCT CASE WHEN eb.status = 'waitlist' AND COALESCE(r_book.name, '') <> 'teamer' THEN eb.id END) >= COALESCE(e.max_waitlist_size, 0)) THEN 'closed'
                  ELSE 'open'
                END as registration_status
         FROM events e
         LEFT JOIN event_bookings eb ON e.id = eb.event_id
+        LEFT JOIN users u_book ON eb.user_id = u_book.id
+        LEFT JOIN roles r_book ON u_book.role_id = r_book.id
         LEFT JOIN (
           SELECT event_id, SUM(max_participants) as total_capacity
           FROM event_timeslots
           GROUP BY event_id
         ) timeslot_capacity ON e.id = timeslot_capacity.event_id
-        WHERE e.id = $1 AND e.organization_id = $2 AND (e.cancelled = FALSE OR e.cancelled IS NULL)
+        WHERE e.id = $1 AND e.organization_id = $2
+          AND (e.cancelled IS NOT TRUE OR $3::boolean)
         GROUP BY e.id, timeslot_capacity.total_capacity
-      `, [eventId, req.user.organization_id]);
+      `, [eventId, req.user.organization_id, !!registration]);
       
       if (!event) {
         return res.status(404).json({ error: 'Event nicht gefunden' });
@@ -1321,13 +1394,18 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
           u.display_name
         FROM event_bookings eb
         JOIN users u ON eb.user_id = u.id
+        JOIN events e ON eb.event_id = e.id
         LEFT JOIN roles r ON u.role_id = r.id
         WHERE eb.event_id = $1
+          AND e.organization_id = $2
           AND eb.status = 'confirmed'
           AND (r.name IS NULL OR r.name <> 'teamer')
         ORDER BY u.display_name ASC
       `;
-      const { rows: participants } = await db.query(participantsQuery, [eventId]);
+      // organization_id MUSS mitgeprueft werden: ohne sie konnte ein Konfi mit
+      // einer geratenen Event-ID die Teilnehmerliste von Terminen FREMDER
+      // Gemeinden abrufen.
+      const { rows: participants } = await db.query(participantsQuery, [eventId, req.user.organization_id]);
 
       // Anonymize names: "Vorname N." (first name + first letter of last name with period)
       const anonymizedParticipants = participants.map(p => {
@@ -1365,9 +1443,17 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
 
       // Get konfi's preferred translation
       const { rows: [konfi] } = await db.query(
-        'SELECT kp.bible_translation FROM users u JOIN konfi_profiles kp ON u.id = kp.user_id WHERE u.id = $1',
+        'SELECT bible_translation FROM users WHERE id = $1',
         [konfiId]
       );
+
+      const { rows: [losungSetting] } = await db.query(
+        "SELECT value FROM settings WHERE organization_id = $1 AND key = 'dashboard_show_losung'",
+        [req.user.organization_id]
+      );
+      if (losungSetting && (losungSetting.value === 'false' || losungSetting.value === '0')) {
+        return res.status(204).end();
+      }
 
       const translation = konfi?.bible_translation || 'LUT';
       const result = await fetchTageslosung(db, translation);
@@ -1398,13 +1484,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
       // Statischer Fallback
       res.json({
         success: true,
-        data: {
-          date: new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
-          losung: { text: "Der HERR ist mein Hirte, mir wird nichts mangeln.", reference: "Psalm 23,1", testament: "AT" },
-          lehrtext: { text: "Jesus spricht: Ich bin der gute Hirte. Der gute Hirte lässt sein Leben für die Schafe.", reference: "Johannes 10,11", testament: "NT" },
-          translation: { code: "LUT", name: "Lutherbibel 2017", language: "German" },
-          source: "Fallback"
-        },
+        data: tageslosungFallback(),
         fallback: true,
         error: 'Losungen API nicht erreichbar - Fallback verwendet'
       });
@@ -1501,6 +1581,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
             AND eb.status = 'confirmed'
             AND e.is_konfirmation = true
             AND e.organization_id = $2
+            AND (e.cancelled IS NULL OR e.cancelled = false)
         `;
         const { rows: [existingKonfirmation] } = await client.query(existingKonfirmationQuery, [konfiId, req.user.organization_id]);
 
@@ -1513,13 +1594,29 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         }
       }
 
-      // Get event details and current registration count (FOR UPDATE sperrt die Event-Zeile)
-      const event = await getEventWithCounts(client, eventId, req.user.organization_id);
+      // Get event details and current registration count (FOR UPDATE sperrt die Event-Zeile).
+      // excludeTeamers: Konfi- und Teamer-Plaetze sind strikt getrennt (Migration
+      // 120). Ohne den Filter zählten angemeldete Teamer gegen das KONFI-
+      // Kontingent — ein Event mit 5 Konfi-Plaetzen und 3 Teamern hätte nur noch
+      // 2 Konfis aufgenommen und danach faelschlich "ausgebucht" gemeldet.
+      const event = await getEventWithCounts(client, eventId, req.user.organization_id, { excludeTeamers: true });
 
       if (!event) {
         await client.query('ROLLBACK');
         client.release();
         return res.status(404).json({ error: 'Event nicht gefunden' });
+      }
+
+      if (event.teamer_only) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(403).json({ error: 'Dieser Termin ist nur für Teamer:innen' });
+      }
+
+      if (event.cancelled) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ error: 'Dieser Termin ist abgesagt' });
       }
 
       // Registrierungsfenster prüfen
@@ -1581,7 +1678,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
       const status = statusResult;
 
       // Register for event (with optional timeslot_id).
-      // organization_id MUSS gesetzt sein, sonst zaehlen Badge-Queries (event_count,
+      // organization_id MUSS gesetzt sein, sonst zählen Badge-Queries (event_count,
       // activity_count, ...) die Buchung nicht (sie filtern auf organization_id).
       const insertQuery = `
         INSERT INTO event_bookings (user_id, event_id, timeslot_id, status, booking_date, organization_id)
@@ -1589,6 +1686,11 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         RETURNING id
       `;
       const { rows: [newBooking] } = await client.query(insertQuery, [konfiId, eventId, timeslot_id || null, status, req.user.organization_id]);
+
+      // In den Chat zum Termin eintragen, falls es einen gibt. Bisher nahm der
+      // Chat beim Anlegen einen einmaligen Schnappschuss der Gebuchten — wer
+      // sich danach anmeldete, kam nie hinein.
+      await addToEventChat(client, eventId, konfiId, req.user.organization_id);
 
       // Transaktion abschliessen
       await client.query('COMMIT');
@@ -1607,7 +1709,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
 
       // Push-Notification an Konfi senden (nach COMMIT)
       try {
-        await PushService.sendEventRegisteredToKonfi(db, konfiId, event.name, event.event_date, status, eventId, selectedTimeslot);
+        await PushService.sendEventRegisteredToKonfi(db, konfiId, event.name, event.event_date, status, eventId, selectedTimeslot, req.user.organization_id);
       } catch (pushErr) {
         console.error('Error sending event registration push:', pushErr);
       }
@@ -1657,9 +1759,13 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         return res.status(400).json({ error: 'Du bist nicht für dieses Event angemeldet' });
       }
       
-      // Check if event exists and get event details
+      // Check if event exists and get event details.
+      // max_participants/has_timeslots werden für den Kapazitaetscheck beim
+      // Nachruecken gebraucht — fehlten sie hier, war max_participants
+      // undefined und es wurde IMMER nachgerueckt (auch über die Kapazität
+      // hinaus).
       const { rows: [event] } = await db.query(
-        'SELECT name, event_date FROM events WHERE id = $1 AND organization_id = $2',
+        'SELECT name, event_date, max_participants, has_timeslots FROM events WHERE id = $1 AND organization_id = $2',
         [eventId, req.user.organization_id]
       );
       
@@ -1684,24 +1790,59 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         [konfiId, eventId]
       );
 
+      // Auch aus dem Event-Chat entfernen. Fehlte hier bisher, während die
+      // Teamer-Abmeldung es tat — Konfis blieben nach der Abmeldung im Chat
+      // und konnten ihn nicht einmal manuell verlassen.
+      await removeFromEventChat(db, eventId, konfiId, req.user.organization_id);
+
       // Nachrücken von Warteliste wenn ein bestätigter Platz frei wird
       if (registration.status === 'confirmed') {
         try {
-          // Kapazitaet pruefen: Nur nachruecken wenn confirmedCount < maxCapacity
-          const { rows: [countResult] } = await db.query(
-            "SELECT COUNT(*) as confirmed_count FROM event_bookings WHERE event_id = $1 AND status = 'confirmed'",
-            [eventId]
-          );
-          const maxCapacity = event.max_participants || 0;
-          const confirmedCount = parseInt(countResult?.confirmed_count || '0', 10);
+          // Kapazität prüfen: Nur nachruecken wenn confirmedCount < maxCapacity.
+          // Bei Timeslot-Events gilt die SLOT-Kapazität (dort wird auch
+          // slot-genau nachgerueckt), sonst die Event-Kapazität.
+          // Teamer zählen NIE mit: sie haben ein eigenes Kontingent, und
+          // nachgerueckt wird hier ausschliesslich aus der Konfi-Warteliste.
+          let maxCapacity = event.max_participants || 0;
+          let confirmedCount = 0;
+          if (event.has_timeslots && registration.timeslot_id) {
+            const { rows: [slot] } = await db.query(
+              'SELECT max_participants FROM event_timeslots WHERE id = $1',
+              [registration.timeslot_id]
+            );
+            maxCapacity = slot?.max_participants || 0;
+            const { rows: [slotCount] } = await db.query(
+              `SELECT COUNT(*) as confirmed_count
+               FROM event_bookings eb
+               JOIN users u ON eb.user_id = u.id
+               JOIN roles r ON u.role_id = r.id
+               WHERE eb.timeslot_id = $1 AND eb.status = 'confirmed'
+                 AND r.name != 'teamer' AND u.deleted_at IS NULL`,
+              [registration.timeslot_id]
+            );
+            confirmedCount = parseInt(slotCount?.confirmed_count || '0', 10);
+          } else {
+            const { rows: [countResult] } = await db.query(
+              `SELECT COUNT(*) as confirmed_count
+               FROM event_bookings eb
+               JOIN users u ON eb.user_id = u.id
+               JOIN roles r ON u.role_id = r.id
+               WHERE eb.event_id = $1 AND eb.status = 'confirmed'
+                 AND r.name != 'teamer' AND u.deleted_at IS NULL`,
+              [eventId]
+            );
+            confirmedCount = parseInt(countResult?.confirmed_count || '0', 10);
+          }
 
           if (maxCapacity === 0 || confirmedCount < maxCapacity) {
-            const promotedUserId = await promoteFromWaitlist(db, eventId, registration.timeslot_id);
+            // roleFilter 'not_teamer': ein frei gewordener Konfi-Platz wird nur
+            // aus der Konfi-Warteliste nachbesetzt, nie aus der Teamer-Warteliste.
+            const promotedUserId = await promoteFromWaitlist(db, eventId, registration.timeslot_id, 'not_teamer');
 
             if (promotedUserId) {
               // Push-Notification an nachgerückten Konfi
               try {
-                await PushService.sendWaitlistPromotionToKonfi(db, promotedUserId, event.name, event.event_date, eventId);
+                await PushService.sendWaitlistPromotionToKonfi(db, promotedUserId, event.name, event.event_date, eventId, req.user.organization_id);
               } catch (pushErr) {
                 console.error('Error sending waitlist promotion push:', pushErr);
               }
@@ -1862,6 +2003,10 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         return res.status(400).json({ error: 'Keine Opt-out-Anmeldung gefunden' });
       }
 
+      // Meist schon drin — beim Opt-out bleibt man bewusst im Chat. Greift nur,
+      // wenn der Chat erst nach der Abmeldung angelegt wurde; idempotent.
+      await addToEventChat(db, eventId, konfiId, req.user.organization_id);
+
       res.json({ message: 'Wieder angemeldet' });
 
       // Push an Admins (fire-and-forget)
@@ -1892,8 +2037,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
       const konfiId = req.user.id;
       const { translation } = req.body;
       
-      // Validate translation
-      const validTranslations = ['LUT', 'ELB', 'GNB', 'BIGS', 'NIV', 'LSG', 'RVR60'];
+      const validTranslations = ['LUT', 'ELB', 'GNB', 'BIGS', 'NIV', 'LSG'];
       if (!validTranslations.includes(translation)) {
         return res.status(400).json({ 
           error: 'Ungültige Bibelübersetzung',
@@ -1901,9 +2045,8 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         });
       }
       
-      // Update konfi profile with new translation preference
       await db.query(
-        'UPDATE konfi_profiles SET bible_translation = $1 WHERE user_id = $2',
+        'UPDATE users SET bible_translation = $1 WHERE id = $2',
         [translation, konfiId]
       );
       
@@ -1919,13 +2062,13 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
     }
   });
 
-  // Gueltige Translation-Keys fuer den Konfispruch (deskriptiv, NICHT die Kuerzel
+  // Gueltige Translation-Keys für den Konfispruch (deskriptiv, NICHT die Kuerzel
   // aus PUT /bible-translation). Diese Werte landen in der DEDIZIERTEN Spalte
   // konfspruch_translation - getrennt von der Tageslosungs-Praeferenz bible_translation,
   // damit sich die beiden Features nicht gegenseitig ueberschreiben.
   const KONFSPRUCH_TRANSLATIONS = ['luther2017', 'bigs', 'gute_nachricht', 'elberfelder'];
 
-  // Kuratierte Konfsprueche fuer das Auswahl-Modal (org-gefiltert)
+  // Kuratierte Konfsprueche für das Auswahl-Modal (org-gefiltert)
   router.get('/konfsprueche', verifyTokenRBAC, async (req, res) => {
     if (req.user.type !== 'konfi') {
       return res.status(403).json({ error: 'Konfi-Zugriff erforderlich' });
@@ -1995,7 +2138,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
             valid_translations: KONFSPRUCH_TRANSLATIONS
           });
         }
-        // Spruch muss existieren und fuer die Org sichtbar sein
+        // Spruch muss existieren und für die Org sichtbar sein
         const { rows: [spruch] } = await db.query(
           `SELECT id FROM konfsprueche
            WHERE id = $1 AND is_active = true
@@ -2005,7 +2148,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         if (!spruch) {
           return res.status(404).json({ error: 'Konfispruch nicht gefunden' });
         }
-        // Listen-Wahl setzen, Freitext loeschen (Exklusivitaet).
+        // Listen-Wahl setzen, Freitext löschen (Exklusivitaet).
         // konfspruch_translation ist die DEDIZIERTE Spalte - bible_translation (Tageslosung)
         // wird hier bewusst NICHT angefasst.
         await db.query(
@@ -2043,8 +2186,8 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         if (freitext.length > 1000) {
           return res.status(400).json({ error: 'Der Spruchtext ist zu lang' });
         }
-        // Freitext setzen, Listen-Wahl loeschen (Exklusivitaet).
-        // konfspruch_translation bleibt unveraendert (Freitext hat keine Uebersetzungs-Tabs).
+        // Freitext setzen, Listen-Wahl löschen (Exklusivitaet).
+        // konfspruch_translation bleibt unverändert (Freitext hat keine Uebersetzungs-Tabs).
         await db.query(
           `UPDATE konfi_profiles
            SET konfspruch_freitext = $1, konfspruch_freitext_referenz = $2,

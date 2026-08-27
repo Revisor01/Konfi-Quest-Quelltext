@@ -1,4 +1,4 @@
-// Gemeinsame Datums-/Zeit-Formatierung fuer Events (zuvor in jeder Rolle
+// Gemeinsame Datums-/Zeit-Formatierung für Events (zuvor in jeder Rolle
 // dupliziert: Konfi/Admin/Teamer Views + DetailViews). Deutsche Locale.
 
 export const formatEventDate = (dateString: string): string =>
@@ -27,3 +27,21 @@ export const formatEventDateLong = (dateString: string): string =>
     month: 'long',
     year: 'numeric',
   });
+
+// Folge: Bei einer Freizeit vom 10. bis 14. sagte die Konfi-Liste ab dem
+// 11. noch "laeuft", die Detailansicht desselben Termins aber schon
+// "vergangen" -- zwei Ansichten derselben Sache widersprachen sich.
+//
+// Die Begruendung stand bereits zweimal im Code (konfi/views/EventsView.tsx,
+// admin/pages/AdminEventsPage.tsx), nur eben nicht an den anderen neun
+// Stellen. Deshalb steht sie jetzt hier, einmal.
+
+// Ende eines Termins: bei mehrtaegigen das Ende, sonst der Start.
+export const eventEnde = (event: { event_date: string; event_end_time?: string | null }): Date =>
+  new Date(event.event_end_time || event.event_date);
+
+// Ist der Termin vorbei? Mehrtaegige erst NACH ihrem letzten Tag.
+export const istVergangen = (
+  event: { event_date: string; event_end_time?: string | null },
+  jetzt: Date = new Date()
+): boolean => eventEnde(event) < jetzt;

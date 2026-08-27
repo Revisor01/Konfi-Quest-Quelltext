@@ -6,7 +6,6 @@ import {
   IonLabel,
   IonSegment,
   IonSegmentButton,
-  IonItemSliding,
   IonListHeader,
   IonItemGroup,
   IonInput,
@@ -32,7 +31,7 @@ import {
   filterOutline,
   infinite
 } from 'ionicons/icons';
-import { SectionHeader, ListSection, StatusBadge, EventLegendModal, EventCornerBadges, formatEventDate as formatDate, formatEventTime as formatTime } from '../../shared';
+import { SectionHeader, ListSection, StatusBadge, EventLegendModal, EventCornerBadges, formatEventDate as formatDate, formatEventTime as formatTime, istVergangen } from '../../shared';
 import { getStatusIcon } from '../../shared/StatusBadge';
 import { Event } from '../../../types/event';
 
@@ -42,10 +41,13 @@ interface EventsViewProps {
   onTabChange: (tab: 'meine' | 'alle' | 'konfirmation') => void;
   onSelectEvent: (event: Event) => void;
   onUpdate: () => void;
-  // Fuer Card-Modal-Optik (Sheet ueber der Seite statt Vollbild).
+  // Für Card-Modal-Optik (Sheet über der Seite statt Vollbild).
   presentingElement?: HTMLElement | null;
-  // Im iPad-Split-View aktuell rechts geoeffnetes Event (fuer Highlighting).
+  // Im iPad-Split-View aktuell rechts geoeffnetes Event (für Highlighting).
   selectedEventId?: number | null;
+  // Haupt-Segment der Page (Events | Anträge) - wird direkt unter dem
+  // Grafik-Header gerendert, damit die Seitenstruktur zu den anderen Tabs passt.
+  headerSlot?: React.ReactNode;
 }
 
 const EventsView: React.FC<EventsViewProps> = ({
@@ -55,7 +57,8 @@ const EventsView: React.FC<EventsViewProps> = ({
   onSelectEvent,
   onUpdate,
   presentingElement,
-  selectedEventId
+  selectedEventId,
+  headerSlot
 }) => {
   const [searchText, setSearchText] = useState('');
 
@@ -120,10 +123,32 @@ const EventsView: React.FC<EventsViewProps> = ({
 
   const statsData = getStatLabelsAndCounts();
 
+  // Kacheln, die einem Reiter entsprechen, springen dorthin. Die Labels wechseln
+  // je nach Reiter, deshalb wird über das Label zugeordnet statt über die
+  // Position. "Anstehend" ist streng genommen ein Zeitfilter innerhalb des
+  // Reiters und hat keinen eigenen — es fuehrt zu "Alle", weil das die
+  // vollstaendigste Liste ist.
+  const TAB_ZU_LABEL: Record<string, 'alle' | 'meine' | 'konfirmation'> = {
+    'Gesamt': 'alle',
+    'Anstehend': 'alle',
+    'Gebucht': 'meine'
+  };
+
+  const statsMitSprung = statsData.map((s) => {
+    const ziel = TAB_ZU_LABEL[s.label];
+    // Im jeweils eigenen Reiter fuehrt der Klick ins Leere -> dort nicht verlinken.
+    if (!ziel || ziel === activeTab || !onTabChange) return { value: s.count, label: s.label };
+    return {
+      value: s.count,
+      label: s.label,
+      onClick: () => onTabChange(ziel),
+      active: false
+    };
+  });
+
   // Berechne Status-Infos für ein Event
   const getEventStatusInfo = (event: Event) => {
-    // Mehrtaegige Events sind erst nach ihrem Ende (event_end_time) vorbei.
-    const isPastEvent = new Date(event.event_end_time || event.event_date) < new Date();
+    const isPastEvent = istVergangen(event);
     const isParticipated = isPastEvent && event.is_registered;
     const attendanceStatus = event.attendance_status;
     // Warteliste: booking_status kann 'waitlist' oder 'pending' sein (Backend sendet beides)
@@ -138,7 +163,7 @@ const EventsView: React.FC<EventsViewProps> = ({
     const isOptedOut = event.is_opted_out || event.booking_status === 'opted_out';
 
     // Bestimme Farbe - Konfirmation IMMER Lila (auch wenn angemeldet)
-    // Alle Status-Farben aus globalen Tokens — Aenderung im CSS wirkt hier automatisch
+    // Alle Status-Farben aus globalen Tokens — Änderung im CSS wirkt hier automatisch
     const C = {
       bonus: 'var(--app-color-bonus)',       // orange (Warteliste/Ausstehend/Bald)
       danger: 'var(--app-color-danger)',     // rot
@@ -155,7 +180,7 @@ const EventsView: React.FC<EventsViewProps> = ({
     else if (isMandatory && isPastEvent && attendanceStatus === 'absent') statusColor = C.danger;
     else if (isMandatory && isPastEvent) statusColor = C.bonus;
     // Pflicht-Event (Backend: registration_status='mandatory'): wer (auto-)
-    // angemeldet ist, sieht BLAU (wie "angemeldet"); sonst nach Kapazitaet
+    // angemeldet ist, sieht BLAU (wie "angemeldet"); sonst nach Kapazität
     // gruen/orange/rot. Pflicht selbst ist zusaetzlich ein eigenes Badge.
     else if (isMandatory && !isPastEvent && (event.is_registered || isParticipated)) statusColor = C.info;
     else if (isMandatory && !isPastEvent && event.max_participants > 0 && event.registered_count >= event.max_participants && event.waitlist_enabled) statusColor = C.bonus;
@@ -233,9 +258,11 @@ const EventsView: React.FC<EventsViewProps> = ({
         subtitle="Termine und Veranstaltungen"
         icon={calendar}
         preset="events"
-        stats={statsData.map(s => ({ value: s.count, label: s.label }))}
+        stats={statsMitSprung}
         onInfo={() => presentLegend({ presentingElement: presentingElement || undefined })}
       />
+
+      {headerSlot}
 
       {/* Suche & Filter — wie Chat-Pattern */}
       <IonList inset={true} style={{ margin: '16px' }}>
@@ -305,9 +332,12 @@ const EventsView: React.FC<EventsViewProps> = ({
           if (isKonfirmationLocked) statusText = 'Anderer Termin';
           const showBadge = !isPastEvent || isParticipated || isCancelled || isOptedOut || isKonfirmationLocked;
 
+          // Kein IonItemSliding: es gab hier nie IonItemOptions, das Item liess
+          // sich also anwischen und federte wirkungslos zurück — das wirkt
+          // kaputt.
           return (
-            <IonItemSliding key={event.id}>
               <IonItem
+                key={event.id}
                 button
                 onClick={() => onSelectEvent(event)}
                 detail={false}
@@ -319,7 +349,9 @@ const EventsView: React.FC<EventsViewProps> = ({
                   '--inner-padding-end': '0',
                   '--inner-border-width': '0',
                   '--border-style': 'none',
-                  '--min-height': 'auto'
+                  '--min-height': 'auto',
+                  display: 'block',
+                  marginBottom: index < filteredEvents.length - 1 ? '8px' : '0'
                 }}
               >
                 <div
@@ -372,7 +404,7 @@ const EventsView: React.FC<EventsViewProps> = ({
                           {!event.mandatory && (
                           <span className="app-list-item__meta-item">
                             <IonIcon icon={people} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--participants'} />
-                            {event.registered_count - (event.teamer_count || 0)}/{(event.max_participants || 0) > 0 ? event.max_participants : <IonIcon icon={infinite} style={{ verticalAlign: 'middle', fontSize: '0.9em' }} />}
+                            {(event.registered_count || 0)}/{(event.max_participants || 0) > 0 ? event.max_participants : <IonIcon icon={infinite} style={{ verticalAlign: 'middle', fontSize: '0.9em' }} />}
                           </span>
                           )}
                           {event.waitlist_enabled && (event.waitlist_count ?? 0) > 0 && (
@@ -424,7 +456,6 @@ const EventsView: React.FC<EventsViewProps> = ({
                   </div>
                 </div>
               </IonItem>
-            </IonItemSliding>
           );
         })}
       </ListSection>

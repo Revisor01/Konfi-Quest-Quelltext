@@ -19,6 +19,11 @@ export interface Timeslot {
 export interface Jahrgang {
   id: number;
   name: string;
+  // Punktearten-Schalter des Jahrgangs. Das Backend liefert sie ueber
+  // SELECT j.* mit; ohne sie boten die Termin-Formulare auch eine im Jahrgang
+  // abgeschaltete Punkteart an.
+  gottesdienst_enabled?: boolean;
+  gemeinde_enabled?: boolean;
 }
 
 // Vollstaendiges Event-Interface (alle Felder aus allen 8 Definitionen vereint)
@@ -43,6 +48,7 @@ export interface Event {
   registration_closes_at?: string;
   registered_count: number;
   registration_status: 'upcoming' | 'open' | 'closed' | 'cancelled';
+  teamer_registration_status?: 'none' | 'upcoming' | 'open' | 'waitlist' | 'closed' | 'cancelled';
   created_at?: string;
   is_registered?: boolean;
   registered?: boolean;
@@ -74,9 +80,16 @@ export interface Event {
   teamer_needed?: boolean;
   teamer_only?: boolean;
   teamer_count?: number;
+  teamer_max_participants?: number;
+  teamer_waitlist_enabled?: boolean;
+  teamer_max_waitlist_size?: number;
+  teamer_waitlist_count?: number;
   // Serien
   is_series?: boolean;
   series_id?: number;
+  // Event-Chat: nur gesetzt, wenn die abrufende Person Mitglied des Raums ist
+  // (die Listen-Endpunkte liefern sonst null, siehe events.js / konfi.js).
+  chat_room_id?: number | null;
   // Admin-spezifisch
   pending_bookings_count?: number;
   jahrgang_ids?: string;

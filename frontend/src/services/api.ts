@@ -2,22 +2,24 @@ import axios from 'axios';
 import axiosRetry from 'axios-retry';
 import { getToken, getRefreshToken, setToken, setRefreshToken, clearAuth, isLoggingOut, getActiveOrgId, setActiveOrgId } from './tokenStore';
 import { networkMonitor } from './networkMonitor';
+// Kein Zirkelbezug: biometrics.ts importiert nur tokenStore/Preferences, nie api.
+import { rotationUebernehmen } from './biometrics';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://konfi-quest.de/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
   // Timeout, damit ein Request bei totem Netz / Netzwerkwechsel (WLAN<->LTE) nicht
-  // ewig haengt: die alte TCP-Verbindung bricht beim Wechsel, ohne Timeout wuerde
-  // axios das nicht bemerken und die App "haengen". Mit Timeout wirft axios
+  // ewig hängt: die alte TCP-Verbindung bricht beim Wechsel, ohne Timeout wuerde
+  // axios das nicht bemerken und die App "hängen". Mit Timeout wirft axios
   // ECONNABORTED -> axios-retry greift (s.u.) und wiederholt auf der neuen Verbindung.
   timeout: 20000,
 });
 
 // Automatischer Retry für transiente Fehler (5xx, 408) — NICHT für 429.
-// WICHTIG: 429 (Rate-Limit) darf NICHT retried werden. Ein Retry-auf-429 zaehlt
+// WICHTIG: 429 (Rate-Limit) darf NICHT retried werden. Ein Retry-auf-429 zählt
 // erneut gegen das Limit und macht die Ueberschreitung schlimmer (Retry-Lawine) —
-// genau das war die Ursache fuer das sporadische "Zu viele Anfragen". Bei 429
+// genau das war die Ursache für das sporadische "Zu viele Anfragen". Bei 429
 // sagt der Server "warte", die richtige Antwort ist warten, nicht sofort 3x nachfeuern.
 axiosRetry(api, {
   retries: 3,
@@ -39,8 +41,8 @@ export const API_URL = API_BASE_URL;
 
 // Add token to requests. Laeuft der Token in Kuerze ab (oder ist er schon
 // abgelaufen), wird VOR dem Senden einmal refresht — sonst rennt z.B. der
-// Request-Burst beim App-Oeffnen erst in 401s und alle haengen ~1s im
-// Refresh-Umweg (das war die Hauptquelle der "App haengt kurz"-Momente).
+// Request-Burst beim App-Oeffnen erst in 401s und alle hängen ~1s im
+// Refresh-Umweg (das war die Hauptquelle der "App hängt kurz"-Momente).
 api.interceptors.request.use(async (config) => {
   const url = config.url || '';
   const isAuthFree = url.includes('/login') || url.includes('/refresh');
@@ -62,7 +64,7 @@ api.interceptors.request.use(async (config) => {
 
 // Verhindere parallele Refresh-Requests. Subscriber haben einen Fehlerpfad:
 // ohne ihn wuerden Requests, die auf einen fehlschlagenden Refresh warten,
-// als nie-aufloesende Promises haengen bleiben.
+// als nie-aufloesende Promises hängen bleiben.
 let isRefreshing = false;
 let refreshSubscribers: { onSuccess: (token: string) => void; onFail: (err: unknown) => void }[] = [];
 
@@ -81,7 +83,7 @@ const addRefreshSubscriber = (onSuccess: (token: string) => void, onFail: (err: 
 };
 
 // Refresh-Request selbst (direktes axios, nicht api — vermeidet Interceptor-Loop).
-// Aktive Org mitsenden, damit das neue Token den Org-Claim behaelt.
+// Aktive Org mitsenden, damit das neue Token den Org-Claim behält.
 const performRefresh = async (refreshToken: string): Promise<string> => {
   const activeOrgId = getActiveOrgId();
   const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
@@ -93,14 +95,26 @@ const performRefresh = async (refreshToken: string): Promise<string> => {
   // REIHENFOLGE IST KRITISCH (Android-Session-Verlust, 1.5.0):
   // Der Server rotiert bei jedem Refresh und REVOKED den alten Refresh-Token
   // sofort (Grace-Window nur 30s). Der neue Refresh-Token ist der einzige
-  // langlebige (90d) Wiederherstellungs-Schluessel — geht er verloren, ist die
+  // langlebige (90d) Wiederherstellungs-Schlüssel — geht er verloren, ist die
   // Session nach 30s unrettbar tot (kein Push-Token-Send, Chat laedt nur Stale-
   // Cache, Socket 'jwt expired'). Android killt App-Prozesse aggressiver als iOS,
   // daher MUSS der Refresh-Token ZUERST und bestaetigt persistiert werden.
   // Der Access-Token ist unkritisch: geht er bei einem Crash verloren, holt ihn
-  // der naechste ensureFreshToken() ueber den (gesicherten) Refresh-Token neu.
+  // der nächste ensureFreshToken() über den (gesicherten) Refresh-Token neu.
   await setRefreshToken(newRefreshToken);
   await setToken(newToken);
+
+  // Ist die biometrische Anmeldung aktiv, muss die gesichert abgelegte Sitzung
+  // denselben rotierten Token bekommen — sonst ist sie beim naechsten Start
+  // tot (der Server macht den alten Token nach 5 Minuten ungueltig).
+  // Best-effort: ein Fehler hier darf den laufenden Refresh NICHT scheitern
+  // lassen, sonst zerlegt eine Kleinigkeit im sicheren Speicher die Sitzung.
+  try {
+    await rotationUebernehmen(newRefreshToken);
+  } catch (fehler) {
+    console.warn('Biometrisch gesicherte Sitzung nicht aktualisiert:', fehler);
+  }
+
   return newToken;
 };
 
@@ -122,7 +136,7 @@ const getTokenExp = (token: string): number | null => {
 
 // Sorgt dafuer, dass der Access-Token noch mindestens marginSeconds gueltig ist,
 // und refresht sonst proaktiv EINMAL (parallel wartende Aufrufer teilen sich den
-// Refresh). Gibt bei transienten Fehlern den alten Token zurueck — die Session
+// Refresh). Gibt bei transienten Fehlern den alten Token zurück — die Session
 // wird hier bewusst NICHT zerstoert, das entscheidet allein der 401-Interceptor.
 export const ensureFreshToken = async (marginSeconds = 30): Promise<string | null> => {
   const token = getToken();
@@ -161,8 +175,8 @@ api.interceptors.response.use(
 
     // SICHERHEITSNETZ Multi-Org: Wenn ein Request mit aktivem Org-Header ein
     // 403 "Kein Zugriff auf diese Organisation" bekommt (z.B. Mitgliedschaft
-    // entzogen, oder Token-Claim nach Refresh verloren), faellt die App auf die
-    // Primaer-Org zurueck und laedt neu — statt dauerhaft alles leer zu zeigen.
+    // entzogen, oder Token-Claim nach Refresh verloren), fällt die App auf die
+    // Primaer-Org zurück und laedt neu — statt dauerhaft alles leer zu zeigen.
     if (
       error.response?.status === 403 &&
       error.response?.data?.error === 'Kein Zugriff auf diese Organisation' &&
@@ -192,7 +206,7 @@ api.interceptors.response.use(
 
       const refreshToken = getRefreshToken();
       if (!refreshToken) {
-        // Bewusster Logout laeuft → kein "Sitzung abgelaufen", einfach durchreichen.
+        // Bewusster Logout läuft → kein "Sitzung abgelaufen", einfach durchreichen.
         if (isLoggingOut()) {
           return Promise.reject(error);
         }
@@ -204,7 +218,7 @@ api.interceptors.response.use(
 
       if (isRefreshing) {
         // Anderer Request refresht bereits → warten. Schlaegt der Refresh fehl,
-        // wird der wartende Request mit dem Fehler abgewiesen (statt ewig zu haengen).
+        // wird der wartende Request mit dem Fehler abgewiesen (statt ewig zu hängen).
         return new Promise((resolve, reject) => {
           addRefreshSubscriber(
             (newToken: string) => {
@@ -231,7 +245,7 @@ api.interceptors.response.use(
         isRefreshing = false;
         onTokenRefreshFailed(refreshError);
 
-        // Bewusster Logout laeuft → kein "Sitzung abgelaufen"-Dialog.
+        // Bewusster Logout läuft → kein "Sitzung abgelaufen"-Dialog.
         if (isLoggingOut()) {
           await clearAuth();
           return Promise.reject(refreshError);

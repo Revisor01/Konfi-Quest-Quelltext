@@ -1,4 +1,6 @@
-const admin = require('firebase-admin');
+const { initializeApp, cert } = require('firebase-admin/app');
+// Gleiches gilt für admin.messaging() — in v14 nur noch über getMessaging().
+const { getMessaging } = require('firebase-admin/messaging');
 
 // Firebase Admin initialisieren (Service Account wird später hinzugefügt)
 let firebaseApp = null;
@@ -21,8 +23,8 @@ const initializeFirebase = () => {
       }
     }
 
-    firebaseApp = admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount),
+    firebaseApp = initializeApp({
+      credential: cert(serviceAccount),
     });
 
     return firebaseApp;
@@ -71,7 +73,7 @@ const sendFirebasePushNotification = async (deviceToken, notificationData) => {
       },
     };
 
-    const response = await admin.messaging().send(message);
+    const response = await getMessaging().send(message);
     return { success: true, messageId: response };
   } catch (error) {
     console.error('Firebase notification error:', error);
@@ -100,10 +102,15 @@ const sendFirebaseSilentPush = async (deviceToken, badgeCount) => {
           'apns-priority': '5',
         },
       },
+      android: {
+        priority: 'high',
+        // Bewusst ohne notification-Block: Das hier soll nichts anzeigen,
+        // sondern nur die Zahl nachfuehren.
+      },
       data: { type: 'badge_update', count: badgeCount.toString() },
     };
 
-    const response = await admin.messaging().send(message);
+    const response = await getMessaging().send(message);
     return { success: true, messageId: response };
   } catch (error) {
     console.error('Firebase silent push error:', error);

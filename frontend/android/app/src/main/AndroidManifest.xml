@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- allowBackup=false: Die App haelt Login-Token und Chat-Inhalte von
+         Jugendlichen vor. Mit Androids Auto-Backup landeten die im Google-Konto
+         der Nutzer:innen und liessen sich auf ein anderes Geraet einspielen. -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -39,4 +44,30 @@
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Benachrichtigungen ab Android 13 (API 33). Ohne diese Deklaration darf
+         die App dort KEINE Push-Nachrichten anzeigen — PushNotifications
+         .requestPermissions() im AppContext laeuft dann ins Leere, ohne dass ein
+         Dialog erscheint. Das Capacitor-Push-Plugin bringt nur den
+         Messaging-Service mit, nicht diese Berechtigung. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Biometrische Anmeldung (Fingerabdruck / Gesichtsentsperrung). Ohne
+         diese Deklaration meldet BiometricManager keine Verfuegbarkeit und der
+         Schalter im Profil erscheint auf keinem Geraet. -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+
+    <!-- Biometrie ist kein Muss: Geraete ohne Sensor sollen die App weiterhin
+         installieren koennen, sie sehen den Schalter dann einfach nicht. -->
+    <uses-feature android:name="android.hardware.biometrics" android:required="false" />
+
+    <!-- Kamera fuer den QR-Scanner (Event-Checkin). Ohne diese Deklaration
+         verweigert Android getUserMedia in der WebView, ohne dass der Nutzer
+         ueberhaupt einen Berechtigungsdialog zu sehen bekommt. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Die Kamera ist kein Muss: Geraete ohne Kamera sollen die App weiterhin
+         aus dem Play Store installieren koennen. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 </manifest>

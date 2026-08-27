@@ -4,7 +4,9 @@ const bcrypt = require('bcrypt');
 const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const { invalidateUserCache } = require('../middleware/rbac');
+const { validatePassword } = require('../utils/passwordUtils');
 const liveUpdate = require('../utils/liveUpdate');
+const { deletePhotoFile, deleteChallengeFile, deleteChatFile, deleteMaterialFile } = require('../utils/photoStorage');
 const { syncTeamChat } = require('../utils/teamChat');
 const { syncJahrgangChat } = require('../utils/jahrgangChat');
 const chatSyncCache = require('../utils/chatSyncCache');
@@ -14,7 +16,31 @@ const chatSyncCache = require('../utils/chatSyncCache');
 // super_admin: Kann ALLE Orgs sehen, erstellen, löschen
 // org_admin: Kann NUR eigene Org sehen und bearbeiten
 // ============================================
-module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
+module.exports = (db, rbacVerifier, { requireSuperAdmin, requireTeamer }) => {
+
+  // Verwaltungszugriff auf Organisationsdaten: super_admin (org-uebergreifend
+  // zustaendig) ODER eine Verwaltungsrolle der Organisation. requireTeamer
+  // allein wuerde den super_admin aussperren, dessen Rolle in requireRole
+  // nicht gelistet ist; requireSuperAdmin allein wuerde org_admin/admin/teamer
+  // aussperren. Die Org-Zugehoerigkeit selbst prüfen die Routen weiterhin
+  // inline (is_super_admin ODER eigene Org).
+  const requireOrgVerwaltung = (req, res, next) => {
+    if (req.user && req.user.is_super_admin) return next();
+    return requireTeamer(req, res, next);
+  };
+
+  // Zentrale Passwort-Policy auch hier anwenden:
+  // Diese beiden Routen prüfen bisher nur eine Mindestlaenge von 6 Zeichen —
+  // schwaecher als jede andere Stelle, an der Passwoerter gesetzt werden, und
+  // das ausgerechnet für org_admin-Konten. validatePassword verlangt 8 Zeichen,
+  // Gross-/Kleinbuchstaben, Ziffer, Sonderzeichen und keine Leerzeichen.
+  // Die automatisch erzeugten Passwoerter (generateBiblicalPassword, z.B.
+  // "Offenbarung23,8") erfuellen die Policy — gegen 300 Stichproben geprüft.
+  const passwortPolicy = (feld) => body(feld).custom((wert) => {
+    const fehler = validatePassword(wert || '');
+    if (fehler) throw new Error(fehler);
+    return true;
+  });
 
   // Validierungsregeln
   const validateCreateOrg = [
@@ -22,7 +48,7 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
     body('slug').trim().notEmpty().withMessage('Slug ist erforderlich'),
     body('display_name').trim().notEmpty().withMessage('Anzeigename ist erforderlich'),
     body('admin_username').trim().notEmpty().withMessage('Admin-Benutzername ist erforderlich'),
-    body('admin_password').isLength({ min: 6 }).withMessage('Admin-Passwort muss mindestens 6 Zeichen lang sein'),
+    passwortPolicy('admin_password'),
     body('admin_display_name').trim().notEmpty().withMessage('Admin-Anzeigename ist erforderlich'),
     handleValidationErrors
   ];
@@ -44,18 +70,18 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
     param('id').isInt({ min: 1 }).withMessage('Ungültige Organisations-ID'),
     body('username').trim().notEmpty().withMessage('Benutzername ist erforderlich'),
     body('display_name').trim().notEmpty().withMessage('Anzeigename ist erforderlich'),
-    body('password').isLength({ min: 6 }).withMessage('Passwort muss mindestens 6 Zeichen lang sein'),
+    passwortPolicy('password'),
     handleValidationErrors
   ];
 
   // Get all organizations - NUR super_admin
   router.get('/', rbacVerifier, requireSuperAdmin, async (req, res) => {
     try {
-      // user_count (Team) zaehlt BEIDE Quellen: Primaer-User (users.organization_id)
+      // user_count (Team) zählt BEIDE Quellen: Primaer-User (users.organization_id)
       // UND Multi-Org-Mitglieder (user_organizations), jeweils ohne Konfis und
-      // ueber DISTINCT dedupliziert (ein User, der primaer + Mapping in derselben
-      // Org haengt, zaehlt nur einmal). Als Sub-Query, damit der konfi_count-JOIN
-      // die Zaehlung nicht verzerrt.
+      // über DISTINCT dedupliziert (ein User, der primaer + Mapping in derselben
+      // Org hängt, zählt nur einmal). Als Sub-Query, damit der konfi_count-JOIN
+      // die Zählung nicht verzerrt.
       const query = `
         SELECT o.*,
                (
@@ -88,7 +114,7 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
     }
   });
 
-  // GET /search-users?q= — bestehende User systemweit suchen (fuer Multi-Org-
+  // GET /search-users?q= — bestehende User systemweit suchen (für Multi-Org-
   // Zuweisung). Konfis ausgenommen. MUSS vor /:id stehen, sonst faengt /:id den Pfad.
   router.get('/search-users', rbacVerifier, requireSuperAdmin, async (req, res) => {
     try {
@@ -117,7 +143,12 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
   });
 
   // Get current organization details (muss VOR /:id stehen, sonst wird "current" als ID gefangen)
-  router.get('/current', rbacVerifier, async (req, res) => {
+  // requireTeamer wie bei GET /:id: Die Route liefert o.* der eigenen
+  // Organisation und damit dieselben Kontakt-, Lizenz- und Trial-Daten.
+  // Ohne diesen Guard wäre der Schutz an GET /:id wirkungslos — derselbe
+  // Datensatz wäre hier weiterhin für jede Konfi abrufbar gewesen
+  // 
+  router.get('/current', rbacVerifier, requireOrgVerwaltung, async (req, res) => {
     try {
       const organizationId = req.user.organization_id;
 
@@ -134,19 +165,13 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
                    WHERE uo.organization_id = o.id AND r.name != 'konfi'
                  ) team
                ) as user_count,
-               COUNT(DISTINCT kp.user_id) as konfi_count,
-               COUNT(DISTINCT j.id) as jahrgang_count,
-               COUNT(DISTINCT a.id) as activity_count,
-               COUNT(DISTINCT e.id) as event_count,
-               COUNT(DISTINCT cb.id) as badge_count
+               (SELECT COUNT(*) FROM konfi_profiles kp WHERE kp.organization_id = o.id) as konfi_count,
+               (SELECT COUNT(*) FROM jahrgaenge j WHERE j.organization_id = o.id) as jahrgang_count,
+               (SELECT COUNT(*) FROM activities a WHERE a.organization_id = o.id) as activity_count,
+               (SELECT COUNT(*) FROM events e WHERE e.organization_id = o.id) as event_count,
+               (SELECT COUNT(*) FROM custom_badges cb WHERE cb.organization_id = o.id) as badge_count
         FROM organizations o
-        LEFT JOIN konfi_profiles kp ON o.id = kp.organization_id
-        LEFT JOIN jahrgaenge j ON o.id = j.organization_id
-        LEFT JOIN activities a ON o.id = a.organization_id
-        LEFT JOIN events e ON o.id = e.organization_id
-        LEFT JOIN custom_badges cb ON o.id = cb.organization_id
         WHERE o.id = $1
-        GROUP BY o.id
       `;
 
       const { rows: [organization] } = await db.query(query, [organizationId]);
@@ -165,7 +190,11 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
   // Get single organization by ID
   // super_admin: alle, org_admin: nur eigene
   // OPTIMIERT: Parallele Queries statt JOIN-Monster
-  router.get('/:id', rbacVerifier, async (req, res) => {
+  // requireTeamer: Die Route liefert SELECT * der Organisation — Kontaktdaten
+  // (Name, Telefon, Privatadresse der Leitung), Lizenz- und Trial-Angaben.
+  // Geprueft wurde bisher nur die Org-Zugehoerigkeit, nicht die Rolle: damit
+  // bekam auch jede Konfi diese Daten.
+  router.get('/:id', rbacVerifier, requireOrgVerwaltung, async (req, res) => {
     try {
       const { id } = req.params;
 
@@ -181,7 +210,7 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       const orgQuery = "SELECT * FROM organizations WHERE id = $1";
 
       // Statistiken parallel laden (viel schneller als JOINs)
-      // Team-Zaehler beziehen BEIDE Quellen ein: Primaer-User (users.organization_id)
+      // Team-Zähler beziehen BEIDE Quellen ein: Primaer-User (users.organization_id)
       // UND Multi-Org-Mitglieder (user_organizations), dedupliziert per UNION/DISTINCT.
       // Sonst zeigen Orgs mit ausschliesslich zugewiesenen (nicht primaeren) Admins
       // faelschlich "0 Team".
@@ -445,6 +474,53 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
         }
       }
 
+      // 9. Beispiel-Challenges (Startpunkt zum Anpassen). Je eine pro
+      // challenge_type, als Entwuerfe (is_draft=true) angelegt, damit nichts
+      // ungewollt live geht — die Leitung passt Inhalte an und veroeffentlicht
+      // selbst. Platzhalter-Zeitraum (7 bis 14 Tage ab jetzt), da eine neue Org
+      // noch keine Jahrgänge hat und die Challenges daher bewusst OHNE
+      // Jahrgangs-Zuweisung starten (challenge_jahrgang_assignments bleibt leer;
+      // routes/challenges.js zeigt Entwuerfe ohne Zuweisung über LEFT JOIN /
+      // COALESCE sauber an).
+      const defaultChallenges = [
+        {
+          title: 'Unbezahlbar — Momente, die man nicht kaufen kann',
+          description: 'Eine Woche lang achtest du auf Momente, die nichts kosten und dir trotzdem wichtig sind — ein Lachen, ein Sonnenuntergang, ein gutes Gespräch. Teile so einen Moment als Foto oder Text.',
+          challenge_type: 'wahrnehmung',
+          visibility: 'konfi_choice',
+          moderated: true,
+          badge_name: 'Unbezahlbar'
+        },
+        {
+          title: 'Dein Song',
+          description: 'Es gibt bestimmt einen Song, der etwas mit dir macht — der dich runterholt, aufbaut oder einfach zu dir passt. Teile ihn als Link und schreib in einem Satz, warum genau dieser Song.',
+          challenge_type: 'beitrag',
+          visibility: 'konfi_choice',
+          moderated: false,
+          badge_name: 'Dein Song'
+        },
+        {
+          title: 'Eine Woche ein guter Vorsatz',
+          description: 'Zieh eine Woche lang etwas Kleines durch, das dir guttut — zum Beispiel morgens an eine Sache denken, für die du dankbar bist, oder jeden Tag einen freundlichen Satz zu jemandem sagen. Schreib am Ende kurz auf, wie es für dich war. Das lesen nur wir.',
+          challenge_type: 'praxis',
+          visibility: 'private',
+          moderated: false,
+          badge_name: 'Guter Vorsatz'
+        }
+      ];
+
+      const challengeQuery = `INSERT INTO challenges (
+        organization_id, title, description, challenge_type, visibility, moderated,
+        badge_name, created_by, starts_at, ends_at, is_draft
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW() + INTERVAL '7 days', NOW() + INTERVAL '14 days', true)`;
+
+      for (const challenge of defaultChallenges) {
+        await db.query(challengeQuery, [
+          organizationId, challenge.title, challenge.description, challenge.challenge_type,
+          challenge.visibility, challenge.moderated, challenge.badge_name, newAdmin.id
+        ]);
+      }
+
       res.status(201).json({
         id: organizationId,
         admin_user_id: newAdmin.id,
@@ -453,13 +529,14 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
         default_levels_created: defaultLevels.length,
         default_categories_created: defaultCategories.length,
         default_activities_created: defaultActivities.length,
-        message: `Organisation erfolgreich erstellt (Standard-Rollen, Admin, ${defaultBadges.length} Badges, ${defaultCertificates.length} Zertifikate, ${defaultLevels.length} Levels, ${defaultCategories.length} Kategorien, ${defaultActivities.length} Aktivitäten)`
+        default_challenges_created: defaultChallenges.length,
+        message: `Organisation erfolgreich erstellt (Standard-Rollen, Admin, ${defaultBadges.length} Badges, ${defaultCertificates.length} Zertifikate, ${defaultLevels.length} Levels, ${defaultCategories.length} Kategorien, ${defaultActivities.length} Aktivitäten, ${defaultChallenges.length} Beispiel-Challenges)`
       });
 
       // Live-Update NACH der Response: nur an den ausfuehrenden Super-Admin selbst
       // (Multi-Device-Sync seiner eigenen Sitzung). Die Organisations-Verwaltung ist
       // super-admin-only und org-uebergreifend; ein Org-Broadcast passt hier nicht.
-      // Andere Super-Admins sind selten und aktualisieren beim naechsten Seitenaufruf.
+      // Andere Super-Admins sind selten und aktualisieren beim nächsten Seitenaufruf.
       liveUpdate.sendToUserByRole(req.user.id, 'organizations', 'create');
 
     } catch (err) {
@@ -493,21 +570,32 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       const setClauses = [
         'name = $1', 'slug = $2', 'display_name = $3', 'description = $4',
         'contact_name = $5', 'contact_email = $6', 'contact_phone = $7', 'address = $8',
-        'website_url = $9', 'kirchenkreis = $10', 'is_active = $11', 'updated_at = NOW()'
+        'website_url = $9', 'kirchenkreis = $10', 'updated_at = NOW()'
       ];
       const params = [
         name, slug, display_name, description, contact_name || null, contact_email, contact_phone,
-        address, website_url, kirchenkreis || null, is_active
+        address, website_url, kirchenkreis || null
       ];
 
-      // trial_ends_at + is_trial darf NUR der super_admin aendern.
+      // is_active darf NUR der super_admin setzen.
+      // Eine inaktive Organisation fuehrt in rbac.js:177 für JEDEN Zugang zu
+      // 401 "Organization is inactive" — ein org_admin konnte damit sich selbst
+      // und die gesamte Gemeinde aussperren, ohne den Schritt zurueckdrehen zu
+      // können: dazu braeuchte es wieder einen Zugang, den es dann nicht mehr
+      // gibt. Nur der super_admin kaeme noch heran.
+      if (isSuperAdmin && Object.prototype.hasOwnProperty.call(req.body, 'is_active')) {
+        params.push(is_active);
+        setClauses.push(`is_active = $${params.length}`);
+      }
+
+      // trial_ends_at + is_trial darf NUR der super_admin ändern.
       //   trial_ends_at: null = unbegrenzt, Datum = Zugang bis dahin.
       //   is_trial:      true = Dashboard-Hinweis an, false = aus (Lizenz/unbegrenzt).
       if (isSuperAdmin && Object.prototype.hasOwnProperty.call(req.body, 'trial_ends_at')) {
         params.push(req.body.trial_ends_at || null);
         setClauses.push(`trial_ends_at = $${params.length}`);
-        // Bei jeder Laufzeit-Aenderung den Erinnerungs-Marker zuruecksetzen,
-        // damit die naechste anstehende Lizenz-Erinnerung wieder verschickt wird.
+        // Bei jeder Laufzeit-Änderung den Erinnerungs-Marker zuruecksetzen,
+        // damit die nächste anstehende Lizenz-Erinnerung wieder verschickt wird.
         setClauses.push('license_reminder_sent_at = NULL');
       }
       if (isSuperAdmin && Object.prototype.hasOwnProperty.call(req.body, 'is_trial')) {
@@ -527,7 +615,7 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       res.json({ message: 'Organisation erfolgreich aktualisiert' });
 
       // Live-Update NACH der Response an den Ausfuehrenden selbst (Multi-Device).
-      // Passt fuer super_admin (org-uebergreifende Verwaltung) und org_admin (eigene Org).
+      // Passt für super_admin (org-uebergreifende Verwaltung) und org_admin (eigene Org).
       liveUpdate.sendToUserByRole(req.user.id, 'organizations', 'update');
     } catch (err) {
       if (err.code === '23505') { // unique_violation
@@ -557,16 +645,21 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       // sich auf FK-CASCADE zu verlassen, da viele FKs NO ACTION sind (created_by,
       // admin_id, *.organization_id auf chat_rooms/materials/settings/...). Eine
       // einzige nicht abgeraeumte NO-ACTION-Referenz wuerde sonst die ganze
-      // Loeschung blockieren (Rollback). Alles laeuft in EINER Transaktion.
+      // Löschung blockieren (Rollback). Alles läuft in EINER Transaktion.
       //
       // Hinweis Multi-Org: Gast-Mitgliedschaften FREMDER User in dieser Org
-      // (user_organizations.organization_id = id) werden hier geloescht; die
-      // Gast-User selbst bleiben (gehoeren ihrer eigenen Org). Die org-eigenen
-      // User werden geloescht, ihre Gast-Mitgliedschaften in ANDEREN Orgs
-      // kaskadieren ueber den users-FK (user_organizations.user_id CASCADE).
+      // (user_organizations.organization_id = id) werden hier gelöscht; die
+      // Gast-User selbst bleiben (gehören ihrer eigenen Org). Die org-eigenen
+      // User werden gelöscht, ihre Gast-Mitgliedschaften in ANDEREN Orgs
+      // kaskadieren über den users-FK (user_organizations.user_id CASCADE).
 
-      // 1. Chat-System (Blaetter zuerst). chat_polls haengt an message_id (NICHT
-      // room_id) -> ueber chat_messages der Org-Rooms aufloesen.
+      // Chat-Anhaenge VOR den DB-Deletes einsammeln, damit die Dateien nach
+      // dem COMMIT vom Datenträger entfernt werden können.
+      const { rows: orgChatFiles } = await client.query(
+        'SELECT file_path FROM chat_messages WHERE room_id IN (SELECT id FROM chat_rooms WHERE organization_id = $1) AND file_path IS NOT NULL', [id]);
+
+      // 1. Chat-System (Blaetter zuerst). chat_polls hängt an message_id (NICHT
+      // room_id) -> über chat_messages der Org-Rooms aufloesen.
       await client.query('DELETE FROM chat_poll_votes WHERE poll_id IN (SELECT id FROM chat_polls WHERE message_id IN (SELECT id FROM chat_messages WHERE room_id IN (SELECT id FROM chat_rooms WHERE organization_id = $1)))', [id]);
       await client.query('DELETE FROM chat_polls WHERE message_id IN (SELECT id FROM chat_messages WHERE room_id IN (SELECT id FROM chat_rooms WHERE organization_id = $1))', [id]);
       await client.query('DELETE FROM chat_message_reactions WHERE message_id IN (SELECT id FROM chat_messages WHERE room_id IN (SELECT id FROM chat_rooms WHERE organization_id = $1))', [id]);
@@ -575,13 +668,14 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       await client.query('DELETE FROM chat_participants WHERE room_id IN (SELECT id FROM chat_rooms WHERE organization_id = $1)', [id]);
       await client.query('DELETE FROM chat_rooms WHERE organization_id = $1', [id]);
 
-      // 2. Material-System (haengt an events/jahrgaenge/users der Org)
-      await client.query('DELETE FROM material_file_tags WHERE material_id IN (SELECT id FROM materials WHERE organization_id = $1)', [id]);
+      // 2. Material-System (hängt an events/jahrgaenge/users der Org).
+      // Auch hier: Dateinamen vor dem DB-Delete sichern.
+      const { rows: orgMaterialFiles } = await client.query(
+        'SELECT mf.stored_name FROM material_files mf JOIN materials m ON mf.material_id = m.id WHERE m.organization_id = $1', [id]);
       await client.query('DELETE FROM material_files WHERE material_id IN (SELECT id FROM materials WHERE organization_id = $1)', [id]);
       await client.query('DELETE FROM material_events WHERE material_id IN (SELECT id FROM materials WHERE organization_id = $1)', [id]);
       await client.query('DELETE FROM material_jahrgaenge WHERE material_id IN (SELECT id FROM materials WHERE organization_id = $1)', [id]);
       await client.query('DELETE FROM materials WHERE organization_id = $1', [id]);
-      await client.query('DELETE FROM material_tags WHERE organization_id = $1', [id]);
 
       // 3. Event-Daten
       await client.query('DELETE FROM event_points WHERE organization_id = $1', [id]);
@@ -590,8 +684,8 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       await client.query('DELETE FROM event_bookings WHERE organization_id = $1', [id]);
       await client.query('DELETE FROM event_categories WHERE event_id IN (SELECT id FROM events WHERE organization_id = $1)', [id]);
       await client.query('DELETE FROM event_jahrgang_assignments WHERE event_id IN (SELECT id FROM events WHERE organization_id = $1)', [id]);
-      await client.query('DELETE FROM event_timeslots WHERE event_id IN (SELECT id FROM events WHERE organization_id = $1)', [id]);
-      // Serien-Selbstreferenz (events.series_id NO ACTION) entkoppeln, dann loeschen
+      await client.query('DELETE FROM event_timeslots WHERE organization_id = $1 OR event_id IN (SELECT id FROM events WHERE organization_id = $2)', [id, id]);
+      // Serien-Selbstreferenz (events.series_id NO ACTION) entkoppeln, dann löschen
       await client.query('UPDATE events SET series_id = NULL WHERE organization_id = $1', [id]);
       await client.query('DELETE FROM events WHERE organization_id = $1', [id]);
 
@@ -599,22 +693,36 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       await client.query('DELETE FROM user_activities WHERE organization_id = $1', [id]);
       await client.query('DELETE FROM bonus_points WHERE organization_id = $1', [id]);
       await client.query('DELETE FROM user_badges WHERE organization_id = $1', [id]);
+      const { rows: orgRequestPhotos } = await client.query(
+        'SELECT photo_filename FROM activity_requests WHERE organization_id = $1 AND photo_filename IS NOT NULL', [id]);
+      const { rows: orgChallengeFiles } = await client.query(
+        'SELECT file_path FROM challenge_submissions WHERE organization_id = $1 AND file_path IS NOT NULL', [id]);
       await client.query('DELETE FROM activity_requests WHERE organization_id = $1', [id]);
+      // Challenges explizit (statt CASCADE), passend zum Stil dieser Löschung
+      await client.query('DELETE FROM challenge_submissions WHERE organization_id = $1', [id]);
+      await client.query('DELETE FROM challenge_jahrgang_assignments WHERE challenge_id IN (SELECT id FROM challenges WHERE organization_id = $1)', [id]);
+      await client.query('DELETE FROM challenges WHERE organization_id = $1', [id]);
       await client.query('DELETE FROM wrapped_snapshots WHERE organization_id = $1', [id]);
 
       // 5. Zertifikate (user_certificates -> certificate_types)
       await client.query('DELETE FROM user_certificates WHERE organization_id = $1', [id]);
       await client.query('DELETE FROM certificate_types WHERE organization_id = $1', [id]);
 
-      // 6. Notifications, Tokens, Resets (haengen an org-Usern)
-      await client.query('DELETE FROM notifications WHERE user_id IN (SELECT id FROM users WHERE organization_id = $1)', [id]);
+      await client.query('DELETE FROM notifications WHERE organization_id = $1 OR user_id IN (SELECT id FROM users WHERE organization_id = $2)', [id, id]);
       await client.query('DELETE FROM push_tokens WHERE user_id IN (SELECT id FROM users WHERE organization_id = $1)', [id]);
       await client.query('DELETE FROM refresh_tokens WHERE user_id IN (SELECT id FROM users WHERE organization_id = $1)', [id]);
       await client.query('DELETE FROM password_resets WHERE user_id IN (SELECT id FROM users WHERE organization_id = $1)', [id]);
 
       // 7. User-Zuweisungen + Multi-Org-Mitgliedschaften
       await client.query('DELETE FROM user_jahrgang_assignments WHERE user_id IN (SELECT id FROM users WHERE organization_id = $1)', [id]);
-      // ALLE Mitgliedschaften in dieser Org (auch Gast-User fremder Orgs)
+      // ALLE Mitgliedschaften in dieser Org (auch Gast-User fremder Orgs).
+      // Die betroffenen User VORHER einsammeln: Ihr gecachtes req.user trägt
+      // noch die Rolle in dieser Org, und ohne Invalidierung könnten sie bis
+      // zu 30 Sekunden weiterarbeiten.
+      const { rows: exMitglieder } = await client.query(
+        'SELECT DISTINCT user_id FROM user_organizations WHERE organization_id = $1',
+        [id]
+      );
       await client.query('DELETE FROM user_organizations WHERE organization_id = $1', [id]);
 
       // 8. Konfsprueche (org-gescopt; konfi_profiles.konfspruch_id ist SET NULL)
@@ -622,7 +730,7 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       await client.query('DELETE FROM konfsprueche WHERE organization_id = $1', [id]);
 
       // 9. Stammdaten, die per created_by/admin_id (NO ACTION) auf users zeigen,
-      // MUESSEN vor DELETE FROM users weg, sonst blockiert der FK das Loeschen.
+      // MUESSEN vor DELETE FROM users weg, sonst blockiert der FK das Löschen.
       await client.query('DELETE FROM activity_categories WHERE activity_id IN (SELECT id FROM activities WHERE organization_id = $1)', [id]);
       await client.query('DELETE FROM activities WHERE organization_id = $1', [id]);
       await client.query('DELETE FROM categories WHERE organization_id = $1', [id]);
@@ -633,11 +741,11 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       await client.query('DELETE FROM settings WHERE organization_id = $1', [id]);
 
       // 10. Konfi-Profile + Users der Org. Gast-Mitgliedschaften dieser User in
-      // ANDEREN Orgs kaskadieren ueber den users-FK.
+      // ANDEREN Orgs kaskadieren über den users-FK.
       await client.query('DELETE FROM konfi_profiles WHERE organization_id = $1', [id]);
       await client.query('DELETE FROM users WHERE organization_id = $1', [id]);
 
-      // 11. Jahrgaenge (nach users; user_jahrgang_assignments ist weg)
+      // 11. Jahrgänge (nach users; user_jahrgang_assignments ist weg)
       await client.query('DELETE FROM jahrgaenge WHERE organization_id = $1', [id]);
 
       // 12. Rollen (role_permissions + user_organizations.role_id RESTRICT sind
@@ -653,7 +761,31 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       }
 
       await client.query('COMMIT');
+
+      // Cache der ehemaligen Mitglieder leeren — erst nach dem COMMIT, damit
+      // ein Rollback keinen unnötig geleerten Cache hinterlaesst. Ohne das
+      // könnten Gast-User fremder Organisationen bis zu 30 Sekunden mit ihrer
+      // alten Rolle weiterarbeiten.
+      for (const m of exMitglieder) {
+        invalidateUserCache(m.user_id);
+      }
+
       res.json({ message: 'Organisation und alle zugehörigen Daten erfolgreich gelöscht' });
+
+      // Dateien nach dem COMMIT entfernen (nicht blockierend — ein fehlendes
+      // File darf die bereits erfolgte Löschung nicht scheitern lassen).
+      for (const row of orgRequestPhotos) {
+        try { await deletePhotoFile(row.photo_filename); } catch (e) { console.warn('Org-Delete: Antragsfoto nicht entfernbar:', e.message); }
+      }
+      for (const row of orgChallengeFiles) {
+        try { await deleteChallengeFile(row.file_path); } catch (e) { console.warn('Org-Delete: Challenge-Datei nicht entfernbar:', e.message); }
+      }
+      for (const row of orgChatFiles) {
+        try { await deleteChatFile(row.file_path); } catch (e) { console.warn('Org-Delete: Chat-Anhang nicht entfernbar:', e.message); }
+      }
+      for (const row of orgMaterialFiles) {
+        try { await deleteMaterialFile(row.stored_name); } catch (e) { console.warn('Org-Delete: Material-Datei nicht entfernbar:', e.message); }
+      }
 
       // Live-Update NACH der Response an den ausfuehrenden Super-Admin selbst (Multi-Device).
       liveUpdate.sendToUserByRole(req.user.id, 'organizations', 'delete');
@@ -668,7 +800,7 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
   });
 
   // Set Konfi-Limit (max_konfis) der Organisation - NUR super_admin
-  // Eigener Endpunkt, damit org_admin (der die PUT-Route fuer die eigene Org nutzen darf)
+  // Eigener Endpunkt, damit org_admin (der die PUT-Route für die eigene Org nutzen darf)
   // das Limit NICHT setzen und den Tarif aushebeln kann.
   // Body: { max_konfis: <nicht-negativer Integer | null> }. null = unbegrenzt.
   router.patch('/:id/limit', rbacVerifier, requireSuperAdmin, validateOrgId, async (req, res) => {
@@ -838,7 +970,7 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
   // MULTI-ORG MITGLIEDSCHAFTEN (nur super_admin)
   // ============================================
   // Weist BESTEHENDE User (Admin/Teamer/Org-Admin) zusaetzlichen Organisationen
-  // zu, sodass sie per Org-Switcher zwischen ihnen wechseln koennen. Konfis sind
+  // zu, sodass sie per Org-Switcher zwischen ihnen wechseln können. Konfis sind
   // ausgenommen (Switcher ist ein Verwaltungs-Feature).
 
   const validateAddMember = [
@@ -942,7 +1074,7 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       invalidateUserCache(parseInt(user_id));
       res.status(201).json({ message: 'Mitgliedschaft gespeichert' });
 
-      // Chat-Mitgliedschaft der Ziel-Org INLINE pflegen (TTL-Cache verlaesst
+      // Chat-Mitgliedschaft der Ziel-Org INLINE pflegen (TTL-Cache verlässt
       // sich darauf): neues Mitglied sofort in Team-Chat, Org-Admins zusaetzlich
       // in alle Jahrgangs-Chats der Ziel-Org.
       try {
@@ -966,8 +1098,8 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
   });
 
   // DELETE /:id/members/:userId — Mitgliedschaft entfernen.
-  // Die PRIMAER-Org eines Users kann nicht entfernt werden (das waere ein User-
-  // Loeschen, nicht ein Multi-Org-Entzug) -> dafuer die User-Verwaltung nutzen.
+  // Die PRIMAER-Org eines Users kann nicht entfernt werden (das wäre ein User-
+  // Löschen, nicht ein Multi-Org-Entzug) -> dafuer die User-Verwaltung nutzen.
   router.delete('/:id/members/:userId', rbacVerifier, requireSuperAdmin, async (req, res) => {
     const orgId = parseInt(req.params.id);
     const userId = parseInt(req.params.userId);
@@ -989,10 +1121,23 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
       if (rowCount === 0) {
         return res.status(404).json({ error: 'Mitgliedschaft nicht gefunden' });
       }
+
+      // Zusaetzlich zum Cache-Leeren die bestehenden Access-Tokens sperren.
+      // Der Cache-Reset allein genuegt heute, hängt aber daran, dass genau
+      // EIN Backend-Prozess läuft und dass jeder Verbraucher des
+      // active_organization_id-Claims durch rbacVerifier geht. Der Soft-Revoke
+      // kostet nichts pro Request (die Prüfung existiert in rbac.js) und
+      // macht den Entzug davon unabhaengig.
+      //
+      // Niemand wird dadurch ausgesperrt: Das Refresh-Token bleibt gueltig,
+      // der Client holt still ein neues Access-Token — und dieses trägt den
+      // entzogenen Claim nicht mehr, weil die Refresh-Route die Mitgliedschaft
+      // erneut prüft.
+      await db.query('UPDATE users SET token_invalidated_at = NOW() WHERE id = $1', [userId]);
       invalidateUserCache(userId);
       res.json({ message: 'Mitgliedschaft entfernt' });
 
-      // Chat-Mitgliedschaft der Org INLINE aufraeumen: Ex-Mitglied fliegt aus
+      // Chat-Mitgliedschaft der Org INLINE aufräumen: Ex-Mitglied fliegt aus
       // Team-Chat und allen Jahrgangs-Chats der Org (Sync entfernt Nicht-Soll).
       try {
         chatSyncCache.invalidate(orgId, userId);
@@ -1013,7 +1158,9 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
   });
 
   // Get organization statistics - nur eigene Org
-  router.get('/:id/stats', rbacVerifier, async (req, res) => {
+  // requireTeamer aus demselben Grund wie bei GET /:id: Die Zähler (u.a.
+  // pending_requests) sind Verwaltungsdaten und gehen Konfis nichts an.
+  router.get('/:id/stats', rbacVerifier, requireOrgVerwaltung, async (req, res) => {
     try {
       const { id } = req.params;
 
@@ -1053,12 +1200,12 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin }) => {
     }
   });
 
-  // Standard-Zertifikatstypen fuer Organisationen nachziehen, die noch keine
-  // haben (einmalige Datenmigration fuer Bestandsorganisationen).
+  // Standard-Zertifikatstypen für Organisationen nachziehen, die noch keine
+  // haben (einmalige Datenmigration für Bestandsorganisationen).
   //
   // Laeuft bewusst NICHT in Tests: Der Aufruf am Ende dieser Datei ist nicht
-  // awaited und haengt am Router-Load. In der Testsuite wird createApp() pro
-  // Datei neu aufgerufen, waehrend beforeEach die Organisationen loescht und
+  // awaited und hängt am Router-Load. In der Testsuite wird createApp() pro
+  // Datei neu aufgerufen, während beforeEach die Organisationen löscht und
   // neu anlegt — die noch laufende Schleife schrieb dann gegen bereits
   // geloeschte org-IDs ("violates foreign key constraint
   // certificate_types_organization_id_fkey"). Traf das den

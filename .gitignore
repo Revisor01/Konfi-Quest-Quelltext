@@ -133,3 +133,7 @@ frontend/ios/App/build_sim/
 build_ios/
 frontend/ios/App/build_archive/
 frontend/ios/App/build_export*/
+
+# Produktions-Secrets
+.env.production
+

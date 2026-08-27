@@ -15,3 +15,9 @@ CREATE TABLE IF NOT EXISTS invite_codes (
 -- Index for fast code lookup
 CREATE INDEX IF NOT EXISTS idx_invite_codes_code ON invite_codes(code);
 CREATE INDEX IF NOT EXISTS idx_invite_codes_expires ON invite_codes(expires_at);
+
+-- organization_id-Index: Migration 064 legt ihn eigentlich an, kommt aber
+-- VOR dieser Datei — auf einer frischen Datenbank existiert die Tabelle dort
+-- noch nicht und der Index entfaellt. Hier nachziehen,
+-- damit er auf jedem Weg entsteht. In Produktion ein No-Op.
+CREATE INDEX IF NOT EXISTS idx_invite_codes_organization_id ON invite_codes(organization_id);

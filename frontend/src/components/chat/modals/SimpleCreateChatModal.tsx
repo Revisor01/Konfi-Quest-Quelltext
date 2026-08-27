@@ -37,10 +37,12 @@ import {
   cloudOfflineOutline
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useBadge } from '../../../contexts/BadgeContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import api from '../../../services/api';
 import { ChatUser } from '../../../types/user';
+import { istTeamTyp } from '../../../utils/chatRoles';
 
 interface SimpleCreateChatModalProps {
   onClose: () => void;
@@ -48,10 +50,6 @@ interface SimpleCreateChatModalProps {
   // in den Chat navigieren statt auf der Liste zu landen.
   onSuccess: (roomId?: number) => void;
   dismiss?: () => void;
-}
-
-interface Settings {
-  konfi_chat_permissions?: string;
 }
 
 const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, onSuccess, dismiss }) => {
@@ -63,7 +61,6 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
   const [isDirty, setIsDirty] = useState(false);
 
   // State
-  const [settings, setSettings] = useState<Settings>({});
   const [chatType, setChatType] = useState<'direct' | 'group'>('direct');
 
   const doClose = () => {
@@ -111,7 +108,6 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
   }, [groupName, selectedParticipants]);
 
   useEffect(() => {
-    loadSettings();
     loadExistingChats();
   }, []);
 
@@ -125,15 +121,6 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
       setChatType('direct'); // Konfis haben nur Direktnachrichten
     }
   }, [user]);
-
-  const loadSettings = async () => {
-    try {
-      const response = await api.get('/settings');
-      setSettings(response.data);
-    } catch (err) {
- console.error('Error loading settings:', err);
-    }
-  };
 
   const loadExistingChats = async () => {
     try {
@@ -154,7 +141,10 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
           id: u.id,
           name: u.name,
           display_name: u.name,
-          type: u.type as 'admin' | 'konfi',
+          // Das Backend liefert 'teamer' als eigenen Wert — vorher war der Typ
+          // hier auf admin|konfi verengt und Teamer:innen wurden in der Liste
+          // wie Konfis dargestellt.
+          type: u.type as ChatUser['type'],
           jahrgang_name: u.jahrgang_name,
           // Funktionsbeschreibung vom Backend (bereits mit Fallback)
           role_description: u.role_description
@@ -184,13 +174,12 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
           allowedJahrgangIds = userJahrgangRes.data.map((j: any) => j.jahrgang_id ?? j.id);
         }
 
+        const istTeamer = user?.type === 'teamer';
+
         let konfis: ChatUser[] = konfisRes.data
           .filter((konfi: any) => {
-            // Nur Konfis mit erlaubten Jahrgängen zeigen
-            if (allowedJahrgangIds.length > 0) {
-              return konfi.jahrgang_id && allowedJahrgangIds.includes(konfi.jahrgang_id);
-            }
-            return true;
+            if (!istTeamer) return true;
+            return konfi.jahrgang_id && allowedJahrgangIds.includes(konfi.jahrgang_id);
           })
           .map((konfi: any) => ({
             id: konfi.id,
@@ -201,25 +190,22 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
             jahrgang_name: konfi.jahrgang_name
           }));
 
-        // Auch andere Admins laden
+        // Auch die anderen Team-Mitglieder (Admins, Org-Admins, Teamer:innen) laden.
+        // Bewusst über /chat/team-contacts statt /admin/users: Letztere ist mit
+        // requireOrgAdmin geschuetzt, Teamer:innen liefen dort in einen 403 und
+        // bekamen deshalb gar keine Team-Kontakte angezeigt.
         let adminUsers: ChatUser[] = [];
         try {
-          const usersRes = await api.get('/admin/users');
-          adminUsers = usersRes.data
-            .filter((u: any) => {
-              if (u.role_name === 'konfi' || u.id === user.id) return false;
-              return true;
-            })
-            .map((admin: any) => ({
-              id: admin.id,
-              name: admin.display_name || admin.name,
-              display_name: admin.display_name || admin.name,
-              type: 'admin' as const,
-              // Funktionsbeschreibung (role_title) hat Priorität, dann Rollenname
-              role_description: admin.role_title || admin.role_display_name || admin.role_name
-            }));
+          const usersRes = await api.get('/chat/team-contacts');
+          adminUsers = usersRes.data.map((member: any) => ({
+            id: member.id,
+            name: member.display_name,
+            display_name: member.display_name,
+            type: (member.role_name === 'teamer' ? 'teamer' : 'admin') as 'admin' | 'teamer',
+            role_description: member.role_description
+          }));
         } catch (err) {
- console.warn('Admins für Chat konnten nicht geladen werden:', err);
+ console.warn('Team-Kontakte für Chat konnten nicht geladen werden:', err);
         }
 
         const allUsers = [...konfis, ...adminUsers];
@@ -272,7 +258,7 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
   };
 
   const createDirectMessage = async (targetUser: ChatUser) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     // Check if chat already exists
     if (checkDirectChatExists(targetUser)) {
       presentDuplicateAlert({
@@ -361,7 +347,9 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
     // Rollenfilter
     if (selectedRole !== 'alle') {
       if (selectedRole === 'konfi' && user.type !== 'konfi') return false;
-      if (selectedRole === 'admin' && user.type !== 'admin') return false;
+      // "Team" meint Admins UND Teamer:innen. Vorher nur 'admin' — der Filter
+      // "Team" zeigte dadurch das Team ohne seine Teamer:innen.
+      if (selectedRole === 'admin' && !istTeamTyp(user.type)) return false;
     }
 
     // Jahrgangsfilter (nur für Konfis)
@@ -408,14 +396,14 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
       <IonHeader>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton className="app-modal-close-btn" onClick={handleClose} disabled={creating}>
+            <IonButton className="app-modal-close-btn" onClick={handleClose} disabled={creating} aria-label="Schließen">
               <IonIcon icon={closeOutline} slot="icon-only" />
             </IonButton>
           </IonButtons>
           <IonTitle>{chatType === 'direct' ? 'Neue Direktnachricht' : 'Neuer Gruppenchat'}</IonTitle>
           {chatType === 'group' && (
             <IonButtons slot="end">
-              <IonButton className="app-modal-submit-btn app-modal-submit-btn--chat" onClick={createGroupChat} disabled={!isFormValid || creating || !isOnline}>
+              <IonButton className="app-modal-submit-btn app-modal-submit-btn--chat" onClick={createGroupChat} disabled={!isFormValid || creating || !isOnline} aria-label="Gruppenchat erstellen">
                 {!isOnline ? <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</> : creating ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} slot="icon-only" />}
               </IonButton>
             </IonButtons>
@@ -563,7 +551,9 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
                     {filteredUsers.map((targetUser) => {
                       const participantId = `${targetUser.type}-${targetUser.id}`;
                       const isSelected = selectedParticipants.has(participantId);
-                      const isAdmin = targetUser.type === 'admin';
+                      // Teamer:innen gehören zum Team, nicht zu den Konfis —
+                      // sonst Konfi-Farbe und keine Funktionsbezeichnung.
+                      const isAdmin = istTeamTyp(targetUser.type);
 
                       return (
                         <div

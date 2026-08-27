@@ -11,12 +11,14 @@ import {
   IonButtons,
   IonButton,
   useIonModal,
-  useIonRouter,
-  useIonViewDidEnter
+  useIonRouter
 } from '@ionic/react';
-import { Preferences } from '@capacitor/preferences';
 import { sparkles, chevronForward, personCircleOutline } from 'ionicons/icons';
 import KonfiOnboardingModal from '../modals/KonfiOnboardingModal';
+import KonfiUpdateWalkthroughModal from '../modals/KonfiUpdateWalkthroughModal';
+import { useOnboardingWithUpdateOnce } from '../../../hooks/useOnboardingOnce';
+import NeuerungenBanner from '../../shared/NeuerungenBanner';
+import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
 import { useApp } from '../../../contexts/AppContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
@@ -29,7 +31,9 @@ import KonfispruchSelectModal from '../modals/KonfispruchSelectModal';
 import WrappedModal from '../../wrapped/WrappedModal';
 import { Event } from '../../../types/event';
 import { triggerPullHaptic } from '../../../utils/haptics';
+import { mergeSectionOrder, DEFAULT_KONFI_SECTION_ORDER } from '../../../utils/sectionOrder';
 import { TrialBanner } from '../../shared';
+import { track } from '../../../services/analytics';
 
 interface PointConfig {
   gottesdienst_enabled: boolean;
@@ -44,6 +48,7 @@ interface DashboardConfig {
   show_losung: boolean;
   show_badges: boolean;
   show_ranking: boolean;
+  show_challenges?: boolean;
   section_order?: string[];
 }
 
@@ -119,65 +124,42 @@ const KonfiDashboardPage: React.FC = () => {
   const [showLehrtext, setShowLehrtext] = useState(false);
   const pageRef = useRef<HTMLElement>(null);
 
+  // Anonyme Messung der Scroll-Tiefe: Sehen die Konfis die unteren Abschnitte
+  // des Dashboards überhaupt? Je Sitzung wird jede Marke NUR EINMAL gemeldet
+  // (Ref statt State, damit das Scrollen kein Rendern ausloest).
+  const scrollMarken = useRef<Set<number>>(new Set());
+  const handleScrollTiefe = useCallback((ev: CustomEvent) => {
+    const el = ev.target as HTMLIonContentElement & { scrollHeight?: number; clientHeight?: number };
+    const detail: any = ev.detail || {};
+    const hoehe = (el?.scrollHeight || 0) - (el?.clientHeight || 0);
+    if (hoehe <= 0) return;
+    const anteil = Math.round(((detail.scrollTop || 0) / hoehe) * 100);
+    for (const marke of [25, 50, 75, 100]) {
+      if (anteil >= marke && !scrollMarken.current.has(marke)) {
+        scrollMarken.current.add(marke);
+        track('dashboard-gescrollt', { tiefe: marke });
+      }
+    }
+  }, []);
+
   // --- useOfflineQuery: Dashboard ---
-  const { data: dashboardData, loading: dashLoading, refresh: refreshDashboard } = useOfflineQuery<DashboardData>(
+  const { data: dashboardData, loading: dashLoading, refresh: refreshDashboard, refreshLive: refreshDashboardLive } = useOfflineQuery<DashboardData>(
     'konfi:dashboard:' + user?.id,
     () => api.get('/konfi/dashboard').then(r => r.data),
     { ttl: CACHE_TTL.DASHBOARD }
   );
 
-  // --- useOfflineQuery: Profil (fuer gewaehlten Konfispruch) ---
+  // --- useOfflineQuery: Profil (für gewaehlten Konfispruch) ---
   const { data: konfiProfile, refresh: refreshProfile } = useOfflineQuery<KonfiProfile>(
     'konfi:profile:' + user?.id,
     () => api.get('/konfi/profile').then(r => r.data),
     { ttl: CACHE_TTL.PROFILE }
   );
 
-  // --- useOfflineQuery: Tageslosung ---
-  const { data: dailyVerse, refresh: refreshVerse } = useOfflineQuery<DailyVerse>(
-    'konfi:tageslosung:' + new Date().toISOString().split('T')[0],
-    async () => {
-      try {
-        const response = await api.get('/konfi/tageslosung');
 
-        if (response.data.success && response.data.data) {
-          const apiData = response.data.data;
-          const useLosung = Math.random() > 0.5;
-          const cleanText = (text: string) => text?.replace(/\[|\]/g, '') || '';
-
-          setShowLehrtext(useLosung);
-
-          return {
-            losungstext: cleanText(apiData.losung?.text) || "Der HERR ist mein Hirte, mir wird nichts mangeln.",
-            losungsvers: apiData.losung?.reference || "Psalm 23,1",
-            lehrtext: cleanText(apiData.lehrtext?.text) || "Jesus spricht: Ich bin der gute Hirte.",
-            lehrtextvers: apiData.lehrtext?.reference || "Johannes 10,11",
-            date: apiData.date || new Date().toLocaleDateString('de-DE', { weekday: 'long' }),
-            translation: apiData.translation?.name || 'Lutherbibel 2017',
-            fallback: response.data.fallback || false,
-            cached: response.data.cached || false
-          };
-        }
-        throw new Error('Invalid API response');
-      } catch (err) {
-        console.warn('Tageslosung konnte nicht geladen werden, verwende Fallback:', err);
-        setShowLehrtext(Math.random() > 0.5);
-        return {
-          losungstext: "Der HERR ist mein Hirte, mir wird nichts mangeln.",
-          losungsvers: "Psalm 23,1",
-          lehrtext: "Jesus spricht: Ich bin der gute Hirte. Der gute Hirte lässt sein Leben für die Schafe.",
-          lehrtextvers: "Johannes 10,11",
-          date: new Date().toLocaleDateString('de-DE', { weekday: 'long' }),
-          translation: 'Lutherbibel 2017 (Offline)',
-          fallback: true
-        };
-      }
-    },
-    { ttl: CACHE_TTL.TAGESLOSUNG }
-  );
 
   // --- useOfflineQuery: Events ---
-  const { data: upcomingEvents, refresh: refreshEvents } = useOfflineQuery<Event[]>(
+  const { data: upcomingEvents, refresh: refreshEvents, refreshLive: refreshEventsLive } = useOfflineQuery<Event[]>(
     'konfi:events:' + user?.id,
     () => api.get('/konfi/events').then(r => r.data),
     {
@@ -190,7 +172,7 @@ const KonfiDashboardPage: React.FC = () => {
   );
 
   // --- useOfflineQuery: Badges ---
-  const { data: badgesRaw, refresh: refreshBadges } = useOfflineQuery<any>(
+  const { data: badgesRaw, refresh: refreshBadges, refreshLive: refreshBadgesLive } = useOfflineQuery<any>(
     'konfi:badges:' + user?.id,
     () => api.get('/konfi/badges').then(r => r.data),
     { ttl: CACHE_TTL.BADGES }
@@ -256,34 +238,33 @@ const KonfiDashboardPage: React.FC = () => {
     });
   };
 
-  // --- Onboarding-Walkthrough (Tab-Tour) — beim ersten Login einmal zeigen ---
-  // KEIN Modal mehr: Vollbild-Overlay (position:fixed), per State gesteuert.
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const onboardingKey = `konfi_onboarding_seen_${user?.id ?? 'x'}`;
-
-  // Beim ersten Betreten des Dashboards (pro Konfi-Account) die Tour zeigen.
-  useIonViewDidEnter(() => {
-    if (!user?.id) return;
-    Preferences.get({ key: onboardingKey }).then(({ value }) => {
-      if (!value) {
-        Preferences.set({ key: onboardingKey, value: '1' });
-        setTimeout(() => setShowOnboarding(true), 400);
-      }
-    }).catch(() => { /* Preferences nicht verfuegbar -> Tour einfach ueberspringen */ });
-  });
+  // --- Onboarding-Tour (frische Accounts) bzw. Neuigkeiten-Karte
+  // "Was ist neu in Version 2.0" (Bestandsnutzer) — nie beides. Der
+  // Walkthrough poppt nicht mehr von selbst auf, sondern öffnet sich über
+  // die Karte oder dauerhaft über "Was ist neu?" im Profil.
+  const {
+    showOnboarding, closeOnboarding,
+    showUpdateHinweis, markUpdateHinweisGesehen,
+    showMitmachenHinweis, markMitmachenHinweisGesehen
+  } = useOnboardingWithUpdateOnce('konfi_onboarding_seen', user?.id);
+  const [showUpdateWalkthrough, setShowUpdateWalkthrough] = useState(false);
+  const [showMitmachenErklaerung, setShowMitmachenErklaerung] = useState(false);
 
   // Memoized refresh function for live updates
   const refreshAllData = useCallback(() => {
-    refreshDashboard();
-    refreshEvents();
-    refreshBadges();
-  }, [refreshDashboard, refreshEvents, refreshBadges]);
+    refreshDashboardLive();
+    refreshEventsLive();
+    refreshBadgesLive();
+  }, [refreshDashboardLive, refreshEventsLive, refreshBadgesLive]);
 
   // Subscribe to live updates for dashboard and events
-  useLiveRefresh(['dashboard', 'events', 'badges'], refreshAllData);
+  // 'points' MUSS mit dabei sein: genehmigte Aktivitäten melden 'points',
+  // nicht 'dashboard' — ohne das blieben Punkte und Level auf der Startseite
+  // stehen, bis man die App neu oeffnete.
+  useLiveRefresh(['dashboard', 'points', 'events', 'badges'], refreshAllData);
 
   const handleRefresh = async (event: CustomEvent) => {
-    await Promise.all([refreshDashboard(), refreshVerse(), refreshEvents(), refreshBadges()]);
+    await Promise.all([refreshDashboard(), refreshEvents(), refreshBadges()]);
     event.detail.complete();
   };
 
@@ -301,7 +282,7 @@ const KonfiDashboardPage: React.FC = () => {
         </IonHeader>
         <IonContent>
           <p style={{ textAlign: 'center', marginTop: '50px' }}>
-            Keine Dashboard-Daten verfügbar
+            Deine Startseite konnte nicht geladen werden. Zieh die Seite nach unten, um es erneut zu versuchen.
           </p>
         </IonContent>
       </IonPage>
@@ -320,12 +301,23 @@ const KonfiDashboardPage: React.FC = () => {
     show_losung: dashboardData.dashboard_config?.show_losung !== false,
     show_badges: dashboardData.dashboard_config?.show_badges !== false,
     show_ranking: dashboardData.dashboard_config?.show_ranking !== false,
+    // Ohne dieses Durchreichen lief der Challenges-Abruf in der View immer —
+    // der Schalter der Leitung blieb wirkungslos.
+    show_challenges: dashboardData.dashboard_config?.show_challenges !== false,
   };
 
-  const sectionOrder: string[] = dashboardData.dashboard_config?.section_order || ['konfirmation', 'konfispruch', 'events', 'losung', 'badges', 'ranking'];
+  // Gespeicherte Reihenfolge mit der Default-Reihenfolge MERGEN: Bestands-Orgs
+  // haben eine dashboard_section_order ohne die neueren Keys (z.B. 'challenges')
+  // gespeichert. Wuerde nur die gespeicherte Liste gerendert, fällt jede neu
+  // hinzugekommene Sektion bei ihnen stillschweigend unter den Tisch. Fehlende
+  // Keys werden deshalb an ihrer Default-Position wieder eingefuegt.
+  const sectionOrder: string[] = mergeSectionOrder(
+    dashboardData.dashboard_config?.section_order,
+    DEFAULT_KONFI_SECTION_ORDER
+  );
 
   // Gewaehlten Konfispruch (aus Profil-Query) in die Dashboard-Daten mergen,
-  // damit die Card den Spruch anzeigt. Dashboard-Endpoint traegt ihn nicht.
+  // damit die Card den Spruch anzeigt. Dashboard-Endpoint trägt ihn nicht.
   const dashboardDataWithKonfspruch: DashboardData = {
     ...dashboardData,
     konfspruch: konfiProfile?.konfspruch ?? null
@@ -337,7 +329,7 @@ const KonfiDashboardPage: React.FC = () => {
         <IonToolbar>
           <IonTitle>Konfi Quest</IonTitle>
           <IonButtons slot="end">
-            <IonButton onClick={() => router.push('/konfi/profile')}>
+            <IonButton onClick={() => router.push('/konfi/profile')} aria-label="Profil öffnen">
               <IonIcon slot="icon-only" icon={personCircleOutline} style={{ color: '#7c3aed', fontSize: '1.7rem' }} />
             </IonButton>
           </IonButtons>
@@ -346,6 +338,8 @@ const KonfiDashboardPage: React.FC = () => {
 
       <IonContent
         fullscreen
+        scrollEvents={true}
+        onIonScroll={handleScrollTiefe}
         style={{
           '--background': '#f8f9fa'
         }}
@@ -363,6 +357,16 @@ const KonfiDashboardPage: React.FC = () => {
         </IonRefresher>
 
         <TrialBanner style={{ marginTop: '8px' }} />
+
+        <NeuerungenBanner
+          style={{ margin: '8px 16px 0' }}
+          updateSichtbar={showUpdateHinweis}
+          mitmachenSichtbar={showMitmachenHinweis}
+          onUpdateOeffnen={() => { markUpdateHinweisGesehen(); setShowUpdateWalkthrough(true); }}
+          onUpdateAusblenden={markUpdateHinweisGesehen}
+          onMitmachenOeffnen={() => { markMitmachenHinweisGesehen(); setShowMitmachenErklaerung(true); }}
+          onMitmachenAusblenden={markMitmachenHinweisGesehen}
+        />
 
         {dashboardData.has_wrapped && (
           <div onClick={openWrapped} style={{
@@ -388,7 +392,6 @@ const KonfiDashboardPage: React.FC = () => {
 
         <DashboardView
           dashboardData={dashboardDataWithKonfspruch}
-          dailyVerse={dailyVerse}
           badgeStats={badgeStats}
           allBadges={allBadges}
           upcomingEvents={upcomingEvents || []}
@@ -406,8 +409,22 @@ const KonfiDashboardPage: React.FC = () => {
       {/* Onboarding-Walkthrough als Vollbild-Overlay (kein Modal) */}
       {showOnboarding && (
         <KonfiOnboardingModal
-          onClose={() => setShowOnboarding(false)}
+          onClose={closeOnboarding}
           displayName={(user?.display_name || '').split(' ')[0]}
+        />
+      )}
+
+      {/* "Was ist neu"-Walkthrough — geöffnet über die Neuigkeiten-Karte */}
+      {showUpdateWalkthrough && (
+        <KonfiUpdateWalkthroughModal
+          onClose={() => setShowUpdateWalkthrough(false)}
+        />
+      )}
+
+      {showMitmachenErklaerung && (
+        <MitmachenErklaerungModal
+          rolle="konfi"
+          onClose={() => setShowMitmachenErklaerung(false)}
         />
       )}
     </IonPage>

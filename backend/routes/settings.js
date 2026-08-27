@@ -9,13 +9,16 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }) => {
 
   // Validierungsregeln
   const validateSettings = [
-    body('max_waitlist_size').optional().isInt({ min: 0 }).withMessage('Wartelistengröße muss eine nicht-negative Ganzzahl sein'),
     body('dashboard_show_konfirmation').optional().isBoolean().withMessage('Dashboard-Toggle muss Boolean sein'),
     body('dashboard_show_events').optional().isBoolean().withMessage('Dashboard-Toggle muss Boolean sein'),
     body('dashboard_show_losung').optional().isBoolean().withMessage('Dashboard-Toggle muss Boolean sein'),
     body('dashboard_show_badges').optional().isBoolean().withMessage('Dashboard-Toggle muss Boolean sein'),
     body('dashboard_show_ranking').optional().isBoolean().withMessage('Dashboard-Toggle muss Boolean sein'),
+    body('dashboard_show_challenges').optional().isBoolean().withMessage('Dashboard-Toggle muss Boolean sein'),
+    body('dashboard_show_konfispruch').optional().isBoolean().withMessage('Dashboard-Toggle muss Boolean sein'),
     body('teamer_dashboard_show_zertifikate').optional().isBoolean().withMessage('Dashboard-Toggle muss Boolean sein'),
+    body('teamer_dashboard_show_challenges').optional().isBoolean().withMessage('Dashboard-Toggle muss Boolean sein'),
+    body('teamer_dashboard_show_konfispruch').optional().isBoolean().withMessage('Dashboard-Toggle muss Boolean sein'),
     body('teamer_dashboard_show_events').optional().isBoolean().withMessage('Dashboard-Toggle muss Boolean sein'),
     body('teamer_dashboard_show_badges').optional().isBoolean().withMessage('Dashboard-Toggle muss Boolean sein'),
     body('teamer_dashboard_show_losung').optional().isBoolean().withMessage('Dashboard-Toggle muss Boolean sein'),
@@ -67,7 +70,7 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }) => {
 
   // GET settings (alle authentifizierten User der eigenen Org)
   // Auch super_admin wird auf die aktuelle Organisation gescopt: ohne Filter
-  // wuerden Settings ALLER Orgs vermischt zurueckgegeben (key-Kollision ueberschreibt Werte).
+  // wuerden Settings ALLER Orgs vermischt zurueckgegeben (key-Kollision überschreibt Werte).
   router.get('/', rbacVerifier, async (req, res) => {
     try {
       const { rows } = await db.query(
@@ -75,18 +78,16 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }) => {
         [req.user.organization_id]
       );
 
-      const DEFAULT_KONFI_ORDER = ['konfirmation', 'events', 'losung', 'badges', 'ranking'];
-      const DEFAULT_TEAMER_ORDER = ['zertifikate', 'events', 'badges', 'losung'];
+      const DEFAULT_KONFI_ORDER = ['konfirmation', 'challenges', 'konfispruch', 'events', 'losung', 'badges', 'ranking'];
+      const DEFAULT_TEAMER_ORDER = ['zertifikate', 'challenges', 'konfispruch', 'events', 'badges', 'losung'];
 
       const settings = {};
       rows.forEach(row => {
-        if (row.key === 'max_waitlist_size') {
-          settings[row.key] = parseInt(row.value, 10) || 0;
-        } else if (row.key === 'dashboard_section_order') {
+        if (row.key === 'dashboard_section_order') {
           try { settings[row.key] = JSON.parse(row.value); } catch { settings[row.key] = DEFAULT_KONFI_ORDER; }
         } else if (row.key === 'teamer_dashboard_section_order') {
           try { settings[row.key] = JSON.parse(row.value); } catch { settings[row.key] = DEFAULT_TEAMER_ORDER; }
-        } else if (row.key === 'waitlist_enabled' || row.key.startsWith('dashboard_show_') || row.key.startsWith('teamer_dashboard_show_')) {
+        } else if (row.key.startsWith('dashboard_show_') || row.key.startsWith('teamer_dashboard_show_')) {
           settings[row.key] = row.value === 'true' || row.value === '1';
         } else {
           settings[row.key] = row.value;
@@ -105,15 +106,16 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }) => {
     try {
       const orgId = req.user.organization_id;
       const {
-        konfi_chat_permissions,
-        waitlist_enabled,
-        max_waitlist_size,
         dashboard_show_konfirmation,
         dashboard_show_events,
         dashboard_show_losung,
         dashboard_show_badges,
         dashboard_show_ranking,
+        dashboard_show_challenges,
+        dashboard_show_konfispruch,
         teamer_dashboard_show_zertifikate,
+        teamer_dashboard_show_challenges,
+        teamer_dashboard_show_konfispruch,
         teamer_dashboard_show_events,
         teamer_dashboard_show_badges,
         teamer_dashboard_show_losung,
@@ -128,7 +130,11 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }) => {
         dashboard_show_losung,
         dashboard_show_badges,
         dashboard_show_ranking,
+        dashboard_show_challenges,
+        dashboard_show_konfispruch,
         teamer_dashboard_show_zertifikate,
+        teamer_dashboard_show_challenges,
+        teamer_dashboard_show_konfispruch,
         teamer_dashboard_show_events,
         teamer_dashboard_show_badges,
         teamer_dashboard_show_losung
@@ -154,41 +160,6 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }) => {
             [orgId, key, value]
           );
         }
-      }
-
-      if (konfi_chat_permissions !== undefined) {
-        const validPermissions = [
-          'direct_only_admin',
-          'direct_only_all',
-          'group_direct_admin',
-          'group_direct_all'
-        ];
-        if (!validPermissions.includes(konfi_chat_permissions)) {
-          return res.status(400).json({
-            error: 'Ungültiger Chat-Berechtigungswert. Gültige Optionen: ' + validPermissions.join(', ')
-          });
-        }
-        await db.query(
-          `INSERT INTO settings (organization_id, key, value) VALUES ($1, 'konfi_chat_permissions', $2)
-           ON CONFLICT (organization_id, key) DO UPDATE SET value = EXCLUDED.value`,
-          [orgId, konfi_chat_permissions]
-        );
-      }
-
-      if (waitlist_enabled !== undefined) {
-        await db.query(
-          `INSERT INTO settings (organization_id, key, value) VALUES ($1, 'waitlist_enabled', $2)
-           ON CONFLICT (organization_id, key) DO UPDATE SET value = EXCLUDED.value`,
-          [orgId, String(waitlist_enabled)]
-        );
-      }
-
-      if (max_waitlist_size !== undefined) {
-        await db.query(
-          `INSERT INTO settings (organization_id, key, value) VALUES ($1, 'max_waitlist_size', $2)
-           ON CONFLICT (organization_id, key) DO UPDATE SET value = EXCLUDED.value`,
-          [orgId, max_waitlist_size]
-        );
       }
 
       res.json({ message: 'Einstellungen erfolgreich aktualisiert' });

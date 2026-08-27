@@ -1,4 +1,4 @@
-// jahrgangChat.js — Zentrale Sync-Logik fuer den automatischen Jahrgangs-Chat.
+// jahrgangChat.js — Zentrale Sync-Logik für den automatischen Jahrgangs-Chat.
 //
 // Sollregel (vom Nutzer festgelegt):
 //   - Org-Admins (role org_admin) sind IMMER in allen Jahrgangs-Chats ihrer Org
@@ -9,9 +9,9 @@
 //   - Alle Konfis des Jahrgangs sind drin; neue automatisch.
 //
 // WICHTIG user_type-Konsistenz: chat_participants.user_type MUSS dem
-// req.user.type entsprechen, mit dem spaeter gelesen wird:
+// req.user.type entsprechen, mit dem später gelesen wird:
 //   konfi -> 'konfi', teamer -> 'teamer', org_admin/admin -> 'admin'.
-// (Frueher wurden Teamer teils als 'admin' gespeichert und fanden ihre Raeume
+// (Frueher wurden Teamer teils als 'admin' gespeichert und fanden ihre Räume
 //  dann nicht — siehe Migration 098.)
 
 // Mappt eine Rolle auf den chat_participants.user_type-Wert.
@@ -19,18 +19,18 @@ const roleToParticipantType = (roleName) =>
   roleName === 'konfi' ? 'konfi' : roleName === 'teamer' ? 'teamer' : 'admin';
 
 /**
- * Stellt sicher, dass fuer einen Jahrgang ein Chat-Raum existiert und die
+ * Stellt sicher, dass für einen Jahrgang ein Chat-Raum existiert und die
  * Mitgliedschaft exakt der Sollregel entspricht. Idempotent.
  *
  * @param {object} db        Pool ODER Client (muss .query haben). Bei Aufruf
  *                           innerhalb einer Transaktion den Client uebergeben.
  * @param {number} jahrgangId
  * @param {number} organizationId
- * @param {number|null} createdBy  User-ID fuer created_by bei Neuanlage.
+ * @param {number|null} createdBy  User-ID für created_by bei Neuanlage.
  * @returns {Promise<number|null>} room_id des Jahrgangs-Chats (oder null bei Fehler).
  */
 async function syncJahrgangChat(db, jahrgangId, organizationId, createdBy = null) {
-  // 1. Jahrgang laden (Name fuer Chat-Titel, org-gescopt zur Sicherheit)
+  // 1. Jahrgang laden (Name für Chat-Titel, org-gescopt zur Sicherheit)
   const { rows: [jahrgang] } = await db.query(
     'SELECT id, name FROM jahrgaenge WHERE id = $1 AND organization_id = $2',
     [jahrgangId, organizationId]
@@ -58,8 +58,8 @@ async function syncJahrgangChat(db, jahrgangId, organizationId, createdBy = null
   //    c) alle Konfis des Jahrgangs. Ergebnis: (user_id, user_type).
   //    WICHTIG Multi-Org (Migration 101): Mitgliedschaft kann aus der Primaer-Org
   //    (users.organization_id + users.role_id) ODER aus user_organizations
-  //    (Org-Switcher) kommen — beide Quellen zaehlen, sonst entfernt der Sync
-  //    eingewechselte Mitglieder aus den Raeumen.
+  //    (Org-Switcher) kommen — beide Quellen zählen, sonst entfernt der Sync
+  //    eingewechselte Mitglieder aus den Räumen.
   const { rows: sollMembers } = await db.query(
     `
     -- Org-Admins: immer drin (Primaer-Org)
@@ -125,7 +125,7 @@ async function syncJahrgangChat(db, jahrgangId, organizationId, createdBy = null
   }
 
   // 5. Nicht-mehr-Soll-Mitglieder entfernen — ABER Org-Admins nie (Vollzugriff).
-  //    Wir loeschen alle aktuellen Teilnehmer, die nicht in der Soll-Liste stehen
+  //    Wir löschen alle aktuellen Teilnehmer, die nicht in der Soll-Liste stehen
   //    und KEIN org_admin sind.
   const sollKeys = new Set(sollMembers.map((m) => `${m.user_id}:${m.user_type}`));
   const { rows: current } = await db.query(

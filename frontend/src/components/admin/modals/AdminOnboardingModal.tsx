@@ -1,8 +1,8 @@
 import React from 'react';
 import {
   sparklesOutline, peopleOutline, chatbubblesOutline, calendarOutline,
-  checkmarkDoneOutline, settingsOutline, schoolOutline, documentTextOutline,
-  ribbonOutline, statsChartOutline, folderOpenOutline,
+  settingsOutline, schoolOutline, documentTextOutline,
+  ribbonOutline, statsChartOutline, folderOpenOutline, flagOutline,
 } from 'ionicons/icons';
 import OnboardingTour, { OnboardingSlide } from '../../shared/OnboardingTour';
 
@@ -11,10 +11,16 @@ interface AdminOnboardingModalProps {
   displayName?: string;
 }
 
-// Admin-Tour: erst die 5 Tabs (Konfis · Chat · Events · Antraege · Mehr), dann
-// die wichtigsten Verwaltungs-Aufgaben (Jahrgang, Aktivitaeten/Punkte, Antraege
-// bestaetigen, Badges, Wrapped). Gleicher Stil wie die Konfi-Tour.
-const SLIDES: OnboardingSlide[] = [
+// Admin-Tour: erst die 5 Tabs (Konfis · Chat · Mitmachen · Challenges · Mehr),
+// dann die wichtigsten Verwaltungs-Aufgaben (Jahrgang, Badges, Wrapped,
+// Material). Der Mitmachen-Tab bündelt Events und Aktivitäten als zwei
+// Reiter; die Aktivitäten haben einen EIGENEN Slide DIREKT hinter den Events
+// (User-Entscheid 10.08., Umbenennung auf "Mitmachen" 24.08.): nur nebenbei
+// erwähnt ging unter, was sie von Events unterscheidet (kein Anmelden,
+// sondern Meldung hinterher). Das Anlegen selbst bleibt im Mehr-Tab und wird
+// dort genannt. Beispiele stammen aus echten Aktivitäten der Produktivdaten.
+// SLIDES exportiert für den Textbaustein-Test (onboardingSlides.test.ts).
+export const SLIDES: OnboardingSlide[] = [
   {
     icon: sparklesOutline,
     color: 'var(--app-color-konfis)',
@@ -40,15 +46,22 @@ const SLIDES: OnboardingSlide[] = [
     icon: calendarOutline,
     color: 'var(--app-color-events)',
     rgb: '--app-color-events-rgb',
-    title: 'Events',
-    text: 'Lege Termine an — einmalig, über mehrere Tage oder als ganze Serie, mit Plätzen, Zeitfenstern und Warteliste. Konfis melden sich direkt an, und du behältst An- und Abwesenheit im Griff.',
+    title: 'Mitmachen: Events',
+    text: 'Der Tab "Mitmachen" bündelt Events und Aktivitäten in zwei Reitern. Events sind Termine, die du anlegst — einmalig, über mehrere Tage oder als ganze Serie, mit Plätzen, Zeitfenstern und Warteliste. Konfis melden sich vorher an, und du behältst An- und Abwesenheit im Griff. Du kannst auch festlegen, dass Teamer:innen gesucht werden oder ein Termin nur fürs Team ist.',
   },
   {
-    icon: checkmarkDoneOutline,
+    icon: documentTextOutline,
     color: 'var(--app-color-activities)',
     rgb: '--app-color-activities-rgb',
-    title: 'Anträge',
-    text: 'Konfis stellen für ihre Aktivitäten einen Antrag auf Punkte. Hier prüfst du die Anträge und vergibst mit einem Tipp die Punkte. Offene Anträge siehst du sofort.',
+    title: 'Mitmachen: Aktivitäten',
+    text: 'Der zweite Reiter im Mitmachen-Tab: wiederkehrende Dinge, für die es Punkte gibt — Gottesdienst, Andacht, Taufe oder Hochzeit, aber auch Gemeindebrief verteilen oder Besuchsdienst. Anders als bei Events melden sich Konfis nicht vorher an — sie melden die Aktivität hinterher, du prüfst sie und vergibst mit einem Tipp die Punkte. Auch Teamer:innen reichen hier ihren Einsatz ein.',
+  },
+  {
+    icon: flagOutline,
+    color: 'var(--app-color-challenges)',
+    rgb: '--app-color-challenges-rgb',
+    title: 'Challenges',
+    text: 'Challenges begleiten deine Konfis über einen Zeitraum, den du festlegst: Sie antworten mit Foto, Text, Aufnahme oder Link. Bewusst ohne Punkte, ohne Zähler, ohne Rangliste — es gibt nur einen Stempel fürs Mitmachen. Die Idee: sich eine Zeit lang mit einem Thema beschäftigen, mitten im Alltag. Ihr im Team macht mit — und es gibt sogar Runden nur fürs Team.',
   },
   {
     icon: settingsOutline,
@@ -63,13 +76,6 @@ const SLIDES: OnboardingSlide[] = [
     rgb: '--app-color-jahrgang-rgb',
     title: 'Jahrgänge',
     text: 'Alles beginnt mit einem Jahrgang: Hier legst du die Punkteziele für Gottesdienst und Gemeinde fest. Du gibst außerdem frei, ab wann die Konfis ihren Konfispruch auswählen dürfen. Konfis gehören immer zu einem Jahrgang.',
-  },
-  {
-    icon: documentTextOutline,
-    color: 'var(--app-color-activities)',
-    rgb: '--app-color-activities-rgb',
-    title: 'Aktivitäten & Punkte',
-    text: 'Aktivitäten sind wiederkehrende Dinge, für die es Punkte gibt — z.B. Gottesdienstbesuch oder Gemeinde-Aktionen. Anders als Events stellen Konfis dafür selbst einen Antrag auf Punkte. Du legst Kategorie und Punktwert fest.',
   },
   {
     icon: ribbonOutline,

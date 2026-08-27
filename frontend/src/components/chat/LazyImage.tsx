@@ -9,7 +9,7 @@ interface LazyImageProps {
 }
 
 const LazyImage: React.FC<LazyImageProps> = ({ filePath, fileName, onError, onClick }) => {
-  // Synchron pruefen, ob das Bild bereits im In-Memory-Cache liegt. Wenn ja, ist
+  // Synchron prüfen, ob das Bild bereits im In-Memory-Cache liegt. Wenn ja, ist
   // imageSrc schon beim ERSTEN Render gesetzt -> das Bild erscheint sofort, ohne
   // Lazy-Load-Zwischenzustand und ohne Ruckeln beim Hochscrollen. Nur ungecachte
   // Bilder werden lazy nachgeladen (spart Bandbreite beim allerersten Oeffnen).
@@ -18,20 +18,20 @@ const LazyImage: React.FC<LazyImageProps> = ({ filePath, fileName, onError, onCl
   const [isLoading, setIsLoading] = useState(!cachedUrl);
   const imgRef = useRef<HTMLDivElement>(null);
   // Merker, ob bereits geladen wurde (verhindert doppeltes Triggern). Die
-  // Object-URL selbst gehoert dem geteilten In-Memory-Cache (mediaCache) und wird
+  // Object-URL selbst gehört dem geteilten In-Memory-Cache (mediaCache) und wird
   // hier NICHT revoked — so ueberlebt sie das Unmount und das Bild ist beim
   // erneuten Oeffnen des Chats sofort da.
   const loadedRef = useRef(!!cachedUrl);
   // onError als Ref halten: MessageBubble uebergibt einen Inline-Arrow, der bei
   // JEDEM Render neu entsteht. Laege er in der useEffect-Dependency-Liste, wuerde
   // der Effekt staendig neu laufen, die Object-URL revoken und das Bild neu laden
-  // -> Reload-Loop + Springen beim Scrollen. Ueber die Ref bleibt der Effekt an
-  // `filePath` gebunden und laeuft pro Bild nur EINMAL.
+  // -> Reload-Loop + Springen beim Scrollen. Über die Ref bleibt der Effekt an
+  // `filePath` gebunden und läuft pro Bild nur EINMAL.
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
   useEffect(() => {
-    // Cache-Treffer beim Mount -> schon angezeigt, kein Observer/Laden noetig.
+    // Cache-Treffer beim Mount -> schon angezeigt, kein Observer/Laden nötig.
     if (loadedRef.current) return;
 
     let cancelled = false;
@@ -80,7 +80,7 @@ const LazyImage: React.FC<LazyImageProps> = ({ filePath, fileName, onError, onCl
       observer.disconnect();
     };
     // NUR filePath — onError/onClick bewusst ausgeklammert (siehe onErrorRef).
-    // Object-URL wird NICHT revoked (gehoert dem geteilten Cache).
+    // Object-URL wird NICHT revoked (gehört dem geteilten Cache).
   }, [filePath]);
 
   return (

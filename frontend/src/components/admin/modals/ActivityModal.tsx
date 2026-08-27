@@ -23,12 +23,13 @@ import {
   IonModal,
   useIonAlert
 } from '@ionic/react';
-import { closeOutline, checkmarkOutline, flash, calendar, home, people, pricetag } from 'ionicons/icons';
+import { closeOutline, checkmarkOutline, flash, calendar, home, people, pricetag, ribbon } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
+import { istPunkteartAktiv, type PunkteartFlags } from '../../../utils/punktearten';
 
 interface Activity {
   id: number;
@@ -40,14 +41,15 @@ interface Activity {
 
 interface ActivityModalProps {
   konfiId: number;
+  punkteartFlags?: PunkteartFlags;
   onClose: () => void;
   onSave: () => Promise<void>;
   dismiss?: () => void;
   targetRole?: string;
 }
 
-const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave, dismiss, targetRole }) => {
-  const { isOnline } = useApp();
+const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave, dismiss, targetRole, punkteartFlags }) => {
+  const { isOnline, setError } = useApp();
   const [activities, setActivities] = useState<Activity[]>([]);
   const [selectedActivity, setSelectedActivity] = useState<number | null>(null);
   const [comment, setComment] = useState('');
@@ -99,7 +101,14 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
     try {
       const url = targetRole ? `/admin/activities?target_role=${targetRole}` : '/admin/activities';
       const response = await api.get(url);
-      setActivities(response.data);
+      // Nur Aktivitaeten anbieten, deren Punkteart im Jahrgang aktiv ist.
+      // Teamer-Aktivitaeten haben type = NULL und keine Punkteart -- die
+      // bleiben unabhaengig davon in der Liste.
+      setActivities(
+        (response.data || []).filter((activity: Activity) =>
+          !activity.type || istPunkteartAktiv(punkteartFlags, activity.type as 'gottesdienst' | 'gemeinde')
+        )
+      );
     } catch (err) {
  console.error('Error loading activities:', err);
     }
@@ -121,8 +130,13 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
           setIsDirty(false);
           await onSave();
           doClose();
-        } catch (err) {
+        } catch (err: any) {
+          // Ohne diese Meldung blieb das Modal bei einer Ablehnung des Servers
+          // einfach offen stehen — etwa wenn die Punktart im Jahrgang
+          // abgeschaltet ist. Für die Leitung sah das so aus, als passiere
+          // nichts.
           console.error('Error saving activity:', err);
+          setError(err?.response?.data?.error || 'Aktivität konnte nicht gespeichert werden');
         }
       } else {
         await writeQueue.enqueue({
@@ -157,12 +171,12 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
         <IonToolbar>
           <IonTitle>Aktivität hinzufügen</IonTitle>
           <IonButtons slot="start">
-            <IonButton onClick={handleClose} disabled={isSubmitting} className="app-modal-close-btn">
+            <IonButton aria-label="Schließen" onClick={handleClose} disabled={isSubmitting} className="app-modal-close-btn">
               <IonIcon icon={closeOutline} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
-            <IonButton onClick={handleSave} disabled={!selectedActivity || isSubmitting} className={`app-modal-submit-btn app-modal-submit-btn--${sectionClass}`}>
+            <IonButton aria-label="Aktivität speichern" onClick={handleSave} disabled={!selectedActivity || isSubmitting} className={`app-modal-submit-btn app-modal-submit-btn--${sectionClass}`}>
               {isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} />}
             </IonButton>
           </IonButtons>
@@ -225,12 +239,21 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
           <IonCard className="app-card">
             <IonCardContent style={{ padding: '16px' }}>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {activities
+                {[...activities]
                   .sort((a, b) => {
-                    if (a.type !== b.type) {
-                      return a.type.localeCompare(b.type);
+                    // NULL-SICHER: Teamer-Aktivitäten duerfen type = NULL haben
+                    // ("Konfi-Wochenende", "Konfi-Freizeit begleitet"). Ein
+                    // direktes a.type.localeCompare() warf dort sofort, der
+                    // Render brach ab und die ErrorBoundary loggte aus — das war
+                    // der Rauswurf beim Oeffnen (User-Hinweis 11.08.).
+                    // Ausserdem NICHT mehr in-place sortieren: .sort() mutiert
+                    // sonst das activities-State-Array bei jedem Render.
+                    const typeA = a.type || '';
+                    const typeB = b.type || '';
+                    if (typeA !== typeB) {
+                      return typeA.localeCompare(typeB);
                     }
-                    return a.name.localeCompare(b.name);
+                    return (a.name || '').localeCompare(b.name || '');
                   })
                   .map(activity => {
                     const isSelected = selectedActivity === activity.id;
@@ -276,7 +299,10 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
                               className="app-icon-circle app-icon-circle--lg"
                               style={{ backgroundColor: typeColor }}
                             >
-                              <IonIcon icon={activity.type === 'gottesdienst' ? home : people} />
+                              {/* Teamer-Aktivitaeten haben keinen Typ — sonst
+                                  bekaemen sie immer das Gemeinde-Icon.
+                                  Gleiches Symbol wie in ActivitiesView. */}
+                              <IonIcon icon={isTeamer ? ribbon : activity.type === 'gottesdienst' ? home : people} />
                             </div>
                             <div className="app-list-item__content">
                               <div className="app-list-item__title" style={{ paddingRight: isTeamer ? '0' : '60px', whiteSpace: 'normal' }}>

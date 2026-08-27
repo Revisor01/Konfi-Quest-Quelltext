@@ -49,6 +49,36 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
   // identisch zu GET /messages: options als Array, anonymitaets-bewusste Votes
   // (bei anonymen Umfragen ohne user_name). messageId ist die message_id der
   // Poll-Nachricht, damit der Client die richtige Nachricht im State findet.
+  // Stimmen einer Umfrage für die Auslieferung aufbereiten.
+  //
+  // Bei anonymen Umfragen wurde bisher nur der Name weggelassen, user_id und
+  // user_type aber weiterhin je Stimme mitgeliefert. Über die Teilnehmerliste
+  // (GET /rooms/:id/participants) liess sich daraus aufloesen, wer was gewählt
+  // hat — die zugesagte Anonymitaet war nur kosmetisch.
+  //
+  // Das Frontend braucht die Kennung ausschliesslich, um die EIGENE Stimme zu
+  // markieren (MessageBubble: vote.user_id === user.id && vote.user_type ===
+  // user.type). Deshalb wird bei anonymen Umfragen nur noch die eigene Stimme
+  // mit Kennung ausgeliefert; fremde zählen anonym mit.
+  const stimmenAufbereiten = (rawVotes, anonym, empfaengerId, empfaengerTyp) =>
+    rawVotes.map(v => {
+      const eigene = v.user_id === empfaengerId && v.user_type === empfaengerTyp;
+      if (!anonym) {
+        return {
+          user_id: v.user_id,
+          user_type: v.user_type,
+          option_index: v.option_index,
+          user_name: v.voter_name,
+        };
+      }
+      return {
+        user_id: eigene ? v.user_id : null,
+        user_type: eigene ? v.user_type : null,
+        option_index: v.option_index,
+        user_name: undefined,
+      };
+    });
+
   const emitPollUpdate = async (pollDbId, roomId) => {
     if (!io) return; // io-defensiv: in Tests kein Socket -> No-op
     try {
@@ -81,12 +111,11 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         anonymous: isAnonymous,
         exclusive_options: Boolean(poll.exclusive_options),
         expires_at: poll.expires_at,
-        votes: rawVotes.map(v => ({
-          user_id: v.user_id,
-          user_type: v.user_type,
-          option_index: v.option_index,
-          user_name: isAnonymous ? undefined : v.voter_name,
-        })),
+        // Broadcast an den ganzen Raum: Es gibt keinen einzelnen Empfaenger,
+        // also kann hier keine "eigene" Stimme markiert werden. Bei anonymen
+        // Umfragen fallen alle Kennungen weg; der Client holt seine eigene
+        // Markierung über GET /rooms/:id/messages.
+        votes: stimmenAufbereiten(rawVotes, isAnonymous, null, null),
       };
 
       io.to(`room_${roomId}`).emit('pollUpdated', {
@@ -99,10 +128,10 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
     }
   };
 
-  // Hilfsfunktion: 'roomsChanged' an die persoenlichen User-Raeume der
+  // Hilfsfunktion: 'roomsChanged' an die persoenlichen User-Räume der
   // betroffenen Nutzer senden, damit deren ChatOverview die Raumliste neu laedt
-  // Nur die einfachen Faelle (Raum erstellt/
-  // geloescht, Teilnehmer hinzugefuegt/entfernt/verlassen). targets ist eine
+  // Nur die einfachen Fälle (Raum erstellt/
+  // gelöscht, Teilnehmer hinzugefuegt/entfernt/verlassen). targets ist eine
   // Liste von { user_id, user_type }.
   const emitRoomsChanged = (targets) => {
     if (!io || !Array.isArray(targets)) return; // io-defensiv: in Tests No-op
@@ -117,6 +146,47 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
     }
   };
 
+  // Team-Kontaktliste für Direktchats: alle Admins, Org-Admins und Teamer:innen
+  // der eigenen Organisation.
+  //
+  // Warum eine eigene Route: Das Chat-Modal hat die Team-Mitglieder bisher über
+  // /admin/users geladen — die Route ist aber mit requireOrgAdmin geschuetzt.
+  // Teamer:innen liefen dort in einen 403, den das Frontend still verschluckt hat;
+  // ihre Kontaktliste blieb dadurch leer und sie konnten niemanden aus dem Team
+  // anschreiben. Diese Route gibt bewusst NUR die für einen Chat noetigen Felder
+  // heraus (keine E-Mail, keine Login-Zeitpunkte) und ist für das ganze Team offen.
+  router.get('/team-contacts', verifyTokenRBAC, async (req, res) => {
+    try {
+      if (!['admin', 'org_admin', 'teamer'].includes(req.user.role_name)) {
+        return res.status(403).json({ error: 'Nur für Teamer:innen und Admins' });
+      }
+
+      const query = `
+        SELECT u.id, u.display_name, r.name AS role_name,
+               COALESCE(NULLIF(u.role_title, ''),
+                 CASE
+                   WHEN r.name = 'teamer' THEN 'Teamer:in'
+                   ELSE 'Admin'
+                 END
+               ) AS role_description
+          FROM users u
+          JOIN roles r ON u.role_id = r.id
+         WHERE u.organization_id = $1
+           AND r.name IN ('admin', 'org_admin', 'teamer')
+           AND u.is_active = true
+           AND u.deleted_at IS NULL
+           AND u.id != $2
+         ORDER BY u.display_name
+      `;
+      const { rows } = await db.query(query, [req.user.organization_id, req.user.id]);
+      res.json(rows);
+
+    } catch (err) {
+      console.error('Database error in GET /chat/team-contacts:', err);
+      res.status(500).json({ error: 'Datenbankfehler' });
+    }
+  });
+
   // Get admins for direct contact (konfis only)
   router.get('/admins', verifyTokenRBAC, async (req, res) => {
     try {
@@ -125,8 +195,23 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       }
       
       const organizationId = req.user.organization_id;
-      const query = "SELECT u.id, u.display_name, u.username FROM users u JOIN roles r ON u.role_id = r.id WHERE r.name IN ('admin', 'org_admin', 'teamer') AND u.organization_id = $1 ORDER BY u.display_name";
-      const { rows: admins } = await db.query(query, [organizationId]);
+      // Teamer:innen nur mit gemeinsamem Jahrgang (KONFI_SIEHT_TEAMMITGLIED),
+      // Leitung und Admins immer. is_active/deleted_at filtern wie in
+      // /team-contacts — die Route tat das bisher als einzige nicht.
+      // username wird nicht mehr ausgeliefert: für einen Chat unnötig, und
+      // es ist der Login-Name.
+      const query = `
+        SELECT u.id, u.display_name
+          FROM users u
+          JOIN roles r ON u.role_id = r.id
+         WHERE r.name IN ('admin', 'org_admin', 'teamer')
+           AND u.organization_id = $2
+           AND u.is_active = true
+           AND u.deleted_at IS NULL
+           AND u.id <> $1
+           AND ${KONFI_SIEHT_TEAMMITGLIED}
+         ORDER BY u.display_name`;
+      const { rows: admins } = await db.query(query, [req.user.id, organizationId]);
       res.json(admins);
       
     } catch (err) {
@@ -136,6 +221,108 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
   });
   
   // Create or get direct chat room
+  // Darf der Anfragende diesen Konfi anschreiben?
+  //
+  // Gibt null zurück, wenn erlaubt, sonst eine Fehlermeldung.
+  const konfiAnschreibenVerboten = async (anfragender, zielUserId) => {
+    if (anfragender.role_name !== 'teamer') return null;
+
+    const { rows: [ziel] } = await db.query(
+      'SELECT jahrgang_id FROM konfi_profiles WHERE user_id = $1',
+      [zielUserId]
+    );
+
+    // Konfi ohne Jahrgang: nur Leitung und Admins erreichen ihn.
+    if (!ziel || !ziel.jahrgang_id) {
+      return 'Diese Konfirmand:in ist keinem deiner Jahrgänge zugeordnet';
+    }
+
+    const zugewiesen = (anfragender.assigned_jahrgaenge || [])
+      .filter(j => j.can_view)
+      .map(j => j.id);
+
+    if (!zugewiesen.includes(ziel.jahrgang_id)) {
+      return 'Du kannst nur Konfirmand:innen aus deinen Jahrgängen anschreiben';
+    }
+    return null;
+  };
+
+  // Darf dieser Nutzer den Raum oeffnen (lesen, schreiben, Teilnehmer sehen)?
+  //
+  // Grundregel: Teilnehmerschaft. Leitung und Admins (type 'admin', also
+  // admin/org_admin/super_admin) duerfen zusaetzlich gemeindeweit — sie
+  // verantworten die Gemeinde und müssen im Zweifel eingreifen können.
+  //
+  // Gruppen-, Jahrgangs-, Team- und Termin-Chats bleiben für die Leitung
+  // offen: Das sind gemeinschaftliche Räume, keine Zwiegespraeche.
+  //
+  // Gibt true zurück, wenn der Zugriff erlaubt ist.
+  const darfRaumOeffnen = async (roomId, user) => {
+    const { rows: [raum] } = await db.query(
+      'SELECT type FROM chat_rooms WHERE id = $1 AND organization_id = $2',
+      [roomId, user.organization_id]
+    );
+    if (!raum) return false;
+
+    const { rows: [teilnehmer] } = await db.query(
+      'SELECT 1 FROM chat_participants WHERE room_id = $1 AND user_id = $2 AND user_type = $3',
+      [roomId, user.id, user.type]
+    );
+    if (teilnehmer) return true;
+
+    // Kein Teilnehmer: nur Leitung/Admins, und nie bei Direktchats.
+    return user.type === 'admin' && raum.type !== 'direct';
+  };
+
+  // Gegenrichtung: Darf dieser Konfi dieses Team-Mitglied anschreiben?
+  //
+  // Symmetrisch zu konfiAnschreibenVerboten: Teamer:innen und Konfis erreichen
+  // einander nur über einen gemeinsamen Jahrgang. Leitung (org_admin), Admins
+  // und Super-Admins sind für jeden Konfi der Gemeinde erreichbar — sie
+  // verantworten die Gemeinde als Ganzes und haben im uebrigen System ohnehin
+  // Zugriff auf alle Jahrgänge (rbac.js:331).
+  //
+  // Eine Teamer:in OHNE Jahrgangszuweisung ist für Konfis unsichtbar. Das ist
+  // die konsequente Gegenseite: sie erreicht ihrerseits keinen einzigen Konfi.
+  //
+  // Gibt null zurück, wenn erlaubt, sonst eine Fehlermeldung.
+  const teamAnschreibenVerboten = async (konfiUserId, zielRolle, zielUserId) => {
+    if (zielRolle !== 'teamer') return null;
+
+    const { rows: [ziel] } = await db.query(
+      `SELECT 1
+         FROM konfi_profiles kp
+         JOIN user_jahrgang_assignments uja
+           ON uja.jahrgang_id = kp.jahrgang_id AND uja.can_view
+        WHERE kp.user_id = $1 AND uja.user_id = $2
+        LIMIT 1`,
+      [konfiUserId, zielUserId]
+    );
+
+    if (!ziel) {
+      return 'Diese Teamer:in ist nicht für deinen Jahrgang zuständig';
+    }
+    return null;
+  };
+
+  // SQL-Bedingung für Kontaktlisten von Konfis: Team-Mitglied ist erreichbar,
+  // wenn es NICHT teamer ist (Leitung/Admin -> immer) ODER einen gemeinsamen
+  // Jahrgang mit dem Konfi hat. $1 muss die User-ID des Konfis sein.
+  //
+  // Bewusst als geteilter Baustein: Die Regel gilt an drei Stellen (/admins,
+  // /available-users, POST /direct). Stand sie mehrfach im Code, blieb bisher
+  // regelmäßig eine Stelle zurück.
+  const KONFI_SIEHT_TEAMMITGLIED = `(
+    r.name <> 'teamer'
+    OR EXISTS (
+      SELECT 1
+        FROM konfi_profiles kp
+        JOIN user_jahrgang_assignments uja
+          ON uja.jahrgang_id = kp.jahrgang_id AND uja.can_view
+       WHERE kp.user_id = $1 AND uja.user_id = u.id
+    )
+  )`;
+
   router.post('/direct', verifyTokenRBAC, async (req, res) => {
     try {
       const { target_user_id } = req.body;
@@ -146,9 +333,9 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       }
 
       // user_type des Ziels IMMER serverseitig aus der echten Rolle ableiten —
-      // NIE vom Client uebernehmen. Der Client schickte fuer Teamer:innen
+      // NIE vom Client uebernehmen. Der Client schickte für Teamer:innen
       // 'admin' (die API kannte nur admin|konfi), der Raum wurde dann mit
-      // user_type='admin' gespeichert und war fuer den Teamer (liest als
+      // user_type='admin' gespeichert und war für den Teamer (liest als
       // 'teamer') unsichtbar. Gleiche Fehlerklasse wie Migration 098.
       const { rows: [validUser] } = await db.query(
         `SELECT u.id, u.display_name, r.name AS role_name
@@ -160,10 +347,26 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         return res.status(403).json({ error: 'Benutzer nicht in deiner Organisation gefunden' });
       }
 
-      // DATENSCHUTZ: Konfi-zu-Konfi-Chats gibt es nicht. Alle anderen
-      // Kombinationen (konfi/teamer/admin untereinander) sind erlaubt.
+      // DATENSCHUTZ: Konfi-zu-Konfi-Chats gibt es nicht.
       if (req.user.type === 'konfi' && validUser.role_name === 'konfi') {
         return res.status(403).json({ error: 'Konfis können keine anderen Konfis anschreiben' });
+      }
+
+      // Konfis erreichen Teamer:innen nur über einen gemeinsamen Jahrgang.
+      // Leitung, Admins und Super-Admins erreichen sie immer.
+      if (req.user.type === 'konfi') {
+        const verboten = await teamAnschreibenVerboten(req.user.id, validUser.role_name, target_user_id);
+        if (verboten) {
+          return res.status(403).json({ error: verboten });
+        }
+      }
+
+      // Teamer:innen erreichen nur Konfis ihrer zugewiesenen Jahrgänge.
+      if (validUser.role_name === 'konfi') {
+        const verboten = await konfiAnschreibenVerboten(req.user, target_user_id);
+        if (verboten) {
+          return res.status(403).json({ error: verboten });
+        }
       }
 
       const user1_type = req.user.type;
@@ -268,6 +471,46 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
               WHERE u.id = ANY($1::int[]) AND u.organization_id = $2 AND u.deleted_at IS NULL`,
             [participantIds, organizationId]
           );
+
+          // Konfi-zu-Konfi bleibt verboten — auch hier. Geprueft wurde oben nur
+          // der Raum-TYP ('direct'), nicht WEN eine Konfi eintraegt. Über
+          // participants liess sich POST /direct (das die Kombination korrekt
+          // mit 403 ablehnt) damit umgehen und ein Raum mit einer anderen Konfi
+          // anlegen. Der Kommentar oben versprach das bereits.
+          if (req.user.type === 'konfi' && partUsers.some(pu => pu.role_name === 'konfi')) {
+            await db.query('DELETE FROM chat_rooms WHERE id = $1', [roomId]);
+            return res.status(403).json({
+              error: 'Konfirmand:innen können nur das Team anschreiben, nicht einander'
+            });
+          }
+
+          // Gegenrichtung: Ein Konfi darf hier keine fremdjahrgaengige
+          // Teamer:in eintragen — sonst wäre die Regel in POST /direct auf
+          // demselben Weg zu umgehen wie beim Konfi-zu-Konfi-Fall oben.
+          if (req.user.type === 'konfi') {
+            for (const pu of partUsers) {
+              const verboten = await teamAnschreibenVerboten(req.user.id, pu.role_name, pu.id);
+              if (verboten) {
+                await db.query('DELETE FROM chat_rooms WHERE id = $1', [roomId]);
+                return res.status(403).json({ error: verboten });
+              }
+            }
+          }
+
+          // Jahrgangsgrenze für Teamer:innen — wie in POST /direct. Ohne diese
+          // Prüfung wäre die Regel dort wertlos: ein Raum mit demselben Konfi
+          // liesse sich hier einfach anlegen (gleiche Umgehung wie beim
+          // Konfi-zu-Konfi-Fall oben).
+          if (req.user.role_name === 'teamer') {
+            for (const pu of partUsers.filter(x => x.role_name === 'konfi')) {
+              const verboten = await konfiAnschreibenVerboten(req.user, pu.id);
+              if (verboten) {
+                await db.query('DELETE FROM chat_rooms WHERE id = $1', [roomId]);
+                return res.status(403).json({ error: verboten });
+              }
+            }
+          }
+
           const participantPromises = partUsers.map(pu =>
             db.query(
               "INSERT INTO chat_participants (room_id, user_id, user_type) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
@@ -321,8 +564,8 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       
       // Mitgliedschafts-Sync (Jahrgangs- + Team-Chat) NICHT mehr bei jedem Aufruf:
       // Das war Schreibarbeit auf dem meistgerufenen Lesepfad (25-35 Queries bei
-      // einem Org-Admin mit 5 Jahrgaengen, Hauptursache p95 ~919ms). Jetzt laeuft
-      // der Sync pro User hoechstens 1x je TTL (10 Min) — neuer User ohne
+      // einem Org-Admin mit 5 Jahrgängen, Hauptursache p95 ~919ms). Jetzt läuft
+      // der Sync pro User höchstens 1x je TTL (10 Min) — neuer User ohne
       // Cache-Eintrag synct beim ERSTEN Aufruf sofort; Jahrgang-/Rollenwechsel
       // korrigieren die Mitgliedschaft ohnehin INLINE in ihren Handlern
       // (Details: utils/chatSyncCache.js).
@@ -331,8 +574,8 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
 
         // Jahrgangs-Chat-Mitgliedschaft synchronisieren (zentral, user_type-konsistent).
         // - konfi: genau sein Jahrgang
-        // - teamer/admin: alle zugewiesenen Jahrgaenge
-        // - org_admin: alle Jahrgaenge der Org (immer drin)
+        // - teamer/admin: alle zugewiesenen Jahrgänge
+        // - org_admin: alle Jahrgänge der Org (immer drin)
         try {
           let jahrgangIds = [];
           if (userType === 'konfi') {
@@ -348,7 +591,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
             );
             jahrgangIds = rows.map(r => r.id);
           } else {
-            // admin / teamer -> zugewiesene Jahrgaenge
+            // admin / teamer -> zugewiesene Jahrgänge
             const { rows } = await db.query(
               'SELECT jahrgang_id FROM user_jahrgang_assignments WHERE user_id = $1 AND can_view = true',
               [userId]
@@ -363,7 +606,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
           console.error('Jahrgangs-Chat-Sync beim Laden der Raeume fehlgeschlagen:', syncErr.message);
         }
 
-        // Team-Chat-Mitgliedschaft synchronisieren (nur fuer Team-Mitglieder, nie Konfis).
+        // Team-Chat-Mitgliedschaft synchronisieren (nur für Team-Mitglieder, nie Konfis).
         // Stellt sicher, dass der "Team"-Chat existiert und alle Admins/Teamer drin sind.
         if (userType !== 'konfi') {
           try {
@@ -374,7 +617,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
           }
         }
 
-        // Nur bei fehlerfreiem Sync merken — sonst beim naechsten Aufruf erneut versuchen.
+        // Nur bei fehlerfreiem Sync merken — sonst beim nächsten Aufruf erneut versuchen.
         if (syncOk) {
           chatSyncCache.markSynced(organizationId, userId);
         }
@@ -393,11 +636,15 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
               FROM chat_participants cp
               WHERE cp.room_id = r.id
           ) as participant_count,
-          -- Rolle des Direktchat-Partners (admin=Team, konfi=Konfi) fuer Chat-Farbe/Filter.
+          -- Rolle des Direktchat-Partners für Chat-Farbe/Filter. Drei moegliche
+          -- Werte: 'admin' (Leitung/Admin), 'teamer', 'konfi'.
           dm.partner_user_type,
-          -- Reiner Team-Gruppenchat: alle Teilnehmer sind admin (= Teamer:innen). Nur fuer Gruppen relevant.
+          -- Reiner Team-Gruppenchat: KEIN Konfi unter den Teilnehmern. Vorher
+          -- wurde auf user_type <> 'admin' geprüft — eine Gruppe mit
+          -- Teamer:innen galt dadurch nie als Team-Gruppe, obwohl
+          -- chat_participants.user_type 'teamer' als eigenen Wert fuehrt.
           (
-              SELECT COUNT(*) FILTER (WHERE cp.user_type <> 'admin') = 0 AND COUNT(*) > 0
+              SELECT COUNT(*) FILTER (WHERE cp.user_type NOT IN ('admin', 'teamer')) = 0 AND COUNT(*) > 0
               FROM chat_participants cp
               WHERE cp.room_id = r.id
           ) as is_team_only,
@@ -468,25 +715,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       const organizationId = req.user.organization_id;
       
       // 1. Security Check: Does the user have access to this room?
-      let hasAccess = false;
-      const accessQuery = `
-      SELECT 1 FROM chat_participants cp
-      JOIN chat_rooms cr ON cp.room_id = cr.id 
-      WHERE cp.room_id = $1 AND cp.user_id = $2 AND cp.user_type = $3 AND cr.organization_id = $4
-    `;
-      const { rows: [access] } = await db.query(accessQuery, [roomId, userId, userType, organizationId]);
-      
-      if (access) {
-        hasAccess = true;
-      } else if (userType === 'admin') {
-        const adminAccessQuery = "SELECT 1 FROM chat_rooms WHERE id = $1 AND organization_id = $2";
-        const { rows: [adminAccess] } = await db.query(adminAccessQuery, [roomId, organizationId]);
-        if (adminAccess) {
-          hasAccess = true;
-        }
-      }
-      
-      if (!hasAccess) {
+      if (!await darfRaumOeffnen(roomId, req.user)) {
         return res.status(403).json({ error: 'Zugriff verweigert' });
       }
       
@@ -544,15 +773,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       const organizationId = req.user.organization_id;
       
       // Check if user has access to this room (with organization check)
-      const accessQuery = userType === 'admin'
-      ? "SELECT 1 FROM chat_rooms WHERE id = $1 AND organization_id = $2"
-      : `SELECT 1 FROM chat_participants cp 
-          JOIN chat_rooms cr ON cp.room_id = cr.id 
-          WHERE cp.room_id = $1 AND cp.user_id = $2 AND cp.user_type = $3 AND cr.organization_id = $4`;
-      const accessParams = userType === 'admin' ? [roomId, organizationId] : [roomId, userId, userType, organizationId];
-      const { rows: [access] } = await db.query(accessQuery, accessParams);
-      
-      if (!access) {
+      if (!await darfRaumOeffnen(roomId, req.user)) {
         return res.status(403).json({ error: 'Zugriff verweigert' });
       }
       
@@ -607,7 +828,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
 
       const { rows: messages } = await db.query(messagesQuery, queryParams);
 
-      // Bulk-Query fuer Reactions und Poll-Votes (statt N+1 Queries)
+      // Bulk-Query für Reactions und Poll-Votes (statt N+1 Queries)
       const messageIds = messages.map(m => m.id);
 
       let processedMessages = [];
@@ -666,21 +887,16 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
             msg.anonymous = Boolean(msg.anonymous);
             msg.exclusive_options = Boolean(msg.exclusive_options);
             // Votes anreichern: voter_name -> user_name. Bei anonymen Umfragen die
-            // Namen NICHT ausliefern (nur Zaehlung), damit niemand sehen kann, wer
-            // was gewaehlt hat.
+            // Namen NICHT ausliefern (nur Zählung), damit niemand sehen kann, wer
+            // was gewählt hat.
             const rawVotes = votesMap[msg.poll_id] || [];
-            msg.votes = rawVotes.map(v => ({
-              user_id: v.user_id,
-              user_type: v.user_type,
-              option_index: v.option_index,
-              user_name: msg.anonymous ? undefined : v.voter_name,
-            }));
+            msg.votes = stimmenAufbereiten(rawVotes, msg.anonymous, userId, userType);
           }
           return msg;
         });
       }
       
-      // Bei ?after ist die Query bereits ASC sortiert, kein reverse noetig
+      // Bei ?after ist die Query bereits ASC sortiert, kein reverse nötig
       res.json(after ? processedMessages : processedMessages.reverse());
     } catch (err) {
  console.error('Database error in GET /rooms/:roomId/messages:', req.params.roomId, err);
@@ -717,15 +933,8 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         }
       }
 
-      // Check access (mit Organisations-Pruefung)
-      const accessQuery = userType === 'admin'
-      ? "SELECT 1 FROM chat_rooms WHERE id = $1 AND organization_id = $2"
-      : `SELECT 1 FROM chat_participants cp
-          JOIN chat_rooms cr ON cp.room_id = cr.id
-          WHERE cp.room_id = $1 AND cp.user_id = $2 AND cp.user_type = $3 AND cr.organization_id = $4`;
-      const accessParams = userType === 'admin' ? [roomId, organizationId] : [roomId, userId, userType, organizationId];
-      const { rows: [access] } = await db.query(accessQuery, accessParams);
-      if (!access) {
+      // Check access (mit Organisations-Prüfung)
+      if (!await darfRaumOeffnen(roomId, req.user)) {
         return res.status(403).json({ error: 'Zugriff verweigert' });
       }
       
@@ -737,7 +946,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
           return res.status(400).json({ error: 'Datei konnte nicht gelesen werden' });
         }
 
-        // Magic-Bytes-Pruefung direkt auf dem Buffer (echte Dateitypen erzwingen).
+        // Magic-Bytes-Prüfung direkt auf dem Buffer (echte Dateitypen erzwingen).
         // Text-Formate (txt/csv) haben keine Magic Bytes -> Header vertrauen.
         const textMimes = ['text/plain', 'text/csv'];
         if (!textMimes.includes(req.file.mimetype)) {
@@ -928,15 +1137,8 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       const userType = req.user.type;
       const organizationId = req.user.organization_id;
 
-      // Zugriff pruefen (mit Organisations-Pruefung)
-      const accessQuery = userType === 'admin'
-      ? "SELECT 1 FROM chat_rooms WHERE id = $1 AND organization_id = $2"
-      : `SELECT 1 FROM chat_participants cp
-          JOIN chat_rooms cr ON cp.room_id = cr.id
-          WHERE cp.room_id = $1 AND cp.user_id = $2 AND cp.user_type = $3 AND cr.organization_id = $4`;
-      const accessParams = userType === 'admin' ? [roomId, organizationId] : [roomId, userId, userType, organizationId];
-      const { rows: [access] } = await db.query(accessQuery, accessParams);
-      if (!access) {
+      // Zugriff prüfen (mit Organisations-Prüfung)
+      if (!await darfRaumOeffnen(roomId, req.user)) {
         return res.status(403).json({ error: 'Zugriff verweigert' });
       }
 
@@ -958,7 +1160,157 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
     }
   });
   
-  // Get room participants
+  // Bewusst NUR für admin/org_admin — nicht für Teamer:innen und Konfis.
+  // Ein Export nimmt den gesamten Verlauf aus dem Kontext des Chats heraus;
+  // wer ihn ziehen darf, sollte dieselbe Verantwortung tragen wie beim
+  // Löschen eines Raums.
+  // ============================================================
+  router.get('/rooms/:roomId/export', verifyTokenRBAC, async (req, res) => {
+    try {
+      const roomId = parseInt(req.params.roomId, 10);
+      if (!Number.isInteger(roomId) || roomId < 1) {
+        return res.status(400).json({ error: 'Ungültige Raum-ID' });
+      }
+
+      const userType = req.user.type;
+      const roleName = req.user.role_name;
+      const organizationId = req.user.organization_id;
+
+      // Rollenpruefung: nur Leitung. type ist für alles außer konfi/teamer
+      // 'admin', deshalb zusaetzlich der Rollenname.
+      const istLeitung = userType === 'admin'
+        && ['admin', 'org_admin', 'super_admin'].includes(roleName);
+      if (!istLeitung) {
+        return res.status(403).json({ error: 'Nur die Leitung darf Chats exportieren' });
+      }
+
+      // Raum muss zur eigenen Organisation gehören — 404 statt 403, damit der
+      // Export nicht verraet, ob eine fremde Raum-ID existiert.
+      const { rows: [room] } = await db.query(
+        `SELECT cr.id, cr.name, cr.type, cr.created_at, j.name AS jahrgang_name
+         FROM chat_rooms cr
+         LEFT JOIN jahrgaenge j ON cr.jahrgang_id = j.id
+         WHERE cr.id = $1 AND cr.organization_id = $2`,
+        [roomId, organizationId]
+      );
+      if (!room) {
+        return res.status(404).json({ error: 'Chat nicht gefunden' });
+      }
+
+      if (!await darfRaumOeffnen(roomId, req.user)) {
+        return res.status(403).json({ error: 'Private Zweiergespräche lassen sich nicht exportieren' });
+      }
+
+      // Vollstaendiger Verlauf, aelteste zuerst. Geloeschte Nachrichten bleiben
+      // als Platzhalter stehen, damit der Verlauf nachvollziehbar bleibt.
+      const { rows: messages } = await db.query(
+        `SELECT m.id, m.created_at, m.message_type, m.file_name,
+                m.deleted_at IS NOT NULL AS geloescht,
+                CASE WHEN m.deleted_at IS NOT NULL THEN NULL ELSE m.content END AS content,
+                u.display_name AS absender,
+                ro.display_name AS rolle,
+                p.question AS umfrage_frage,
+                p.options  AS umfrage_optionen,
+                reply_user.display_name AS antwort_auf_absender,
+                CASE WHEN reply_msg.deleted_at IS NOT NULL THEN NULL ELSE reply_msg.content END AS antwort_auf_inhalt
+         FROM chat_messages m
+         LEFT JOIN users u ON m.user_id = u.id
+         LEFT JOIN roles ro ON u.role_id = ro.id
+         LEFT JOIN chat_polls p ON m.id = p.message_id
+         LEFT JOIN chat_messages reply_msg ON m.reply_to = reply_msg.id
+         LEFT JOIN users reply_user ON reply_msg.user_id = reply_user.id
+         WHERE m.room_id = $1
+         ORDER BY m.created_at ASC, m.id ASC`,
+        [roomId]
+      );
+
+      const raumName = room.name || room.jahrgang_name || `Chat ${room.id}`;
+      const format = (req.query.format || 'txt').toLowerCase();
+
+      // Dateiname ohne Sonderzeichen — Umlaute werden transliteriert, damit der
+      // Content-Disposition-Header auf allen Systemen sauber ankommt.
+      const dateiBasis = raumName
+        .replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss')
+        .replace(/Ä/g, 'Ae').replace(/Ö/g, 'Oe').replace(/Ü/g, 'Ue')
+        .replace(/[^a-zA-Z0-9_-]+/g, '_')
+        .replace(/^_+|_+$/g, '')
+        .slice(0, 60) || 'chat';
+      const heute = new Date().toISOString().slice(0, 10);
+
+      if (format === 'json') {
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.setHeader('Content-Disposition', `attachment; filename="${dateiBasis}_${heute}.json"`);
+        return res.send(JSON.stringify({
+          chat: raumName,
+          typ: room.type,
+          erstellt_am: room.created_at,
+          exportiert_am: new Date().toISOString(),
+          anzahl_nachrichten: messages.length,
+          nachrichten: messages
+        }, null, 2));
+      }
+
+      // Textformat: für Menschen zum Lesen und Weiterverarbeiten.
+      const zeit = (d) => new Date(d).toLocaleString('de-DE', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      });
+
+      const zeilen = [];
+      zeilen.push(`Chat-Verlauf: ${raumName}`);
+      zeilen.push(`Exportiert am ${zeit(new Date())} — ${messages.length} Nachrichten`);
+      zeilen.push('='.repeat(60));
+      zeilen.push('');
+
+      let letzterTag = '';
+      for (const m of messages) {
+        const tag = new Date(m.created_at).toLocaleDateString('de-DE', {
+          weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric'
+        });
+        if (tag !== letzterTag) {
+          zeilen.push('');
+          zeilen.push(`--- ${tag} ---`);
+          letzterTag = tag;
+        }
+
+        const uhrzeit = new Date(m.created_at).toLocaleTimeString('de-DE', {
+          hour: '2-digit', minute: '2-digit'
+        });
+        const absender = m.absender || 'Unbekannt';
+        const rolle = m.rolle ? ` (${m.rolle})` : '';
+        let text;
+
+        if (m.geloescht) {
+          text = '[gelöscht]';
+        } else if (m.message_type === 'poll' && m.umfrage_frage) {
+          const opts = Array.isArray(m.umfrage_optionen) ? m.umfrage_optionen : [];
+          text = `[Umfrage] ${m.umfrage_frage}` + (opts.length ? `\n    Optionen: ${opts.join(' | ')}` : '');
+        } else if (m.message_type !== 'text' && m.file_name) {
+          text = `[${m.message_type === 'image' ? 'Bild' : m.message_type === 'video' ? 'Video' : 'Datei'}: ${m.file_name}]`
+               + (m.content ? `\n    ${m.content}` : '');
+        } else {
+          text = m.content || '';
+        }
+
+        if (m.antwort_auf_absender) {
+          const zitat = (m.antwort_auf_inhalt || '[gelöscht]').slice(0, 60);
+          zeilen.push(`[${uhrzeit}] ${absender}${rolle} (antwortet ${m.antwort_auf_absender}: "${zitat}")`);
+        } else {
+          zeilen.push(`[${uhrzeit}] ${absender}${rolle}`);
+        }
+        zeilen.push(`    ${text.split('\n').join('\n    ')}`);
+      }
+
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${dateiBasis}_${heute}.txt"`);
+      return res.send(zeilen.join('\n'));
+
+    } catch (err) {
+      console.error('Database error in GET /chat/rooms/:roomId/export:', err);
+      res.status(500).json({ error: 'Datenbankfehler' });
+    }
+  });
+
   router.get('/rooms/:roomId/participants', verifyTokenRBAC, async (req, res) => {
     try {
       const roomId = req.params.roomId;
@@ -966,16 +1318,8 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       const userType = req.user.type;
       const organizationId = req.user.organization_id;
 
-      // Check if user has access to this room (mit Organisations-Pruefung)
-      const accessQuery = userType === 'admin'
-      ? "SELECT 1 FROM chat_rooms WHERE id = $1 AND organization_id = $2"
-      : `SELECT 1 FROM chat_participants cp
-          JOIN chat_rooms cr ON cp.room_id = cr.id
-          WHERE cp.room_id = $1 AND cp.user_id = $2 AND cp.user_type = $3 AND cr.organization_id = $4`;
-      const accessParams = userType === 'admin' ? [roomId, organizationId] : [roomId, userId, userType, organizationId];
-
-      const { rows: [access] } = await db.query(accessQuery, accessParams);
-      if (!access) {
+      // Check if user has access to this room (mit Organisations-Prüfung)
+      if (!await darfRaumOeffnen(roomId, req.user)) {
         return res.status(403).json({ error: 'Zugriff verweigert' });
       }
 
@@ -989,7 +1333,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         u.role_title,
         r.name as role_name,
         r.display_name as role_display_name,
-        -- Jahrgang nur fuer echte Konfis; Team-Mitglieder (admin/teamer) haben keinen.
+        -- Jahrgang nur für echte Konfis; Team-Mitglieder (admin/teamer) haben keinen.
         CASE
           WHEN cp.user_type = 'konfi' THEN kp.jahrgang_id
           ELSE NULL
@@ -1153,7 +1497,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
 
       // Event-Chats sind an die Event-Teilnahme gekoppelt: Konfis verlassen sie
       // NICHT manuell, sondern ausschliesslich durch Abmelden vom Event. Sonst
-      // waere man am Event angemeldet, aber nicht im Chat.
+      // wäre man am Event angemeldet, aber nicht im Chat.
       if (userType === 'konfi' && room.event_id) {
         return res.status(400).json({ error: 'Event-Chats werden über die Event-Abmeldung verlassen, nicht direkt.' });
       }
@@ -1195,12 +1539,80 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       return res.status(401).json({ error: 'Kein Token vorhanden' });
     }
     
-    // Verify token manually since we can't use middleware for query params
+    // Token von Hand prüfen, weil die Middleware den Query-Parameter nicht
+    // unterstuetzt (Video-Elemente können keine Header senden).
+    //
+    // Frueher stand hier schlicht `req.user = decoded`. Zwei Folgen
+    // 
+    //  1. Die Angaben im Token galten ungeprueft für die volle Laufzeit —
+    //     15 Minuten ohne Abgleich mit der Datenbank, auch für geloeschte
+    //     oder gesperrte Konten.
+    //  2. organization_id kam aus dem Token und war damit immer die
+    //     PRIMAER-Organisation. Wer per Umschalter in einer Zweit-Gemeinde
+    //     arbeitete, bekam seine eigenen Chat-Dateien nicht zu sehen (404).
+    //     Dieselbe Klasse Fehler wurde in challenges.js am 06.08. behoben.
+    let decoded;
     try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.user = decoded;
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
     } catch (error) {
       return res.status(401).json({ error: 'Ungültiger Token' });
+    }
+
+    try {
+      const { rows: [nutzer] } = await db.query(
+        `SELECT u.id, u.organization_id, u.token_invalidated_at, r.name AS role_name
+         FROM users u
+         LEFT JOIN roles r ON u.role_id = r.id
+         WHERE u.id = $1 AND u.deleted_at IS NULL AND u.is_active = true`,
+        [decoded.id]
+      );
+      if (!nutzer) {
+        return res.status(401).json({ error: 'Nicht angemeldet' });
+      }
+
+      // Soft-Revoke wie in rbac.js: nach einem Passwortwechsel ausgestellte
+      // Sperren müssen auch hier greifen.
+      if (nutzer.token_invalidated_at) {
+        const ausgestellt = decoded.iat;
+        const gesperrtAb = Math.floor(new Date(nutzer.token_invalidated_at).getTime() / 1000);
+        if (ausgestellt < gesperrtAb) {
+          return res.status(401).json({ error: 'Token invalidated' });
+        }
+      }
+
+      req.user = {
+        id: nutzer.id,
+        organization_id: nutzer.organization_id,
+        role_name: nutzer.role_name,
+        type: nutzer.role_name === 'konfi' ? 'konfi'
+          : nutzer.role_name === 'teamer' ? 'teamer' : 'admin'
+      };
+
+      // Aktive Organisation aufloesen (Umschalter), identisch zu rbac.js.
+      const headerOrg = parseInt(req.headers['x-active-organization']);
+      const tokenOrg = decoded.active_organization_id ? parseInt(decoded.active_organization_id) : null;
+      const gewuenschteOrg = Number.isInteger(headerOrg) ? headerOrg
+        : (Number.isInteger(tokenOrg) ? tokenOrg : null);
+
+      if (gewuenschteOrg && gewuenschteOrg !== req.user.organization_id) {
+        const { rows: [mitgliedschaft] } = await db.query(
+          `SELECT uo.organization_id, r.name AS role_name
+           FROM user_organizations uo
+           JOIN roles r ON uo.role_id = r.id
+           WHERE uo.user_id = $1 AND uo.organization_id = $2`,
+          [decoded.id, gewuenschteOrg]
+        );
+        if (!mitgliedschaft) {
+          return res.status(403).json({ error: 'Kein Zugriff auf diese Organisation' });
+        }
+        req.user.organization_id = mitgliedschaft.organization_id;
+        req.user.role_name = mitgliedschaft.role_name;
+        req.user.type = mitgliedschaft.role_name === 'konfi' ? 'konfi'
+          : mitgliedschaft.role_name === 'teamer' ? 'teamer' : 'admin';
+      }
+    } catch (err) {
+      console.error('Auth-Fehler in GET /chat/files/:filename:', err);
+      return res.status(500).json({ error: 'Datenbankfehler' });
     }
     try {
       // Path-Traversal-Schutz: nur den Dateinamen ohne Verzeichniskomponenten verwenden
@@ -1211,12 +1623,18 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         return res.status(400).json({ error: 'Ungültiger Dateiname' });
       }
 
-      // Check if user has access to this file by checking chat membership
+      // Check if user has access to this file by checking chat membership.
+      // Soft-geloeschte Nachrichten (deleted_at gesetzt) liefern ihren Anhang
+      // NICHT mehr aus: Die Nachricht gilt als gelöscht, also darf auch die
+      // Datei nicht mehr abrufbar sein. Die Datei selbst
+      // bleibt bewusst liegen — die Leitung kann die Nachricht
+      // wiederherstellen (Soft-Delete ist eine Designentscheidung).
       const { rows: [fileMessage] } = await db.query(
         `SELECT cm.room_id, cm.file_name
          FROM chat_messages cm
          JOIN chat_rooms cr ON cm.room_id = cr.id
-         WHERE cm.file_path = $1 AND cr.organization_id = $2`,
+         WHERE cm.file_path = $1 AND cr.organization_id = $2
+           AND cm.deleted_at IS NULL`,
         [filename, req.user.organization_id]
       );
 
@@ -1257,8 +1675,8 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
           }
         }
 
-        // Datei lesen und (falls verschluesselt) entschluesseln, dann senden.
-        // Alte Klartext-Dateien werden vom decryptBuffer unveraendert
+        // Datei lesen und (falls verschlüsselt) entschluesseln, dann senden.
+        // Alte Klartext-Dateien werden vom decryptBuffer unverändert
         // durchgereicht (Abwaertskompatibilitaet bis zur Migration).
         const fileBuffer = await fs.promises.readFile(filePath);
         let mediaBuffer;
@@ -1275,51 +1693,6 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
     } catch (error) {
  console.error('Error serving chat file:', error);
       res.status(500).json({ error: 'Serverfehler' });
-    }
-  });
-
-  // Badge update endpoint for Background Refresh
-  router.post('/badge-update', verifyTokenRBAC, async (req, res) => {
-    try {
-      const userId = req.user.id;
-      const userType = req.user.type;
-      
-      // Use the consistent query for unread counts, referencing chat_read_status
-      const badgeQuery = `
-      SELECT COUNT(DISTINCT m.id) as total_unread
-      FROM chat_messages m
-      JOIN chat_participants p ON m.room_id = p.room_id
-      LEFT JOIN chat_read_status crs ON m.room_id = crs.room_id AND p.user_id = crs.user_id AND p.user_type = crs.user_type
-      WHERE p.user_id = $1
-        AND p.user_type = $2
-        AND m.created_at > COALESCE(crs.last_read_at, '1970-01-01')
-        AND m.deleted_at IS NULL
-        AND m.user_id != $1
-    `;
-      const { rows: [result] } = await db.query(badgeQuery, [userId, userType]);
-      const badgeCount = parseInt(result?.total_unread || '0', 10);
-      
-      // Send badge update via Push Notification
-      await PushService.sendBadgeUpdate(db, userId, badgeCount);
-      
-      res.json({
-        success: true,
-        badgeCount: badgeCount,
-        message: `Badge updated to ${badgeCount}`
-      });
-      
-    } catch (error) {
-      // The push service might throw an error, which should be caught but not treated as a 500
-      if (error.isPushServiceError) {
- console.error('Push badge update failed:', error);
-        res.status(502).json({ 
-          success: false, 
-          error: 'Push-Benachrichtigung fehlgeschlagen'
-        });
-      } else {
- console.error('Badge update endpoint error:', error);
-        res.status(500).json({ error: 'Interner Serverfehler' });
-      }
     }
   });
 
@@ -1354,10 +1727,12 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
     }
     
     try {
-      // Check if user has access to this room
+      // Zugriff wie beim Lesen: Teilnehmerschaft, Leitung gemeindeweit — aber
+      // nicht in fremden Zweiergespraechen. Vorher genuegte die Organisation,
+      // damit liess sich eine Umfrage in ein fremdes Zweiergespraech stellen.
       const { rows: [room] } = await db.query("SELECT 1 FROM chat_rooms WHERE id = $1 AND organization_id = $2", [roomId, req.user.organization_id]);
-      
-      if (!room) {
+
+      if (!room || !await darfRaumOeffnen(roomId, req.user)) {
         return res.status(404).json({ error: 'Raum nicht gefunden' });
       }
       
@@ -1415,7 +1790,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       // WebSocket + Push: Umfrage wie eine normale Nachricht live verteilen.
       // Ohne dies sehen Teilnehmer die Umfrage erst nach Reload/Fallback-Poll
       // Wir bauen ein message-Objekt in derselben
-      // Struktur, die GET /messages fuer Poll-Nachrichten liefert (message_type
+      // Struktur, die GET /messages für Poll-Nachrichten liefert (message_type
       // 'poll', options als Array, Poll-Metadaten, leere votes), damit der
       // ChatRoom-newMessage-Handler die Umfrage sofort rendern kann.
       if (io) {
@@ -1448,7 +1823,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
             reactions: []
           };
 
-          // An den Raum (offene Chats) UND an alle Teilnehmer-User-Raeume
+          // An den Raum (offene Chats) UND an alle Teilnehmer-User-Räume
           // (Badge/Overview), exakt nach dem Muster des Nachrichten-Handlers.
           io.to(`room_${roomId}`).emit('newMessage', {
             roomId: parseInt(roomId),
@@ -1534,7 +1909,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
   });
 
   // Vote for a poll (by poll ID)
-  router.post('/polls/:pollId/vote', verifyTokenRBAC, async (req, res) => {
+  const votePoll = async (req, res) => {
     const pollId = req.params.pollId;
     const { option_index } = req.body;
     const userId = req.user.id;
@@ -1622,7 +1997,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
 
       if (existingVote) {
         // If already voted for this option, remove the vote (toggle off).
-        // Gilt auch fuer exklusive Umfragen: die eigene Wahl wieder freigeben.
+        // Gilt auch für exklusive Umfragen: die eigene Wahl wieder freigeben.
         await client.query(
           "DELETE FROM chat_poll_votes WHERE poll_id = $1 AND user_id = $2 AND user_type = $3 AND option_index = $4",
           [actualPollId, userId, userType, option_index]
@@ -1694,7 +2069,8 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       console.error('Database error in POST /polls/:pollId/vote:', err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
-  });
+  };
+  router.post('/polls/:pollId/vote', verifyTokenRBAC, votePoll);
 
   // Delete message (soft delete)
   router.delete('/messages/:messageId', verifyTokenRBAC, async (req, res) => {
@@ -1716,10 +2092,10 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         return res.status(404).json({ error: 'Nachricht nicht gefunden' });
       }
       
-      // Check if user can delete this message (own message or admin in same org)
-      const canDelete = (message.user_id == userId && message.user_type === userType) || 
-                       (userType === 'admin' && message.organization_id == req.user.organization_id);
-      
+      const eigene = message.user_id == userId && message.user_type === userType;
+      const istLeitung = userType === 'admin';
+      const canDelete = eigene || (istLeitung && await darfRaumOeffnen(message.room_id, req.user));
+
       if (!canDelete) {
         return res.status(403).json({ error: 'Du kannst nur eigene Nachrichten löschen' });
       }
@@ -1743,117 +2119,21 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
     }
   });
 
-  // Vote for a poll (by message ID - for frontend compatibility)
-  router.post('/messages/:messageId/vote', verifyTokenRBAC, async (req, res) => {
-    const messageId = req.params.messageId;
-    const { option_index } = req.body;
-    const userId = req.user.id;
-    const userType = req.user.type;
-    
-    
-    if (option_index === undefined || option_index === null) {
-      return res.status(400).json({ error: 'Option-Index ist erforderlich' });
-    }
-    
-    try {
-      // Get the poll by message_id
-      const getPollQuery = `
-        SELECT p.*, m.room_id FROM chat_polls p
-        JOIN chat_messages m ON p.message_id = m.id
-        WHERE p.message_id = $1
-      `;
-      
-      const { rows: [poll] } = await db.query(getPollQuery, [messageId]);
-      
-      if (!poll) {
-        return res.status(404).json({ error: 'Umfrage für diese Nachricht nicht gefunden' });
-      }
-      
-      // Check if poll has expired
-      if (poll.expires_at && new Date(poll.expires_at) < new Date()) {
-        return res.status(400).json({ error: 'Umfrage ist abgelaufen' });
-      }
-      
-      // Parse options and validate option_index
-      let parsedOptions;
-      try {
-        parsedOptions = JSON.parse(poll.options);
-      } catch (e) {
- console.error('Failed to parse poll options:', poll.options);
-        return res.status(500).json({ error: 'Ungültige Umfragedaten' });
-      }
-      
-      if (option_index < 0 || option_index >= parsedOptions.length) {
-        return res.status(400).json({ error: 'Ungültiger Option-Index' });
-      }
-      
-      // Check if user has access to the room
-      const accessQuery = `
-        SELECT 1 FROM chat_participants cp 
-        JOIN chat_rooms cr ON cp.room_id = cr.id 
-        WHERE cp.room_id = $1 AND cp.user_id = $2 AND cp.user_type = $3 AND cr.organization_id = $4
-      `;
-      const { rows: [access] } = await db.query(accessQuery, [poll.room_id, userId, userType, req.user.organization_id]);
-      
-      if (!access) {
-        return res.status(403).json({ error: 'Zugriff auf diesen Raum verweigert' });
-      }
-      
-      const client = await db.getClient();
-      try {
-      await client.query('BEGIN');
-
-      // For single choice polls, remove existing vote
-      if (!poll.multiple_choice) {
-        await client.query(
-          "DELETE FROM chat_poll_votes WHERE poll_id = $1 AND user_id = $2 AND user_type = $3",
-          [poll.id, userId, userType]
-        );
-      } else {
-        // For multiple choice, check if user already voted for this option
-        const { rows: [existingVote] } = await client.query(
-          "SELECT 1 FROM chat_poll_votes WHERE poll_id = $1 AND user_id = $2 AND user_type = $3 AND option_index = $4",
-          [poll.id, userId, userType, option_index]
-        );
-
-        if (existingVote) {
-          await client.query('ROLLBACK');
-          client.release();
-          return res.status(400).json({ error: 'Du hast bereits für diese Option abgestimmt' });
-        }
-      }
-
-      // Add the new vote
-      await client.query(
-        "INSERT INTO chat_poll_votes (poll_id, user_id, user_type, option_index, created_at) VALUES ($1, $2, $3, $4, NOW())",
-        [poll.id, userId, userType, option_index]
-      );
-
-      await client.query('COMMIT');
-      client.release();
-
-      // Live-Update: aktualisierten Poll-Stand an den Raum senden.
-      await emitPollUpdate(poll.id, poll.room_id);
-
-      res.json({
-        message: 'Stimme erfolgreich abgegeben',
-        poll_id: poll.id,
-        message_id: parseInt(messageId),
-        option_index: option_index,
-        user_id: userId
-      });
-
-      } catch (err) {
-        try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
-        client.release();
-        throw err;
-      }
-
-    } catch (err) {
-      console.error('Database error in POST /messages/:messageId/vote:', err);
-      res.status(500).json({ error: 'Datenbankfehler' });
-    }
-  });
+  // Abstimmen über die Nachrichten-ID (aeltere Adressform).
+  //
+  // Diese Route hatte eine eigene, unvollstaendige Kopie der Abstimmlogik:
+  // exclusive_options wurde komplett ignoriert, es gab weder den FOR-UPDATE-Lock
+  // noch die Belegt-Prüfung. Bei einer exklusiven Umfrage ("wer macht welche
+  // Tour?") konnten hierueber mehrere Personen dieselbe Option belegen, während
+  // /polls/:pollId/vote das korrekt mit 409 ablehnt.
+  //
+  // Statt die Logik zu duplizieren, wird an den einen Handler weitergereicht:
+  // /polls/:pollId/vote sucht die Umfrage ohnehin per poll_id UND per message_id.
+  const voteHandler = (req, res) => {
+    req.params.pollId = req.params.messageId;
+    return votePoll(req, res);
+  };
+  router.post('/messages/:messageId/vote', verifyTokenRBAC, voteHandler);
   
   // DELETE a chat room (Admin only)
   router.delete('/rooms/:roomId', verifyTokenRBAC, async (req, res) => {
@@ -1893,8 +2173,8 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       
       // Direct chats can be deleted by admins (no restrictions)
 
-      // Teilnehmer VOR dem Loeschen einsammeln, damit wir sie danach ueber die
-      // entfernte Raumliste informieren koennen (nach dem Delete sind die
+      // Teilnehmer VOR dem Löschen einsammeln, damit wir sie danach über die
+      // entfernte Raumliste informieren können (nach dem Delete sind die
       // Teilnehmerzeilen weg).
       const { rows: participantsBeforeDelete } = await db.query(
         'SELECT user_id, user_type FROM chat_participants WHERE room_id = $1',
@@ -1974,7 +2254,66 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
-  
+
+  router.delete('/rooms/:roomId/messages', verifyTokenRBAC, async (req, res) => {
+    const roomId = parseInt(req.params.roomId, 10);
+
+    if (req.user.type !== 'admin' || !['org_admin', 'admin'].includes(req.user.role_name)) {
+      return res.status(403).json({ error: 'Nur die Leitung kann den Team-Chat leeren' });
+    }
+
+    try {
+      const { rows: [room] } = await db.query(
+        'SELECT id, is_team_chat FROM chat_rooms WHERE id = $1 AND organization_id = $2',
+        [roomId, req.user.organization_id]
+      );
+      if (!room) {
+        return res.status(404).json({ error: 'Chat-Raum nicht gefunden' });
+      }
+      if (!room.is_team_chat) {
+        return res.status(409).json({ error: 'Nur der Team-Chat lässt sich leeren.' });
+      }
+
+      // Dateien VOR dem Löschen einsammeln (danach sind die Zeilen weg).
+      const { rows: filesForDeletion } = await db.query(
+        'SELECT file_path FROM chat_messages WHERE room_id = $1 AND file_path IS NOT NULL',
+        [roomId]
+      );
+
+      const { rowCount: deletedCount } = await db.query(
+        'DELETE FROM chat_messages WHERE room_id = $1',
+        [roomId]
+      );
+
+      // Anhaenge best effort entfernen — eine fehlende Datei kippt nichts.
+      for (const fileRecord of filesForDeletion) {
+        try {
+          await fs.promises.unlink(path.join(uploadsDir, 'chat', fileRecord.file_path));
+        } catch (fileErr) {
+          if (fileErr.code !== 'ENOENT') {
+            console.warn(`Team-Chat leeren: Datei ${fileRecord.file_path} nicht entfernbar:`, fileErr.message);
+          }
+        }
+      }
+
+      res.json({ message: 'Team-Chat geleert', deleted_count: deletedCount });
+
+      // Offene Chat-Ansichten leeren und die Raumlisten (letzte Nachricht,
+      // Ungelesen-Zaehler) aktualisieren.
+      if (io) {
+        io.to(`room_${roomId}`).emit('chatCleared', { roomId });
+      }
+      const { rows: participants } = await db.query(
+        'SELECT user_id, user_type FROM chat_participants WHERE room_id = $1',
+        [roomId]
+      );
+      emitRoomsChanged(participants);
+    } catch (err) {
+      console.error('Database error in DELETE /rooms/:roomId/messages:', roomId, err);
+      res.status(500).json({ error: 'Datenbankfehler' });
+    }
+  });
+
   // === REACTIONS API ===
 
   // Add reaction to a message
@@ -2087,7 +2426,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
     const organizationId = req.user.organization_id;
 
     try {
-      // Zugriff pruefen: Nachricht muss in der eigenen Organisation liegen
+      // Zugriff prüfen: Nachricht muss in der eigenen Organisation liegen
       const messageQuery = `
         SELECT m.room_id, cr.organization_id
         FROM chat_messages m
@@ -2102,15 +2441,10 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         return res.status(403).json({ error: 'Zugriff verweigert' });
       }
 
-      // Admins duerfen alle Raeume ihrer Org lesen, andere muessen Teilnehmer sein
-      if (userType !== 'admin') {
-        const { rows: [isParticipant] } = await db.query(
-          "SELECT 1 FROM chat_participants WHERE room_id = $1 AND user_id = $2 AND user_type = $3",
-          [message.room_id, userId, userType]
-        );
-        if (!isParticipant) {
-          return res.status(403).json({ error: 'Zugriff verweigert' });
-        }
+      // Dieselbe Regel wie beim Lesen der Nachrichten selbst: Teilnehmerschaft,
+      // Leitung zusaetzlich gemeindeweit — außer in fremden Zweiergespraechen.
+      if (!await darfRaumOeffnen(message.room_id, req.user)) {
+        return res.status(403).json({ error: 'Zugriff verweigert' });
       }
 
       const query = `
@@ -2158,14 +2492,17 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       // DATENSCHUTZ: Konfis dürfen NUR Admins anschreiben (keine Konfi-zu-Konfi Chats)
       // Alle Admins, Org-Admins und Teamer der Organisation
       // role_title ist die selbst gewählte Rollenbezeichnung (z.B. "Pastorin", "Teamerin")
+      // Teamer:innen nur mit gemeinsamem Jahrgang, Leitung/Admins immer
+      // (KONFI_SIEHT_TEAMMITGLIED). type kam bisher hart als 'admin' zurück —
+      // damit landeten Teamer:innen im Konfi-Modal als Admin, obwohl
+      // chat_participants sie als 'teamer' fuehrt.
       const adminQuery = `
-        SELECT DISTINCT u.id, u.display_name as name, 'admin' as type,
+        SELECT DISTINCT u.id, u.display_name as name,
+          CASE WHEN r.name = 'teamer' THEN 'teamer' ELSE 'admin' END as type,
           r.name as role_name,
           COALESCE(NULLIF(u.role_title, ''),
             CASE
               WHEN r.name = 'teamer' THEN 'Teamer:in'
-              WHEN r.name = 'org_admin' THEN 'Admin'
-              WHEN r.name = 'admin' THEN 'Admin'
               ELSE 'Admin'
             END
           ) as role_description,
@@ -2173,11 +2510,14 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         FROM users u
         JOIN roles r ON u.role_id = r.id
         WHERE r.name IN ('admin', 'org_admin', 'teamer')
-        AND u.organization_id = $1
-        AND u.id != $2
+        AND u.organization_id = $2
+        AND u.id <> $1
+        AND u.is_active = true
+        AND u.deleted_at IS NULL
+        AND ${KONFI_SIEHT_TEAMMITGLIED}
         ORDER BY u.display_name
       `;
-      const { rows: admins } = await db.query(adminQuery, [organizationId, userId]);
+      const { rows: admins } = await db.query(adminQuery, [userId, organizationId]);
       const availableUsers = admins;
 
       // 5. Get existing direct chats to filter out duplicates
@@ -2211,7 +2551,10 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       res.json({
         users: filteredUsers,
         jahrgang: konfiProfile.jahrgang_name,
-        permissions: 'direct_only_admin' // DATENSCHUTZ: Konfis dürfen nur Admins anschreiben
+        // Konfis schreiben ausschliesslich das Team an, und davon nur die
+        // Leitung/Admins sowie Teamer:innen des eigenen Jahrgangs. Der Wert ist
+        // fest — die Einstellung konfi_chat_permissions wird nirgends gelesen.
+        permissions: 'direct_only_admin'
       });
 
     } catch (err) {

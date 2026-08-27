@@ -7,7 +7,7 @@
 // Anti-Pattern, das bei mandatory_event_count gefixt wurde).
 
 /**
- * ISO-Wochennummer im Format "YYYY-Www" fuer ein Datum.
+ * ISO-Wochennummer im Format "YYYY-Www" für ein Datum.
  * @param {Date} date - Datumswert
  * @returns {string} z.B. "2026-W05"
  */
@@ -22,7 +22,7 @@ function getYearWeek(date) {
 
 /**
  * Anzahl der ISO-Wochen in einem Jahr (52 oder 53).
- * Wird fuer den Jahresuebergang W1 -> W52/W53 des Vorjahres gebraucht.
+ * Wird für den Jahresuebergang W1 -> W52/W53 des Vorjahres gebraucht.
  * @param {number} year - Jahr
  * @returns {number} 52 oder 53
  */
@@ -37,12 +37,12 @@ function getISOWeeksInYear(year) {
  * bis zur neuesten aktiven Woche. Bricht bei der ersten Luecke ab (break).
  * Beruecksichtigt den Jahresuebergang (W1 -> letzte Woche des Vorjahres).
  *
- * Verhalten identisch zur frueher duplizierten Inline-Logik:
+ * Verhalten identisch zur früher duplizierten Inline-Logik:
  * - leere Liste -> 0
  * - mindestens eine aktive Woche -> Start bei 1
  * - Luecke bricht die Folge ab
  *
- * @param {Array<Date|string|number>} dates - Liste von Datumswerten (Aktivitaeten/Events)
+ * @param {Array<Date|string|number>} dates - Liste von Datumswerten (Aktivitäten/Events)
  * @returns {number} aktueller Streak (ganzzahlig)
  */
 function computeCurrentStreak(dates) {

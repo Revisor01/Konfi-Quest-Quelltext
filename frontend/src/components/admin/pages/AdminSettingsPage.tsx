@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   IonPage,
   IonHeader,
@@ -34,14 +34,21 @@ import {
   pulseOutline,
   informationCircleOutline,
   schoolOutline,
+  compassOutline,
+  sparklesOutline,
+  chevronForwardOutline,
   document as documentIcon
 } from 'ionicons/icons';
 import InfoModal from '../../shared/InfoModal';
+import AdminOnboardingModal from '../modals/AdminOnboardingModal';
+import AdminUpdateWalkthroughModal from '../modals/AdminUpdateWalkthroughModal';
 import { useApp } from '../../../contexts/AppContext';
-// logout/clearAuth werden jetzt zentral ueber useApp().signOut() abgewickelt
+// logout/clearAuth werden jetzt zentral über useApp().signOut() abgewickelt
 import { useModalPage } from '../../../contexts/ModalContext';
 import SpiritFooter from '../../shared/SpiritFooter';
 import { useIonRouter } from '@ionic/react';
+import NeuerungenBanner from '../../shared/NeuerungenBanner';
+import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
 
 const AdminSettingsPage: React.FC = () => {
@@ -50,13 +57,19 @@ const AdminSettingsPage: React.FC = () => {
   const [presentAlert] = useIonAlert();
   const router = useIonRouter();
 
+  // Tour und Update-Hinweis jederzeit erneut aufrufbar (Vollbild-Overlays,
+  // keine Modals — identisch zum automatischen Ablauf beim ersten Start).
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [showUpdateWalkthrough, setShowUpdateWalkthrough] = useState(false);
+  const [showMitmachenErklaerung, setShowMitmachenErklaerung] = useState(false);
+
   const [presentInviteModal, dismissInviteModal] = useIonModal(AdminInvitePage, {
     onClose: () => dismissInviteModal(),
     dismiss: () => dismissInviteModal()
   });
 
-  // Info-Modal (Erklaerung) — exemplarisch fuer Jahrgaenge. Inhalt wird per State
-  // gesetzt, damit derselbe Hook spaeter fuer weitere Bereiche genutzt werden kann.
+  // Info-Modal (Erklaerung) — exemplarisch für Jahrgänge. Inhalt wird per State
+  // gesetzt, damit derselbe Hook später für weitere Bereiche genutzt werden kann.
   const [infoContent, setInfoContent] = React.useState<{ title: string; icon: string; color: string; paragraphs: string[] } | null>(null);
   const [presentInfoModal, dismissInfoModal] = useIonModal(InfoModal, {
     onClose: () => dismissInfoModal(),
@@ -68,12 +81,12 @@ const AdminSettingsPage: React.FC = () => {
 
   const openInfo = (content: { title: string; icon: string; color: string; paragraphs: string[] }) => {
     setInfoContent(content);
-    // im naechsten Tick praesentieren, damit der State sicher gesetzt ist
+    // im nächsten Tick praesentieren, damit der State sicher gesetzt ist
     setTimeout(() => presentInfoModal({ presentingElement: presentingElement || undefined }), 0);
   };
 
   // Erklaerungen je Bereich der "Mehr"-Seite. Fokus: WOFUER braucht man das +
-  // wie haengt es mit anderen Bereichen zusammen.
+  // wie hängt es mit anderen Bereichen zusammen.
   const INFOS: Record<string, { title: string; icon: string; color: string; paragraphs: string[] }> = {
     users: {
       title: 'Benutzer:innen', icon: people, color: 'var(--app-color-users)',
@@ -102,7 +115,7 @@ const AdminSettingsPage: React.FC = () => {
       title: 'Aktivitäten', icon: flash, color: 'var(--app-color-activities)',
       paragraphs: [
         'Aktivitäten sind die wiederkehrenden Dinge, für die es Punkte gibt — z.B. Gottesdienstbesuch oder eine Gemeinde-Aktion.',
-        'Anders als Events stellen Konfis für eine Aktivität selbst einen Antrag auf Punkte. Du bestätigst den Antrag, dann werden die Punkte gutgeschrieben.',
+        'Anders als bei Events melden Konfis eine Aktivität selbst, wenn sie sie erledigt haben. Du bestätigst die Meldung, dann werden die Punkte gutgeschrieben.',
         'Jede Aktivität hat eine Kategorie und einen Punktwert. Über die Kategorie steuerst du, ob die Punkte zu Gottesdienst oder Gemeinde zählen.',
       ],
     },
@@ -181,10 +194,10 @@ const AdminSettingsPage: React.FC = () => {
           <IonTitle>Mehr</IonTitle>
           {user?.is_super_admin && (
             <IonButtons slot="end">
-              <IonButton onClick={() => router.push('/admin/organizations')} title="Organisationen">
+              <IonButton onClick={() => router.push('/admin/organizations')} title="Organisationen" aria-label="Organisationen verwalten">
                 <IonIcon slot="icon-only" icon={business} />
               </IonButton>
-              <IonButton onClick={() => router.push('/admin/metrics')} title="Performance">
+              <IonButton onClick={() => router.push('/admin/metrics')} title="Performance" aria-label="Performance anzeigen">
                 <IonIcon slot="icon-only" icon={pulseOutline} />
               </IonButton>
             </IonButtons>
@@ -197,6 +210,11 @@ const AdminSettingsPage: React.FC = () => {
             <IonTitle size="large">Mehr</IonTitle>
           </IonToolbar>
         </IonHeader>
+
+        <NeuerungenBanner
+          onUpdateOeffnen={() => setShowUpdateWalkthrough(true)}
+          onMitmachenOeffnen={() => setShowMitmachenErklaerung(true)}
+        />
 
         {/* Konto */}
         <IonList inset={true} className="app-segment-wrapper">
@@ -247,6 +265,20 @@ const AdminSettingsPage: React.FC = () => {
                 <div className="app-flex-fill">
                   <h2 className="app-settings-item__title">Benachrichtigungen</h2>
                   <p className="app-settings-item__subtitle">Chat-Nachrichten und Updates</p>
+                </div>
+              </div>
+
+              {/* App-Tour und Neuerungen jederzeit erneut ansehen */}
+              <div
+                className="app-list-item app-list-item--users app-settings-item"
+                onClick={() => setShowOnboarding(true)}
+              >
+                <div className="app-icon-circle app-icon-circle--lg app-icon-circle--users">
+                  <IonIcon icon={compassOutline} />
+                </div>
+                <div className="app-flex-fill">
+                  <h2 className="app-settings-item__title">App-Tour ansehen</h2>
+                  <p className="app-settings-item__subtitle">Kurze Einführung durch die App</p>
                 </div>
               </div>
                 </div>
@@ -378,7 +410,7 @@ const AdminSettingsPage: React.FC = () => {
                   </div>
                   <div className="app-flex-fill">
                     <h2 className="app-settings-item__title">Jahrgänge</h2>
-                    <p className="app-settings-item__subtitle">Jahrgänge anlegen, Punkteziele (Gottesdienst &amp; Gemeinde), Konfispruch-Freischaltung und Wrapped-Freigabe verwalten</p>
+                    <p className="app-settings-item__subtitle">Punkteziele, Konfisprüche und Wrapped verwalten</p>
                   </div>
                   <IonButton
                     fill="clear"
@@ -477,6 +509,24 @@ const AdminSettingsPage: React.FC = () => {
 
         <div className="ion-padding-bottom"></div>
       </IonContent>
+
+      {showOnboarding && (
+        <AdminOnboardingModal
+          onClose={() => setShowOnboarding(false)}
+          displayName={(user?.display_name || '').split(' ')[0]}
+        />
+      )}
+
+      {showUpdateWalkthrough && (
+        <AdminUpdateWalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
+      )}
+
+      {showMitmachenErklaerung && (
+        <MitmachenErklaerungModal
+          rolle="admin"
+          onClose={() => setShowMitmachenErklaerung(false)}
+        />
+      )}
     </IonPage>
   );
 };

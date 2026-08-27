@@ -1,10 +1,10 @@
 // Einmal-Migration: bestehende Klartext-Medien at-rest verschluesseln.
 //
 // Hintergrund: Antrags-Nachweisfotos (uploads/requests/) UND Chat-Medien
-// (uploads/chat/) lagen bisher unverschluesselt. Dieses Skript verschluesselt
+// (uploads/chat/) lagen bisher unverschluesselt. Dieses Skript verschlüsselt
 // alle vorhandenen Dateien mit AES-256-GCM (siehe utils/photoCrypto.js).
 // Es ist IDEMPOTENT: bereits verschluesselte Dateien (erkennbar am Magic-
-// Header) werden uebersprungen, ein zweiter Lauf richtet keinen Schaden an.
+// Header) werden übersprungen, ein zweiter Lauf richtet keinen Schaden an.
 //
 // Aufruf IM CONTAINER (dort ist ACTIVITY_PHOTO_ENCRYPTION_KEY gesetzt und
 // /app/uploads gemountet):

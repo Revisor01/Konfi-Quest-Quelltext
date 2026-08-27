@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   IonPage,
   IonContent,
@@ -13,9 +13,11 @@ import {
   useIonRouter
 } from '@ionic/react';
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
-import { key, person, arrowForward, alertCircle, closeCircle, eye, eyeOff, refreshOutline } from 'ionicons/icons';
+import { key, person, arrowForward, alertCircle, closeCircle, eye, eyeOff, refreshOutline, fingerPrintOutline } from 'ionicons/icons';
 import { useApp } from '../../contexts/AppContext';
-import { loginWithAutoDetection } from '../../services/auth';
+import { loginWithAutoDetection, mitBiometrieAnmelden } from '../../services/auth';
+import { biometrieVerfuegbar, istBiometrieAktiv } from '../../services/biometrics';
+import { BaseUser } from '../../types/user';
 
 const LoginView: React.FC = () => {
   const { setUser } = useApp();
@@ -27,6 +29,17 @@ const LoginView: React.FC = () => {
   const [shakeError, setShakeError] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [isNetworkError, setIsNetworkError] = useState(false);
+  // Biometrie: Knopf nur zeigen, wenn eine gesicherte Sitzung hinterlegt ist.
+  const [biometrieBezeichnung, setBiometrieBezeichnung] = useState<string | null>(null);
+  const [biometrieLaeuft, setBiometrieLaeuft] = useState(false);
+  // Der automatische Versuch beim Oeffnen darf sich NICHT wiederholen: sonst
+  // erscheint nach jedem Abbruch sofort wieder die Abfrage und man kommt nicht
+  // an die Eingabefelder. Danach nur noch auf Knopfdruck.
+  const autoVersuchGelaufen = useRef(false);
+  // Spiegelt loginError fuer den asynchronen Auto-Versuch: der Effekt unten
+  // liest den Wert NACH einem await, wo eine State-Variable aus der Closure
+  // veraltet waere.
+  const fehlerVorhanden = useRef(false);
 
   // Hinweis "Sitzung abgelaufen" anzeigen, wenn der User wegen abgelaufenem
   // Refresh-Token hierher umgeleitet wurde (Flag aus App.tsx).
@@ -41,10 +54,116 @@ const LoginView: React.FC = () => {
     }
   }, []);
 
+  useEffect(() => {
+    fehlerVorhanden.current = loginError !== null;
+  }, [loginError]);
+
   const triggerShake = () => {
     setShakeError(true);
     setTimeout(() => setShakeError(false), 600);
   };
+
+  // Weiterleitung nach erfolgreicher Anmeldung — von der Passwort- UND der
+  // biometrischen Anmeldung genutzt, damit beide Wege exakt gleich landen.
+  const weiterNachAnmeldung = useCallback((user: BaseUser) => {
+    setUser(user);
+    if (user.role_name === 'super_admin') {
+      // Super-Admin Branch hat kein IonTabs-Wrapper -> router.push verliert die
+      // Route im Capacitor WebView. Hartes Navigieren erzwingt sauberen Re-Render.
+      window.location.replace('/admin/organizations');
+    } else if (user.type === 'admin') {
+      router.push('/admin/konfis', 'root', 'replace');
+    } else if (user.type === 'teamer') {
+      router.push('/teamer/dashboard', 'root', 'replace');
+    } else {
+      router.push('/konfi/dashboard', 'root', 'replace');
+    }
+  }, [router, setUser]);
+
+
+  // Biometrische Anmeldung ausloesen. `automatisch` unterscheidet den Versuch
+  // beim Oeffnen der App vom bewussten Tippen auf den Knopf: beim automatischen
+  // Versuch bleibt ein Abbruch kommentarlos (die Person will offensichtlich
+  // gerade das Passwort nutzen), beim Knopfdruck gibt es eine Rueckmeldung.
+  const handleBiometrie = useCallback(async (automatisch = false) => {
+    setBiometrieLaeuft(true);
+    setLoginError(null);
+    setIsNetworkError(false);
+    try {
+      const ergebnis = await mitBiometrieAnmelden();
+
+      switch (ergebnis.status) {
+        case 'ok':
+          weiterNachAnmeldung(ergebnis.user);
+          return;
+
+        case 'abgebrochen':
+          // Kein Fehler: die Person geht den normalen Weg ueber das Passwort.
+          return;
+
+        case 'nichts-gespeichert':
+          // Nichts (mehr) hinterlegt oder Frist abgelaufen. Der Knopf wird
+          // ausgeblendet, damit er nicht erneut ins Leere fuehrt.
+          setBiometrieBezeichnung(null);
+          if (!automatisch) {
+            setLoginError('Bitte melde dich einmal mit deinem Passwort an.');
+            triggerShake();
+          }
+          return;
+
+        case 'abgelaufen':
+          setBiometrieBezeichnung(null);
+          setLoginError('Deine gespeicherte Anmeldung ist abgelaufen. Bitte melde dich mit deinem Passwort an.');
+          triggerShake();
+          return;
+
+        case 'offline':
+          setLoginError('Keine Verbindung zum Server. Bitte prüfe deine Internetverbindung.');
+          setIsNetworkError(true);
+          triggerShake();
+          return;
+
+        default:
+          setLoginError('Anmeldung nicht möglich. Bitte melde dich mit deinem Passwort an.');
+          triggerShake();
+      }
+    } finally {
+      setBiometrieLaeuft(false);
+    }
+  }, [weiterNachAnmeldung]);
+
+  // Beim Oeffnen pruefen, ob eine gesicherte Sitzung vorliegt — und wenn ja,
+  // direkt danach fragen. Genau das war der Wunsch: die App aufmachen und
+  // sehen, was aufgelaufen ist, ohne jedes Mal Nutzername und Passwort zu
+  // tippen. Laeuft nur EINMAL pro Aufbau der Anmeldemaske (siehe
+  // autoVersuchGelaufen), damit nach einem Abbruch niemand in einer Schleife
+  // aus wiederkehrenden Abfragen festhaengt.
+  useEffect(() => {
+    let abgemeldet = false;
+    (async () => {
+      const [verfuegbarkeit, aktiv] = await Promise.all([
+        biometrieVerfuegbar(),
+        istBiometrieAktiv()
+      ]);
+      if (abgemeldet) return;
+      if (!verfuegbarkeit.verfuegbar || !aktiv) return;
+
+      setBiometrieBezeichnung(verfuegbarkeit.bezeichnung);
+
+      if (autoVersuchGelaufen.current) return;
+      autoVersuchGelaufen.current = true;
+
+      // Nicht automatisch fragen, wenn schon ein Hinweis auf dem Schirm steht
+      // (z.B. "Sitzung abgelaufen" aus dem Effekt weiter oben). Eine Abfrage
+      // ueber einer Fehlermeldung waere verwirrend. Deshalb liest diese Stelle
+      // den Zustand `loginError` statt erneut sessionStorage — das Flag ist zu
+      // diesem Zeitpunkt bereits geleert.
+      if (fehlerVorhanden.current) return;
+
+      await handleBiometrie(true);
+    })();
+    return () => { abgemeldet = true; };
+  }, [handleBiometrie]);
 
   const handleLogin = async () => {
     setLoginError(null);
@@ -59,27 +178,14 @@ const LoginView: React.FC = () => {
     setLoading(true);
     try {
       const user = await loginWithAutoDetection(username, password);
-      setUser(user);
-
-      // Explicit navigation based on user type
-      if (user.role_name === 'super_admin') {
-        // Super-Admin Branch hat kein IonTabs-Wrapper -> router.push verliert die Route
-        // im Capacitor WebView. Hartes Navigieren erzwingt sauberen Re-Render.
-        window.location.replace('/admin/organizations');
-      } else if (user.type === 'admin') {
-        router.push('/admin/konfis', 'root', 'replace');
-      } else if (user.type === 'teamer') {
-        router.push('/teamer/dashboard', 'root', 'replace');
-      } else {
-        router.push('/konfi/dashboard', 'root', 'replace');
-      }
+      weiterNachAnmeldung(user);
     } catch (err: any) {
       // Defensiv: errorMessage immer ein String, sonst werfen die .includes()-Checks unten
       const errorMessage: string = err?.response?.data?.error || err?.message || '';
       const errorCode: string = err?.response?.data?.error_code || '';
       let displayError: string;
 
-      // Rate-Limit (429) ZUERST pruefen — ein 429 ist KEINE fehlende Verbindung.
+      // Rate-Limit (429) ZUERST prüfen — ein 429 ist KEINE fehlende Verbindung.
       // Sonst zeigt die App bei "zu viele Versuche" faelschlich "Keine Verbindung".
       if (err.response?.status === 429 || err.rateLimitMessage) {
         displayError = err.rateLimitMessage || err?.response?.data?.error || 'Zu viele Login-Versuche. Bitte warte einen Moment.';
@@ -224,6 +330,28 @@ const LoginView: React.FC = () => {
                   </>
                 )}
               </IonButton>
+
+              {/* Biometrische Anmeldung — erscheint nur, wenn auf diesem Geraet
+                  eine gesicherte Sitzung hinterlegt ist. */}
+              {biometrieBezeichnung && (
+                <IonButton
+                  expand="full"
+                  fill="outline"
+                  onClick={() => handleBiometrie(false)}
+                  disabled={loading || biometrieLaeuft}
+                  className="app-auth-biometrie-button"
+                  style={{ marginTop: '12px' }}
+                >
+                  {biometrieLaeuft ? (
+                    <IonSpinner name="crescent" />
+                  ) : (
+                    <>
+                      <IonIcon icon={fingerPrintOutline} slot="start" />
+                      Mit {biometrieBezeichnung} anmelden
+                    </>
+                  )}
+                </IonButton>
+              )}
 
               {/* Passwort vergessen Link - immer an fester Position direkt unter Button */}
               <div className="app-auth-footer">

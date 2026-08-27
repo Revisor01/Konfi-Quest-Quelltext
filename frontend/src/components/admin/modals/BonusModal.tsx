@@ -29,15 +29,28 @@ import api from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
+import {
+  aktivePunktearten,
+  ersteAktivePunkteart,
+  PUNKTEART_NAME,
+  type Punkteart,
+  type PunkteartFlags,
+} from '../../../utils/punktearten';
 
 interface BonusModalProps {
   konfiId: number;
   onClose: () => void;
   onSave: () => Promise<void>;
   dismiss?: () => void;
+  /**
+   * Punktearten-Schalter des Jahrgangs, zu dem die Konfi gehoert. Ohne diese
+   * Angabe gelten beide Arten als aktiv -- die Auswahl bot dann auch eine
+   * abgeschaltete Art an, und das Speichern scheiterte am Server (400).
+   */
+  punkteartFlags?: PunkteartFlags;
 }
 
-const BonusModal: React.FC<BonusModalProps> = ({ konfiId, onClose, onSave, dismiss }) => {
+const BonusModal: React.FC<BonusModalProps> = ({ konfiId, onClose, onSave, dismiss, punkteartFlags }) => {
   const { isOnline, setError } = useApp();
   const handleClose = () => {
     if (dismiss) {
@@ -49,12 +62,23 @@ const BonusModal: React.FC<BonusModalProps> = ({ konfiId, onClose, onSave, dismi
   const [name, setName] = useState('');
   const [points, setPoints] = useState<number>(1);
   const [reason, setReason] = useState('');
-  const [type, setType] = useState('gemeinde');
+  // Vorbelegung nur aus den AKTIVEN Arten. Vorher stand fest 'gemeinde' hier --
+  // war ausgerechnet Gemeinde abgeschaltet, war die Voreinstellung die verbotene.
+  const verfuegbareArten = aktivePunktearten(punkteartFlags);
+  const [type, setType] = useState<Punkteart | null>(
+    () => ersteAktivePunkteart(punkteartFlags, 'gemeinde')
+  );
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
   const { isSubmitting, guard } = useActionGuard();
 
   const handleSave = async () => {
     if (!name.trim() || points <= 0) return;
+    // Ohne aktive Punkteart gibt es nichts zu vergeben -- der Server wiese das
+    // mit 400 zurueck. Hier abfangen, statt eine leere type-Angabe zu senden.
+    if (!type) {
+      setError('Für diesen Jahrgang ist keine Punkteart aktiv.');
+      return;
+    }
 
     const body = {
       points: points,
@@ -100,12 +124,12 @@ const BonusModal: React.FC<BonusModalProps> = ({ konfiId, onClose, onSave, dismi
         <IonToolbar>
           <IonTitle>Bonuspunkte hinzufügen</IonTitle>
           <IonButtons slot="start">
-            <IonButton onClick={handleClose} disabled={isSubmitting} className="app-modal-close-btn">
+            <IonButton aria-label="Schließen" onClick={handleClose} disabled={isSubmitting} className="app-modal-close-btn">
               <IonIcon icon={closeOutline} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
-            <IonButton onClick={handleSave} disabled={!isValid || isSubmitting} className="app-modal-submit-btn app-modal-submit-btn--bonus">
+            <IonButton aria-label="Bonuspunkte speichern" onClick={handleSave} disabled={!isValid || isSubmitting} className="app-modal-submit-btn app-modal-submit-btn--bonus">
               {isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} />}
             </IonButton>
           </IonButtons>
@@ -155,7 +179,9 @@ const BonusModal: React.FC<BonusModalProps> = ({ konfiId, onClose, onSave, dismi
                 />
               </IonModal>
 
-              <p className="app-text-sub" style={{ marginTop: '16px', marginBottom: '4px' }}>Punkte * ({points})</p>
+              <p className="app-text-sub" style={{ marginTop: '16px', marginBottom: '4px' }}>
+                Punkte * <span style={{ fontWeight: 700, color: 'var(--app-color-bonus)' }}>{points}</span>
+              </p>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '0 8px' }}>
                 <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>1</span>
                 <IonRange
@@ -172,45 +198,39 @@ const BonusModal: React.FC<BonusModalProps> = ({ konfiId, onClose, onSave, dismi
                     '--pin-background': 'var(--app-color-bonus)',
                   } as any}
                 />
-                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--app-color-bonus)', minWidth: '28px', textAlign: 'center' }}>10</span>
+                <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>10</span>
               </div>
 
               <div style={{ marginTop: '16px', marginBottom: '8px' }}>
                 <span style={{ fontSize: '0.9rem', fontWeight: '500', color: '#666' }}>Typ *</span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div
-                  className="app-list-item"
-                  onClick={() => !isSubmitting && setType('gemeinde')}
-                  style={{
-                    cursor: isSubmitting ? 'default' : 'pointer',
-                    opacity: isSubmitting ? 0.6 : 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    marginBottom: '0',
-                    borderLeftColor: '#059669',
-                    backgroundColor: type === 'gemeinde' ? 'rgba(5, 150, 105, 0.1)' : undefined
-                  }}
-                >
-                  <span style={{ fontWeight: '500', color: '#333' }}>Gemeinde</span>
-                </div>
-                <div
-                  className="app-list-item"
-                  onClick={() => !isSubmitting && setType('gottesdienst')}
-                  style={{
-                    cursor: isSubmitting ? 'default' : 'pointer',
-                    opacity: isSubmitting ? 0.6 : 1,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    marginBottom: '0',
-                    borderLeftColor: '#3b82f6',
-                    backgroundColor: type === 'gottesdienst' ? 'rgba(59, 130, 246, 0.1)' : undefined
-                  }}
-                >
-                  <span style={{ fontWeight: '500', color: '#333' }}>Gottesdienst</span>
-                </div>
+                {verfuegbareArten.map((art) => {
+                  // Farben wie bisher: Gemeinde gruen, Gottesdienst blau.
+                  const rahmen = art === 'gemeinde' ? '#059669' : '#3b82f6';
+                  const fuellung = art === 'gemeinde'
+                    ? 'rgba(5, 150, 105, 0.1)'
+                    : 'rgba(59, 130, 246, 0.1)';
+                  return (
+                    <div
+                      key={art}
+                      className="app-list-item"
+                      onClick={() => !isSubmitting && setType(art)}
+                      style={{
+                        cursor: isSubmitting ? 'default' : 'pointer',
+                        opacity: isSubmitting ? 0.6 : 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        marginBottom: '0',
+                        borderLeftColor: rahmen,
+                        backgroundColor: type === art ? fuellung : undefined
+                      }}
+                    >
+                      <span style={{ fontWeight: '500', color: '#333' }}>{PUNKTEART_NAME[art]}</span>
+                    </div>
+                  );
+                })}
               </div>
             </IonCardContent>
           </IonCard>

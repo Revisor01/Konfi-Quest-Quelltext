@@ -5,7 +5,7 @@ const { handleValidationErrors, commonValidations } = require('../middleware/val
 const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
 const { computeCurrentStreak } = require('../utils/streakCalculation');
-// Single Source of Truth: welche Events zaehlen fuer Badges (Konfi vs. Teamer).
+// Single Source of Truth: welche Events zählen für Badges (Konfi vs. Teamer).
 const { KONFI_BADGE_EVENT_CONDITION } = require('../utils/badgeEventRule');
 
 // Badge criteria types
@@ -86,8 +86,11 @@ const CRITERIA_TYPES = {
   // === SPEZIAL-KRITERIEN (Selten verwendet) ===
   bonus_points: {
     label: "Bonuspunkte",
-    description: "Anzahl erhaltener Bonuspunkte",
-    help: "Badge wird vergeben, wenn die angegebene Anzahl von Bonuspunkt-Vergaben erhalten wurde (es zählt die Anzahl der Vergaben, nicht die Punktesumme). Beispiel: Wert 2 = mindestens 2 Bonuspunkt-Vergaben erhalten."
+    description: "Summe der erhaltenen Bonuspunkte",
+    // Der Hilfetext behauptete das Gegenteil ("Anzahl der Vergaben"), obwohl
+    // die Wertung unten SUM(points) nimmt. Wer sich danach richtete, stellte
+    // die Schwelle falsch ein.
+    help: "Badge wird vergeben, wenn die Bonuspunkte zusammengezählt den angegebenen Wert erreichen — nicht die Anzahl der Vergaben. Beispiel: Wert 5 = fünf Bonuspunkte insgesamt, egal ob in einer Vergabe oder in fünf."
   },
 
   // === TEAMER-SPEZIFISCH ===
@@ -364,8 +367,8 @@ async function checkAndAwardTeamerBadges(db, userId, organizationId) {
     { rows: teamerUniqueActs }
   ] = await Promise.all([
     db.query(`SELECT COUNT(*) as count FROM user_activities ua JOIN activities a ON ua.activity_id = a.id WHERE ua.user_id = $1 AND ua.organization_id = $2 AND a.target_role = 'teamer'`, [userId, organizationId]),
-    // Teamer: ALLE bestaetigten Events zaehlen (inkl. Pflicht/Konfirmation) — Teamer
-    // arbeiten dort mit, das ist eine legitime Zaehlung. (Anders als bei Konfis.)
+    // Teamer: ALLE bestaetigten Events zählen (inkl. Pflicht/Konfirmation) — Teamer
+    // arbeiten dort mit, das ist eine legitime Zählung. (Anders als bei Konfis.)
     db.query("SELECT COUNT(*) as count FROM event_bookings WHERE user_id = $1 AND attendance_status = 'present' AND organization_id = $2", [userId, organizationId]),
     db.query(`SELECT DISTINCT a.name FROM user_activities ua JOIN activities a ON ua.activity_id = a.id WHERE ua.user_id = $1 AND a.organization_id = $2 AND a.target_role = 'teamer'`, [userId, organizationId]),
     db.query(`SELECT DISTINCT ua.activity_id FROM user_activities ua JOIN activities a ON ua.activity_id = a.id WHERE ua.user_id = $1 AND ua.organization_id = $2 AND a.target_role = 'teamer'`, [userId, organizationId])
@@ -403,17 +406,26 @@ async function checkAndAwardTeamerBadges(db, userId, organizationId) {
         break;
 
       case 'activity_combination': {
-        let allMet = true;
+        // Dieselbe Regel wie bei den Konfis (siehe oben, badges.js im
+        // Konfi-Zweig): "mindestens criteria_value aus der Liste". Vorher
+        // verlangte der Teamer-Zweig ALLE und ignorierte den Wert — Formular,
+        // Hilfetext und Fortschrittsanzeige beschreiben aber die
+        // Mindestanzahl. Der Fortschritt konnte dadurch 100 Prozent zeigen,
+        // ohne dass das Abzeichen kam. In Produktion gab
+        // es zum Zeitpunkt der Umstellung kein einziges solches Abzeichen.
+        let treffer = 0;
+        let gefordert = 0;
 
-        // Aktivitäten-Namen prüfen
         if (criteria.required_activities && criteria.required_activities.length > 0) {
-          const actMatch = criteria.required_activities.filter(req => teamerPreloaded.completedActivityNames.includes(req)).length;
-          if (actMatch < criteria.required_activities.length) allMet = false;
+          gefordert += criteria.required_activities.length;
+          treffer += criteria.required_activities
+            .filter(req => teamerPreloaded.completedActivityNames.includes(req)).length;
         }
 
-        // Event-Namen prüfen (falls vorhanden). events-Spalte heisst 'name'
-        // (nicht 'title') -> als title aliasen.
-        if (allMet && criteria.required_events && criteria.required_events.length > 0) {
+        // Termine zählen mit, wenn welche hinterlegt sind. Die Spalte heißt
+        // 'name' (nicht 'title') -> als title aliasen.
+        if (criteria.required_events && criteria.required_events.length > 0) {
+          gefordert += criteria.required_events.length;
           const { rows: attendedEvents } = await db.query(
             `SELECT DISTINCT e.name AS title FROM event_bookings eb
              JOIN events e ON eb.event_id = e.id
@@ -421,11 +433,14 @@ async function checkAndAwardTeamerBadges(db, userId, organizationId) {
             [userId, organizationId]
           );
           const evNames = attendedEvents.map(r => r.title);
-          const evMatch = criteria.required_events.filter(req => evNames.includes(req)).length;
-          if (evMatch < criteria.required_events.length) allMet = false;
+          treffer += criteria.required_events.filter(req => evNames.includes(req)).length;
         }
 
-        badgeEarned = allMet && (criteria.required_activities || criteria.required_events);
+        // Ohne hinterlegte Bedingung wird nichts vergeben. Der Wert 0 oder
+        // fehlend fällt auf "alle nötig" zurück, damit ein unausgefuelltes
+        // Feld nicht versehentlich jedem das Abzeichen gibt.
+        const noetig = badge.criteria_value > 0 ? badge.criteria_value : gefordert;
+        badgeEarned = gefordert > 0 && treffer >= noetig;
         break;
       }
 
@@ -578,7 +593,7 @@ async function checkAndAwardTeamerBadges(db, userId, organizationId) {
 // Shared: Streak-Prüfung (Konfi + Teamer)
 // =====================================================================
 async function checkStreakCriteria(db, userId, organizationId, criteriaValue, isTeamer = false) {
-  // Konfis: Pflicht/Konfirmation zaehlen nicht. Teamer: alle bestaetigten Events.
+  // Konfis: Pflicht/Konfirmation zählen nicht. Teamer: alle bestaetigten Events.
   const eventCond = isTeamer ? "eb.attendance_status = 'present'" : KONFI_BADGE_EVENT_CONDITION;
   const streakQuery = `
     SELECT completed_date as date FROM user_activities WHERE user_id = $1 AND organization_id = $2
@@ -625,14 +640,16 @@ async function insertBadgesAndNotify(db, userId, organizationId, earnedBadgeIds,
     }
 
     for (const badge of earnedBadgeDetails) {
-      await PushService.sendBadgeEarnedToKonfi(db, userId, badge.name, badge.icon, badge.description);
+      await PushService.sendBadgeEarnedToKonfi(
+        db, userId, badge.name, badge.icon, badge.description, badge.id ?? null, organizationId
+      );
     }
 
-    // Live-Update an den Empfaenger selbst: Badge-Zaehler sofort aktualisieren,
+    // Live-Update an den Empfaenger selbst: Badge-Zähler sofort aktualisieren,
     // ohne dass die App dafuer alle 60s /konfi/badges pollen muss.
-    // earnedBadgeDetails ist hier immer nicht-leer (Aufrufer prueft das).
+    // earnedBadgeDetails ist hier immer nicht-leer (Aufrufer prüft das).
     // sendToUserByRole (statt sendToKonfi), weil Badges auch an Teamer:innen
-    // vergeben werden koennen und deren Socket im Raum user_teamer_ sitzt.
+    // vergeben werden können und deren Socket im Raum user_teamer_ sitzt.
     // Fire-and-forget.
     liveUpdate.sendToUserByRole(userId, 'badges', 'earned', { count: earnedBadgeDetails.length });
   } catch (notifErr) {
@@ -646,12 +663,43 @@ async function insertBadgesAndNotify(db, userId, organizationId, earnedBadgeIds,
 // Badges: Teamer darf ansehen, Admin darf bearbeiten
 module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
 
-  // Validierungsregeln
+  // Validierungsregeln.
+  // criteria_value: min 1 — Wert 0 (oder fehlend -> NULL) liesse jedes
+  // Zähl-Kriterium sofort für alle auslösen, denn in JavaScript ist
+  // `x >= null` wahr. Der PUT validierte den Wert
+  // vorher GAR nicht.
+  // criteria_extra: Typen mit Auswahl (Aktivität, Kombination, Kategorie,
+  // Zeitraum) brauchen ihre Auswahl — ohne sie entsteht ein still
+  // unerreichbares Abzeichen; in Produktion lagen 4 solche Altfälle
+  // 
+  const validateCriteriaExtra = body('criteria_extra').custom((extra, { req }) => {
+    const type = req.body.criteria_type;
+    const e = (typeof extra === 'object' && extra !== null) ? extra : {};
+    if (type === 'specific_activity'
+        && !(typeof e.required_activity_name === 'string' && e.required_activity_name.trim())) {
+      throw new Error('Bitte eine Aktivität auswählen');
+    }
+    if (type === 'activity_combination'
+        && !(Array.isArray(e.required_activities) && e.required_activities.length > 0)) {
+      throw new Error('Bitte mindestens eine Aktivität auswählen');
+    }
+    if (type === 'category_activities'
+        && !(typeof e.required_category === 'string' && e.required_category.trim())) {
+      throw new Error('Bitte eine Kategorie auswählen');
+    }
+    if (type === 'time_based'
+        && !(parseInt(e.days, 10) >= 1 || parseInt(e.weeks, 10) >= 1)) {
+      throw new Error('Bitte einen Zeitraum angeben');
+    }
+    return true;
+  });
+
   const validateCreateBadge = [
     commonValidations.name,
     body('icon').trim().notEmpty().withMessage('Icon ist erforderlich'),
     body('criteria_type').notEmpty().withMessage('Kriterientyp ist erforderlich'),
-    body('criteria_value').isInt({ min: 0 }).withMessage('Kriterienwert muss eine nicht-negative Ganzzahl sein'),
+    body('criteria_value').isInt({ min: 1 }).withMessage('Kriterienwert muss eine positive Ganzzahl sein'),
+    validateCriteriaExtra,
     handleValidationErrors
   ];
 
@@ -660,6 +708,8 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
     commonValidations.name,
     body('icon').trim().notEmpty().withMessage('Icon ist erforderlich'),
     body('criteria_type').notEmpty().withMessage('Kriterientyp ist erforderlich'),
+    body('criteria_value').isInt({ min: 1 }).withMessage('Kriterienwert muss eine positive Ganzzahl sein'),
+    validateCriteriaExtra,
     handleValidationErrors
   ];
 
@@ -768,11 +818,17 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
     
     try {
       const extraJson = criteria_extra ? JSON.stringify(criteria_extra) : null;
-      const activeFlag = !!is_active;
-      const hiddenFlag = !!is_hidden;
-      
+      // is_active/is_hidden nur setzen, wenn sie AUSDRUECKLICH mitgeschickt
+      // wurden. Vorher stand hier `!!is_active`: Ein Teil-Update ohne das Feld
+      // (undefined) wurde damit zu false — ein aktives Abzeichen verschwand
+      // still aus der Anzeige, obwohl nur die Beschreibung geaendert werden
+      // sollte. COALESCE laesst den Bestandswert stehen,
+      // wenn NULL uebergeben wird; ein ausdrueckliches false wirkt weiterhin.
+      const activeFlag = is_active === undefined ? null : !!is_active;
+      const hiddenFlag = is_hidden === undefined ? null : !!is_hidden;
+
       const query = `UPDATE custom_badges 
-                    SET name = $1, icon = $2, description = $3, criteria_type = $4, criteria_value = $5, criteria_extra = $6, is_active = $7, is_hidden = $8, color = $9 
+                    SET name = $1, icon = $2, description = $3, criteria_type = $4, criteria_value = $5, criteria_extra = $6, is_active = COALESCE($7, is_active), is_hidden = COALESCE($8, is_hidden), color = $9 
                     WHERE id = $10 AND organization_id = $11`;
       
       const params = [name, icon, description, criteria_type, criteria_value, extraJson, activeFlag, hiddenFlag, color || '#667eea', req.params.id, req.user.organization_id];

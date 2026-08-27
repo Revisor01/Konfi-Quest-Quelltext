@@ -1,17 +1,17 @@
 // backend/utils/konfiLimit.js
-// Gemeinsame Konfi-Limit-Pruefung (Single Source of Truth).
+// Gemeinsame Konfi-Limit-Prüfung (Single Source of Truth).
 // Wird von beiden Anlage-Wegen genutzt (Wave 2): POST-Konfi-Route (Leitung legt an)
 // und Invite-Code-Selbstregistrierung. Analog deleteKonfiCascade aus Phase 114 wird
 // die Logik EINMAL gebaut, damit die Durchsetzung nicht auseinanderlaeuft.
 
-// Kulanz-Puffer ueber dem Tarif-Limit: bis zu GRACE_BUFFER weitere Konfis
+// Kulanz-Puffer über dem Tarif-Limit: bis zu GRACE_BUFFER weitere Konfis
 // duerfen mit Bestaetigung angelegt werden, danach harte Grenze.
 const GRACE_BUFFER = 5;
 
 const TARIF_STUFEN = [15, 50, 75, 100];
 
 /**
- * Ermittelt die naechsthoehere Tarif-Stufe ueber dem aktuellen Limit.
+ * Ermittelt die naechsthoehere Tarif-Stufe über dem aktuellen Limit.
  * @param {number|null} limit - aktuelles max_konfis der Org
  * @returns {number|null} kleinste Stufe > limit, oder null wenn keine groessere existiert
  */
@@ -33,14 +33,14 @@ function nextTier(limit) {
  *   - count >= max_konfis + 5                    -> { stufe: 'hard_block',  count, limit }
  *
  * Gezaehlt werden ausschliesslich aktive Konfis (Rolle 'konfi') der Org mit
- * deleted_at IS NULL — soft-geloeschte Konfis (Phase 114) zaehlen NICHT.
- * Die Zaehlung ist org-isoliert (organization_id = $1).
+ * deleted_at IS NULL — soft-geloeschte Konfis (Phase 114) zählen NICHT.
+ * Die Zählung ist org-isoliert (organization_id = $1).
  *
  * db kann ein Pool ODER ein laufender Client (aus db.getClient()) sein, damit die
- * Pruefung in eine Transaktion des Aufrufers eingebettet werden kann (Util-Muster Phase 114).
+ * Prüfung in eine Transaktion des Aufrufers eingebettet werden kann (Util-Muster Phase 114).
  *
  * @param {{ query: Function }} db - DB-Pool oder Client
- * @param {number} organizationId - Organisation, deren Limit geprueft wird
+ * @param {number} organizationId - Organisation, deren Limit geprüft wird
  * @returns {Promise<{ count: number, limit: number|null, stufe: 'under_limit'|'grace'|'hard_block' }>}
  */
 async function checkKonfiLimit(db, organizationId) {
@@ -53,7 +53,7 @@ async function checkKonfiLimit(db, organizationId) {
     ? Number(orgRows[0].max_konfis)
     : null;
 
-  // 2. Aktive Konfis der Org zaehlen (NICHT konfi_profiles — das filtert deleted_at nicht).
+  // 2. Aktive Konfis der Org zählen (NICHT konfi_profiles — das filtert deleted_at nicht).
   const { rows: countRows } = await db.query(
     `SELECT COUNT(*)::int AS count
        FROM users u

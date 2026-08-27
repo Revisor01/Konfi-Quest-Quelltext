@@ -64,7 +64,7 @@ const PasswordCheckItem: React.FC<{ label: string; checked: boolean }> = ({ labe
 );
 
 // Kryptographisch sicherer Zufallswert in [0, max) — Rejection-Sampling
-// gegen Modulo-Bias (Math.random ist fuer Passwoerter nicht geeignet)
+// gegen Modulo-Bias (Math.random ist für Passwoerter nicht geeignet)
 const randomInt = (max: number): number => {
   const limit = Math.floor(0x100000000 / max) * max;
   const buf = new Uint32Array(1);
@@ -160,12 +160,12 @@ const AdminPasswordResetModal: React.FC<AdminPasswordResetModalProps> = ({ admin
         <IonToolbar>
           <IonTitle>Passwort ändern</IonTitle>
           <IonButtons slot="start">
-            <IonButton onClick={onClose} disabled={isSubmitting} className="app-modal-close-btn">
+            <IonButton aria-label="Schließen" onClick={onClose} disabled={isSubmitting} className="app-modal-close-btn">
               <IonIcon icon={closeOutline} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
-            <IonButton onClick={handleSave} disabled={isSubmitting || !isValid || !isOnline} className="app-modal-submit-btn app-modal-submit-btn--settings">
+            <IonButton aria-label="Passwort zurücksetzen" onClick={handleSave} disabled={isSubmitting || !isValid || !isOnline} className="app-modal-submit-btn app-modal-submit-btn--settings">
               {!isOnline ? <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</> : isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} />}
             </IonButton>
           </IonButtons>
@@ -193,7 +193,7 @@ const AdminPasswordResetModal: React.FC<AdminPasswordResetModalProps> = ({ admin
                     placeholder="Neues Passwort eingeben"
                     disabled={isSubmitting}
                   />
-                  <IonButton slot="end" fill="clear" onClick={() => setShowPasswords(prev => ({ ...prev, new: !prev.new }))}>
+                  <IonButton aria-label="Passwort anzeigen oder verbergen" slot="end" fill="clear" onClick={() => setShowPasswords(prev => ({ ...prev, new: !prev.new }))}>
                     <IonIcon icon={showPasswords.new ? eyeOffOutline : eyeOutline} />
                   </IonButton>
                 </IonItem>
@@ -207,7 +207,7 @@ const AdminPasswordResetModal: React.FC<AdminPasswordResetModalProps> = ({ admin
                     placeholder="Neues Passwort bestätigen"
                     disabled={isSubmitting}
                   />
-                  <IonButton slot="end" fill="clear" onClick={() => setShowPasswords(prev => ({ ...prev, confirm: !prev.confirm }))}>
+                  <IonButton aria-label="Passwortbestätigung anzeigen oder verbergen" slot="end" fill="clear" onClick={() => setShowPasswords(prev => ({ ...prev, confirm: !prev.confirm }))}>
                     <IonIcon icon={showPasswords.confirm ? eyeOffOutline : eyeOutline} />
                   </IonButton>
                 </IonItem>

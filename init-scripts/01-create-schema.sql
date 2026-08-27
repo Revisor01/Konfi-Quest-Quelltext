@@ -309,6 +309,11 @@ CREATE TABLE events (
     has_timeslots BOOLEAN DEFAULT false,
     waitlist_enabled BOOLEAN DEFAULT true,
     max_waitlist_size INTEGER DEFAULT 10 CHECK (max_waitlist_size >= 0),
+    -- Teamer-Kontingent (Migration 120): eigenes Kontingent + eigene Warteliste,
+    -- strikt getrennt vom Konfi-Kontingent. 0 = unbegrenzt (wie max_participants).
+    teamer_max_participants INTEGER NOT NULL DEFAULT 0 CHECK (teamer_max_participants >= 0),
+    teamer_waitlist_enabled BOOLEAN NOT NULL DEFAULT true,
+    teamer_max_waitlist_size INTEGER NOT NULL DEFAULT 10 CHECK (teamer_max_waitlist_size >= 0),
     is_series BOOLEAN DEFAULT false,
     -- series_id = ID des ersten Events der Serie (Prod ist BIGINT, NICHT UUID)
     series_id BIGINT,

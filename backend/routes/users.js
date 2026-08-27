@@ -5,22 +5,28 @@ const { body, param } = require('express-validator');
 const { handleValidationErrors, commonValidations } = require('../middleware/validation');
 const { checkUserHierarchy, filterUsersByHierarchy } = require('../utils/roleHierarchy');
 const { validatePassword } = require('../utils/passwordUtils');
+const { generateUniqueUsername } = require('../utils/usernameGenerator');
 const { invalidateUserCache } = require('../middleware/rbac');
 const { syncJahrgangChat } = require('../utils/jahrgangChat');
 const { syncTeamChat } = require('../utils/teamChat');
 const chatSyncCache = require('../utils/chatSyncCache');
-const { deletePhotoFile } = require('../utils/photoStorage');
+const { deletePhotoFile, deleteChallengeFile, deleteChatFile } = require('../utils/photoStorage');
 const liveUpdate = require('../utils/liveUpdate');
 
 // User management routes
 // WICHTIGER HINWEIS: Das übergebene 'db'-Objekt ist eine PostgreSQL Pool-Instanz.
 // Transaktionen verwenden einen dedizierten Client via db.getClient() (pool.connect()).
 // Users: Nur org_admin darf verwalten
-module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
+module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin }, io) => {
 
   // Validierungsregeln
   const validateCreateUser = [
-    commonValidations.username,
+    // username optional: Fehlt er, wird er aus display_name erzeugt — wie bei
+    // Konfis (konfi-management.js:154). Wird einer mitgeschickt, gelten die
+    // gewohnten Zeichenregeln.
+    body('username').optional({ checkFalsy: true })
+      .isLength({ min: 3, max: 50 }).withMessage('Benutzername muss zwischen 3 und 50 Zeichen lang sein')
+      .matches(/^[a-zA-Z0-9.-]+$/).withMessage('Benutzername darf nur Buchstaben, Zahlen, Punkt (.) und Bindestrich (-) enthalten'),
     body('display_name').trim().notEmpty().withMessage('Anzeigename ist erforderlich'),
     commonValidations.password,
     body('role_id').isInt({ min: 1 }).withMessage('Ungültige Rollen-ID'),
@@ -71,7 +77,10 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
   };
 
   // Get users in current organization
-  router.get('/', rbacVerifier, requireOrgAdmin, async (req, res) => {
+  // Auch die Liste: Wer Teamer:innen anlegen darf, muss sie sehen koennen.
+  // can_edit pro Zeile kommt weiterhin aus der Hierarchie -- ein Admin sieht
+  // org_admins in der Liste, kann sie aber nicht bearbeiten.
+  router.get('/', rbacVerifier, requireAdmin, async (req, res) => {
     const organizationId = req.user.organization_id;
 
     const query = `
@@ -105,7 +114,7 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
   });
 
   // Get single user with details
-  router.get('/:id', rbacVerifier, requireOrgAdmin, userHierarchyMiddleware('view'), async (req, res) => {
+  router.get('/:id', rbacVerifier, requireAdmin, userHierarchyMiddleware('view'), async (req, res) => {
     const { id } = req.params;
     const organizationId = req.user.organization_id;
 
@@ -148,17 +157,24 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
     }
   });
 
-  // Create new user
-  router.post('/', rbacVerifier, requireOrgAdmin, userHierarchyMiddleware('create'), validateCreateUser, async (req, res) => {
+  router.post('/', rbacVerifier, requireAdmin, userHierarchyMiddleware('create'), validateCreateUser, async (req, res) => {
     const organizationId = req.user.organization_id;
-    const { username, email, display_name, role_title, password, role_id } = req.body;
+    const { username: gewuenschterName, email, display_name, role_title, password, role_id } = req.body;
 
-    if (!username || !display_name || !password || !role_id) {
-      return res.status(400).json({ error: 'Benutzername, Name, Passwort und Rolle sind erforderlich' });
+    if (!display_name || !password || !role_id) {
+      return res.status(400).json({ error: 'Name, Passwort und Rolle sind erforderlich' });
     }
 
     try {
-      // Verify role exists in organization (name wird unten fuer den Chat-Sync gebraucht)
+      const username = gewuenschterName && gewuenschterName.trim()
+        ? gewuenschterName.trim()
+        : await generateUniqueUsername(db, display_name);
+
+      if (!username) {
+        return res.status(400).json({ error: 'Aus dem Namen liess sich kein Benutzername bilden' });
+      }
+
+      // Verify role exists in organization (name wird unten für den Chat-Sync gebraucht)
       const roleCheckQuery = "SELECT id, name FROM roles WHERE id = $1 AND organization_id = $2";
       const { rows: [role] } = await db.query(roleCheckQuery, [role_id, organizationId]);
 
@@ -167,7 +183,7 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
       }
 
       // Prüfen ob Benutzername bereits existiert (GLOBAL eindeutig, case-insensitiv —
-      // sonst koennten "Anna"/"anna" parallel existieren und der Login waere mehrdeutig).
+      // sonst könnten "Anna"/"anna" parallel existieren und der Login wäre mehrdeutig).
       const { rows: [existingUser] } = await db.query(
         "SELECT id FROM users WHERE LOWER(username) = LOWER($1)",
         [username]
@@ -204,7 +220,7 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
       // Live-Update NACH der Response: neuer Benutzer in der Benutzer-Liste.
       liveUpdate.sendToOrgAdmins(organizationId, 'users', 'create', { userId: newUser.id });
 
-      // Chat-Mitgliedschaft INLINE pflegen (der TTL-Sync-Cache verlaesst sich
+      // Chat-Mitgliedschaft INLINE pflegen (der TTL-Sync-Cache verlässt sich
       // darauf, dass Mutations-Handler das tun — sonst erscheinen neue
       // Teamer:innen/Admins erst nach bis zu 10 Minuten im Team-Chat).
       if (['org_admin', 'admin', 'teamer'].includes(role.name)) {
@@ -235,7 +251,7 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
   });
 
   // Update user
-  router.put('/:id', rbacVerifier, requireOrgAdmin, userHierarchyMiddleware('update'), validateUpdateUser, async (req, res) => {
+  router.put('/:id', rbacVerifier, requireAdmin, userHierarchyMiddleware('update'), validateUpdateUser, async (req, res) => {
     const { id } = req.params;
     const organizationId = req.user.organization_id;
     const { username, email, display_name, role_title, role_id, is_active, password } = req.body;
@@ -273,6 +289,14 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
       addUpdate('is_active', is_active);
 
       if (password) {
+        // Policy auch beim Bearbeiten prüfen:
+        // Das optionale password-Feld wurde bisher ungeprueft gehasht — weder
+        // über den Validator noch inline. Beim Anlegen (Zeile 181) gilt die
+        // Policy laengst; über den Bearbeiten-Weg liess sie sich umgehen.
+        const passwortFehler = validatePassword(password);
+        if (passwortFehler) {
+          return res.status(400).json({ error: passwortFehler });
+        }
         updateFields.push(`password_hash = $${updateParams.length + 1}`);
         updateParams.push(await bcrypt.hash(password, 10));
       }
@@ -304,8 +328,8 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
         invalidateUserCache(parseInt(id));
       }
 
-      // Rollen- oder Aktiv-Status-Wechsel aendert die Soll-Mitgliedschaft in
-      // Team-/Jahrgangs-Chats -> INLINE syncen (TTL-Cache verlaesst sich darauf)
+      // Rollen- oder Aktiv-Status-Wechsel ändert die Soll-Mitgliedschaft in
+      // Team-/Jahrgangs-Chats -> INLINE syncen (TTL-Cache verlässt sich darauf)
       // und den Sync-Cache des Users invalidieren.
       if (role_id !== undefined || is_active !== undefined) {
         try {
@@ -356,8 +380,7 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
     }
   });
 
-  // Delete user
-  router.delete('/:id', rbacVerifier, requireOrgAdmin, userHierarchyMiddleware('delete'), validateUserId, async (req, res) => {
+  router.delete('/:id', rbacVerifier, requireAdmin, userHierarchyMiddleware('delete'), validateUserId, async (req, res) => {
     const { id } = req.params;
     const organizationId = req.user.organization_id;
 
@@ -393,10 +416,10 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
       // Delete user jahrgang assignments
       await client.query("DELETE FROM user_jahrgang_assignments WHERE user_id = $1", [id]);
 
-      // Verwaiste FK-Referenzen auf diesen User aufloesen, bevor users geloescht wird.
+      // Verwaiste FK-Referenzen auf diesen User aufloesen, bevor users gelöscht wird.
       // admin_id/created_by referenzieren den HANDELNDEN User (nicht das Subjekt) — diese
       // Historie der Konfis bleibt erhalten, die Referenz wird anonymisiert (SET NULL).
-      // Tabellen mit NOT-NULL-Referenz (invite_codes.created_by) werden geloescht.
+      // Tabellen mit NOT-NULL-Referenz (invite_codes.created_by) werden gelöscht.
       // Pro Statement fehlertolerant: nicht vorhandene Spalten/Tabellen duerfen den
       // Loeschvorgang nicht kippen (Schema variiert je nach Migrationsstand).
       const nullifyRefs = [
@@ -407,6 +430,10 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
         "UPDATE materials SET created_by = NULL WHERE created_by = $1",
         "UPDATE chat_rooms SET created_by = NULL WHERE created_by = $1",
         "UPDATE activity_requests SET approved_by = NULL WHERE approved_by = $1",
+        "UPDATE events SET created_by = NULL WHERE created_by = $1",
+        "UPDATE custom_badges SET created_by = NULL WHERE created_by = $1",
+        "UPDATE levels SET created_by = NULL WHERE created_by = $1",
+        "UPDATE user_jahrgang_assignments SET assigned_by = NULL WHERE assigned_by = $1",
       ];
       for (const sql of nullifyRefs) {
         // SAVEPOINT: bei nicht vorhandener Spalte/Tabelle (42703/42P01) nur dieses
@@ -420,11 +447,26 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
           if (refErr.code !== '42703' && refErr.code !== '42P01') throw refErr;
         }
       }
-      // invite_codes.created_by ist NOT NULL -> Eintraege loeschen
+      // invite_codes.created_by ist NOT NULL -> Eintraege löschen
       await client.query("DELETE FROM invite_codes WHERE created_by = $1", [id]);
-      // Chat-Daten des Users (Teamer/Admin koennen Teilnehmer/Autoren sein)
+      // Chat-Daten des Users (Teamer/Admin können Teilnehmer/Autoren sein)
       await client.query("DELETE FROM chat_participants WHERE user_id = $1", [id]);
       await client.query("DELETE FROM chat_read_status WHERE user_id = $1", [id]);
+      // Chat-Anhaenge: Dateipfade VOR dem Löschen der Nachrichten einsammeln —
+      // die DB-Zeilen verschwinden gleich, die verschluesselten Dateien auf der
+      // Platte sonst nicht. Entfernt werden
+      // sie erst nach erfolgreichem COMMIT.
+      let chatFiles = [];
+      try {
+        const { rows } = await client.query(
+          "SELECT file_path FROM chat_messages WHERE user_id = $1 AND file_path IS NOT NULL",
+          [id]
+        );
+        chatFiles = rows.map(r => r.file_path);
+      } catch (chatErr) {
+        // Spalte/Tabelle evtl. nicht vorhanden (Schema-Varianz) — nicht kippen
+        if (chatErr.code !== '42703' && chatErr.code !== '42P01') throw chatErr;
+      }
       await client.query("DELETE FROM chat_messages WHERE user_id = $1", [id]);
       await client.query(`
         DELETE FROM chat_rooms r
@@ -435,8 +477,8 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
       await client.query("DELETE FROM push_tokens WHERE user_id = $1", [id]);
       await client.query("DELETE FROM password_resets WHERE user_id = $1", [id]);
 
-      // Nachweisfotos der Antraege dieses Users einsammeln, BEVOR activity_requests
-      // im Purge unten geloescht wird — sonst blieben die Dateien als Leichen liegen.
+      // Nachweisfotos der Anträge dieses Users einsammeln, BEVOR activity_requests
+      // im Purge unten gelöscht wird — sonst blieben die Dateien als Leichen liegen.
       // Entfernt werden sie erst nach erfolgreichem COMMIT.
       let photoFilenames = [];
       try {
@@ -450,12 +492,27 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
         if (photoErr.code !== '42703' && photoErr.code !== '42P01') throw photoErr;
       }
 
+      // Dasselbe für Challenge-Beitraege: Die DB-Zeilen verschwinden per
+      // CASCADE mit dem User, die verschluesselten Dateien auf der Platte aber
+      // nicht. konfiDeletion.js macht das laengst, dieser Pfad nicht — auch
+      // Teamer:innen reichen Beitraege ein.
+      let challengeFiles = [];
+      try {
+        const { rows } = await client.query(
+          "SELECT file_path FROM challenge_submissions WHERE user_id = $1 AND file_path IS NOT NULL",
+          [id]
+        );
+        challengeFiles = rows.map(r => r.file_path);
+      } catch (chErr) {
+        if (chErr.code !== '42703' && chErr.code !== '42P01') throw chErr;
+      }
+
       // Konfi-History DIESES Users mitloeschen. Wichtig: Diese Tabellen tragen
       // (aus der SQLite-Altlast) einen zweiten NO-ACTION-FK auf users(id) neben
       // dem CASCADE-FK — NO ACTION gewinnt und wuerde den User-Delete sonst mit
       // "violates foreign key constraint" (500) blocken. Der NO-ACTION-Schutz ist
-      // gewollt fuer den JAHRGANG-Delete (dort bleibt der User bestehen und behaelt
-      // seine History). Wird der USER selbst geloescht, gehoert seine History mit weg.
+      // gewollt für den JAHRGANG-Delete (dort bleibt der User bestehen und behält
+      // seine History). Wird der USER selbst gelöscht, gehört seine History mit weg.
       // Fehlertolerant (Schema-Varianz je Migrationsstand), analog zu nullifyRefs.
       const purgeHistory = [
         "DELETE FROM activity_requests WHERE user_id = $1",
@@ -465,6 +522,10 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
         "DELETE FROM event_points WHERE konfi_id = $1",
         "DELETE FROM event_bookings WHERE user_id = $1",
         "DELETE FROM konfi_profiles WHERE user_id = $1",
+        // Empfangene Urkunden. Der Fremdschlüssel hat kein ON DELETE und
+        // blockierte jede Löschung einer ausgezeichneten Person — oben wird
+        // nur admin_id genullt, also die verleihende Seite.
+        "DELETE FROM user_certificates WHERE user_id = $1",
       ];
       for (const sql of purgeHistory) {
         await client.query('SAVEPOINT hist_purge');
@@ -497,6 +558,12 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
       // Foto-Dateien nach COMMIT vom Dateisystem entfernen (nicht blockierend)
       for (const filename of photoFilenames) {
         await deletePhotoFile(filename);
+      }
+      for (const filePath of challengeFiles) {
+        await deleteChallengeFile(filePath);
+      }
+      for (const filePath of chatFiles) {
+        await deleteChatFile(filePath);
       }
 
       res.json({ message: 'Benutzer erfolgreich gelöscht' });
@@ -541,7 +608,7 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
         const currentJahrgangIds = currentAssignments.map(a => a.jahrgang_id);
         const newJahrgangIds = jahrgang_assignments.map(a => a.jahrgang_id);
 
-        // Alle betroffenen Jahrgaenge (alt + neu) — fuer diese wird nach dem
+        // Alle betroffenen Jahrgänge (alt + neu) — für diese wird nach dem
         // Setzen der Zuweisungen der Chat synchronisiert (Beitritt bei neuer
         // Zuweisung, Entfernung bei Entzug — Org-Admins bleiben immer drin).
         const affectedJahrgangIds = Array.from(new Set([...currentJahrgangIds, ...newJahrgangIds]));
@@ -573,7 +640,7 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
             }
         }
 
-        // Chat-Mitgliedschaft fuer ALLE betroffenen Jahrgaenge (alt + neu)
+        // Chat-Mitgliedschaft für ALLE betroffenen Jahrgänge (alt + neu)
         // zentral synchronisieren: zugewiesene Admins/Teamer treten bei,
         // entzogene fliegen raus, Org-Admins bleiben immer drin, Chat wird bei
         // Bedarf angelegt. Ersetzt die frueheren manuellen Add/Remove-Schleifen
@@ -656,7 +723,7 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
   });
 
   // ENTFERNT: /users/:id/permissions Route
-  // Permissions sind jetzt rollen-basiert (hardcoded), keine DB-Abfrage mehr noetig
+  // Permissions sind jetzt rollen-basiert (hardcoded), keine DB-Abfrage mehr nötig
   // ENTFERNT: zweite /me/jahrgaenge Route (Duplikat, lieferte andere Spaltenaliase)
 
   // Reset password for a user (super_admin or org_admin of same org)
@@ -699,8 +766,8 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }, io) => {
       await db.query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2 AND organization_id = $3', [hashedPassword, id, targetUser.organization_id]);
 
       // Bestehende Socket-Verbindungen des Users trennen: Nach einem Passwort-
-      // Reset soll die alte Session nicht ueber einen offenen Socket weiterlaufen.
-      // Der Client verbindet sich nach dem naechsten (Re-)Login mit frischem Token.
+      // Reset soll die alte Session nicht über einen offenen Socket weiterlaufen.
+      // Der Client verbindet sich nach dem nächsten (Re-)Login mit frischem Token.
       liveUpdate.disconnectUserSockets(parseInt(id));
 
       res.json({ message: 'Passwort erfolgreich zurückgesetzt' });

@@ -18,6 +18,7 @@ import {
   arrowBack
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import api from '../../../services/api';
@@ -79,7 +80,7 @@ const AdminOrganizationsPage: React.FC = () => {
       // User-State neu laden -> Trial-Banner erscheint/verschwindet sofort
       // (ohne Logout/Neustart). Bedingungslos: ein /me-Call ist guenstig, und
       // der Vergleich auf die eigene Org war fehleranfaellig (modalOrganizationId
-      // wurde teils schon zurueckgesetzt). super_admin ohne Org schadet es nicht.
+      // wurde teils schon zurückgesetzt). super_admin ohne Org schadet es nicht.
       refreshUser();
       setSelectedOrganization(null);
       setModalOrganizationId(null);
@@ -91,7 +92,7 @@ const AdminOrganizationsPage: React.FC = () => {
   useLiveRefresh('organizations', loadOrganizations);
 
   const handleDeleteOrganization = async (organization: Organization) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Organisation löschen',
       message: `Organisation "${organization.display_name}" (${organization.name}) wirklich löschen?\n\nWarnung: Alle zugehörigen Daten (Benutzer, Konfis, Aktivitäten) werden ebenfalls gelöscht!`,
@@ -138,13 +139,13 @@ const AdminOrganizationsPage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()}>
+            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
               <IonIcon icon={arrowBack} />
             </IonButton>
           </IonButtons>
           <IonTitle>Organisationen</IonTitle>
           <IonButtons slot="end">
-            <IonButton onClick={presentOrganizationModal}>
+            <IonButton aria-label="Neue Organisation anlegen" onClick={presentOrganizationModal}>
               <IonIcon icon={add} />
             </IonButton>
           </IonButtons>

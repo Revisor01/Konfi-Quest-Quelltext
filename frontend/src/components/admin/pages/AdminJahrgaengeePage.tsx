@@ -43,6 +43,7 @@ import {
   people
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import api from '../../../services/api';
@@ -54,6 +55,7 @@ import LoadingSpinner from '../../common/LoadingSpinner';
 import { SectionHeader, ListSection } from '../../shared';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { safeUUID } from '../../../utils/uuid';
+import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 
 interface Jahrgang {
   id: number;
@@ -253,12 +255,12 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
             {jahrgang ? 'Jahrgang bearbeiten' : 'Neuer Jahrgang'}
           </IonTitle>
           <IonButtons slot="start">
-            <IonButton onClick={handleClose} disabled={loading}>
+            <IonButton aria-label="Schließen" onClick={handleClose} disabled={loading}>
               <IonIcon icon={closeOutline} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
-            <IonButton
+            <IonButton aria-label="Jahrgang speichern"
               onClick={handleSubmit}
               disabled={!formData.name.trim() || loading}
             >
@@ -330,7 +332,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
                 )}
                 {formData.gottesdienst_enabled && (
                   <IonItem lines="full" style={{ '--background': 'transparent' }}>
-                    <IonLabel position="stacked">Ziel Gottesdienst</IonLabel>
+                    <IonLabel position="stacked">Ziel Gottesdienst <span style={{ fontWeight: 700, color: 'var(--ion-color-primary)' }}>{formData.target_gottesdienst}</span></IonLabel>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
                       <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>1</span>
                       <IonRange
@@ -341,7 +343,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
                         disabled={loading}
                         style={{ flex: 1 }}
                       />
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--ion-color-primary)', minWidth: '28px', textAlign: 'center' }}>{formData.target_gottesdienst}</span>
+                      <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>20</span>
                     </div>
                   </IonItem>
                 )}
@@ -362,7 +364,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
                 )}
                 {formData.gemeinde_enabled && (
                   <IonItem lines="none" style={{ '--background': 'transparent' }}>
-                    <IonLabel position="stacked">Ziel Gemeinde</IonLabel>
+                    <IonLabel position="stacked">Ziel Gemeinde <span style={{ fontWeight: 700, color: 'var(--ion-color-primary)' }}>{formData.target_gemeinde}</span></IonLabel>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
                       <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>1</span>
                       <IonRange
@@ -373,7 +375,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
                         disabled={loading}
                         style={{ flex: 1 }}
                       />
-                      <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--ion-color-primary)', minWidth: '28px', textAlign: 'center' }}>{formData.target_gemeinde}</span>
+                      <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>20</span>
                     </div>
                   </IonItem>
                 )}
@@ -444,8 +446,8 @@ const AdminJahrgaengeePage: React.FC = () => {
   const { pageRef, presentingElement, cleanupModals } = useModalPage('admin-jahrgaenge');
   const { user, setError, isOnline } = useApp();
 
-  // Offline-Query: Jahrgaenge
-  const { data: jahrgaenge, loading, refresh: refreshJahrgaenge } = useOfflineQuery<Jahrgang[]>(
+  // Offline-Query: Jahrgänge
+  const { data: jahrgaenge, loading, refresh: refreshJahrgaenge, refreshLive: refreshJahrgaengeLive } = useOfflineQuery<Jahrgang[]>(
     'admin:jahrgaenge-detail:' + user?.organization_id,
     async () => { const res = await api.get('/admin/jahrgaenge'); return res.data; },
     { ttl: CACHE_TTL.STAMMDATEN }
@@ -470,7 +472,7 @@ const AdminJahrgaengeePage: React.FC = () => {
   });
 
   // Subscribe to live updates for jahrgaenge
-  useLiveRefresh('jahrgaenge', refreshJahrgaenge);
+  useLiveRefresh('jahrgaenge', refreshJahrgaengeLive);
 
   const handleRefresh = async (event: CustomEvent) => {
     await refreshJahrgaenge();
@@ -478,7 +480,7 @@ const AdminJahrgaengeePage: React.FC = () => {
   };
 
   const handleDeleteWithSlideClose = async (jahrgang: Jahrgang, forceDelete = false) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     const performDelete = async () => {
       const slidingElement = slidingRefs.current.get(jahrgang.id);
       try {
@@ -551,14 +553,14 @@ const AdminJahrgaengeePage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()}>
+            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
               <IonIcon icon={arrowBack} />
             </IonButton>
           </IonButtons>
           <IonTitle>Jahrgänge</IonTitle>
           {canCreate && (
             <IonButtons slot="end">
-              <IonButton onClick={openCreateModal}>
+              <IonButton aria-label="Neuen Jahrgang anlegen" onClick={openCreateModal}>
                 <IonIcon icon={add} />
               </IonButton>
             </IonButtons>
@@ -681,7 +683,8 @@ const AdminJahrgaengeePage: React.FC = () => {
                       {canDelete && (
                         <IonItemOptions side="end" className="app-swipe-actions">
                           <IonItemOption
-                            onClick={() => handleDeleteWithSlideClose(jahrgang)}
+                            onClick={() => { closeOpenSlidingItems(); handleDeleteWithSlideClose(jahrgang); }}
+                            aria-label="Jahrgang löschen"
                             className="app-swipe-action"
                           >
                             <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">

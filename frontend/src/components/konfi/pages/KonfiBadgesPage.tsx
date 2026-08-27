@@ -9,6 +9,7 @@ import {
   IonRefresherContent
 } from '@ionic/react';
 import { useApp } from '../../../contexts/AppContext';
+import { useBadge } from '../../../contexts/BadgeContext';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
@@ -50,18 +51,19 @@ interface BadgeData {
 
 const KonfiBadgesPage: React.FC = () => {
   const { user, setError } = useApp();
+  const { refreshAllCounts } = useBadge();
   const { pageRef, presentingElement } = useModalPage('konfi-badges');
   const [selectedFilter, setSelectedFilter] = useState('alle');
 
   // --- useOfflineQuery: Badges ---
-  const { data: badgeData, loading: badgesLoading, refresh: refreshBadges } = useOfflineQuery<BadgeData>(
+  const { data: badgeData, loading: badgesLoading, refresh: refreshBadges, refreshLive: refreshBadgesLive } = useOfflineQuery<BadgeData>(
     'konfi:badges:' + user?.id,
     () => api.get('/konfi/badges').then(r => r.data),
     { ttl: CACHE_TTL.BADGES }
   );
 
   // --- useOfflineQuery: Profile (für Punkte-Progress) ---
-  const { data: konfiData, refresh: refreshProfile } = useOfflineQuery<any>(
+  const { data: konfiData, refresh: refreshProfile, refreshLive: refreshProfileLive } = useOfflineQuery<any>(
     'konfi:profile:' + user?.id,
     () => api.get('/konfi/profile').then(r => r.data),
     { ttl: CACHE_TTL.PROFILE }
@@ -71,16 +73,22 @@ const KonfiBadgesPage: React.FC = () => {
 
   // Subscribe to live updates for badges
   const refreshAll = () => {
-    refreshBadges();
-    refreshProfile();
+    refreshBadgesLive();
+    refreshProfileLive();
   };
   useLiveRefresh('badges', refreshAll);
 
-  // Mark badges as seen (Write-Aktion, nicht cachen)
+  const lastMarkedRef = React.useRef<string>('');
   useEffect(() => {
     if (badgeData) {
-      const hasUnseenBadges = badgeData.earned.some((badge: any) => !badge.seen);
+      const unseenIds = badgeData.earned
+        .filter((badge: any) => !badge.seen)
+        .map((badge: any) => badge.id)
+        .sort((a: number, b: number) => a - b)
+        .join(',');
+      const hasUnseenBadges = unseenIds.length > 0 && unseenIds !== lastMarkedRef.current;
       if (hasUnseenBadges) {
+        lastMarkedRef.current = unseenIds;
         if (!networkMonitor.isOnline) {
           writeQueue.enqueue({
             method: 'POST',
@@ -90,9 +98,13 @@ const KonfiBadgesPage: React.FC = () => {
             metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Badges gesehen' },
           });
         } else {
-          api.post('/konfi/badges/mark-seen').catch((markError) => {
-            console.warn('Badges konnten nicht als gesehen markiert werden:', markError);
-          });
+          api.post('/konfi/badges/mark-seen')
+            .then(() => {
+              refreshAllCounts();
+            })
+            .catch((markError) => {
+              console.warn('Badges konnten nicht als gesehen markiert werden:', markError);
+            });
         }
       }
     }

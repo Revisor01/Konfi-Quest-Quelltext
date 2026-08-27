@@ -3,7 +3,7 @@ import { IonIcon } from '@ionic/react';
 import { people, flame, shieldCheckmark } from 'ionicons/icons';
 import StatusBadge from './StatusBadge';
 
-// Gemeinsame Corner-Badge-Reihe fuer Event-Cards (zuvor pro Rolle dupliziert).
+// Gemeinsame Corner-Badge-Reihe für Event-Cards (zuvor pro Rolle dupliziert).
 // Reihenfolge: Team -> Konfirmation -> Pflicht -> Status. Jeweils mit Separator
 // dazwischen. Welche Badges sichtbar sind, ergibt sich aus den event-Flags;
 // der Status-Badge wird nur gezeigt, wenn showStatus gesetzt ist.

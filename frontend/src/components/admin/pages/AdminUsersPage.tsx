@@ -15,6 +15,7 @@ import {
 } from '@ionic/react';
 import { add, arrowBack } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import api from '../../../services/api';
@@ -31,7 +32,7 @@ const AdminUsersPage: React.FC = () => {
   const { pageRef, presentingElement } = useModalPage('admin-users');
   
   // Offline-Query: Users
-  const { data: users, loading, refresh: refreshUsers } = useOfflineQuery<AdminUser[]>(
+  const { data: users, loading, refresh: refreshUsers, refreshLive: refreshUsersLive } = useOfflineQuery<AdminUser[]>(
     'admin:users:' + user?.organization_id,
     async () => { const res = await api.get('/users'); return res.data; },
     { ttl: CACHE_TTL.KONFIS }
@@ -61,10 +62,10 @@ const AdminUsersPage: React.FC = () => {
   });
 
   // Subscribe to live updates for users
-  useLiveRefresh('users', refreshUsers);
+  useLiveRefresh('users', refreshUsersLive);
 
   const handleDeleteUser = async (userToDelete: AdminUser) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Benutzer löschen',
       message: `Benutzer "${userToDelete.display_name}" (@${userToDelete.username}) wirklich löschen?`,
@@ -111,14 +112,14 @@ const AdminUsersPage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
         <IonButtons slot="start">
-          <IonButton onClick={() => window.history.back()}>
+          <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
             <IonIcon icon={arrowBack} />
           </IonButton>
         </IonButtons>
           <IonTitle>Benutzer:innen</IonTitle>
           <IonButtons slot="end">
             {user?.role_name === 'org_admin' && (
-              <IonButton onClick={presentUserModal}>
+              <IonButton aria-label="Neue Benutzer:in anlegen" onClick={presentUserModal}>
                 <IonIcon icon={add} />
               </IonButton>
             )}
@@ -148,6 +149,7 @@ const AdminUsersPage: React.FC = () => {
             onAddUserClick={presentUserModal}
             onSelectUser={handleSelectUser}
             onDeleteUser={handleDeleteUser}
+            darfVerwalten={user?.role_name === 'org_admin'}
           />
         )}
       </IonContent>

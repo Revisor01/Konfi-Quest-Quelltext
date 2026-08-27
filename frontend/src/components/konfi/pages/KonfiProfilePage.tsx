@@ -77,14 +77,17 @@ const KonfiProfilePage: React.FC = () => {
   const { pageRef, presentingElement } = useModalPage('profile');
 
   // --- useOfflineQuery: Profile ---
-  const { data: profile, loading, refresh } = useOfflineQuery<KonfiProfile>(
+  const { data: profile, loading, refresh, refreshLive } = useOfflineQuery<KonfiProfile>(
     'konfi:profile:' + user?.id,
     () => api.get('/konfi/profile').then(r => r.data),
     { ttl: CACHE_TTL.PROFILE }
   );
 
   // Subscribe to live updates for points and badges
-  useLiveRefresh(['points', 'badges'], refresh);
+  // 'dashboard' MUSS mit dabei sein: Bonuspunkte und von der Leitung vergebene
+  // Aktivitäten melden 'dashboard', nicht 'points' — ohne das blieb das Profil
+  // bei genau diesen Vergabewegen stehen.
+  useLiveRefresh(['points', 'dashboard', 'badges'], refreshLive);
 
   if (loading) {
     return <LoadingSpinner message="Profil wird geladen..." />;
@@ -107,7 +110,7 @@ const KonfiProfilePage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()}>
+            <IonButton onClick={() => window.history.back()} aria-label="Zurück">
               <IonIcon icon={arrowBack} slot="icon-only" />
             </IonButton>
           </IonButtons>

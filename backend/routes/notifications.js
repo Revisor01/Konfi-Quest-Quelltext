@@ -1,7 +1,6 @@
 const express = require('express');
 const { body } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
-const { sendFirebasePushNotification } = require('../push/firebase');
 
 module.exports = (db, verifyTokenRBAC) => {
   const router = express.Router();
@@ -19,16 +18,16 @@ module.exports = (db, verifyTokenRBAC) => {
     handleValidationErrors
   ];
 
-  // Leichtgewichtige Badge-Zaehler fuer die Tab-Leiste.
+  // Leichtgewichtige Badge-Zähler für die Tab-Leiste.
   // Ersetzt im BadgeContext die frueheren Voll-Fetches von /chat/rooms +
-  // /admin/activities/requests + /events, die nur fuer Zaehler geladen wurden.
-  // WICHTIG fuer Konsistenz mit den Listen-Ansichten:
+  // /admin/activities/requests + /events, die nur für Zähler geladen wurden.
+  // WICHTIG für Konsistenz mit den Listen-Ansichten:
   // - chat.byRoom repliziert EXAKT die unread_count-Semantik der
   //   GET /chat/rooms-Query (inkl. Mitzaehlen eigener Nachrichten) — die Werte
   //   speisen chatUnreadByRoom, das ChatRoom/ChatOverview konsumieren.
-  //   BEWUSST OHNE Mitgliedschafts-Sync (der laeuft TTL-gesteuert in /rooms).
+  //   BEWUSST OHNE Mitgliedschafts-Sync (der läuft TTL-gesteuert in /rooms).
   // - pendingRequests entspricht dem pending-Filter der Admin-Antragsliste
-  //   (GET /admin/activities/requests ist org-weit ueber activities.organization_id).
+  //   (GET /admin/activities/requests ist org-weit über activities.organization_id).
   // - pendingEvents entspricht der Frontend-Logik "unprocessed_count > 0 UND
   //   event_date < jetzt" (unprocessed = bestaetigte Buchung ohne attendance_status).
   router.get('/badge-counts', verifyTokenRBAC, async (req, res) => {
@@ -45,6 +44,13 @@ module.exports = (db, verifyTokenRBAC) => {
                  WHERE m.room_id = r.id
                  AND m.deleted_at IS NULL
                  AND m.created_at > COALESCE(crs.last_read_at, '1970-01-01')
+                 -- Eigene Nachrichten zählen nicht als ungelesen. Ohne diese
+                 -- Zeile stand nach der eigenen letzten Nachricht eine Eins am
+                 -- Reiter, die erst beim Oeffnen des Raums verschwand — und wer
+                 -- ihn nicht mehr oeffnete, sah sie dauerhaft. Die Zählung im
+                 -- Hintergrunddienst schließt sie seit jeher aus
+                 -- (backgroundService.js), diese hier nicht.
+                 AND NOT (m.user_id = $1 AND m.user_type = $2)
                ) AS unread_count
         FROM chat_rooms r
         INNER JOIN chat_participants p ON r.id = p.room_id AND p.user_id = $1 AND p.user_type = $2
@@ -52,12 +58,68 @@ module.exports = (db, verifyTokenRBAC) => {
         WHERE r.organization_id = $3
       `;
 
-      // Pending-Zaehler nur fuer Admin-Typen (Konfis/Teamer nutzen sie im
-      // Frontend nicht — BadgeContext zeigt sie nur fuer isAdmin).
+      // Pending-Zähler nur für Admin-Typen (Konfis/Teamer nutzen sie im
+      // Frontend nicht — BadgeContext zeigt sie nur für isAdmin).
       const isAdminType = userType === 'admin';
       const zero = Promise.resolve({ rows: [{ c: 0 }] });
 
-      const [chatRes, requestsRes, eventsRes] = await Promise.all([
+      // Offene Challenge-Freigaben: Admin org-weit; Teamer nur für Challenges
+      // ihrer zugewiesenen Jahrgänge (gleiche Grenze wie viewableJahrgangIds
+      // in routes/challenges.js — der Teamer soll nicht auf Freigaben gestupst
+      // werden, deren Challenge er gar nicht oeffnen darf).
+      const teamerJahrgangIds = userType === 'teamer'
+        ? (req.user.assigned_jahrgaenge || []).filter(j => j.can_view).map(j => j.id)
+        : [];
+      let challengesPromise = zero;
+      if (isAdminType) {
+        challengesPromise = db.query(
+          `SELECT COUNT(*)::int AS c
+           FROM challenge_submissions cs
+           JOIN challenges c ON cs.challenge_id = c.id
+           WHERE c.organization_id = $1 AND cs.moderation_status = 'pending'`,
+          [organizationId]
+        );
+      } else if (userType === 'teamer') {
+        // 'nur_team'-Challenges laufen org-weit ueber die Rolle (Migration 121):
+        // Jede:r Teamer:in der Organisation darf sie sehen und moderieren, auch
+        // ohne Jahrgangs-Zuordnung -- die es dort per Definition nicht gibt.
+        // Dieselbe Ausnahme steht in challenges.js (leadershipMayAccess und die
+        // Listen-Abfrage).
+        challengesPromise = db.query(
+          `SELECT COUNT(*)::int AS c
+           FROM challenge_submissions cs
+           JOIN challenges c ON cs.challenge_id = c.id
+           WHERE c.organization_id = $1
+             AND cs.moderation_status = 'pending'
+             AND (
+               c.audience = 'nur_team'
+               OR EXISTS (
+                 SELECT 1 FROM challenge_jahrgang_assignments cja
+                 WHERE cja.challenge_id = c.id AND cja.jahrgang_id = ANY($2::int[])
+               )
+             )`,
+          [organizationId, teamerJahrgangIds]
+        );
+      }
+
+      // Die Fortschrittsberechnung braucht es dafuer NICHT: user_badges.seen
+      // gilt fuer beide Rollen, custom_badges.target_role trennt sie. Eine
+      // COUNT-Abfrage genuegt.
+      // Die Leitung kann keine Abzeichen verdienen -> immer 0.
+      const badgesPromise = (userType === 'konfi' || userType === 'teamer')
+        ? db.query(
+            `SELECT COUNT(*)::int AS c
+             FROM user_badges ub
+             JOIN custom_badges cb ON ub.badge_id = cb.id
+             WHERE ub.user_id = $1
+               AND ub.organization_id = $2
+               AND ub.seen = false
+               AND COALESCE(cb.target_role, 'konfi') = $3`,
+            [userId, organizationId, userType]
+          )
+        : zero;
+
+      const [chatRes, requestsRes, eventsRes, challengesRes, badgesRes] = await Promise.all([
         db.query(chatQuery, [userId, userType, organizationId]),
         isAdminType
           ? db.query(
@@ -82,7 +144,9 @@ module.exports = (db, verifyTokenRBAC) => {
                )`,
               [organizationId]
             )
-          : zero
+          : zero,
+        challengesPromise,
+        badgesPromise
       ]);
 
       const byRoom = {};
@@ -96,7 +160,9 @@ module.exports = (db, verifyTokenRBAC) => {
       res.json({
         chat: { total, byRoom },
         pendingRequests: requestsRes.rows[0]?.c || 0,
-        pendingEvents: eventsRes.rows[0]?.c || 0
+        pendingEvents: eventsRes.rows[0]?.c || 0,
+        pendingChallenges: challengesRes.rows[0]?.c || 0,
+        newBadges: badgesRes.rows[0]?.c || 0
       });
     } catch (err) {
       console.error('Database error in GET /notifications/badge-counts:', err);
@@ -181,56 +247,6 @@ module.exports = (db, verifyTokenRBAC) => {
       if (err.code === '23505') {
         return res.status(409).json({ error: 'Token für diesen Benutzer und dieses Gerät existiert bereits.' });
       }
-      res.status(500).json({ error: 'Datenbankfehler' });
-    }
-  });
-
-  // Sendet eine Test-Push-Benachrichtigung an alle Geräte eines Benutzers
-  router.post('/test-push', verifyTokenRBAC, async (req, res) => {
-    const userId = req.user.id;
-    const { message = 'Test Push Notification' } = req.body;
-
-    try {
-      // Org-gefiltert: Nur Tokens des eigenen Users innerhalb der eigenen Organisation
-      const { rows: tokens } = await db.query(
-        `SELECT pt.* FROM push_tokens pt
-         JOIN users u ON pt.user_id = u.id
-         WHERE pt.user_id = $1 AND u.organization_id = $2`,
-        [userId, req.user.organization_id]
-      );
-
-      if (!tokens || tokens.length === 0) {
-        return res.json({ success: false, message: 'Keine Push-Tokens gefunden' });
-      }
-
-      let sentCount = 0;
-      let errorCount = 0;
-
-      for (const tokenRow of tokens) {
-        try {
-          await sendFirebasePushNotification(tokenRow.token, {
-            title: 'Test Push',
-            body: message,
-            badge: 1,
-            sound: 'default'
-          });
-          sentCount++;
-        } catch (error) {
-          console.error('Error sending to token:', error.message);
-          errorCount++;
-        }
-      }
-
-      res.json({
-        success: true,
-        sent: sentCount,
-        errors: errorCount,
-        total: tokens.length,
-        message: `Test-Push an ${sentCount} Gerät(e) gesendet`
-      });
-
-    } catch (err) {
-      console.error('Database error in POST /test-push:', err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });

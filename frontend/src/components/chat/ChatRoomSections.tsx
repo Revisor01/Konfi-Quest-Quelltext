@@ -18,9 +18,10 @@ import {
   people,
   returnUpBack,
   closeCircle,
-  ellipsisVertical
+  ellipsisVertical,
+  trashOutline
 } from 'ionicons/icons';
-import { Message } from '../../types/chat';
+import { Message, ChatUserType } from '../../types/chat';
 import { formatFileSize } from '../../utils/helpers';
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
@@ -44,19 +45,24 @@ interface ChatHeaderProps {
   onOpenMembers: () => void;
   onOpenPoll: () => void;
   onLeaveChat: () => void;
+  // Team-Chat leeren (nur Leitung, nur im automatischen Team-Chat gesetzt):
+  // Mülleimer im Header, löscht alle Nachrichten, der Raum bleibt.
+  onClearChat?: (() => void) | null;
   eventId?: number | null;
-  partnerType?: 'admin' | 'konfi' | null;
+  partnerType?: ChatUserType | null;
 }
 
 export const ChatHeader = React.memo<ChatHeaderProps>(({
   roomName,
+  roomType,
   isAdmin,
   canLeave,
   isOnline,
   onBack,
   onOpenMembers,
   onOpenPoll,
-  onLeaveChat
+  onLeaveChat,
+  onClearChat
 }) => {
   return (
     // translucent bewusst AUS: Der Chat-Content ist nicht fullscreen (Footer mit
@@ -65,24 +71,30 @@ export const ChatHeader = React.memo<ChatHeaderProps>(({
     <IonHeader>
       <IonToolbar>
         <IonButtons slot="start">
-          <IonButton onClick={onBack}>
+          <IonButton aria-label="Zurück" onClick={onBack}>
             <IonIcon icon={arrowBack} />
           </IonButton>
         </IonButtons>
         <IonTitle>{roomName}</IonTitle>
         <IonButtons slot="end">
+          {roomType !== 'direct' && (
+            <IonButton aria-label="Mitglieder anzeigen" onClick={onOpenMembers}>
+              <IonIcon icon={people} />
+            </IonButton>
+          )}
+          {/* Umfragen anlegen bleibt der Leitung vorbehalten. */}
           {isAdmin && (
-            <>
-              <IonButton onClick={onOpenMembers}>
-                <IonIcon icon={people} />
-              </IonButton>
-              <IonButton onClick={onOpenPoll}>
-                <IonIcon icon={barChart} />
-              </IonButton>
-            </>
+            <IonButton aria-label="Umfrage erstellen" onClick={onOpenPoll}>
+              <IonIcon icon={barChart} />
+            </IonButton>
+          )}
+          {onClearChat && (
+            <IonButton aria-label="Team-Chat leeren" disabled={!isOnline} onClick={onClearChat}>
+              <IonIcon icon={trashOutline} />
+            </IonButton>
           )}
           {canLeave && (
-            <IonButton disabled={!isOnline} onClick={onLeaveChat}>
+            <IonButton aria-label="Weitere Chat-Optionen" disabled={!isOnline} onClick={onLeaveChat}>
               <IonIcon icon={ellipsisVertical} />
             </IonButton>
           )}
@@ -129,7 +141,7 @@ export const ReplyPreview = React.memo<ReplyPreviewProps>(({ replyToMessage, onC
               : (replyToMessage.content || '')}
       </div>
     </div>
-    <IonButton
+    <IonButton aria-label="Antwort verwerfen"
       fill="clear"
       size="small"
       onClick={onClear}
@@ -206,7 +218,7 @@ export const FilePreviewBar = React.memo<FilePreviewBarProps>(({ selectedFile, s
         {formatFileSize(selectedFile.size)}
       </div>
     </div>
-    <IonButton
+    <IonButton aria-label="Datei entfernen"
       fill="clear"
       size="small"
       onClick={onClear}
@@ -300,7 +312,7 @@ export const MessageInput = React.memo<MessageInputProps>(({
         gap: '8px',
         width: '100%'
       }}>
-        <IonButton
+        <IonButton aria-label="Datei anhängen"
           fill="clear"
           size="small"
           onClick={() => fileInputRef.current?.click()}
@@ -356,7 +368,7 @@ export const MessageInput = React.memo<MessageInputProps>(({
             }}
             onKeyDown={(e) => {
               // Auf nativen Apps (iOS/Android, Touch-Tastatur) erzeugt Enter IMMER
-              // einen Zeilenumbruch — gesendet wird nur ueber den Senden-Button.
+              // einen Zeilenumbruch — gesendet wird nur über den Senden-Button.
               // Sonst (Browser/Hardware-Tastatur) sendet Enter, Shift+Enter = Umbruch.
               if (Capacitor.isNativePlatform()) return;
               if (e.key === 'Enter' && !e.shiftKey) {
@@ -377,7 +389,7 @@ export const MessageInput = React.memo<MessageInputProps>(({
           onPointerDown={(e) => e.preventDefault()}
           // Fokus SYNCHRON in der Klick-Geste zuruecksetzen: Nach dem Senden
           // wird der Button disabled (Text leer) und der Browser wirft den
-          // Fokus sonst auf BODY -> iOS schliesst die Tastatur. Innerhalb der
+          // Fokus sonst auf BODY -> iOS schließt die Tastatur. Innerhalb der
           // User-Geste haelt setFocus die Tastatur offen (verifiziert im Web:
           // activeElement war BODY nach Senden).
           onClick={() => {
@@ -454,20 +466,20 @@ export const selectFromGallery = async (): Promise<CameraResult | null> => {
   return { file, previewUrl };
 };
 
-// Auto-capitalize fuer das Eingabefeld: schreibt den ersten Buchstaben sowie den
+// Auto-capitalize für das Eingabefeld: schreibt den ersten Buchstaben sowie den
 // ersten Buchstaben nach einem Satzende (. ! ?) oder Zeilenumbruch gross. Greift nur
 // am Ende der Eingabe (= das gerade getippte Zeichen), damit der Cursor nicht springt
-// und bereits getippter Text nicht nachtraeglich umgeschrieben wird.
+// und bereits getippter Text nicht nachträglich umgeschrieben wird.
 export const autoCapitalize = (value: string): string => {
   if (!value) return '';
 
   const newChar = value.slice(-1);
-  // Nur Kleinbuchstaben (inkl. Umlaute) hochstellen, alles andere unveraendert lassen.
+  // Nur Kleinbuchstaben (inkl. Umlaute) hochstellen, alles andere unverändert lassen.
   if (newChar === newChar.toUpperCase() || !/[a-z\u00e4\u00f6\u00fc]/.test(newChar)) {
     return value;
   }
 
-  // Am Satzanfang? = erstes Zeichen ueberhaupt ODER vor dem letzten Zeichen steht
+  // Am Satzanfang? = erstes Zeichen überhaupt ODER vor dem letzten Zeichen steht
   // (ggf. mit einem Space) ein Satzende-Zeichen bzw. ein Zeilenumbruch.
   const before = value.slice(0, -1);
   const atStart = before.length === 0;

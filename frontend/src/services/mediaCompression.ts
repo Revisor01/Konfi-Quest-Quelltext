@@ -6,13 +6,13 @@
 // Hintergrund schwarz), alle anderen werden zu JPEG konvertiert.
 //
 // Videos lassen sich im WebView nicht sinnvoll transkodieren (kein Canvas-Weg,
-// ffmpeg.wasm waere zu gross/langsam auf Mobilgeraeten) -> hier NICHT behandelt.
+// ffmpeg.wasm wäre zu gross/langsam auf Mobilgeraeten) -> hier NICHT behandelt.
 
 const MAX_EDGE = 1920;
 const JPEG_QUALITY = 0.8;
 
-// Bilder ab dieser Kantenlaenge ODER Groesse werden ueberhaupt angefasst. Kleine
-// Bilder (Screenshots, bereits komprimierte) bleiben unveraendert -> kein
+// Bilder ab dieser Kantenlaenge ODER Größe werden überhaupt angefasst. Kleine
+// Bilder (Screenshots, bereits komprimierte) bleiben unverändert -> kein
 // Qualitaetsverlust durch unnoetiges Re-Encoding.
 const SIZE_THRESHOLD = 500 * 1024; // 500 KB
 
@@ -32,12 +32,12 @@ const loadImage = (objectUrl: string): Promise<HTMLImageElement> =>
 const canvasToBlob = (canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> =>
   new Promise((resolve) => canvas.toBlob((b) => resolve(b), type, quality));
 
-// Prueft, ob ein Bild (teil-)transparente Pixel enthaelt. Nur dann muss PNG
+// Prueft, ob ein Bild (teil-)transparente Pixel enthält. Nur dann muss PNG
 // erhalten bleiben; sonst ist JPEG deutlich kleiner.
 const hasTransparency = (ctx: CanvasRenderingContext2D, width: number, height: number): boolean => {
   try {
     const { data } = ctx.getImageData(0, 0, width, height);
-    // Jeden 4. Wert (Alpha) pruefen; aus Performancegruenden in groben Schritten.
+    // Jeden 4. Wert (Alpha) prüfen; aus Performancegruenden in groben Schritten.
     const step = Math.max(4, Math.floor(data.length / 4 / 50000) * 4);
     for (let i = 3; i < data.length; i += step) {
       if (data[i] < 255) return true;
@@ -56,13 +56,13 @@ const changeExtension = (name: string, ext: string): string => {
 };
 
 /**
- * Komprimiert/skaliert ein Bild-File fuer den Upload. Gibt das (ggf.
- * unveraenderte) File samt frischer Preview-URL zurueck. Nicht-Bilder werden
- * unveraendert durchgereicht.
+ * Komprimiert/skaliert ein Bild-File für den Upload. Gibt das (ggf.
+ * unveraenderte) File samt frischer Preview-URL zurück. Nicht-Bilder werden
+ * unverändert durchgereicht.
  */
 /**
- * Kompression + Groessen-Gate fuer Foto-Uploads (Aktivitaetsantraege etc.):
- * erst verkleinern, DANN gegen maxBytes pruefen — Live-Kamerafotos (8-16 MB)
+ * Kompression + Groessen-Gate für Foto-Uploads (Aktivitaetsantraege etc.):
+ * erst verkleinern, DANN gegen maxBytes prüfen — Live-Kamerafotos (8-16 MB)
  * wuerden einen vorgezogenen Check sonst immer reissen, obwohl sie nach der
  * Kompression locker passen. Die Preview-URL aus compressImage wird hier
  * sofort freigegeben (die Aufrufer bauen ihre eigene Vorschau).
@@ -120,7 +120,7 @@ export const compressImage = async (file: File): Promise<CompressResult> => {
     const outName = keepPng ? file.name : changeExtension(file.name, 'jpg');
     const outFile = new File([blob], outName, { type: outType });
 
-    // Alte Quell-URL freigeben, frische Preview-URL fuer das komprimierte File.
+    // Alte Quell-URL freigeben, frische Preview-URL für das komprimierte File.
     URL.revokeObjectURL(srcUrl);
     return { file: outFile, previewUrl: URL.createObjectURL(outFile) };
   } catch (err) {

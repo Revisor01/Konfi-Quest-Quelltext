@@ -42,6 +42,7 @@ import {
 } from 'ionicons/icons';
 import { useLocation } from 'react-router-dom';
 import { useApp } from '../../contexts/AppContext';
+import { offlineBlockiert } from '../../utils/offlineAktion';
 import { useBadge } from '../../contexts/BadgeContext';
 import { SectionHeader, EmptyState } from '../shared';
 import { useModalPage } from '../../contexts/ModalContext';
@@ -55,10 +56,12 @@ import LoadingSpinner from '../common/LoadingSpinner';
 import SimpleCreateChatModal from './modals/SimpleCreateChatModal';
 import { ChatRoomOverview } from '../../types/chat';
 import { triggerPullHaptic } from '../../utils/haptics';
+import { closeOpenSlidingItems } from '../../utils/slidingItems';
+import { istTeamTyp } from '../../utils/chatRoles';
 
 interface ChatOverviewProps {
   onSelectRoom: (room: ChatRoomOverview) => void;
-  // Im iPad-Split-View aktuell rechts geoeffneter Raum (fuer Highlighting).
+  // Im iPad-Split-View aktuell rechts geoeffneter Raum (für Highlighting).
   selectedRoomId?: number | null;
 }
 
@@ -77,17 +80,27 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
   const [searchText, setSearchText] = useState('');
   const [filterType, setFilterType] = useState<string>('alle');
 
+  // Loeschrecht: nur Leitung/Admins (so prüft es auch das Backend,
+  // DELETE /chat/rooms/:roomId verlangt type === 'admin').
   const isAdmin = user?.type === 'admin';
+  // Reiter "Team": alle, die selbst zum Team gehören — also auch Teamer:innen.
+  // Sie sind in Produktion in 4 Team-Chats, sahen den Reiter aber nicht, weil
+  // hier auf 'admin' geprüft wurde (gleiche Verwechslung wie in chatRoles).
+  const gehoertZumTeam = istTeamTyp(user?.type);
 
-  // Zentrale Logik: Ist das ein Team-Chat (= pink, gehoert in den Team-Tab)?
-  // - Direktchat: Partner ist Teamer:in (partner_user_type='admin')
+  // Zentrale Logik: Ist das ein Team-Chat (= pink, gehört in den Team-Tab)?
+  // - Direktchat: Partner gehört zum Team (partner_user_type 'admin' ODER 'teamer')
   // - type='admin': ausdrueckliche Team-Gruppe
   // - type='group': reiner Team-Gruppenchat (alle Teilnehmer Teamer:innen)
   // Konfi-Direktchats + gemischte/Konfi-Gruppen sind KEINE Team-Chats.
+  //
+  // chat_participants.user_type speichert 'teamer' als eigenen Wert (nicht als
+  // 'admin'). Die Prüfung nur auf 'admin' sortierte Direktchats mit
+  // Teamer:innen deshalb in den falschen Reiter.
   const isTeamChat = (room: ChatRoomOverview): boolean => {
     if (room.event_id) return false;
     if (room.type === 'admin') return true;
-    if (room.type === 'direct') return room.partner_user_type === 'admin';
+    if (room.type === 'direct') return istTeamTyp(room.partner_user_type);
     if (room.type === 'group') return room.is_team_only === true;
     return false;
   };
@@ -137,10 +150,10 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
   // Live-Update der Chat-Räume wenn Badge Count sich ändert.
   // Das ist der EINZIGE newMessage-getriebene Refresh-Trigger der Overview:
   // BadgeContext haelt einen eigenen (socketEpoch-rebindenden) 'newMessage'-
-  // Listener, der refreshAllCounts() ruft -> chatUnreadByRoom aendert sich ->
+  // Listener, der refreshAllCounts() ruft -> chatUnreadByRoom ändert sich ->
   // dieser Effect feuert refresh(). Ein zusaetzlicher eigener socket.on(
-  // 'newMessage')-Handler waere redundant (3x /chat/rooms pro Nachricht) und
-  // haette zudem KEIN socketEpoch-Rebind nach Reconnect -- deshalb bewusst
+  // 'newMessage')-Handler wäre redundant (3x /chat/rooms pro Nachricht) und
+  // hätte zudem KEIN socketEpoch-Rebind nach Reconnect -- deshalb bewusst
   // entfernt.
   useEffect(() => {
     if (rooms && rooms.length > 0) { // Nur wenn bereits Räume geladen sind
@@ -156,9 +169,9 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
     return () => { unsubReconnect(); };
   }, [refresh]);
 
-  // Live-Update der Raumliste bei Raum-Aenderungen (Raum erstellt/geloescht,
+  // Live-Update der Raumliste bei Raum-Änderungen (Raum erstellt/gelöscht,
   // Teilnehmer hinzugefuegt/entfernt/verlassen). Der Server sendet 'roomsChanged'
-  // an die persoenlichen User-Raeume der betroffenen Nutzer.
+  // an die persoenlichen User-Räume der betroffenen Nutzer.
   // socketEpoch in den Deps -> Rebind am frischen Socket nach
   // Reconnect-mit-neuem-Token (gleiche Disziplin wie der BadgeContext-Listener).
   useEffect(() => {
@@ -176,9 +189,11 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
     };
   }, [refresh, user, socketEpoch]);
 
-  // Bei Rückkehr zur View (z.B. nach ChatRoom) Raumliste aktualisieren
+  const mountedAtRef = React.useRef(Date.now());
   useIonViewWillEnter(() => {
-    refresh();
+    if (Date.now() - mountedAtRef.current > 2000) {
+      refresh();
+    }
   });
 
   // Modal mit useIonModal Hook
@@ -214,7 +229,7 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
   }));
 
   const deleteRoom = (room: ChatRoomOverview) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Chat löschen?',
       message: `"${room.name}" wird für alle Teilnehmer:innen gelöscht. Alle Nachrichten und Dateien gehen unwiderruflich verloren.`,
@@ -270,7 +285,11 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
 
       // Typ-Filter
       if (filterType === 'alle') return true;
-      if (filterType === 'direkt') return room.type === 'direct';
+      // Ungelesen statt Direkt: Nach Chat-ART zu filtern hilft beim Wiederfinden
+      // kaum — man weiß ohnehin, wen man sucht, und dafuer gibt es die Suche.
+      // Die eigentliche Frage beim Oeffnen der Übersicht ist "wo muss ich
+      // ran?". Genau das beantwortet dieser Filter.
+      if (filterType === 'ungelesen') return (chatUnreadByRoom[room.id] || 0) > 0;
       // Konfis-Tab: Jahrgangs-/Gruppenchats mit Konfis, KEINE reinen Team-Gruppen.
       if (filterType === 'konfis') return (room.type === 'jahrgang' || room.type === 'group') && !isTeamChat(room);
       // Team-Tab: Team-Gruppen + reine Team-group + Direktchats mit Teamer:innen.
@@ -311,11 +330,10 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
   const getDisplayRoomName = (room: ChatRoomOverview) => {
     // Für Direktchats: Zeige den Namen des Chat-Partners, nicht des eigenen Users
     if (room.type === 'direct') {
-      // Finde den Chat-Partner (nicht der aktuelle User) — robust per user_id,
-      // NICHT per user_type (eigener type kann 'teamer' sein, participants nur 'admin'|'konfi').
-      const otherParticipant = room.participants?.find((p: { user_id: number; user_type: 'admin' | 'konfi'; name: string; display_name?: string }) =>
-        p.user_id !== user?.id
-      );
+      // Finde den Chat-Partner (nicht der aktuelle User) — robust per user_id
+      // statt per user_type. chat_participants.user_type kennt drei Werte
+      // ('admin', 'teamer', 'konfi'); ein Vergleich darauf ginge fehl.
+      const otherParticipant = room.participants?.find(p => p.user_id !== user?.id);
       
       if (otherParticipant) {
         return otherParticipant.display_name || otherParticipant.name || 'Unbekannt';
@@ -377,7 +395,7 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
         <IonToolbar>
           <IonTitle>Chat</IonTitle>
           <IonButtons slot="end">
-            <IonButton onClick={handleCreateNewChat}>
+            <IonButton aria-label="Neuen Chat starten" onClick={handleCreateNewChat}>
               <IonIcon icon={add} />
             </IonButton>
           </IonButtons>
@@ -404,8 +422,21 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
           icon={chatbubbles}
           colors={{ primary: '#06b6d4', secondary: '#0891b2' }}
           stats={[
-            { value: (rooms || []).length, label: 'CHATS' },
-            { value: Object.values(chatUnreadByRoom).reduce((sum, c) => sum + c, 0), label: 'UNGELESEN' },
+            // CHATS und UNGELESEN entsprechen je einem Reiter und schalten
+            // dorthin (gleiches Muster wie Challenges/Anfragen/Nutzende).
+            // AKTIV hat keinen Reiter und bleibt reine Anzeige.
+            {
+              value: (rooms || []).length,
+              label: 'CHATS',
+              onClick: () => setFilterType('alle'),
+              active: filterType === 'alle'
+            },
+            {
+              value: Object.values(chatUnreadByRoom).reduce((sum, c) => sum + c, 0),
+              label: 'UNGELESEN',
+              onClick: () => setFilterType('ungelesen'),
+              active: filterType === 'ungelesen'
+            },
             { value: (rooms || []).filter(room => room.last_message && new Date(room.last_message.created_at) > new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)).length, label: 'AKTIV' }
           ]}
         />
@@ -441,9 +472,9 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
         <div className="app-segment-wrapper">
           <IonSegment value={filterType} onIonChange={(e) => setFilterType(String(e.detail.value))}>
             <IonSegmentButton value="alle"><IonLabel>Alle</IonLabel></IonSegmentButton>
-            <IonSegmentButton value="direkt"><IonLabel>Direkt</IonLabel></IonSegmentButton>
+            <IonSegmentButton value="ungelesen"><IonLabel>Ungelesen</IonLabel></IonSegmentButton>
             <IonSegmentButton value="konfis"><IonLabel>Konfis</IonLabel></IonSegmentButton>
-            {isAdmin && (
+            {gehoertZumTeam && (
               <IonSegmentButton value="team"><IonLabel>Team</IonLabel></IonSegmentButton>
             )}
           </IonSegment>
@@ -600,7 +631,8 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
                         {canDelete && (
                           <IonItemOptions side="end" className="app-swipe-actions">
                             <IonItemOption
-                              onClick={() => deleteRoom(room)}
+                              onClick={() => { closeOpenSlidingItems(); deleteRoom(room); }}
+                              aria-label="Chat löschen"
                               className="app-swipe-action"
                             >
                               <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">

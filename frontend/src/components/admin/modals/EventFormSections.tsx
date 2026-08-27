@@ -12,12 +12,15 @@ import {
   IonToggle,
   IonCard,
   IonCardContent,
-  IonRange
+  IonRange,
+  IonAccordion,
+  IonAccordionGroup
 } from '@ionic/react';
 import {
-  create, people, scanOutline, copy
+  create, people, scanOutline, copy, chevronDownOutline
 } from 'ionicons/icons';
 import { Category, Jahrgang } from '../../../types/event';
+import { istPunkteartAktiv, PUNKTEART_NAME, type Punkteart } from '../../../utils/punktearten';
 
 // ---- Shared form data type ----
 
@@ -45,9 +48,17 @@ export interface EventFormData {
   is_konfirmation: boolean;
   bring_items: string;
   checkin_window: number;
+  teamer_max_participants: number;
+  teamer_waitlist_enabled: boolean;
+  teamer_max_waitlist_size: number;
 }
 
-// ---- BasicInfoSection (jetzt inkl. Pflicht-Event, Mitbringen, Teamer-Zugang) ----
+// ---- BasicInfoSection ----
+// Enthaelt bewusst ALLES, was den weiteren Formularverlauf steuert (User-
+// Entscheid 09.08.): Pflicht-Event, Konfirmation und der Teamer-Zugang. Sobald
+// hier feststeht, FUER WEN das Event ist, blendet sich der Rest des Formulars
+// entsprechend ein oder aus — deshalb darf diese Entscheidung nicht weiter
+// unten stehen.
 
 interface BasicInfoSectionProps {
   formData: EventFormData;
@@ -110,6 +121,33 @@ export const BasicInfoSection = React.memo<BasicInfoSectionProps>(({
             disabled={loading}
           />
         </IonItem>
+        {/* Steuert, welche Abschnitte weiter unten ueberhaupt erscheinen —
+            gehoert deshalb ganz nach oben in die Grunddaten. */}
+        <IonItem lines={teamerAccess === 'teamer_only' ? 'none' : 'inset'}>
+          <IonLabel position="stacked">Für wen ist das Event?</IonLabel>
+          <IonSelect
+            value={teamerAccess}
+            onIonChange={(e) => {
+              const value = e.detail.value;
+              setTeamerAccess(value);
+              // "Nur Teamer:innen" schließt Pflicht-Event und Konfirmation aus:
+              // beides sind Konfi-Kategorien (Pflicht für den Jahrgang bzw. der
+              // Konfirmationstermin) und ergeben ohne Konfis keinen Sinn.
+              if (value === 'teamer_only') {
+                setFormData({ ...formData, mandatory: false, is_konfirmation: false, has_timeslots: false });
+              }
+            }}
+            disabled={loading}
+            interface="popover"
+            interfaceOptions={{ cssClass: 'app-select-popover--wide' }}
+          >
+            <IonSelectOption value="normal">Nur Konfis</IonSelectOption>
+            <IonSelectOption value="teamer_needed">Konfis, Teamer:innen gesucht</IonSelectOption>
+            <IonSelectOption value="teamer_only">Nur Teamer:innen</IonSelectOption>
+          </IonSelect>
+        </IonItem>
+        {/* Pflicht-Event und Konfirmation nur, wenn Konfis teilnehmen */}
+        {teamerAccess !== 'teamer_only' && (<>
         <IonItem lines="inset">
           <IonLabel position="stacked">Pflicht-Event</IonLabel>
           <IonToggle
@@ -118,13 +156,13 @@ export const BasicInfoSection = React.memo<BasicInfoSectionProps>(({
             checked={formData.mandatory}
             onIonChange={(e) => {
               const mandatory = e.detail.checked;
-              // Pflicht-Event schliesst Timeslots aus -> beim Aktivieren abschalten
+              // Pflicht-Event schließt Timeslots aus -> beim Aktivieren abschalten
               setFormData({ ...formData, mandatory, ...(mandatory ? { has_timeslots: false } : {}) });
             }}
             disabled={loading}
           />
         </IonItem>
-        <IonItem lines="inset">
+        <IonItem lines="none">
           <IonLabel position="stacked">Konfirmation</IonLabel>
           <IonToggle
             slot="end"
@@ -132,26 +170,13 @@ export const BasicInfoSection = React.memo<BasicInfoSectionProps>(({
             checked={formData.is_konfirmation}
             onIonChange={(e) => {
               const is_konfirmation = e.detail.checked;
-              // Konfirmation schliesst Timeslots aus (feste Termine) -> beim Aktivieren abschalten
+              // Konfirmation schließt Timeslots aus (feste Termine) -> beim Aktivieren abschalten
               setFormData({ ...formData, is_konfirmation, ...(is_konfirmation ? { has_timeslots: false } : {}) });
             }}
             disabled={loading}
           />
         </IonItem>
-        <IonItem lines="none">
-          <IonLabel position="stacked">Teamer-Zugang</IonLabel>
-          <IonSelect
-            value={teamerAccess}
-            onIonChange={(e) => setTeamerAccess(e.detail.value)}
-            disabled={loading}
-            interface="popover"
-            interfaceOptions={{ cssClass: 'app-select-popover--wide' }}
-          >
-            <IonSelectOption value="normal">Nur Konfis</IonSelectOption>
-            <IonSelectOption value="teamer_needed">Teamer:innen gesucht</IonSelectOption>
-            <IonSelectOption value="teamer_only">Nur Teamer:innen</IonSelectOption>
-          </IonSelect>
-        </IonItem>
+        </>)}
       </IonList>
     </IonCardContent>
     </IonCard>
@@ -209,17 +234,37 @@ interface PointsParticipantsSectionProps {
   formData: EventFormData;
   setFormData: (data: EventFormData) => void;
   loading: boolean;
+  /**
+   * Alle Jahrgaenge der Organisation. Gebraucht, um die Punkteart-Auswahl auf
+   * die Arten zu beschraenken, die in den ausgewaehlten Jahrgaengen ueberhaupt
+   * aktiv sind -- sonst laesst sich ein Termin anlegen, dessen Punkte spaeter
+   * pro Teilnehmer:in am Server scheitern.
+   */
+  jahrgaenge?: Jahrgang[];
 }
 
+// Eine Karte "Konfis" — Plätze, Warteliste und Punkte zusammen, damit die
+// Struktur der Teamer-Karte entspricht (einziger Unterschied: die Punkte).
 export const PointsParticipantsSection = React.memo<PointsParticipantsSectionProps>(({
-  formData, setFormData, loading
-}) => (
+  formData, setFormData, loading, jahrgaenge = []
+}) => {
+  // Ein Termin gehoert mehreren Jahrgaengen. Eine Punkteart bleibt waehlbar,
+  // solange sie in MINDESTENS EINEM der ausgewaehlten Jahrgaenge aktiv ist --
+  // fuer die uebrigen verbucht der Server sie ohnehin nicht.
+  // Ohne Jahrgangs-Auswahl (noch keiner gewaehlt) bleiben beide waehlbar,
+  // sonst haette man vor der ersten Auswahl gar keine Punkteart.
+  const gewaehlte = jahrgaenge.filter((j) => formData.jahrgang_ids.includes(j.id));
+  const verfuegbareArten: Punkteart[] = (['gottesdienst', 'gemeinde'] as Punkteart[]).filter(
+    (art) => gewaehlte.length === 0 || gewaehlte.some((j) => istPunkteartAktiv(j, art))
+  );
+
+  return (
   <IonList inset={true} className="app-modal-section">
     <IonListHeader>
       <div className="app-section-icon app-section-icon--events">
         <IonIcon icon={people} />
       </div>
-      <IonLabel>{formData.is_konfirmation ? 'Teilnehmer:innen' : `Punkte${!formData.has_timeslots ? ' & Teilnehmer:innen' : ''}`}</IonLabel>
+      <IonLabel>Konfis</IonLabel>
     </IonListHeader>
     <IonCard className="app-card">
     <IonCardContent>
@@ -254,6 +299,40 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
                 </div>
               </IonItem>
             )}
+
+            {/* Warteliste NUR bei begrenzter Teilnahme — bei unbegrenzt kann
+                niemand warten, dann waere der Schalter irrefuehrend. */}
+            {formData.max_participants !== 0 && (
+              <>
+                <IonItem lines="none" style={{ '--background': 'transparent', marginBottom: formData.waitlist_enabled ? '12px' : '0', paddingTop: '8px' }}>
+                  <IonLabel>Warteliste aktivieren</IonLabel>
+                  <IonToggle
+                    slot="end"
+                    className="app-toggle--events"
+                    checked={formData.waitlist_enabled}
+                    onIonChange={(e) => setFormData({ ...formData, waitlist_enabled: e.detail.checked })}
+                    disabled={loading}
+                  />
+                </IonItem>
+                {formData.waitlist_enabled && (
+                  <IonItem lines="none">
+                    <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Max. Wartelisten-Plätze</IonLabel>
+                    <div className="app-range-row">
+                      <span className="app-range-row__min">1</span>
+                      <IonRange
+                        className="app-range app-range--events"
+                        min={1} max={10} step={1}
+                        pin={true} pinFormatter={(value: number) => `${value}`}
+                        value={formData.max_waitlist_size}
+                        onIonChange={(e) => setFormData({ ...formData, max_waitlist_size: e.detail.value as number })}
+                        disabled={loading}
+                      />
+                      <span className="app-range-row__value">{formData.max_waitlist_size}</span>
+                    </div>
+                  </IonItem>
+                )}
+              </>
+            )}
           </>
         )}
 
@@ -280,24 +359,18 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
               <IonLabel style={{ fontSize: '0.9rem', fontWeight: '500', color: '#666' }}>Typ *</IonLabel>
             </IonItem>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              <div
-                className={`app-list-item app-list-item--gemeinde${formData.point_type === 'gemeinde' ? ' app-list-item--selected' : ''}`}
-                onClick={() => !loading && setFormData({ ...formData, point_type: 'gemeinde' })}
-                style={{
-                  cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.6 : 1,
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0'
-                }}>
-                <span style={{ fontWeight: '500', color: '#333' }}>Gemeinde</span>
-              </div>
-              <div
-                className={`app-list-item app-list-item--gottesdienst${formData.point_type === 'gottesdienst' ? ' app-list-item--selected' : ''}`}
-                onClick={() => !loading && setFormData({ ...formData, point_type: 'gottesdienst' })}
-                style={{
-                  cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.6 : 1,
-                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0'
-                }}>
-                <span style={{ fontWeight: '500', color: '#333' }}>Gottesdienst</span>
-              </div>
+              {verfuegbareArten.map((art) => (
+                <div
+                  key={art}
+                  className={`app-list-item app-list-item--${art}${formData.point_type === art ? ' app-list-item--selected' : ''}`}
+                  onClick={() => !loading && setFormData({ ...formData, point_type: art })}
+                  style={{
+                    cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.6 : 1,
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0'
+                  }}>
+                  <span style={{ fontWeight: '500', color: '#333' }}>{PUNKTEART_NAME[art]}</span>
+                </div>
+              ))}
             </div>
           </>
         )}
@@ -305,7 +378,8 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
     </IonCardContent>
     </IonCard>
   </IonList>
-));
+  );
+});
 
 // ---- CategoriesTargetSection ----
 
@@ -332,44 +406,55 @@ export const CategoriesTargetSection = React.memo<CategoriesTargetSectionProps>(
     <IonCardContent>
       <IonList>
         {categories.length > 0 ? (
-          <>
-            <IonItem lines="none" style={{ '--background': 'transparent', paddingBottom: '8px' }}>
-              <IonLabel style={{ fontSize: '0.9rem', fontWeight: '500', color: '#666' }}>
-                Kategorien (mehrere möglich)
-                {formData.category_ids.length > 0 && (
-                  <span style={{ marginLeft: '8px', fontSize: '0.8rem', color: 'var(--app-color-categories)', fontWeight: 'normal' }}>
-                    ({formData.category_ids.length} ausgewählt)
-                  </span>
-                )}
-              </IonLabel>
-            </IonItem>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-              {categories.map((category) => {
-                const isSelected = formData.category_ids.includes(category.id);
-                return (
-                  <div
-                    key={category.id}
-                    className={`app-list-item app-list-item--categories${isSelected ? ' app-list-item--selected' : ''}`}
-                    onClick={() => {
-                      if (!loading) {
-                        setFormData(prev => ({
-                          ...prev,
-                          category_ids: prev.category_ids.includes(category.id)
-                            ? prev.category_ids.filter(id => id !== category.id)
-                            : [...prev.category_ids, category.id]
-                        }));
-                      }
-                    }}
-                    style={{
-                      cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.6 : 1,
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0'
-                    }}>
-                    <span style={{ fontWeight: '500', color: '#333' }}>{category.name}</span>
-                  </div>
-                );
-              })}
-            </div>
-          </>
+          // Akkordeon mit Multi-Auswahl (Muster: Icon-Picker im Challenge-Modal) —
+          // die Kategorien-Liste ist sonst der laengste Block im Formular.
+          <IonAccordionGroup>
+            <IonAccordion value="kategorien" toggleIcon={chevronDownOutline} toggleIconSlot="end">
+              <IonItem slot="header" lines="none">
+                <IonLabel>
+                  <h3 style={{ fontSize: '0.9rem', fontWeight: '500', color: '#666', margin: '0 0 4px 0' }}>
+                    Kategorien (mehrere möglich)
+                  </h3>
+                  <p style={{ fontSize: '0.85rem', color: '#333', margin: '0', fontWeight: '500' }}>
+                    {formData.category_ids.length === 0
+                      ? 'Keine Auswahl'
+                      : categories
+                          .filter((c) => formData.category_ids.includes(c.id))
+                          .map((c) => c.name)
+                          .join(', ')}
+                  </p>
+                </IonLabel>
+              </IonItem>
+              <div slot="content" style={{ padding: '8px 0' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {categories.map((category) => {
+                    const isSelected = formData.category_ids.includes(category.id);
+                    return (
+                      <div
+                        key={category.id}
+                        className={`app-list-item app-list-item--categories${isSelected ? ' app-list-item--selected' : ''}`}
+                        onClick={() => {
+                          if (!loading) {
+                            setFormData(prev => ({
+                              ...prev,
+                              category_ids: prev.category_ids.includes(category.id)
+                                ? prev.category_ids.filter(id => id !== category.id)
+                                : [...prev.category_ids, category.id]
+                            }));
+                          }
+                        }}
+                        style={{
+                          cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.6 : 1,
+                          display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0'
+                        }}>
+                        <span style={{ fontWeight: '500', color: '#333' }}>{category.name}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </IonAccordion>
+          </IonAccordionGroup>
         ) : (
           <IonItem lines="none">
             <IonLabel color="medium"><p>Keine Kategorien verfügbar</p></IonLabel>
@@ -420,15 +505,19 @@ export const CategoriesTargetSection = React.memo<CategoriesTargetSectionProps>(
   </IonList>
 ));
 
-// ---- WaitlistSection ----
+// ---- TeamerSection (Plaetze + Warteliste für Teamer:innen) ----
+// Der Zugang ("Für wen ist das Event?") steht in den GRUNDDATEN, weil er den
+// weiteren Formularverlauf steuert (User-Entscheid 09.08.). Diese Karte wird
+// von EventModal nur gerendert, wenn Teamer:innen überhaupt teilnehmen —
+// Aufbau identisch zur Konfis-Karte, nur ohne Punkte.
 
-interface WaitlistSectionProps {
+interface TeamerSectionProps {
   formData: EventFormData;
   setFormData: (data: EventFormData) => void;
   loading: boolean;
 }
 
-export const WaitlistSection = React.memo<WaitlistSectionProps>(({
+export const TeamerSection = React.memo<TeamerSectionProps>(({
   formData, setFormData, loading
 }) => (
   <IonList inset={true} className="app-modal-section">
@@ -436,38 +525,69 @@ export const WaitlistSection = React.memo<WaitlistSectionProps>(({
       <div className="app-section-icon app-section-icon--events">
         <IonIcon icon={people} />
       </div>
-      <IonLabel>Warteliste</IonLabel>
+      <IonLabel>Teamer:innen</IonLabel>
     </IonListHeader>
     <IonCard className="app-card">
     <IonCardContent>
       <IonList>
-        <IonItem lines="none" style={{ '--background': 'transparent', marginBottom: formData.waitlist_enabled ? '12px' : '0' }}>
-          <IonLabel>Warteliste aktivieren</IonLabel>
+        <IonItem lines="none">
+          <IonLabel>Unbegrenzte Teamer:innen</IonLabel>
           <IonToggle
             slot="end"
             className="app-toggle--events"
-            checked={formData.waitlist_enabled}
-            onIonChange={(e) => setFormData({ ...formData, waitlist_enabled: e.detail.checked })}
+            checked={formData.teamer_max_participants === 0}
+            onIonChange={(e) => setFormData({ ...formData, teamer_max_participants: e.detail.checked ? 0 : 5 })}
             disabled={loading}
           />
         </IonItem>
-        {formData.waitlist_enabled && (
+        {formData.teamer_max_participants !== 0 && (
           <IonItem lines="none">
-            <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Max. Wartelisten-Plätze</IonLabel>
+            <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Wie viele Teamer:innen werden gesucht?</IonLabel>
             <div className="app-range-row">
               <span className="app-range-row__min">1</span>
               <IonRange
                 className="app-range app-range--events"
-                min={1} max={10} step={1}
+                min={1} max={25} step={1}
                 pin={true} pinFormatter={(value: number) => `${value}`}
-                value={formData.max_waitlist_size}
-                onIonChange={(e) => setFormData({ ...formData, max_waitlist_size: e.detail.value as number })}
+                value={Math.min(formData.teamer_max_participants, 25)}
+                onIonChange={(e) => setFormData({ ...formData, teamer_max_participants: e.detail.value as number })}
                 disabled={loading}
               />
-              <span className="app-range-row__value">{formData.max_waitlist_size}</span>
+              <span className="app-range-row__value">{formData.teamer_max_participants}</span>
             </div>
           </IonItem>
         )}
+
+        {/* Warteliste NUR bei begrenzten Teamer-Plaetzen (wie bei den Konfis) */}
+        {formData.teamer_max_participants !== 0 && (<>
+          <IonItem lines="none" style={{ '--background': 'transparent', marginBottom: formData.teamer_waitlist_enabled ? '12px' : '0', paddingTop: '8px' }}>
+            <IonLabel>Warteliste aktivieren</IonLabel>
+            <IonToggle
+              slot="end"
+              className="app-toggle--events"
+              checked={formData.teamer_waitlist_enabled}
+              onIonChange={(e) => setFormData({ ...formData, teamer_waitlist_enabled: e.detail.checked })}
+              disabled={loading}
+            />
+          </IonItem>
+          {formData.teamer_waitlist_enabled && (
+            <IonItem lines="none">
+              <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Max. Wartelisten-Plätze</IonLabel>
+              <div className="app-range-row">
+                <span className="app-range-row__min">1</span>
+                <IonRange
+                  className="app-range app-range--events"
+                  min={1} max={10} step={1}
+                  pin={true} pinFormatter={(value: number) => `${value}`}
+                  value={formData.teamer_max_waitlist_size}
+                  onIonChange={(e) => setFormData({ ...formData, teamer_max_waitlist_size: e.detail.value as number })}
+                  disabled={loading}
+                />
+                <span className="app-range-row__value">{formData.teamer_max_waitlist_size}</span>
+              </div>
+            </IonItem>
+          )}
+        </>)}
       </IonList>
     </IonCardContent>
     </IonCard>

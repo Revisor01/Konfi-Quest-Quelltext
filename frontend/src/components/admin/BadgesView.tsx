@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   IonCard,
   IonCardContent,
@@ -24,84 +24,19 @@ import {
   close,
   eye,
   eyeOff,
-  medal,
-  flame,
-  heart,
-  thumbsUp,
-  flash,
-  diamond,
-  rocket,
-  shield,
-  sparkles,
-  sunny,
-  moon,
-  leaf,
-  rose,
-  gift,
-  balloon,
-  musicalNote,
-  book,
-  school,
-  restaurant,
-  fitness,
-  bicycle,
-  car,
-  airplane,
-  boat,
-  home,
-  business,
-  construct,
-  hammer,
-  brush,
-  colorPalette,
-  camera,
-  image,
-  chatbubbles,
-  people,
-  personAdd,
-  checkmarkCircle,
-  alertCircle,
-  informationCircle,
-  helpCircle,
-  flag,
-  pin,
-  navigate,
-  location,
-  compass,
-  timer,
-  stopwatch,
-  calendar,
-  today,
-  time,
   filterOutline,
-  search,
-  statsChart,
-  grid,
-  listOutline,
-  pricetag
+  search
 } from 'ionicons/icons';
+import api from '../../services/api';
 import { filterBySearchTerm } from '../../utils/helpers';
 import { SectionHeader, ListSection } from '../shared';
 
 import { star } from 'ionicons/icons';
+import { closeOpenSlidingItems } from '../../utils/slidingItems';
+import { getIconFromString } from '../../utils/badgeIcons';
+import { getCriteriaIcon as getCriteriaTypeIcon } from '../../utils/badgeCriteria';
 
-// Badge Icon Mapping (shared with BadgeManagementModal)
-const BADGE_ICONS: Record<string, any> = {
-  trophy, medal, ribbon, star, checkmarkCircle, diamond, shield,
-  flame, flash, rocket, sparkles, thumbsUp,
-  heart, people, personAdd, chatbubbles, gift,
-  book, school, construct, brush, colorPalette,
-  sunny, moon, leaf, rose,
-  calendar, today, time, timer, stopwatch,
-  restaurant, fitness, bicycle, car, airplane, boat, camera, image, musicalNote, balloon,
-  home, business, location, navigate, compass, pin, flag,
-  informationCircle, helpCircle, alertCircle, hammer
-};
 
-// Helper function to get icon from string
-const getIconFromString = (iconName: string) => {
-  return BADGE_ICONS[iconName] || ribbon;
-};
 
 interface Badge {
   id: number;
@@ -140,6 +75,22 @@ const BadgesView: React.FC<BadgesViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedFilter, setSelectedFilter] = useState('alle');
 
+  const [activityNames, setActivityNames] = useState<Record<number, string>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    api.get(`/admin/activities?target_role=${targetRole}`)
+      .then((res) => {
+        if (cancelled) return;
+        const list = Array.isArray(res.data) ? res.data : [];
+        const map: Record<number, string> = {};
+        list.forEach((a: { id: number; name: string }) => { map[a.id] = a.name; });
+        setActivityNames(map);
+      })
+      .catch(() => { if (!cancelled) setActivityNames({}); });
+    return () => { cancelled = true; };
+  }, [targetRole]);
+
   const filteredAndSortedBadges = (() => {
     let result = filterBySearchTerm(badges, searchTerm, ['name', 'description']);
     
@@ -152,11 +103,16 @@ const BadgesView: React.FC<BadgesViewProps> = ({
       result = result.filter(badge => !badge.is_active);
     }
     
-    // Sort by criteria_type first, then by name
+    // Sort by criteria_type first, then by name.
+    // NULL-SICHER: custom_badges.criteria_type und .name duerfen laut Schema
+    // NULL sein. Aktuell gibt es keinen solchen Datensatz, aber genau dieses
+    // Muster hat bei den Aktivitäten zum Rauswurf geführt (11.08.):
+    // null.localeCompare() wirft, der Render bricht ab, die ErrorBoundary
+    // leert Auth + Cache.
     result = result.sort((a, b) => {
-      const typeCompare = a.criteria_type.localeCompare(b.criteria_type);
+      const typeCompare = (a.criteria_type || '').localeCompare(b.criteria_type || '');
       if (typeCompare !== 0) return typeCompare;
-      return a.name.localeCompare(b.name);
+      return (a.name || '').localeCompare(b.name || '');
     });
     
     return result;
@@ -199,27 +155,6 @@ const BadgesView: React.FC<BadgesViewProps> = ({
     }
   };
 
-  const getCriteriaTypeIcon = (type: string) => {
-    switch (type) {
-      case 'total_points': return statsChart;
-      case 'gottesdienst_points': return home;
-      case 'gemeinde_points': return people;
-      case 'specific_activity': return flash;
-      case 'both_categories': return grid;
-      case 'activity_combination': return listOutline;
-      case 'category_activities': return pricetag;
-      case 'time_based': return time;
-      case 'activity_count': return checkmarkCircle;
-      case 'event_count': return calendar;
-      case 'mandatory_event_count': return shield;
-      case 'bonus_points': return star;
-      case 'streak': return flame;
-      case 'unique_activities': return sparkles;
-      case 'teamer_year': return calendar;
-      default: return flash;
-    }
-  };
-
   const getCriteriaDetail = (badge: Badge): string | null => {
     let extra: any = {};
     try {
@@ -240,10 +175,35 @@ const BadgesView: React.FC<BadgesViewProps> = ({
         return `${badge.criteria_value} Punkte`;
       case 'both_categories':
         return `${badge.criteria_value} Punkte pro Kategorie`;
-      case 'specific_activity':
-        return extra.activity_id ? `${badge.criteria_value}x Aktivität #${extra.activity_id}` : `${badge.criteria_value}x`;
-      case 'activity_combination':
-        return extra.activity_ids?.length ? `${extra.activity_ids.length} Aktivitäten, min. ${badge.criteria_value}x` : null;
+      case 'specific_activity': {
+        if (extra.required_activity_name) {
+          return `${badge.criteria_value}x ${extra.required_activity_name}`;
+        }
+        if (!extra.activity_id) return `${badge.criteria_value}x`;
+        const name = activityNames[extra.activity_id];
+        return name
+          ? `${badge.criteria_value}x ${name}`
+          : `${badge.criteria_value}x Aktivität #${extra.activity_id}`;
+      }
+      case 'activity_combination': {
+        // Wie oben: neu gespeichert stehen hier Namen (required_activities).
+        if (extra.required_activities?.length) {
+          const n = extra.required_activities;
+          return n.length <= 2
+            ? `${n.join(' + ')}, min. ${badge.criteria_value}x`
+            : `${n.length} Aktivitäten, min. ${badge.criteria_value}x`;
+        }
+        if (!extra.activity_ids?.length) return null;
+        // Bis zu zwei Namen ausschreiben, danach zählen — sonst sprengt die
+        // Zeile die Listenbreite.
+        const names = extra.activity_ids
+          .map((id: number) => activityNames[id])
+          .filter(Boolean);
+        if (names.length === extra.activity_ids.length && names.length <= 2) {
+          return `${names.join(' + ')}, min. ${badge.criteria_value}x`;
+        }
+        return `${extra.activity_ids.length} Aktivitäten, min. ${badge.criteria_value}x`;
+      }
       case 'category_activities':
         return extra.required_category ? `${badge.criteria_value}x in "${extra.required_category}"` : `${badge.criteria_value}x`;
       case 'time_based':
@@ -284,8 +244,10 @@ const BadgesView: React.FC<BadgesViewProps> = ({
         icon={ribbon}
         preset="badges"
         stats={[
-          { value: badges.length, label: 'GESAMT' },
-          { value: getActiveBadges().length, label: 'AKTIV' },
+          { value: badges.length, label: 'GESAMT', onClick: () => setSelectedFilter('alle'), active: selectedFilter === 'alle' },
+          { value: getActiveBadges().length, label: 'AKTIV', onClick: () => setSelectedFilter('aktiv'), active: selectedFilter === 'aktiv' },
+          // "Verliehen" ist eine Summe über alle Abzeichen, kein Filterzustand
+          // -> bleibt bewusst reine Anzeige.
           { value: getTotalEarnedCount(), label: 'VERLIEHEN' }
         ]}
       />
@@ -502,7 +464,8 @@ const BadgesView: React.FC<BadgesViewProps> = ({
 
                           <IonItemOptions side="end" className="app-swipe-actions">
                             <IonItemOption
-                              onClick={() => onDeleteBadge(badge)}
+                              onClick={() => { closeOpenSlidingItems(); onDeleteBadge(badge); }}
+                              aria-label="Badge löschen"
                               className="app-swipe-action"
                             >
                               <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">

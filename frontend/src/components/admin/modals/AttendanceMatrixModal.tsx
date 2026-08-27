@@ -28,6 +28,7 @@ import {
   checkmarkCircle,
   closeCircle,
   ellipseOutline,
+  removeCircle,
   peopleOutline,
   calendarOutline,
   filterOutline,
@@ -38,6 +39,12 @@ import {
 import api from '../../../services/api';
 import { useApp } from '../../../contexts/AppContext';
 import EmptyState from '../../shared/EmptyState';
+import {
+  getZellStatus,
+  berechneZeilenStats,
+  MatrixZellStatus,
+  MatrixZeilenStats
+} from '../../../utils/anwesenheitsMatrix';
 
 interface Jahrgang {
   id: number;
@@ -187,25 +194,21 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
     return map;
   }, [data]);
 
-  const getCellStatus = (userId: number, eventId: number): 'present' | 'absent' | 'open' => {
-    const b = bookingMap.get(`${userId}-${eventId}`);
-    if (!b) return 'open';
-    if (b.attendance_status === 'present') return 'present';
-    if (b.attendance_status === 'absent') return 'absent';
-    return 'open';
-  };
+  // Zellstatus kommt aus utils/anwesenheitsMatrix:
+  // Abgemeldete ('opted_out') sind ein eigener Status und fallen nicht mehr
+  // auf "ausstehend" — sie waren sonst von "noch nicht verbucht" nicht
+  // unterscheidbar (Prod-Events 105, 129, 132).
+  const getCellStatus = (userId: number, eventId: number): MatrixZellStatus =>
+    getZellStatus(bookingMap.get(`${userId}-${eventId}`));
 
   // Pro-Konfi-Statistik
   const konfiStats = useMemo(() => {
-    if (!data) return new Map<number, { present: number; absent: number; open: number }>();
-    const stats = new Map<number, { present: number; absent: number; open: number }>();
+    const stats = new Map<number, MatrixZeilenStats>();
+    if (!data) return stats;
     data.konfis.forEach(k => {
-      const counts = { present: 0, absent: 0, open: 0 };
-      data.events.forEach(e => {
-        const s = getCellStatus(k.user_id, e.id);
-        counts[s]++;
-      });
-      stats.set(k.user_id, counts);
+      stats.set(k.user_id, berechneZeilenStats(
+        data.events.map(e => getCellStatus(k.user_id, e.id))
+      ));
     });
     return stats;
   }, [data, bookingMap]);
@@ -226,7 +229,7 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
       <IonHeader>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton className="app-modal-close-btn" onClick={onClose}>
+            <IonButton className="app-modal-close-btn" onClick={onClose} aria-label="Schließen">
               <IonIcon icon={closeOutline} slot="icon-only" />
             </IonButton>
           </IonButtons>
@@ -236,6 +239,7 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
               onClick={handleSendEmail}
               disabled={sending || !jahrgangId}
               title="Per E-Mail an dich senden"
+              aria-label="Per E-Mail an dich senden"
             >
               {sending
                 ? <IonSpinner name="crescent" />
@@ -408,7 +412,8 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
                   </thead>
                   <tbody>
                     {filteredKonfis.map(k => {
-                      const stats = konfiStats.get(k.user_id) || { present: 0, absent: 0, open: 0 };
+                      const stats = konfiStats.get(k.user_id)
+                        || { present: 0, absent: 0, open: 0, opted_out: 0, nenner: 0 };
                       return (
                         <tr key={k.user_id}>
                           <td className="attendance-matrix__td-konfi">{k.display_name}</td>
@@ -418,7 +423,12 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
                               <td key={e.id} className="attendance-matrix__td-cell">
                                 <span className={`attendance-matrix__dot attendance-matrix__dot--${s}`}>
                                   <IonIcon
-                                    icon={s === 'present' ? checkmarkCircle : s === 'absent' ? closeCircle : ellipseOutline}
+                                    icon={
+                                      s === 'present' ? checkmarkCircle
+                                      : s === 'absent' ? closeCircle
+                                      : s === 'opted_out' ? removeCircle
+                                      : ellipseOutline
+                                    }
                                   />
                                 </span>
                               </td>
@@ -426,7 +436,8 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
                           })}
                           <td className="attendance-matrix__td-summary">
                             <span className="attendance-matrix__summary-text">
-                              {stats.present}/{data.events.length}
+                              {/* Nenner ohne abgemeldete Termine */}
+                              {stats.present}/{stats.nenner}
                             </span>
                           </td>
                         </tr>
@@ -456,6 +467,12 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
                       <IonIcon icon={closeCircle} />
                     </span>
                     <span>Fehlt</span>
+                  </div>
+                  <div className="attendance-matrix__legend-item">
+                    <span className="attendance-matrix__dot attendance-matrix__dot--opted_out">
+                      <IonIcon icon={removeCircle} />
+                    </span>
+                    <span>Abgemeldet</span>
                   </div>
                   <div className="attendance-matrix__legend-item">
                     <span className="attendance-matrix__dot attendance-matrix__dot--open">

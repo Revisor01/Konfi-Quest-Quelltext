@@ -6,7 +6,7 @@ if (!JWT_SECRET) {
 }
 
 // ============================================
-// LRU-CACHE fuer User-Objekte (30s TTL, max 500 Eintraege)
+// LRU-CACHE für User-Objekte (30s TTL, max 500 Eintraege)
 // ============================================
 const USER_CACHE_TTL = 30 * 1000; // 30 Sekunden
 const USER_CACHE_MAX = 500;
@@ -14,7 +14,7 @@ const userCache = new Map();
 
 // Cache-Key haelt die AKTIVE Org mit rein: ein User kann (Multi-Org) je nach
 // aktivem Org-Kontext ein voellig anderes req.user-Objekt haben (andere Org,
-// andere Rolle, andere Jahrgaenge). Ohne Org im Key wuerde der 30s-Cache nach
+// andere Rolle, andere Jahrgänge). Ohne Org im Key wuerde der 30s-Cache nach
 // einem Org-Switch die alte Org ausliefern.
 const cacheKey = (userId, activeOrgId) => `${userId}:${activeOrgId || 'default'}`;
 
@@ -37,7 +37,7 @@ const setCachedUser = (key, data) => {
   userCache.set(key, { data, timestamp: Date.now() });
 };
 
-// Cache invalidieren bei User-Aenderungen (Export fuer andere Module).
+// Cache invalidieren bei User-Änderungen (Export für andere Module).
 // Loescht ALLE Org-Varianten eines Users (Praefix-Match), da der Key
 // "userId:orgId" lautet. Ohne userId: kompletter Cache-Clear.
 const invalidateUserCache = (userId) => {
@@ -161,7 +161,7 @@ const verifyTokenRBAC = (db) => {
 
         if (!membership) {
           // Nicht Mitglied der angeforderten Org -> Zugriff verweigern (kein
-          // stilles Zurueckfallen auf die Primaer-Org, das waere verwirrend).
+          // stilles Zurueckfallen auf die Primaer-Org, das wäre verwirrend).
           return res.status(403).json({ error: 'Kein Zugriff auf diese Organisation' });
         }
 
@@ -178,7 +178,7 @@ const verifyTokenRBAC = (db) => {
         return res.status(401).json({ error: 'Organization is inactive' });
       }
 
-      // Jahrgänge laden (nur für nicht-super_admin) — fuer die AKTIVE Org gescopt,
+      // Jahrgänge laden (nur für nicht-super_admin) — für die AKTIVE Org gescopt,
       // damit Teamer-Zuweisungen aus der falschen Org nicht durchschlagen.
       let assignedJahrgaenge = [];
       if (user.organization_id) {

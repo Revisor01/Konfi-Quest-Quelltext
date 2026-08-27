@@ -137,13 +137,13 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
       <IonHeader>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton className="app-modal-close-btn" onClick={handleClose} disabled={creating}>
+            <IonButton className="app-modal-close-btn" onClick={handleClose} disabled={creating} aria-label="Schließen">
               <IonIcon icon={closeOutline} slot="icon-only" />
             </IonButton>
           </IonButtons>
           <IonTitle>Neue Umfrage</IonTitle>
           <IonButtons slot="end">
-            <IonButton className="app-modal-submit-btn app-modal-submit-btn--chat" onClick={createPoll} disabled={!canCreate() || creating || !isOnline}>
+            <IonButton className="app-modal-submit-btn app-modal-submit-btn--chat" onClick={createPoll} disabled={!canCreate() || creating || !isOnline} aria-label="Umfrage erstellen">
               {!isOnline ? <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</> : creating ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} slot="icon-only" />}
             </IonButton>
           </IonButtons>
@@ -200,7 +200,7 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
                     autoCorrect="on"
                   />
                   {options.length > 2 && (
-                    <IonButton
+                    <IonButton aria-label="Antwortoption entfernen"
                       fill="clear"
                       slot="end"
                       onClick={() => removeOption(index)}
@@ -231,68 +231,74 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
               <IonLabel>Einstellungen</IonLabel>
             </IonListHeader>
             <IonItemGroup>
+              {/* Muster wie beim Challenge-Erstellen: Label links (Titel +
+                  mehrzeilige Erklärung über globale Klassen), Toggle rechts. */}
               <IonItem>
+                <IonLabel>
+                  <h3 className="app-toggle-item__title">Mehrfachauswahl</h3>
+                  <p className="app-toggle-item__hint">
+                    {exclusiveOptions ? 'Bei exklusiven Optionen nicht möglich' : 'Mehrere Antworten erlauben'}
+                  </p>
+                </IonLabel>
                 <IonToggle
+                  slot="end"
                   className="app-toggle--chat"
                   checked={multipleChoice}
                   disabled={exclusiveOptions}
                   onIonChange={(e) => setMultipleChoice(e.detail.checked)}
-                >
-                  <IonLabel>
-                    <h3>Mehrfachauswahl</h3>
-                    <p className="app-settings-item__subtitle">
-                      {exclusiveOptions ? 'Bei exklusiven Optionen nicht möglich' : 'Mehrere Antworten erlauben'}
-                    </p>
-                  </IonLabel>
-                </IonToggle>
+                  aria-label="Mehrfachauswahl"
+                />
               </IonItem>
 
               <IonItem>
+                <IonLabel>
+                  <h3 className="app-toggle-item__title">Namen anzeigen</h3>
+                  <p className="app-toggle-item__hint">
+                    Sichtbar machen, wer welche Antwort gewählt hat
+                  </p>
+                </IonLabel>
                 <IonToggle
+                  slot="end"
                   className="app-toggle--chat"
                   checked={!anonymous}
                   onIonChange={(e) => setAnonymous(!e.detail.checked)}
-                >
-                  <IonLabel>
-                    <h3>Namen anzeigen</h3>
-                    <p className="app-settings-item__subtitle">
-                      Sichtbar machen, wer welche Antwort gewählt hat
-                    </p>
-                  </IonLabel>
-                </IonToggle>
+                  aria-label="Namen anzeigen"
+                />
               </IonItem>
 
               <IonItem>
+                <IonLabel>
+                  <h3 className="app-toggle-item__title">Exklusive Optionen</h3>
+                  <p className="app-toggle-item__hint">
+                    Jede Option kann nur von einer Person gewählt werden
+                  </p>
+                </IonLabel>
                 <IonToggle
+                  slot="end"
                   className="app-toggle--chat"
                   checked={exclusiveOptions}
                   onIonChange={(e) => {
                     setExclusiveOptions(e.detail.checked);
                     if (e.detail.checked) setMultipleChoice(false);
                   }}
-                >
-                  <IonLabel>
-                    <h3>Exklusive Optionen</h3>
-                    <p className="app-settings-item__subtitle">
-                      Jede Option kann nur von einer Person gewählt werden
-                    </p>
-                  </IonLabel>
-                </IonToggle>
+                  aria-label="Exklusive Optionen"
+                />
               </IonItem>
 
               <IonItem>
+                <IonLabel>
+                  <h3 className="app-toggle-item__title">Ablaufdatum</h3>
+                  <p className="app-toggle-item__hint">
+                    Umfrage automatisch schließen
+                  </p>
+                </IonLabel>
                 <IonToggle
+                  slot="end"
                   className="app-toggle--chat"
                   checked={hasExpiration}
                   onIonChange={(e) => setHasExpiration(e.detail.checked)}
-                >
-                  <IonLabel>
-                    <h3>Ablaufdatum</h3>
-                    <p className="app-settings-item__subtitle">
-                      Umfrage automatisch schließen
-                    </p>
-                  </IonLabel>
-                </IonToggle>
+                  aria-label="Ablaufdatum"
+                />
               </IonItem>
 
               {hasExpiration && (

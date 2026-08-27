@@ -15,6 +15,14 @@ export interface BaseUser {
   is_super_admin?: boolean;
   trial_ends_at?: string | null;
   is_trial?: boolean;
+  /**
+   * Eigene Jahrgangs-Zuweisungen, aus GET /auth/me.
+   *
+   * Nur fuer `admin` von Bedeutung: Die Rolle sieht ausschliesslich Konfis
+   * ihrer zugewiesenen Jahrgaenge. Bei `org_admin` ist die Liste leer oder
+   * bedeutungslos — diese Rolle sieht ohnehin alles.
+   */
+  assigned_jahrgaenge?: { id: number; name: string; can_view?: boolean; can_edit?: boolean }[];
 }
 
 // Admin-User-Verwaltung (UsersView, AdminUsersPage, UserManagementModal)
@@ -41,7 +49,9 @@ export interface ChatUser {
   id: number;
   name?: string;
   display_name?: string;
-  type: 'admin' | 'konfi';
+  // 'teamer' ist eigenstaendig: Teamer:innen lesen ihre Räume mit user_type
+  // 'teamer', ein als 'admin' gefuehrter Teamer wäre für sich selbst unsichtbar.
+  type: 'admin' | 'konfi' | 'teamer';
   jahrgang?: string;
   jahrgang_name?: string;
   role_name?: string;

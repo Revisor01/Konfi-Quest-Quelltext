@@ -39,6 +39,8 @@ import {
   search as searchIcon,
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
+import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import api from '../../../services/api';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../../services/offlineCache';
@@ -47,6 +49,7 @@ import LoadingSpinner from '../../common/LoadingSpinner';
 import { SectionHeader } from '../../shared';
 import MaterialFormModal from '../modals/MaterialFormModal';
 import { triggerPullHaptic } from '../../../utils/haptics';
+import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 
 
 interface Material {
@@ -75,7 +78,7 @@ const AdminMaterialPage: React.FC = () => {
     setPresentingElement(pageRef.current);
   }, []);
 
-  // Offline-Query: Jahrgaenge
+  // Offline-Query: Jahrgänge
   const { data: jahrgaenge } = useOfflineQuery<{ id: number; name: string }[]>(
     'admin:jahrgaenge:' + user?.organization_id,
     async () => { const res = await api.get('/admin/jahrgaenge'); return res.data; },
@@ -83,7 +86,7 @@ const AdminMaterialPage: React.FC = () => {
   );
 
   // Offline-Query: Material (cache-key enthält search + jahrgang filter)
-  const { data: materials, loading, refresh: refreshMaterial } = useOfflineQuery<Material[]>(
+  const { data: materials, loading, refresh: refreshMaterial, refreshLive: refreshMaterialLive } = useOfflineQuery<Material[]>(
     `admin:material:${user?.organization_id}:${search}:${activeJahrgangId || ''}`,
     async () => {
       const res = await api.get('/material', {
@@ -97,10 +100,14 @@ const AdminMaterialPage: React.FC = () => {
     { ttl: CACHE_TTL.PROFILE }
   );
 
+  // Material-Liste live halten: neue oder geloeschte Materialien erschienen
+  // vorher erst beim nächsten Oeffnen.
+  useLiveRefresh('materials', refreshMaterialLive);
+
   const filteredMaterials = materials || [];
 
   const handleDelete = (material: Material) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Material löschen',
       message: `"${material.title}" wirklich löschen? Alle zugehörigen Dateien werden ebenfalls gelöscht.`,
@@ -164,13 +171,13 @@ const AdminMaterialPage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()}>
+            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
               <IonIcon icon={arrowBack} />
             </IonButton>
           </IonButtons>
           <IonTitle>Material verwalten</IonTitle>
           <IonButtons slot="end">
-            <IonButton onClick={openCreateModal}>
+            <IonButton aria-label="Neues Material anlegen" onClick={openCreateModal}>
               <IonIcon icon={add} />
             </IonButton>
           </IonButtons>
@@ -199,7 +206,7 @@ const AdminMaterialPage: React.FC = () => {
               title="Material"
               subtitle="Dokumente und Dateien"
               icon={documentIcon}
-              colors={{ primary: '#d97706', secondary: '#b45309' }}
+              colors={{ primary: 'var(--app-color-material)', secondary: '#b45309' }}
               stats={[
                 { value: (materials || []).length, label: 'Material' },
                 { value: (materials || []).reduce((sum, m) => sum + (m.file_count || 0), 0), label: 'Dateien' }
@@ -259,7 +266,7 @@ const AdminMaterialPage: React.FC = () => {
                       icon={documentOutline}
                       title="Keine Materialien"
                       message="Erstelle dein erstes Material mit dem + Button"
-                      iconColor="#d97706"
+                      iconColor="var(--app-color-material)"
                     />
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -274,11 +281,11 @@ const AdminMaterialPage: React.FC = () => {
                           >
                             <div
                               className="app-list-item"
-                              style={{ borderLeftColor: '#d97706' }}
+                              style={{ borderLeftColor: 'var(--app-color-material)' }}
                             >
                               <div className="app-list-item__row">
                                 <div className="app-list-item__main">
-                                  <div className="app-icon-circle" style={{ backgroundColor: '#d97706' }}>
+                                  <div className="app-icon-circle" style={{ backgroundColor: 'var(--app-color-material)' }}>
                                     <IonIcon icon={documentIcon} />
                                   </div>
                                   <div className="app-list-item__content">
@@ -299,7 +306,7 @@ const AdminMaterialPage: React.FC = () => {
                                     <div className="app-list-item__meta">
                                       {mat.file_count !== undefined && mat.file_count > 0 && (
                                         <span className="app-list-item__meta-item">
-                                          <IonIcon icon={attachOutline} style={{ color: '#d97706' }} />
+                                          <IonIcon icon={attachOutline} style={{ color: 'var(--app-color-material)' }} />
                                           {mat.file_count} {mat.file_count === 1 ? 'Datei' : 'Dateien'}
                                         </span>
                                       )}
@@ -318,7 +325,8 @@ const AdminMaterialPage: React.FC = () => {
                           <IonItemOptions className="app-swipe-actions" side="end">
                             <IonItemOption
                               className="app-swipe-action"
-                              onClick={() => handleDelete(mat)}
+                              onClick={() => { closeOpenSlidingItems(); handleDelete(mat); }}
+                              aria-label="Material löschen"
                             >
                               <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
                                 <IonIcon icon={trash} />

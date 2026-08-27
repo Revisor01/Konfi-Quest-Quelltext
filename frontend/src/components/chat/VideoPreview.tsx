@@ -20,8 +20,8 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   // onError als Ref (MessageBubble liefert einen Inline-Arrow, der bei jedem
   // Render neu entsteht). In der useEffect-Dependency-Liste wuerde das den
-  // Lade-Effekt staendig neu ausloesen -> Video-Reload-Loop. Ueber die Ref
-  // bleibt der Effekt an `message.file_path` gebunden und laeuft pro Video EINMAL.
+  // Lade-Effekt staendig neu auslösen -> Video-Reload-Loop. Über die Ref
+  // bleibt der Effekt an `message.file_path` gebunden und läuft pro Video EINMAL.
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
 
@@ -59,7 +59,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
       } catch (error) {
         console.warn('Canvas-Thumbnail fehlgeschlagen:', message.file_name, error);
       }
-      // Offscreen-Video aufraeumen
+      // Offscreen-Video aufräumen
       offscreenVideo.removeAttribute('src');
       offscreenVideo.load();
     });

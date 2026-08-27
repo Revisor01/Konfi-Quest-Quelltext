@@ -9,9 +9,9 @@ import 'swiper/css';
 import 'swiper/css/pagination';
 
 // Eine Slide der Onboarding-Tour. `color` = CSS-Farbe (z.B. var(--app-color-konfis)),
-// `rgb` = Name der zugehoerigen -rgb-Variable (z.B. '--app-color-konfis-rgb') fuer
+// `rgb` = Name der zugehörigen -rgb-Variable (z.B. '--app-color-konfis-rgb') für
 // die rgba()-Alphastufen im Hintergrund-Gradient. `${color}d9` (Hex an var()
-// anhaengen) ist UNGUELTIGES CSS -> immer ueber rgb + rgba() gehen.
+// anhaengen) ist UNGUELTIGES CSS -> immer über rgb + rgba() gehen.
 export interface OnboardingSlide {
   icon: string;
   color: string;
@@ -28,7 +28,7 @@ interface OnboardingTourProps {
   displayName?: string;
 }
 
-// Wechselnde Positionen fuer das grosse Ghost-Logo (Lutherrose) — eine je Slide.
+// Wechselnde Positionen für das grosse Ghost-Logo (Lutherrose) — eine je Slide.
 const ROSE_POSITIONS: React.CSSProperties[] = [
   { top: '-14vh', right: '-26vw', transform: 'rotate(-10deg)' },
   { top: '-16vh', left: '-28vw', transform: 'rotate(12deg)' },
@@ -74,13 +74,13 @@ const OnboardingTour: React.FC<OnboardingTourProps> = ({ slides, onClose, displa
   }, [isLast, onClose]);
 
   // Deckender farbiger Hintergrund der AKTUELLEN Slide, nach unten abgedunkelt
-  // (weisse Schrift bleibt lesbar). rgb()/rgba() ueber die -rgb-Variable.
+  // (weisse Schrift bleibt lesbar). rgb()/rgba() über die -rgb-Variable.
   const rgb = slides[index].rgb;
   const activeGradient =
     `linear-gradient(165deg, rgba(0,0,0,0) 30%, rgba(0,0,0,0.18) 70%, rgba(0,0,0,0.5) 100%), rgb(var(${rgb}))`;
 
   // Per Portal an document.body -> liegt AUSSERHALB des Tab-Outlets, also auch
-  // ueber der Ionic-Tab-Bar.
+  // über der Ionic-Tab-Bar.
   return createPortal(
     <div
       className="konfi-onboarding-content"

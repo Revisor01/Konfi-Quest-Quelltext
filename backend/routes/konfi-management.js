@@ -6,8 +6,10 @@ const { checkPointTypeEnabled } = require('../utils/pointTypeGuard');
 const { generateBiblicalPassword } = require('../utils/passwordUtils');
 const { generateUniqueUsername } = require('../utils/usernameGenerator');
 const { deleteKonfiCascade } = require('../utils/konfiDeletion');
+const { deletePhotoFile } = require('../utils/photoStorage');
 const { checkKonfiLimit, nextTier } = require('../utils/konfiLimit');
 const { syncJahrgangChat } = require('../utils/jahrgangChat');
+const { removeFromEventChat, addToEventChat } = require('../utils/eventChat');
 const { getKonfiBadgeProgress } = require('../utils/konfiBadgeProgress');
 const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
@@ -63,7 +65,8 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
                     .map(j => j.id);
 
                 if (viewableJahrgaenge.length === 0) {
-                    return res.json([]); // No access to any jahrgaenge
+                    res.set('X-Kein-Jahrgang-Zugewiesen', 'true');
+                    return res.json([]);
                 }
 
                 const placeholders = viewableJahrgaenge.map(() => `$${placeholderIndex++}`).join(',');
@@ -227,8 +230,15 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
                   AND e.organization_id = $2
                   AND e.cancelled IS NOT TRUE
                 ON CONFLICT (user_id, event_id) DO NOTHING
+                RETURNING event_id
               `;
-              await db.query(enrollFutureEventsQuery, [userId, req.user.organization_id, jahrgang_id]);
+              const { rows: gebucht } = await db.query(enrollFutureEventsQuery, [userId, req.user.organization_id, jahrgang_id]);
+              // Auch in die Chats der Pflichttermine eintreten (falls die
+              // Leitung dort einen angelegt hat) — sonst fehlt der neue Konfi
+              // in Chats, in denen sein ganzer Jahrgang sitzt.
+              for (const row of gebucht) {
+                await addToEventChat(db, row.event_id, userId, req.user.organization_id);
+              }
             } catch (enrollErr) {
               console.error('Auto-enrollment für Pflicht-Events fehlgeschlagen:', enrollErr);
             }
@@ -236,7 +246,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
             res.status(201).json({ id: userId, username, temporaryPassword: password, message: 'Konfi erfolgreich erstellt' });
 
             // Live-Update NACH der Response: neuer Konfi taucht in der Admin-Liste auf.
-            // Ausserhalb des try/catch waere ideal, hier aber unkritisch, da der Send
+            // Ausserhalb des try/catch wäre ideal, hier aber unkritisch, da der Send
             // selbst gefangen ist (No-op ohne io) und die Response bereits raus ist.
             liveUpdate.sendToOrgAdmins(req.user.organization_id, 'konfis', 'create');
 
@@ -281,6 +291,15 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
                 return res.status(404).json({ error: 'Konfi nicht gefunden' });
             }
 
+            const zielJahrgangQuery = "SELECT id FROM jahrgaenge WHERE id = $1 AND organization_id = $2";
+            const { rows: [zielJahrgang] } = await client.query(
+                zielJahrgangQuery, [jahrgang_id, req.user.organization_id]
+            );
+            if (!zielJahrgang) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ error: 'Jahrgang nicht gefunden oder gehört nicht zu Ihrer Organisation' });
+            }
+
             const profileQuery = `UPDATE konfi_profiles SET jahrgang_id = $1 WHERE user_id = $2`;
             await client.query(profileQuery, [jahrgang_id, req.params.id]);
 
@@ -294,11 +313,42 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
                 await syncJahrgangChat(client, jahrgang_id, req.user.organization_id, req.user.id);
             }
 
-            await client.query('COMMIT');
-
-            // Auto-Enrollment für zukünftige Pflicht-Events des neuen Jahrgangs
             if (currentProfile && currentProfile.jahrgang_id !== parseInt(jahrgang_id)) {
-              try {
+              // Zuerst die Pflichttermine des ALTEN Jahrgangs abraeumen. Ohne das
+              // blieb der Konfi dort gebucht und stand anschliessend in den
+              // Pflichtterminen beider Jahrgänge.
+              // Bewusst eng gefasst: nur kuenftige Termine, nur solange keine
+              // Anwesenheit erfasst ist und der Termin nicht auch zum neuen
+              // Jahrgang gehört — Historie bleibt damit unberuehrt.
+              if (currentProfile.jahrgang_id) {
+                  const { rows: abgemeldet } = await client.query(
+                    `DELETE FROM event_bookings eb
+                     USING events e
+                     WHERE eb.event_id = e.id
+                       AND eb.user_id = $1
+                       AND eb.attendance_status IS NULL
+                       AND e.event_date > NOW()
+                       AND e.organization_id = $2
+                       AND EXISTS (
+                         SELECT 1 FROM event_jahrgang_assignments eja
+                         WHERE eja.event_id = e.id AND eja.jahrgang_id = $3
+                       )
+                       AND NOT EXISTS (
+                         SELECT 1 FROM event_jahrgang_assignments eja
+                         WHERE eja.event_id = e.id AND eja.jahrgang_id = $4
+                       )
+                     RETURNING eb.event_id`,
+                    [req.params.id, req.user.organization_id, currentProfile.jahrgang_id, jahrgang_id]
+                  );
+                  // Wer nicht mehr gebucht ist, gehört auch nicht mehr in den
+                  // Event-Chat — dieselbe Regel wie bei der Abmeldung
+                  // (eventChat.js). Ohne das las der Konfi im Chat eines
+                  // Termins mit, den er gar nicht mehr sieht
+                  // 
+                  for (const row of abgemeldet) {
+                    await removeFromEventChat(client, row.event_id, parseInt(req.params.id, 10), req.user.organization_id);
+                  }
+              }
                 const enrollFutureEventsQuery = `
                   INSERT INTO event_bookings (event_id, user_id, status, booking_date, organization_id)
                   SELECT e.id, $1, 'confirmed', NOW(), $2
@@ -310,12 +360,19 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
                     AND e.organization_id = $2
                     AND e.cancelled IS NOT TRUE
                   ON CONFLICT (user_id, event_id) DO NOTHING
+                  RETURNING event_id
                 `;
-                await db.query(enrollFutureEventsQuery, [req.params.id, req.user.organization_id, jahrgang_id]);
-              } catch (enrollErr) {
-                console.error('Auto-enrollment für Pflicht-Events fehlgeschlagen:', enrollErr);
-              }
+                const { rows: gebucht } = await client.query(enrollFutureEventsQuery, [req.params.id, req.user.organization_id, jahrgang_id]);
+                // In die Chats der neu gebuchten Pflichttermine eintreten —
+                // dieselbe Regel wie beim Nachbuchen eines Jahrgangs am Event
+                // (events.js: syncEventChat). Existiert kein Chat, passiert
+                // nichts (Anlage bleibt Sache der Leitung).
+                for (const row of gebucht) {
+                  await addToEventChat(client, row.event_id, parseInt(req.params.id, 10), req.user.organization_id);
+                }
             }
+
+            await client.query('COMMIT');
 
             res.json({ message: 'Konfi erfolgreich aktualisiert' });
 
@@ -356,6 +413,9 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
 
             // Live-Update NACH der Response: geloeschter Konfi aus der Admin-Liste entfernen.
             liveUpdate.sendToOrgAdmins(req.user.organization_id, 'konfis', 'delete', { konfiId: userId });
+            // Socket trennen: sonst empfaengt das geloeschte Konto weiter
+            // Org-Updates, bis die App neu gestartet wird.
+            liveUpdate.disconnectUserSockets(userId);
 
         } catch (err) {
             await client.query('ROLLBACK').catch(rbErr => console.error('Rollback failed:', rbErr));
@@ -421,7 +481,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
                 LEFT JOIN (
                   -- Konfirmationstermin/-ort PRO KONFI: das is_konfirmation-Event, zu dem
                   -- der Konfi mit status='confirmed' gebucht ist (mehrere Termine je Jahrgang
-                  -- moeglich, jeder Konfi bucht genau einen). Keine Buchung -> kein Termin.
+                  -- möglich, jeder Konfi bucht genau einen). Keine Buchung -> kein Termin.
                   SELECT eb.user_id, e.location, e.event_date
                   FROM event_bookings eb
                   JOIN events e ON e.id = eb.event_id
@@ -617,8 +677,8 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
         const konfiId = req.params.id;
 
         try {
-            // Org-Zugehoerigkeit + Konfi-Rolle pruefen (Badge-Progress ist
-            // konfi-spezifisch; Teamer haben eigene Badges ueber teamer.js).
+            // Org-Zugehoerigkeit + Konfi-Rolle prüfen (Badge-Progress ist
+            // konfi-spezifisch; Teamer haben eigene Badges über teamer.js).
             const { rows: [konfi] } = await db.query(
                 `SELECT u.id FROM users u
                  JOIN roles r ON u.role_id = r.id
@@ -710,6 +770,21 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
         }
 
         try {
+            if (req.user.role_name === 'teamer') {
+                const { rows: [konfiProfile] } = await db.query(
+                    'SELECT jahrgang_id FROM konfi_profiles WHERE user_id = $1', [req.params.id]
+                );
+                if (!konfiProfile) {
+                    return res.status(404).json({ error: 'Konfi nicht gefunden' });
+                }
+                const hasAccess = req.user.assigned_jahrgaenge.some(
+                    j => j.id === konfiProfile.jahrgang_id && j.can_view
+                );
+                if (!hasAccess) {
+                    return res.status(403).json({ error: 'Kein Zugriff auf diesen Konfi' });
+                }
+            }
+
             // Guard: Punkte-Typ muss für den Jahrgang aktiviert sein
             const { enabled, error } = await checkPointTypeEnabled(db, req.params.id, type);
             if (!enabled) return res.status(400).json({ error });
@@ -911,19 +986,34 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
         try {
             await client.query('BEGIN');
 
+            // organization_id MUSS mitgeprueft werden: ohne sie fand der SELECT
+            // auch Eintraege fremder Organisationen. Der DELETE darunter ist zwar
+            // org-gescopt und traf dann 0 Zeilen — das UPDATE auf konfi_profiles
+            // lief aber trotzdem und zog dem fremden Konfi Punkte ab
+            // 
             const getActivityQuery = `
                 SELECT ka.*, a.points, a.type
                 FROM user_activities ka
                 JOIN activities a ON ka.activity_id = a.id
-                WHERE ka.id = $1 AND ka.user_id = $2`;
-            const { rows: [activity] } = await client.query(getActivityQuery, [req.params.activityId, req.params.id]);
+                JOIN users u ON ka.user_id = u.id
+                WHERE ka.id = $1 AND ka.user_id = $2
+                  AND ka.organization_id = $3 AND u.organization_id = $3`;
+            const { rows: [activity] } = await client.query(getActivityQuery, [req.params.activityId, req.params.id, req.user.organization_id]);
 
             if (!activity) {
                 await client.query('ROLLBACK');
                 return res.status(404).json({ error: 'Aktivität nicht gefunden' });
             }
 
-            await client.query('DELETE FROM user_activities WHERE id = $1 AND organization_id = $2', [req.params.activityId, req.user.organization_id]);
+            const { rowCount: geloescht } = await client.query(
+                'DELETE FROM user_activities WHERE id = $1 AND organization_id = $2',
+                [req.params.activityId, req.user.organization_id]
+            );
+            // Nur dekrementieren, wenn wirklich etwas gelöscht wurde.
+            if (geloescht === 0) {
+                await client.query('ROLLBACK');
+                return res.status(404).json({ error: 'Aktivität nicht gefunden' });
+            }
 
             const updateField = getPointField(activity.type);
             const updateQuery = `
@@ -1026,7 +1116,10 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
             // 4. Event-Buchungen löschen
             await client.query('DELETE FROM event_bookings WHERE user_id = $1', [konfiId]);
 
-            // 5. Offene Anträge löschen
+            const { rows: pendingFotos } = await client.query(
+                "SELECT photo_filename FROM activity_requests WHERE user_id = $1 AND status = 'pending' AND photo_filename IS NOT NULL",
+                [konfiId]
+            );
             await client.query("DELETE FROM activity_requests WHERE user_id = $1 AND status = 'pending'", [konfiId]);
 
             // 6. Jahrgang aus konfi_profiles in user_jahrgang_assignments übertragen
@@ -1052,7 +1145,15 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
             await client.query("UPDATE chat_participants SET user_type = 'teamer' WHERE user_id = $1 AND user_type = 'konfi'", [konfiId]);
             await client.query("UPDATE chat_read_status SET user_type = 'teamer' WHERE user_id = $1 AND user_type = 'konfi'", [konfiId]);
 
+
             await client.query('COMMIT');
+
+            // Nachweisfotos der geloeschten Anträge vom Dateisystem entfernen
+            // (nach dem COMMIT, fehlertolerant — eine fehlende Datei darf die
+            // Beförderung nicht scheitern lassen).
+            for (const row of pendingFotos) {
+                await deletePhotoFile(row.photo_filename);
+            }
 
             res.json({
                 success: true,
@@ -1068,6 +1169,10 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, filterByJah
             // und taucht als Teamer:in in der Benutzer-Liste auf.
             liveUpdate.sendToOrgAdmins(req.user.organization_id, 'konfis', 'update', { konfiId });
             liveUpdate.sendToOrgAdmins(req.user.organization_id, 'users', 'update', { userId: konfiId });
+            // Rollenwechsel: Socket ZULETZT trennen, sonst bleibt die/der
+            // Befoerderte im Konfi-Raum hängen und bekommt als Teamer:in gar
+            // keine Updates mehr, bis sie/er sich neu anmeldet.
+            liveUpdate.disconnectUserSockets(konfiId);
 
         } catch (err) {
             await client.query('ROLLBACK').catch(rbErr => console.error('Rollback failed:', rbErr));

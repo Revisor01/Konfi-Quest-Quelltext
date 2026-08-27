@@ -19,12 +19,8 @@ import {
   IonCardContent,
   IonCardHeader,
   IonCardTitle,
-  IonGrid,
-  IonRow,
-  IonCol,
   IonIcon,
   IonText,
-  IonCheckbox,
   IonSpinner,
   IonList,
   IonListHeader,
@@ -37,57 +33,9 @@ import {
   closeOutline,
   ribbon,
   settings,
-  trophy,
-  star,
-  medal,
-  flame,
-  heart,
-  thumbsUp,
-  flash,
-  diamond,
-  rocket,
-  shield,
-  sparkles,
-  sunny,
-  moon,
-  leaf,
-  rose,
-  gift,
-  balloon,
-  musicalNote,
-  book,
-  school,
-  restaurant,
-  fitness,
-  bicycle,
-  car,
-  airplane,
-  boat,
   home,
-  business,
-  construct,
-  hammer,
-  brush,
-  colorPalette,
-  camera,
-  image,
-  chatbubbles,
   people,
-  personAdd,
-  checkmarkCircle,
-  alertCircle,
-  informationCircle,
-  helpCircle,
-  flag,
-  pin,
-  navigate,
-  location,
-  compass,
-  timer,
-  stopwatch,
-  calendar,
-  today,
-  time,
+  pricetag,
   peopleOutline,
   chevronDownOutline
 } from 'ionicons/icons';
@@ -96,75 +44,10 @@ import api from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
+import { ICON_CHOICES as BADGE_ICONS, getIconFromString } from '../../../utils/badgeIcons';
+import { getCriteriaColor as getCategoryColor, getCriteriaIcon, CRITERIA_FALLBACK_COLOR } from '../../../utils/badgeCriteria';
 
-// Badge Icon Mapping
-const BADGE_ICONS = {
-  trophy: { icon: trophy, name: 'Pokal', category: 'Erfolg' },
-  medal: { icon: medal, name: 'Medaille', category: 'Erfolg' },
-  ribbon: { icon: ribbon, name: 'Band', category: 'Erfolg' },
-  star: { icon: star, name: 'Stern', category: 'Erfolg' },
-  checkmarkCircle: { icon: checkmarkCircle, name: 'Bestanden', category: 'Erfolg' },
-  diamond: { icon: diamond, name: 'Diamant', category: 'Erfolg' },
-  shield: { icon: shield, name: 'Schild', category: 'Erfolg' },
 
-  flame: { icon: flame, name: 'Flamme', category: 'Engagement' },
-  flash: { icon: flash, name: 'Blitz', category: 'Engagement' },
-  rocket: { icon: rocket, name: 'Rakete', category: 'Engagement' },
-  sparkles: { icon: sparkles, name: 'Funken', category: 'Engagement' },
-  thumbsUp: { icon: thumbsUp, name: 'Daumen hoch', category: 'Engagement' },
-
-  heart: { icon: heart, name: 'Herz', category: 'Gemeinschaft' },
-  people: { icon: people, name: 'Gruppe', category: 'Gemeinschaft' },
-  personAdd: { icon: personAdd, name: 'Neue Person', category: 'Gemeinschaft' },
-  chatbubbles: { icon: chatbubbles, name: 'Chat', category: 'Gemeinschaft' },
-  gift: { icon: gift, name: 'Geschenk', category: 'Gemeinschaft' },
-
-  book: { icon: book, name: 'Buch', category: 'Lernen' },
-  school: { icon: school, name: 'Schule', category: 'Lernen' },
-  construct: { icon: construct, name: 'Werkzeug', category: 'Lernen' },
-  brush: { icon: brush, name: 'Pinsel', category: 'Lernen' },
-  colorPalette: { icon: colorPalette, name: 'Farbpalette', category: 'Lernen' },
-
-  sunny: { icon: sunny, name: 'Sonne', category: 'Natur' },
-  moon: { icon: moon, name: 'Mond', category: 'Natur' },
-  leaf: { icon: leaf, name: 'Blatt', category: 'Natur' },
-  rose: { icon: rose, name: 'Rose', category: 'Natur' },
-
-  calendar: { icon: calendar, name: 'Kalender', category: 'Zeit' },
-  today: { icon: today, name: 'Heute', category: 'Zeit' },
-  time: { icon: time, name: 'Uhr', category: 'Zeit' },
-  timer: { icon: timer, name: 'Timer', category: 'Zeit' },
-  stopwatch: { icon: stopwatch, name: 'Stoppuhr', category: 'Zeit' },
-
-  restaurant: { icon: restaurant, name: 'Restaurant', category: 'Aktivitäten' },
-  fitness: { icon: fitness, name: 'Fitness', category: 'Aktivitäten' },
-  bicycle: { icon: bicycle, name: 'Fahrrad', category: 'Aktivitäten' },
-  car: { icon: car, name: 'Auto', category: 'Aktivitäten' },
-  airplane: { icon: airplane, name: 'Flugzeug', category: 'Aktivitäten' },
-  boat: { icon: boat, name: 'Boot', category: 'Aktivitäten' },
-  camera: { icon: camera, name: 'Kamera', category: 'Aktivitäten' },
-  image: { icon: image, name: 'Bild', category: 'Aktivitäten' },
-  musicalNote: { icon: musicalNote, name: 'Musik', category: 'Aktivitäten' },
-  balloon: { icon: balloon, name: 'Ballon', category: 'Aktivitäten' },
-
-  home: { icon: home, name: 'Zuhause', category: 'Orte' },
-  business: { icon: business, name: 'Gebäude', category: 'Orte' },
-  location: { icon: location, name: 'Standort', category: 'Orte' },
-  navigate: { icon: navigate, name: 'Navigation', category: 'Orte' },
-  compass: { icon: compass, name: 'Kompass', category: 'Orte' },
-  pin: { icon: pin, name: 'Pin', category: 'Orte' },
-  flag: { icon: flag, name: 'Flagge', category: 'Orte' },
-
-  informationCircle: { icon: informationCircle, name: 'Info', category: 'Sonstiges' },
-  helpCircle: { icon: helpCircle, name: 'Hilfe', category: 'Sonstiges' },
-  alertCircle: { icon: alertCircle, name: 'Warnung', category: 'Sonstiges' },
-  hammer: { icon: hammer, name: 'Hammer', category: 'Sonstiges' }
-};
-
-// Helper function to get icon from string
-const getIconFromString = (iconName: string) => {
-  return BADGE_ICONS[iconName as keyof typeof BADGE_ICONS]?.icon || trophy;
-};
 
 interface Badge {
   id: number;
@@ -197,31 +80,10 @@ interface BadgeManagementModalProps {
   targetRole?: 'konfi' | 'teamer';
   onClose: () => void;
   onSuccess: () => void;
-  // Meldet den "ungespeicherte Aenderungen"-Stand nach aussen, damit die
-  // praesentierende Seite ueber canDismiss auch Swipe/Backdrop-Schliessen abfangen kann.
+  // Meldet den "ungespeicherte Änderungen"-Stand nach aussen, damit die
+  // praesentierende Seite über canDismiss auch Swipe/Backdrop-Schliessen abfangen kann.
   onDirtyChange?: (dirty: boolean) => void;
 }
-
-// Standardfarben pro Badge-Kategorie (criteria_type)
-const CATEGORY_COLORS: Record<string, string> = {
-  total_points: '#ffd700',
-  gottesdienst_points: '#ff9500',
-  gemeinde_points: '#059669',
-  bonus_points: '#ff6b9d',
-  both_categories: '#5856d6',
-  activity_count: '#3880ff',
-  unique_activities: '#10dc60',
-  activity_combination: '#7044ff',
-  category_activities: '#0cd1e8',
-  specific_activity: '#ffce00',
-  streak: '#eb445a',
-  time_based: '#8e8e93',
-  event_count: '#e63946',
-  mandatory_event_count: '#b91c1c',
-  teamer_year: '#5b21b6'
-};
-
-const getCategoryColor = (criteriaType: string) => CATEGORY_COLORS[criteriaType] || '#667eea';
 
 const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
   badgeId,
@@ -238,12 +100,12 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
 
   const doClose = () => onClose();
 
-  // Schliessen anstossen. Die "ungespeicherte Aenderungen"-Nachfrage laeuft zentral
-  // ueber canDismiss der praesentierenden Seite (faengt X-Button, Swipe UND Backdrop
+  // Schliessen anstossen. Die "ungespeicherte Änderungen"-Nachfrage läuft zentral
+  // über canDismiss der praesentierenden Seite (faengt X-Button, Swipe UND Backdrop
   // einheitlich ab) -> hier keine zweite Abfrage.
   const handleClose = () => { doClose(); };
 
-  // isDirty-Stand nach aussen melden (fuer canDismiss der praesentierenden Seite).
+  // isDirty-Stand nach aussen melden (für canDismiss der praesentierenden Seite).
   useEffect(() => { onDirtyChange?.(isDirty); }, [isDirty, onDirtyChange]);
 
   // Punkte-basierte Kriterien - bei Teamer ausblenden
@@ -282,24 +144,6 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
 
   const isEditMode = !!badgeId;
 
-  const criteriaTypeLabels: Record<string, string> = {
-    'total_points': 'Gesamtpunkte',
-    'gottesdienst_points': 'Gottesdienst-Punkte',
-    'gemeinde_points': 'Gemeinde-Punkte',
-    'specific_activity': 'Spezielle Aktivität',
-    'both_categories': 'Beide Kategorien',
-    'activity_combination': 'Aktivitätskombination',
-    'category_activities': 'Kategorie-Aktivitäten',
-    'time_based': 'Zeitbasiert',
-    'activity_count': 'Aktivitätsanzahl',
-    'event_count': 'Event-Teilnahmen',
-    'mandatory_event_count': 'Pflicht-Anwesenheit',
-    'bonus_points': 'Bonuspunkte',
-    'streak': 'Serie',
-    'unique_activities': 'Einzigartige Aktivitäten',
-    'teamer_year': 'Teamer-Jahre'
-  };
-
   useEffect(() => {
     const init = async () => {
       await loadInitialData();
@@ -317,8 +161,10 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
     try {
       setInitialDataLoading(true);
 
-      // Load activities
-      const activitiesResponse = await api.get('/admin/activities');
+      // Aktivitäten NUR aus der Zielgruppe des Badges: ein Teamer-Badge darf
+      // nicht auf Konfi-Aktivitäten verweisen (und umgekehrt) — die Wertung in
+      // badges.js zählt ohnehin nur die passende target_role.
+      const activitiesResponse = await api.get(`/admin/activities?target_role=${targetRole}`);
       setActivities(Array.isArray(activitiesResponse.data) ? activitiesResponse.data : []);
 
       // Load categories
@@ -367,6 +213,22 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
           extra.weeks = Math.round(extra.days / 7) || 1;
         }
 
+        // Aktivitäten: DB speichert NAMEN, die Auswahl arbeitet mit IDs.
+        // Ohne diese Rueckuebersetzung stünde die Auswahl beim Bearbeiten
+        // leer da und ein Speichern wuerde die Angabe löschen.
+        // activity_id/activity_ids werden weiter gelesen: Badges aus der Zeit
+        // vor dem Fix tragen noch die alten Schlüssel.
+        if (badge.criteria_type === 'specific_activity' && !extra.activity_id) {
+          const treffer = activities.find(a => a.name === extra.required_activity_name);
+          if (treffer) extra.activity_id = treffer.id;
+        }
+        if (badge.criteria_type === 'activity_combination' && !extra.activity_ids) {
+          const ids = (extra.required_activities || [])
+            .map((name: string) => activities.find(a => a.name === name)?.id)
+            .filter((id: number | undefined): id is number => id !== undefined);
+          if (ids.length > 0) extra.activity_ids = ids;
+        }
+
         const newFormData = {
           name: badge.name || '',
           icon: badge.icon || 'trophy-outline',
@@ -376,7 +238,10 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
           criteria_extra: badge.criteria_extra || '{}',
           is_active: badge.is_active !== undefined ? badge.is_active : true,
           is_hidden: badge.is_hidden !== undefined ? badge.is_hidden : false,
-          color: badge.color || '#667eea',
+          // MUSS ein Hex-Wert bleiben: der Wert landet in <input type="color">
+          // und wird so in der Datenbank gespeichert. Eine CSS-Variable ist
+          // dort ungueltig (Regression vom 11.08., wieder zurückgenommen).
+          color: badge.color || CRITERIA_FALLBACK_COLOR,
           target_role: badge.target_role || targetRole
         };
 
@@ -397,18 +262,33 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
       return;
     }
 
-    await guard(async () => {
+    // guard() wirft, wenn bereits ein Speichern läuft ("Aktion läuft
+    // bereits"). Ohne dieses catch flog der Fehler ungefangen nach oben —
+    // und weil setLoading(true) INNERHALB des Guards steht, blieb loading
+    // dann auf true hängen. Der X-Button ist mit disabled={loading}
+    // verknuepft und liess sich danach nicht mehr druecken, während der
+    // Swipe weiter ging (User-Hinweis 12.08.).
+    try {
+      await guard(async () => {
     setLoading(true);
     try {
       // Prepare criteria_extra based on criteria_type
       let criteriaExtra = {};
       
+      // Die Auswahl arbeitet intern mit IDs, gespeichert werden aber NAMEN:
+      // Das Backend wertet `required_activity_name` bzw. `required_activities`
+      // über activities.name aus (badges.js:216,227). Vorher schrieb das
+      // Formular activity_id/activity_ids — diese Badges wurden nie vergeben,
+      // weil der Schlüssel serverseitig gar nicht gelesen wird
+      // 
       switch (formData.criteria_type) {
-        case 'specific_activity':
-          if (extraCriteria.activity_id) {
-            criteriaExtra = { activity_id: extraCriteria.activity_id };
+        case 'specific_activity': {
+          const gewaehlt = activities.find(a => a.id === extraCriteria.activity_id);
+          if (gewaehlt) {
+            criteriaExtra = { required_activity_name: gewaehlt.name };
           }
           break;
+        }
         case 'category_activities':
           if (extraCriteria.required_category) {
             criteriaExtra = { required_category: extraCriteria.required_category };
@@ -419,11 +299,15 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
             criteriaExtra = { days: extraCriteria.weeks * 7 };
           }
           break;
-        case 'activity_combination':
-          if (extraCriteria.activity_ids && extraCriteria.activity_ids.length > 0) {
-            criteriaExtra = { activity_ids: extraCriteria.activity_ids };
+        case 'activity_combination': {
+          const namen = (extraCriteria.activity_ids || [])
+            .map((id: number) => activities.find(a => a.id === id)?.name)
+            .filter(Boolean);
+          if (namen.length > 0) {
+            criteriaExtra = { required_activities: namen };
           }
           break;
+        }
       }
 
       const badgeData = {
@@ -465,7 +349,7 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
 
       setIsDirty(false);
       // WICHTIG: Dirty-Stand SYNCHRON nach aussen melden, bevor onSuccess() das Modal
-      // ueber dismiss()/canDismiss schliesst. Sonst sieht canDismiss noch isDirty=true,
+      // über dismiss()/canDismiss schließt. Sonst sieht canDismiss noch isDirty=true,
       // blockiert das programmatische Schliessen -> Modal bleibt offen, erneutes
       // Speichern legt das Badge mehrfach an.
       onDirtyChange?.(false);
@@ -475,7 +359,41 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
     } finally {
       setLoading(false);
     }
-    });
+      });
+    } catch {
+      // Doppelklick auf Speichern — der zweite Aufruf wird verworfen.
+      // Nichts anzeigen, aber den Ladezustand sicher zuruecknehmen.
+      setLoading(false);
+    }
+  };
+
+  // Gottesdienst/Gemeinde gibt es NUR bei Konfis — bei Teamer-Aktivitäten ist
+  // `type` bedeutungslos und wuerde als Untertitel nur in die Irre fuehren
+  // (User-Hinweis 11.08.). Deshalb dort neutral in der Teamer-Farbe.
+  const isTeamerBadge = targetRole === 'teamer';
+  // Dieselben Farben wie der linke Balken der Zeile (app-list-item--gottesdienst
+  // / --gemeinde). Vorher standen hier #007aff (das ist die JAHRGANGS-Farbe) und
+  // #2dd36f — dadurch hatten Balken und Icon-Kreis zwei verschiedene Toene.
+  const activityColor = (activity: Activity) =>
+    isTeamerBadge ? 'var(--app-color-teamer)'
+      : activity.type === 'gottesdienst'
+        ? 'var(--app-color-gottesdienst)'
+        : 'var(--app-color-gemeinde)';
+  const activityIcon = (activity: Activity) =>
+    isTeamerBadge ? people : activity.type === 'gottesdienst' ? home : people;
+  const activitySubtitle = (activity: Activity): string | null =>
+    isTeamerBadge ? null : activity.type === 'gottesdienst' ? 'Gottesdienst' : 'Gemeinde';
+
+  // Auswahl wird wie ueberall sonst über die Bereichsklasse dargestellt
+  // (eingefaerbter Hintergrund), NICHT über ein Haekchen — siehe die
+  // Kategorie- und Jahrgangs-Auswahl im Event-Formular (User-Hinweis 11.08.).
+  const activityItemClass = (activity: Activity, isSelected: boolean): string => {
+    const bereich = isTeamerBadge
+      ? 'app-list-item--teamer'
+      : activity.type === 'gottesdienst'
+        ? 'app-list-item--gottesdienst'
+        : 'app-list-item--gemeinde';
+    return `app-list-item ${bereich}${isSelected ? ' app-list-item--selected' : ''}`;
   };
 
   const renderCriteriaSpecificFields = () => {
@@ -493,7 +411,8 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
                     </h3>
                     {selectedActivity && (
                       <p style={{ fontSize: '0.85rem', color: '#333', margin: '0', fontWeight: '500' }}>
-                        {selectedActivity.name} ({selectedActivity.type === 'gottesdienst' ? 'Gottesdienst' : 'Gemeinde'})
+                        {selectedActivity.name}
+                        {activitySubtitle(selectedActivity) && ` (${activitySubtitle(selectedActivity)})`}
                       </p>
                     )}
                   </IonLabel>
@@ -505,40 +424,29 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
                       return (
                         <div
                           key={activity.id}
-                          className="app-list-item app-list-item--info"
-                          onClick={() => setExtraCriteria({ ...extraCriteria, activity_id: activity.id })}
+                          className={activityItemClass(activity, isSelected)}
+                          onClick={() => !loading && setExtraCriteria({ ...extraCriteria, activity_id: activity.id })}
                           style={{
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            marginBottom: '0',
-                            borderLeftColor: activity.type === 'gottesdienst' ? '#007aff' : '#2dd36f',
-                            backgroundColor: isSelected ? 'rgba(0, 122, 255, 0.08)' : undefined
+                            cursor: loading ? 'default' : 'pointer',
+                            opacity: loading ? 0.6 : 1,
+                            marginBottom: '0'
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
-                            <div
-                              className="app-icon-circle"
-                              style={{ backgroundColor: activity.type === 'gottesdienst' ? '#007aff' : '#2dd36f' }}
-                            >
-                              <IonIcon icon={activity.type === 'gottesdienst' ? home : people} />
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div className="app-list-item__title">{activity.name}</div>
-                              <div className="app-list-item__subtitle">
-                                {activity.type === 'gottesdienst' ? 'Gottesdienst' : 'Gemeinde'}
+                          <div className="app-list-item__row">
+                            <div className="app-list-item__main">
+                              <div className="app-icon-circle" style={{ backgroundColor: activityColor(activity) }}>
+                                <IonIcon icon={activityIcon(activity)} />
+                              </div>
+                              <div className="app-list-item__content">
+                                <div className="app-list-item__title">{activity.name}</div>
+                                {activitySubtitle(activity) && (
+                                  <div className="app-list-item__subtitle">
+                                    {activitySubtitle(activity)}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </div>
-                          <IonCheckbox
-                            checked={isSelected}
-                            style={{
-                              '--checkbox-background-checked': activity.type === 'gottesdienst' ? '#007aff' : '#2dd36f',
-                              '--border-color-checked': activity.type === 'gottesdienst' ? '#007aff' : '#2dd36f',
-                              '--checkmark-color': 'white'
-                            }}
-                          />
                         </div>
                       );
                     })}
@@ -574,31 +482,24 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
                       return (
                         <div
                           key={category.id}
-                          className="app-list-item app-list-item--warning"
-                          onClick={() => setExtraCriteria({ ...extraCriteria, required_category: category.name })}
+                          className={`app-list-item app-list-item--categories${isSelected ? ' app-list-item--selected' : ''}`}
+                          onClick={() => !loading && setExtraCriteria({ ...extraCriteria, required_category: category.name })}
                           style={{
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            marginBottom: '0',
-                            backgroundColor: isSelected ? 'rgba(255, 149, 0, 0.08)' : undefined
+                            cursor: loading ? 'default' : 'pointer',
+                            opacity: loading ? 0.6 : 1,
+                            marginBottom: '0'
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
-                            <div className="app-icon-circle app-icon-circle--warning">
-                              <IonIcon icon={flag} />
+                          <div className="app-list-item__row">
+                            <div className="app-list-item__main">
+                              <div className="app-icon-circle app-icon-circle--categories">
+                                <IonIcon icon={pricetag} />
+                              </div>
+                              <div className="app-list-item__content">
+                                <div className="app-list-item__title">{category.name}</div>
+                              </div>
                             </div>
-                            <div className="app-list-item__title">{category.name}</div>
                           </div>
-                          <IonCheckbox
-                            checked={isSelected}
-                            style={{
-                              '--checkbox-background-checked': '#ff9500',
-                              '--border-color-checked': '#ff9500',
-                              '--checkmark-color': 'white'
-                            }}
-                          />
                         </div>
                       );
                     })}
@@ -612,9 +513,9 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
       case 'time_based':
         return (
           <IonItem lines="none" style={{ '--background': 'transparent', marginTop: '16px' }}>
-            <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Zeitraum (Wochen)</IonLabel>
+            <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Zeitraum (Wochen) <span style={{ fontWeight: 700, color: 'var(--ion-color-primary)' }}>{extraCriteria.weeks || 4}</span></IonLabel>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
-              <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>1</span>
+              <span style={{ fontSize: '0.75rem', color: 'var(--app-text-system)', minWidth: '24px', textAlign: 'center' }}>1</span>
               <IonRange
                 min={1} max={26} step={1}
                 pin={true} pinFormatter={(value: number) => `${value}`}
@@ -623,7 +524,7 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
                 disabled={loading}
                 style={{ flex: 1 }}
               />
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--ion-color-primary)', minWidth: '28px', textAlign: 'center' }}>{extraCriteria.weeks || 4}</span>
+              <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>26</span>
             </div>
           </IonItem>
         );
@@ -655,7 +556,7 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
                       return (
                         <div
                           key={activity.id}
-                          className="app-list-item app-list-item--info"
+                          className={activityItemClass(activity, isSelected)}
                           onClick={() => {
                             const currentIds = extraCriteria.activity_ids || [];
                             const newIds = isSelected
@@ -664,37 +565,26 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
                             setExtraCriteria({ ...extraCriteria, activity_ids: newIds });
                           }}
                           style={{
-                            cursor: 'pointer',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            marginBottom: '0',
-                            borderLeftColor: activity.type === 'gottesdienst' ? '#007aff' : '#2dd36f',
-                            backgroundColor: isSelected ? 'rgba(0, 122, 255, 0.08)' : undefined
+                            cursor: loading ? 'default' : 'pointer',
+                            opacity: loading ? 0.6 : 1,
+                            marginBottom: '0'
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
-                            <div
-                              className="app-icon-circle"
-                              style={{ backgroundColor: activity.type === 'gottesdienst' ? '#007aff' : '#2dd36f' }}
-                            >
-                              <IonIcon icon={activity.type === 'gottesdienst' ? home : people} />
-                            </div>
-                            <div style={{ flex: 1, minWidth: 0 }}>
-                              <div className="app-list-item__title">{activity.name}</div>
-                              <div className="app-list-item__subtitle">
-                                {activity.type === 'gottesdienst' ? 'Gottesdienst' : 'Gemeinde'}
+                          <div className="app-list-item__row">
+                            <div className="app-list-item__main">
+                              <div className="app-icon-circle" style={{ backgroundColor: activityColor(activity) }}>
+                                <IonIcon icon={activityIcon(activity)} />
+                              </div>
+                              <div className="app-list-item__content">
+                                <div className="app-list-item__title">{activity.name}</div>
+                                {activitySubtitle(activity) && (
+                                  <div className="app-list-item__subtitle">
+                                    {activitySubtitle(activity)}
+                                  </div>
+                                )}
                               </div>
                             </div>
                           </div>
-                          <IonCheckbox
-                            checked={isSelected}
-                            style={{
-                              '--checkbox-background-checked': activity.type === 'gottesdienst' ? '#007aff' : '#2dd36f',
-                              '--border-color-checked': activity.type === 'gottesdienst' ? '#007aff' : '#2dd36f',
-                              '--checkmark-color': 'white'
-                            }}
-                          />
                         </div>
                       );
                     })}
@@ -709,6 +599,8 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
         return null;
     }
   };
+
+  const reglerMax = Math.max(20, formData.criteria_value || 0);
 
   const getValueLabel = () => {
     switch (formData.criteria_type) {
@@ -747,12 +639,16 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
         <IonToolbar>
           <IonTitle>{isEditMode ? 'Badge bearbeiten' : 'Neues Badge'}</IonTitle>
           <IonButtons slot="start">
-            <IonButton onClick={handleClose} disabled={loading} className="app-modal-close-btn">
+            {/* NICHT an loading haengen: Schliessen muss immer moeglich sein.
+                Bleibt loading haengen, waere das Modal sonst nur noch per
+                Swipe zu verlassen. Die Rueckfrage bei ungespeicherten
+                Aenderungen laeuft ohnehin ueber canDismiss der Seite. */}
+            <IonButton aria-label="Schließen" onClick={handleClose} className="app-modal-close-btn">
               <IonIcon icon={closeOutline} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
-            <IonButton
+            <IonButton aria-label="Badge speichern"
               onClick={handleSave}
               disabled={loading || isSubmitting || !formData.name.trim()}
               className="app-modal-submit-btn app-modal-submit-btn--badges"
@@ -786,35 +682,45 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
           <IonCard className="app-card">
             <IonCardContent>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {/* Jede Zielgruppe in IHRER Farbe (Konfi-Lila, Teamer-Pink)
+                    statt beide in Orange — wie ueberall sonst in der App. */}
                 <div
-                  className="app-list-item"
+                  className={`app-list-item app-list-item--purple${formData.target_role === 'konfi' ? ' app-list-item--selected' : ''}`}
                   onClick={() => !loading && setFormData({ ...formData, target_role: 'konfi', criteria_type: 'total_points', criteria_value: 10, color: getCategoryColor('total_points') })}
                   style={{
                     cursor: loading ? 'default' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    marginBottom: '0',
-                    borderLeftColor: '#f59e0b',
-                    background: formData.target_role === 'konfi' ? 'rgba(245, 158, 11, 0.1)' : undefined
+                    marginBottom: '0'
                   }}
                 >
-                  <span style={{ fontWeight: '500', color: '#333' }}>Konfis</span>
+                  <div className="app-list-item__row">
+                    <div className="app-list-item__main">
+                      <div className="app-icon-circle app-icon-circle--purple">
+                        <IonIcon icon={people} />
+                      </div>
+                      <div className="app-list-item__content">
+                        <div className="app-list-item__title">Konfis</div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 <div
-                  className="app-list-item"
+                  className={`app-list-item app-list-item--teamer${formData.target_role === 'teamer' ? ' app-list-item--selected' : ''}`}
                   onClick={() => !loading && setFormData({ ...formData, target_role: 'teamer', criteria_type: 'activity_count', criteria_value: 5, color: getCategoryColor('activity_count') })}
                   style={{
                     cursor: loading ? 'default' : 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    marginBottom: '0',
-                    borderLeftColor: '#f59e0b',
-                    background: formData.target_role === 'teamer' ? 'rgba(245, 158, 11, 0.1)' : undefined
+                    marginBottom: '0'
                   }}
                 >
-                  <span style={{ fontWeight: '500', color: '#333' }}>Teamer:innen</span>
+                  <div className="app-list-item__row">
+                    <div className="app-list-item__main">
+                      <div className="app-icon-circle app-icon-circle--teamer">
+                        <IonIcon icon={ribbon} />
+                      </div>
+                      <div className="app-list-item__content">
+                        <div className="app-list-item__title">Teamer:innen</div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </IonCardContent>
@@ -900,7 +806,7 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
                                   alignItems: 'center',
                                   justifyContent: 'center',
                                   cursor: 'pointer',
-                                  border: '1px solid #e0e0e0',
+                                  border: '1px solid rgba(0,0,0,0.06)',
                                   boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
                                   transition: 'all 0.2s'
                                 }}
@@ -934,7 +840,7 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
                       style={{
                         flex: 1,
                         height: '60px',
-                        border: '2px solid #e0e0e0',
+                        border: '2px solid rgba(0,0,0,0.12)',
                         borderRadius: '12px',
                         cursor: 'pointer'
                       }}
@@ -1017,13 +923,14 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
                       })
                       .map(([value, type]: [string, any]) => {
                       const isSelected = formData.criteria_type === value;
+                      const typColor = getCategoryColor(value);
                       // Remove emojis from label
                       const labelWithoutEmoji = type.label.replace(/[\u{1F300}-\u{1F9FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu, '').trim();
 
                       return (
                         <div
                           key={value}
-                          className="app-list-item app-list-item--warning"
+                          className="app-list-item"
                           onClick={() => {
                             if (!loading) {
                               let defaultValue = 10;
@@ -1037,7 +944,7 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
                                 defaultValue = 4;
                               }
                               const currentCategoryColor = getCategoryColor(formData.criteria_type);
-                              const newColor = (formData.color === currentCategoryColor || formData.color === '#667eea')
+                              const newColor = (formData.color === currentCategoryColor || formData.color === CRITERIA_FALLBACK_COLOR)
                                 ? getCategoryColor(value)
                                 : formData.color;
                               setFormData({ ...formData, criteria_type: value, criteria_value: defaultValue, color: newColor });
@@ -1048,13 +955,24 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
                             cursor: loading ? 'default' : 'pointer',
                             opacity: loading ? 0.6 : 1,
                             marginBottom: '0',
-                            background: isSelected ? 'rgba(245, 158, 11, 0.1)' : undefined
+                            // Jeder Kriterientyp hat seine eigene Farbe (dieselbe,
+                            // die das fertige Badge trägt) — vorher war die
+                            // ganze Liste pauschal orange.
+                            borderLeftColor: typColor,
+                            background: isSelected ? `${typColor}14` : undefined
                           }}
                         >
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div className="app-list-item__title">{labelWithoutEmoji}</div>
-                            <div className="app-list-item__subtitle" style={{ whiteSpace: 'normal' }}>
-                              {type.help}
+                          <div className="app-list-item__row">
+                            <div className="app-list-item__main">
+                              <div className="app-icon-circle" style={{ backgroundColor: typColor }}>
+                                <IonIcon icon={getCriteriaIcon(value)} />
+                              </div>
+                              <div className="app-list-item__content">
+                                <div className="app-list-item__title">{labelWithoutEmoji}</div>
+                                <div className="app-list-item__subtitle" style={{ whiteSpace: 'normal' }}>
+                                  {type.help}
+                                </div>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -1067,18 +985,20 @@ const BadgeManagementModal: React.FC<BadgeManagementModalProps> = ({
 
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               <IonItem lines="none" style={{ '--background': 'transparent', marginBottom: '12px', marginTop: '16px' }}>
-                <IonLabel position="stacked" style={{ marginBottom: '8px' }}>{getValueLabel()}</IonLabel>
+                <IonLabel position="stacked" style={{ marginBottom: '8px' }}>
+                  {getValueLabel()} <span style={{ fontWeight: 700, color: 'var(--ion-color-primary)' }}>{formData.criteria_value}</span>
+                </IonLabel>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
-                  <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>1</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--app-text-system)', minWidth: '24px', textAlign: 'center' }}>1</span>
                   <IonRange
-                    min={1} max={20} step={1}
+                    min={1} max={reglerMax} step={1}
                     pin={true} pinFormatter={(value: number) => `${value}`}
                     value={formData.criteria_value}
                     onIonChange={(e) => setFormData({ ...formData, criteria_value: e.detail.value as number })}
                     disabled={loading}
                     style={{ flex: 1 }}
                   />
-                  <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--ion-color-primary)', minWidth: '28px', textAlign: 'center' }}>{formData.criteria_value}</span>
+                  <span style={{ fontSize: '0.75rem', color: 'var(--app-text-system)', minWidth: '24px', textAlign: 'center' }}>{reglerMax}</span>
                 </div>
               </IonItem>
 

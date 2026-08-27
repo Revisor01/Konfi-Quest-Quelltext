@@ -19,10 +19,10 @@ import {
 } from 'ionicons/icons';
 
 // Mapping: Status-Text -> Icon
-// SINGLE SOURCE OF TRUTH fuer Event-Status-Icons: dieselbe Map wird sowohl fuer
-// das Corner-Badge als auch (ueber getStatusIcon) fuer das grosse Kreis-Icon
+// SINGLE SOURCE OF TRUTH für Event-Status-Icons: dieselbe Map wird sowohl für
+// das Corner-Badge als auch (über getStatusIcon) für das grosse Kreis-Icon
 // vorne genutzt -> Kreis und Badge zeigen IMMER dasselbe Icon pro Zustand.
-// Durchgehend "Kreis"-Icons fuer Event-Status (einheitliche runde Symbole).
+// Durchgehend "Kreis"-Icons für Event-Status (einheitliche runde Symbole).
 const STATUS_ICON_MAP: Record<string, string> = {
   // Events
   'Offen': addCircle,        // Plus im Kreis = "anmelden/hinzufuegen"
@@ -47,7 +47,7 @@ const STATUS_ICON_MAP: Record<string, string> = {
   'Abgemeldet': closeCircle,
   'Verpasst': closeCircle,
   'Ausstehend': hourglassOutline,
-  // Anträge
+  // Gemeldete Aktivitäten
   'Genehmigt': checkmarkCircle,
   'Abgelehnt': closeCircle,
   // Badges / generische Zustände (keine Text-Corner-Badges mehr)
@@ -72,7 +72,7 @@ interface StatusBadgeProps {
 
 /**
  * Corner-Badge mit Icon statt Text.
- * Faellt auf Text zurueck, wenn fuer den Status kein Icon gemappt ist.
+ * Faellt auf Text zurück, wenn für den Status kein Icon gemappt ist.
  */
 const StatusBadge: React.FC<StatusBadgeProps> = ({ statusText, statusColor }) => {
   const icon = getStatusIcon(statusText);

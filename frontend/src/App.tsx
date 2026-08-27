@@ -113,7 +113,7 @@ const AppContent: React.FC = () => {
     };
   }, [handleRateLimit]);
 
-  // Bei abgelaufenem Refresh-Token zurueck zum Login — OHNE harten Reload.
+  // Bei abgelaufenem Refresh-Token zurück zum Login — OHNE harten Reload.
   // Frueher: window.location.href = '/' — im nativen Capacitor-WebView laedt das
   // die App komplett neu (capacitor://localhost) und konnte beim Wiederaufbau
   // crashen. Jetzt setzen wir nur den User auf null -> React rendert sofort die
@@ -173,7 +173,7 @@ const AppContent: React.FC = () => {
 
   // Die Render-Logik wird jetzt super einfach:
   // key={orgVersion}: Bei einem Org-Wechsel (Multi-Org-Switcher) wird orgVersion
-  // erhoeht -> der gesamte Router-Subtree remountet frisch und alle Views laden
+  // erhöht -> der gesamte Router-Subtree remountet frisch und alle Views laden
   // mit dem neuen aktiven-Org-Header neu. Ersetzt den fragilen location-Reload.
   return (
     <IonApp>

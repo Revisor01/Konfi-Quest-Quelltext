@@ -24,6 +24,7 @@ if (!JWT_SECRET) {
 // ====================================================================
 
 const db = require('./database');
+const { darfRaumBetreten } = require('./utils/chatRoomAccess');
 
 // ====================================================================
 // HTTP SERVER (ohne App — App kommt nach Socket.IO Setup)
@@ -53,11 +54,11 @@ const io = new Server(server, {
 // Request verarbeitet hat, erreichte Clients auf der anderen Replika NIE
 // (betraf alle LiveUpdates und Chat-Events). Der postgres-adapter nutzt die
 // vorhandene DB als Event-Bus (NOTIFY/LISTEN); Payloads > ~8000 Bytes laufen
-// ueber die Tabelle socket_io_attachments (Migration 109).
+// über die Tabelle socket_io_attachments (Migration 109).
 const { createAdapter: createPgAdapter } = require('@socket.io/postgres-adapter');
 const { Pool: PgPool } = require('pg');
 
-// Eigener kleiner Pool fuer den Adapter (dedizierte LISTEN-Connection + Queries),
+// Eigener kleiner Pool für den Adapter (dedizierte LISTEN-Connection + Queries),
 // getrennt vom App-Pool in database.js, damit die dauerhafte LISTEN-Verbindung
 // keinen App-Slot belegt.
 const socketAdapterPool = new PgPool({
@@ -77,20 +78,81 @@ io.engine.on('connection_error', (err) => {
 });
 
 // Socket.io JWT Authentication Middleware
-io.use((socket, next) => {
+//
+// Frueher stand hier `socket.user = decoded` — die Angaben aus dem Token
+// galten damit ungeprueft, und ein Socket lebt deutlich laenger als die
+// 15 Minuten Token-Laufzeit. Ein geloeschtes, deaktiviertes oder per
+// Passwortwechsel gesperrtes Konto behielt seine Live-Verbindung
+// Die Prüfung kostet EINE Query je Verbindungsaufbau,
+// nicht je Nachricht — der Socket verbindet sich einmal und bleibt dann.
+io.use(async (socket, next) => {
   const token = socket.handshake.auth.token;
 
   if (!token) {
     return next(new Error('Authentication required'));
   }
 
+  let decoded;
   try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    socket.user = decoded;
-    next();
+    decoded = jwt.verify(token, JWT_SECRET);
   } catch (err) {
     console.warn('Socket.io Auth fehlgeschlagen:', err.message);
     return next(new Error('Invalid token'));
+  }
+
+  try {
+    const { rows: [nutzer] } = await db.query(
+      `SELECT u.id, u.organization_id, u.token_invalidated_at, r.name AS role_name
+       FROM users u
+       LEFT JOIN roles r ON u.role_id = r.id
+       WHERE u.id = $1 AND u.deleted_at IS NULL AND u.is_active = true`,
+      [decoded.id]
+    );
+    if (!nutzer) {
+      return next(new Error('Invalid token'));
+    }
+
+    // Soft-Revoke wie in rbac.js: Sperren aus einem Passwortwechsel gelten auch hier.
+    if (nutzer.token_invalidated_at) {
+      const ausgestellt = decoded.iat;
+      const gesperrtAb = Math.floor(new Date(nutzer.token_invalidated_at).getTime() / 1000);
+      if (ausgestellt < gesperrtAb) {
+        return next(new Error('Token invalidated'));
+      }
+    }
+
+    // Aktive Organisation aufloesen (Umschalter). Ohne das arbeitet der Socket
+    // immer in der Primaer-Org — die Raum-Prüfungen unten (joinRoom) hätten
+    // in einer Zweit-Gemeinde die falsche Organisation verglichen.
+    let orgId = nutzer.organization_id;
+    let rolle = nutzer.role_name;
+    const tokenOrg = decoded.active_organization_id ? parseInt(decoded.active_organization_id) : null;
+
+    if (Number.isInteger(tokenOrg) && tokenOrg !== orgId) {
+      const { rows: [mitgliedschaft] } = await db.query(
+        `SELECT uo.organization_id, r.name AS role_name
+         FROM user_organizations uo
+         JOIN roles r ON uo.role_id = r.id
+         WHERE uo.user_id = $1 AND uo.organization_id = $2`,
+        [decoded.id, tokenOrg]
+      );
+      if (!mitgliedschaft) {
+        return next(new Error('Kein Zugriff auf diese Organisation'));
+      }
+      orgId = mitgliedschaft.organization_id;
+      rolle = mitgliedschaft.role_name;
+    }
+
+    socket.user = {
+      id: nutzer.id,
+      organization_id: orgId,
+      role_name: rolle,
+      type: rolle === 'konfi' ? 'konfi' : rolle === 'teamer' ? 'teamer' : 'admin'
+    };
+    next();
+  } catch (err) {
+    console.error('Socket.io Auth: Datenbankfehler:', err.message);
+    return next(new Error('Authentication failed'));
   }
 });
 
@@ -101,24 +163,11 @@ io.on('connection', (socket) => {
 
   socket.on('joinRoom', async (roomId) => {
     try {
-      const { rows } = await db.query(
-        'SELECT organization_id FROM chat_rooms WHERE id = $1',
-        [roomId]
-      );
-
-      if (rows.length === 0) {
-        console.warn(`Socket joinRoom: Room ${roomId} nicht gefunden (User ${socket.user.id})`);
+      const erlaubt = await darfRaumBetreten(db, roomId, socket.user);
+      if (!erlaubt.ok) {
+        console.warn(`Socket joinRoom abgelehnt: User ${socket.user.id} -> Room ${roomId} (${erlaubt.grund})`);
         return;
       }
-
-      const roomOrgId = rows[0].organization_id;
-      const userOrgId = socket.user.organization_id;
-
-      if (roomOrgId !== userOrgId) {
-        console.warn(`Socket joinRoom: Org-Isolation-Verletzung! User ${socket.user.id} (Org ${userOrgId}) versucht Room ${roomId} (Org ${roomOrgId}) beizutreten`);
-        return;
-      }
-
       socket.join(`room_${roomId}`);
     } catch (err) {
       console.error('Socket joinRoom Fehler:', err.message);
@@ -129,14 +178,12 @@ io.on('connection', (socket) => {
     socket.leave(`room_${roomId}`);
   });
 
+  // Auch hier Teilnehmerschaft prüfen: Ohne sie liesse sich über die
+  // Tipp-Anzeige verraten, wer gerade in einem fremden Raum schreibt.
   socket.on('typing', async (roomId) => {
     try {
-      const { rows } = await db.query(
-        'SELECT organization_id FROM chat_rooms WHERE id = $1',
-        [roomId]
-      );
-      if (rows.length === 0) return;
-      if (rows[0].organization_id !== socket.user.organization_id) return;
+      const erlaubt = await darfRaumBetreten(db, roomId, socket.user);
+      if (!erlaubt.ok) return;
       socket.to(`room_${roomId}`).emit('userTyping', {
         roomId,
         userId: socket.user.id,
@@ -149,12 +196,8 @@ io.on('connection', (socket) => {
 
   socket.on('stopTyping', async (roomId) => {
     try {
-      const { rows } = await db.query(
-        'SELECT organization_id FROM chat_rooms WHERE id = $1',
-        [roomId]
-      );
-      if (rows.length === 0) return;
-      if (rows[0].organization_id !== socket.user.organization_id) return;
+      const erlaubt = await darfRaumBetreten(db, roomId, socket.user);
+      if (!erlaubt.ok) return;
       socket.to(`room_${roomId}`).emit('userStoppedTyping', {
         roomId,
         userId: socket.user.id
@@ -173,7 +216,7 @@ io.on('connection', (socket) => {
 
 // liveUpdate mit io initialisieren (DI statt globaler Variable)
 const liveUpdate = require('./utils/liveUpdate');
-liveUpdate.init(io);
+liveUpdate.init(io, db);
 
 // ====================================================================
 // SMTP CONFIGURATION
@@ -245,13 +288,28 @@ const authLimiter = rateLimit({
 
 // Registrierung: Beim Onboarding einer Konfi-Gruppe registrieren sich viele
 // hintereinander aus DEMSELBEN Gemeinde-WLAN (gleiche IP). 5/Stunde war viel
-// zu eng. Erfolgreiche Registrierungen zaehlen nicht mit, damit nur echte
+// zu eng. Erfolgreiche Registrierungen zählen nicht mit, damit nur echte
 // Missbrauchs-Schleifen (Fehlversuche) gebremst werden.
 const registerLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 200,
   keyGenerator: (req) => ipKeyGenerator(clientIp(req)), // echte Client-IP (X-Real-IP)
   message: { error: 'Zu viele Registrierungen. Bitte warte eine Stunde.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true
+});
+
+// Doku-Anmeldung (/api/docs-auth/anmelden): EIN gemeinsames Passwort ohne
+// Benutzernamen — der globale Limiter (2000/15min) ist als einzige Bremse
+// viel zu weit, damit liesse sich das Passwort schlicht durchprobieren
+// Erfolgreiche Anmeldungen zählen nicht,
+// 20 Fehlversuche pro Viertelstunde reichen für Vertipper locker.
+const docsLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => ipKeyGenerator(clientIp(req)), // echte Client-IP (X-Real-IP)
+  message: { error: 'Zu viele Anmeldeversuche. Bitte warte 15 Minuten.' },
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true
@@ -284,10 +342,24 @@ const uploadLimiter = rateLimit({
   legacyHeaders: false
 });
 
+// Team-Chat leeren: entfernt ALLE Nachrichten eines Raums samt Dateianhaengen
+// (Schleife ueber unlink). Der generalLimiter mit 2000/15min ist fuer eine so
+// teure Operation viel zu weit gefasst; CodeQL hat die Route deshalb als
+// "Missing rate limiting" gemeldet. Zehn Leerungen pro Viertel-
+// stunde reichen fuer jeden echten Bedarf der Leitung.
+const chatClearLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  keyGenerator: userOrIpKey,
+  message: { error: 'Zu viele Leerungen des Team-Chats. Bitte versuche es spaeter erneut.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
 const orgLimiter = rateLimit({
   // Deckt ALLE /api/organizations-Routen ab. GET (Lesen: Liste, Detail, Admins)
-  // wird per skip ausgenommen und faellt auf den generalLimiter. Nur Schreib-Ops
-  // (POST/PUT/PATCH/DELETE) zaehlen hier, pro User (nicht pro IP).
+  // wird per skip ausgenommen und fällt auf den generalLimiter. Nur Schreib-Ops
+  // (POST/PUT/PATCH/DELETE) zählen hier, pro User (nicht pro IP).
   windowMs: 15 * 60 * 1000,
   max: 500,
   keyGenerator: userOrIpKey,
@@ -311,7 +383,9 @@ const app = createApp(db, {
     general: generalLimiter,
     authLimiter,
     registerLimiter,
+    docsLoginLimiter,
     chatMessageLimiter,
+    chatClearLimiter,
     eventBookingLimiter,
     uploadLimiter,
     orgLimiter,
@@ -336,7 +410,7 @@ setImmediate(() => initializeChatRooms(db));
 // Wrapped) duerfen bei MEHREREN Backend-Replicas (Zero-Downtime-Setup) nur EINMAL
 // laufen, sonst gibt es Doppel-Pushes/-Loeschungen/-Snapshots. Nur die Replica mit
 // RUN_BACKGROUND_JOBS!=='false' startet sie. Default = an (Single-Replica/lokal
-// unveraendert); im 2-Replica-Stack setzt nur backend2 RUN_BACKGROUND_JOBS=false.
+// unverändert); im 2-Replica-Stack setzt nur backend2 RUN_BACKGROUND_JOBS=false.
 const BackgroundService = require('./services/backgroundService');
 if (process.env.RUN_BACKGROUND_JOBS !== 'false') {
   BackgroundService.startAllServices(db, { wrappedRouter: app.wrappedRouter });

@@ -18,7 +18,7 @@ import api from '../../services/api';
 const PushNotificationSettings: React.FC = () => {
   const { pushNotificationsPermission, requestPushPermissions } = useApp();
 
-  // Master-Schalter: globaler Push an/aus fuer diesen User (Backend users.push_enabled)
+  // Master-Schalter: globaler Push an/aus für diesen User (Backend users.push_enabled)
   const [pushEnabled, setPushEnabled] = useState<boolean>(true);
   const [prefLoading, setPrefLoading] = useState<boolean>(true);
   const [prefSaving, setPrefSaving] = useState<boolean>(false);

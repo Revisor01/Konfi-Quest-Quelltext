@@ -19,7 +19,7 @@ function notifyListeners() {
 // vorhanden ist (Ping/HTTP funktionieren). In diesen Faellen optimistisch
 // online bleiben — sonst blockt die App den Login VOR dem ersten Request
 // ("Keine Verbindung"), was zu Google-Play-Rejections (Login fehlgeschlagen)
-// gefuehrt hat. Ein echter fehlgeschlagener Request faellt ohnehin in den
+// geführt hat. Ein echter fehlgeschlagener Request fällt ohnehin in den
 // Fehler-Handler; lieber den Request versuchen als ihn faelschlich zu blocken.
 function evaluateOnline(status: { connected: boolean; connectionType?: string }): boolean {
   if (status.connectionType === 'unknown' || status.connectionType === 'none') return true;

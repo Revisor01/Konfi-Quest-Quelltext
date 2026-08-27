@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   IonPage,
   IonHeader,
@@ -15,10 +15,15 @@ import { arrowBack } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
+import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
+import { useBadge } from '../../../contexts/BadgeContext';
 import { CACHE_TTL } from '../../../services/offlineCache';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import BadgesView from '../../konfi/views/BadgesView';
 import { triggerPullHaptic } from '../../../utils/haptics';
+import { writeQueue } from '../../../services/writeQueue';
+import { networkMonitor } from '../../../services/networkMonitor';
+import { safeUUID } from '../../../utils/uuid';
 
 interface TeamerBadgeAPI {
   id: number;
@@ -41,11 +46,55 @@ const TeamerBadgesPage: React.FC = () => {
   const { user } = useApp();
   const [selectedFilter, setSelectedFilter] = useState('alle');
 
-  const { data: badgesData, loading, refresh } = useOfflineQuery<TeamerBadgeAPI[]>(
+  const { data: badgesData, loading, refresh, refreshLive } = useOfflineQuery<TeamerBadgeAPI[]>(
     'teamer:badges:' + user?.id,
-    async () => { const res = await api.get('/teamer/badges'); return res.data || []; },
+    async () => {
+      const res = await api.get('/teamer/badges');
+      const liste: TeamerBadgeAPI[] = res.data || [];
+      // Unverdiente geheime Abzeichen liefert der Server nicht mehr mit; ihre
+      // Gesamtzahl steht in der Kopfzeile. An die Liste geheftet, damit sie den
+      // Zwischenspeicher übersteht (der sichert nur die Daten, keine Header).
+      const geheim = Number(res.headers?.['x-badges-secret-total']);
+      if (Number.isFinite(geheim)) (liste as any).geheimGesamt = geheim;
+      return liste;
+    },
     { ttl: CACHE_TTL.BADGES }
   );
+
+  // Das Backend sendet 'badges' gezielt an Teamer:innen (routes/teamer.js:796),
+  // es fehlte nur der Empfaenger.
+  useLiveRefresh(['badges'], useCallback(() => { refreshLive(); }, [refreshLive]));
+
+  // Anders als bei den Konfis liefert die Teamer-Liste kein 'seen' je Abzeichen
+  // mit -- markiert wird deshalb pauschal beim Oeffnen, genau dafuer ist der
+  // schlanke Endpunkt gedacht. Der Ref verhindert, dass jedes Neuladen
+  // (Live-Update, Pull-to-Refresh) einen weiteren Aufruf ausloest.
+  // Seit der Zaehler-Konsolidierung kommt die Zahl aus dem
+  // BadgeContext -- refreshAllCounts() ist jetzt der richtige und einzige Weg.
+  // Vorher brauchte es hier triggerRefresh('badges'), weil der Zaehler als
+  // einziger an einem anderen Mechanismus hing.
+  const { refreshAllCounts } = useBadge();
+  const bereitsMarkiert = useRef(false);
+  useEffect(() => {
+    if (bereitsMarkiert.current) return;
+    bereitsMarkiert.current = true;
+
+    if (!networkMonitor.isOnline) {
+      writeQueue.enqueue({
+        method: 'PUT',
+        url: '/teamer/badges/mark-seen',
+        maxRetries: 3,
+        hasFileUpload: false,
+        metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Abzeichen gesehen' },
+      });
+      return;
+    }
+    api.put('/teamer/badges/mark-seen')
+      .then(() => { refreshAllCounts(); })
+      .catch((markError) => {
+        console.warn('Abzeichen konnten nicht als gesehen markiert werden:', markError);
+      });
+  }, [refreshAllCounts]);
 
   const badges = badgesData || [];
 
@@ -69,7 +118,10 @@ const TeamerBadgesPage: React.FC = () => {
 
   const badgeStats = {
     totalVisible: badges.filter((b) => !b.is_hidden).length,
-    totalSecret: badges.filter((b) => b.is_hidden).length
+    // Aus der Kopfzeile, nicht aus der Liste: Diese enthält nur noch die
+    // bereits verdienten Geheimnisse, sonst staende hier immer die eigene
+    // Trefferzahl statt der Gesamtzahl.
+    totalSecret: (badges as any).geheimGesamt ?? badges.filter((b) => b.is_hidden).length
   };
 
   if (loading) {
@@ -81,7 +133,7 @@ const TeamerBadgesPage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()}>
+            <IonButton onClick={() => window.history.back()} aria-label="Zurück">
               <IonIcon icon={arrowBack} slot="icon-only" />
             </IonButton>
           </IonButtons>

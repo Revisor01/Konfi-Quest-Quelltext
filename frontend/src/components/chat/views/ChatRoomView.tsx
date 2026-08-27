@@ -59,7 +59,7 @@ const ChatRoomView: React.FC<ChatRoomViewProps> = ({ roomId, onBack }) => {
         <IonHeader>
           <IonToolbar>
             <IonButtons slot="start">
-              <IonButton onClick={onBack}>
+              <IonButton aria-label="Zurück" onClick={onBack}>
                 <IonIcon icon={arrowBack} />
               </IonButton>
             </IonButtons>

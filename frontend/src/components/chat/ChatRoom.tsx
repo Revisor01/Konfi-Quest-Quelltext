@@ -18,6 +18,7 @@ import {
   chevronDown
 } from 'ionicons/icons';
 import { useApp } from '../../contexts/AppContext';
+import { offlineBlockiert } from '../../utils/offlineAktion';
 import { useBadge } from '../../contexts/BadgeContext';
 import { useOfflineQuery } from '../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../services/offlineCache';
@@ -31,12 +32,14 @@ import MembersModal from './modals/MembersModal';
 import FileViewerModal, { FileItem } from '../shared/FileViewerModal';
 // Camera is now handled via ChatRoomSections helpers
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
-import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { Keyboard } from '@capacitor/keyboard';
-// Native FileViewer ueber openFileNatively, FileViewerModal als Web-Fallback
+// Native FileViewer über openFileNatively, FileViewerModal als Web-Fallback
 import { openFileNatively } from '../../utils/nativeFileViewer';
-import { writeQueue } from '../../services/writeQueue';
+import { writeQueue, onItemFailed } from '../../services/writeQueue';
+import { ergaenzeLokaleBubbles, chatNachrichtEinreihen } from './chatOutbox';
 import { safeUUID } from '../../utils/uuid';
 import { networkMonitor } from '../../services/networkMonitor';
 import { compressImage } from '../../services/mediaCompression';
@@ -58,11 +61,34 @@ const formatDayDivider = (d: Date): string => {
 // wurde (Modul-Scope, ueberlebt Re-Mounts). Der Trenner ist ein EINMALIGER
 // Einstiegs-Indikator: Nach Verlassen+Wiederbetreten darf derselbe (evtl. aus
 // stale unread_count rekonstruierte) Anker nicht erneut erscheinen — nur ein
-// NEUER Anker (= wirklich neue Nachrichten seit dem letzten Besuch) zaehlt.
+// NEUER Anker (= wirklich neue Nachrichten seit dem letzten Besuch) zählt.
 const shownMarkerAnchors = new Map<number, number>();
 
 // Ab welchem Abstand zum Listenende (in px) der "Nach unten"-Button erscheint.
 const SCROLL_DOWN_THRESHOLD = 300;
+
+/**
+ * Server-Liste mit den noch nicht zugestellten LOKALEN Nachrichten zusammenfuehren.
+ *
+ * Behalten werden nur Nachrichten mit localId und Status pending/error, deren
+ * Server-Kopie noch nicht angekommen ist (Abgleich über client_id/localId).
+ */
+const mergeMitLokalen = (server: Message[], vorher: Message[]): Message[] => {
+  const offen = vorher.filter(m =>
+    m.localId && (m.queueStatus === 'pending' || m.queueStatus === 'error')
+  );
+  if (offen.length === 0) return server;
+
+  // Ist die Server-Kopie inzwischen da, fällt die lokale Fassung weg.
+  const serverClientIds = new Set(
+    server.map(m => (m as any).client_id || m.localId).filter(Boolean)
+  );
+  const nochOffen = offen.filter(m => !serverClientIds.has(m.localId));
+  if (nochOffen.length === 0) return server;
+
+  // Lokale Nachrichten ans Ende: sie sind die juengsten und stehen im Chat unten.
+  return [...server, ...nochOffen];
+};
 
 const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingElement }) => {
   const { user, setError, isOnline } = useApp();
@@ -89,9 +115,51 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   // Initiale Nachrichten aus Cache/API in lokalen State kopieren
   useEffect(() => {
     if (initialMessages && initialMessages.length > 0) {
-      setMessages(initialMessages);
+      // Merge statt Ersetzen: sonst löscht der Cache-/API-Stand die noch nicht
+      // zugestellten lokalen Nachrichten aus der Liste.
+      setMessages(prev => mergeMitLokalen(initialMessages, prev));
+      // Ist die Server-Kopie da, ist der "endgueltig fehlgeschlagen"-Merker
+      // fuer diese client_ids hinfaellig (best-effort).
+      writeQueue.forgetFailedChatMany(initialMessages.map(m => (m as any).client_id));
     }
   }, [initialMessages]);
+
+  // Gibt die Queue eine Nachricht endgueltig auf, blieb die Bubble bisher auf
+  // 'pending' stehen — ohne Hinweis und ohne Weg zum Neuversand. Jetzt wird sie
+  // als fehlgeschlagen markiert und bekommt damit den Retry-Button.
+  useEffect(() => {
+    return onItemFailed((item) => {
+      if (item.metadata.type !== 'chat') return;
+      if (room?.id && item.metadata.roomId !== room.id) return;
+      const clientId = item.metadata.clientId;
+      setMessages(prev => prev.map(m =>
+        m.localId === clientId ? { ...m, queueStatus: 'error' as const } : m
+      ));
+    });
+  }, [room?.id]);
+
+  // Beim Oeffnen des Raums noch nicht zugestellte Nachrichten wieder anzeigen:
+  // wartende Queue-Items als "wird gesendet", endgueltig fehlgeschlagene aus
+  // dem Merker als "fehlgeschlagen" mit Retry-Knopf. Ohne das war eine
+  // ungesendete Nachricht nach App-Neustart unsichtbar — und ein endgueltiger
+  // Fehlschlag bei geschlossenem Chat spurlos (verschwundene Nachricht).
+  useEffect(() => {
+    if (!room?.id || !user) return;
+    let aktiv = true;
+    (async () => {
+      const [queueItems, fehlgeschlagene] = await Promise.all([
+        writeQueue.getByMetadata({ roomId: room.id, type: 'chat' }),
+        writeQueue.getFailedChat(room.id),
+      ]);
+      if (!aktiv || (queueItems.length === 0 && fehlgeschlagene.length === 0)) return;
+      setMessages(prev => ergaenzeLokaleBubbles(prev, queueItems, fehlgeschlagene, {
+        id: user.id,
+        name: user.display_name || '',
+        type: (user.type || 'konfi') as 'admin' | 'teamer' | 'konfi',
+      }));
+    })();
+    return () => { aktiv = false; };
+  }, [room?.id]);
 
   const [messageText, setMessageText] = useState('');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -108,7 +176,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   // sichtbaren Nachricht. Genau EIN Chip -> kein Ueberlagern mehrerer Sticky-Trenner.
   const [floatingDay, setFloatingDay] = useState<string>('');
   // "Nach unten"-Button: erscheint erst, wenn der Nutzer spuerbar weiter oben
-  // steht (Schwelle SCROLL_DOWN_THRESHOLD). Nahe am Ende waere er nur Ballast,
+  // steht (Schwelle SCROLL_DOWN_THRESHOLD). Nahe am Ende wäre er nur Ballast,
   // weil dort ohnehin automatisch nachgescrollt wird.
   const [showScrollDown, setShowScrollDown] = useState(false);
   const contentRef = useRef<HTMLIonContentElement>(null);
@@ -152,6 +220,65 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
                 hasFileUpload: retryItem.hasFileUpload,
                 metadata: retryItem.metadata,
               });
+            } else if (room && message.localId) {
+              const merker = (await writeQueue.getFailedChat(room.id))
+                .find(f => f.clientId === message.localId);
+              if (merker?.localFilePath) {
+                await writeQueue.enqueue({
+                  method: 'POST',
+                  url: `/chat/rooms/${room.id}/messages`,
+                  body: {
+                    content: merker.content || '',
+                    client_id: message.localId,
+                    _localFilePath: merker.localFilePath,
+                    _fileName: merker.fileName,
+                    _fileType: merker.fileType,
+                  },
+                  headers: { 'Content-Type': 'multipart/form-data' },
+                  maxRetries: 5,
+                  hasFileUpload: true,
+                  metadata: {
+                    type: 'chat',
+                    clientId: message.localId,
+                    roomId: room.id,
+                    label: 'Chat-Nachricht',
+                  },
+                });
+              } else if (message.content && !message.file_path) {
+                await writeQueue.enqueue({
+                  method: 'POST',
+                  url: `/chat/rooms/${room.id}/messages`,
+                  body: {
+                    content: message.content,
+                    client_id: message.localId,
+                    ...(message.reply_to ? { reply_to: String(message.reply_to) } : {})
+                  },
+                  headers: { 'Content-Type': 'application/json' },
+                  maxRetries: 5,
+                  hasFileUpload: false,
+                  metadata: {
+                    type: 'chat',
+                    clientId: message.localId,
+                    roomId: room.id,
+                    label: 'Chat-Nachricht',
+                  },
+                });
+              } else {
+                // Datei-Nachricht ohne Queue-Item und ohne lokale Kopie im
+                // Merker: ein Neuversand ist nicht möglich. Ehrlich melden
+                // statt still nichts zu tun.
+                setMessages(prev => prev.map(m =>
+                  m.localId === message.localId ? { ...m, queueStatus: 'error' as const } : m
+                ));
+                setError('Diese Nachricht lässt sich nicht mehr senden. Bitte neu schreiben.');
+                return;
+              }
+            } else {
+              setMessages(prev => prev.map(m =>
+                m.localId === message.localId ? { ...m, queueStatus: 'error' as const } : m
+              ));
+              setError('Diese Nachricht lässt sich nicht mehr senden. Bitte neu schreiben.');
+              return;
             }
             // Flush versuchen wenn online
             if (networkMonitor.isOnline) {
@@ -160,7 +287,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
           }
         },
         {
-          text: 'Nachricht l\u00f6schen',
+          text: 'Nachricht löschen',
           role: 'destructive',
           handler: async () => {
             // Aus UI entfernen
@@ -170,13 +297,22 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
             const item = queueItems.find(qi => qi.metadata.clientId === message.localId || qi.id === message.localId);
             if (item) {
               await writeQueue.remove(item.id);
-              // Lokale Datei l\u00f6schen falls vorhanden
+              // Lokale Datei löschen falls vorhanden
               if (item.body?._localFilePath) {
                 try {
                   await Filesystem.deleteFile({ path: item.body._localFilePath, directory: Directory.Data });
                 } catch { /* ignore */ }
               }
             }
+            // Auch den "endgueltig fehlgeschlagen"-Merker samt lokaler
+            // Dateikopie aufraeumen (Loeschen ist eine bewusste Entscheidung).
+            const merker = (await writeQueue.getFailedChat(room?.id)).find(f => f.clientId === message.localId);
+            if (merker?.localFilePath) {
+              try {
+                await Filesystem.deleteFile({ path: merker.localFilePath, directory: Directory.Data });
+              } catch { /* ignore */ }
+            }
+            await writeQueue.forgetFailedChat(message.localId);
           }
         },
         {
@@ -195,13 +331,21 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     const item = queueItems.find(qi => qi.metadata.clientId === message.localId || qi.id === message.localId);
     if (item) {
       await writeQueue.remove(item.id);
-      // Lokale Datei l\u00f6schen falls vorhanden
+      // Lokale Datei löschen falls vorhanden
       if (item.body?._localFilePath) {
         try {
           await Filesystem.deleteFile({ path: item.body._localFilePath, directory: Directory.Data });
         } catch { /* ignore */ }
       }
     }
+    // Auch den "endgueltig fehlgeschlagen"-Merker samt lokaler Dateikopie aufraeumen
+    const merker = (await writeQueue.getFailedChat(room?.id)).find(f => f.clientId === message.localId);
+    if (merker?.localFilePath) {
+      try {
+        await Filesystem.deleteFile({ path: merker.localFilePath, directory: Directory.Data });
+      } catch { /* ignore */ }
+    }
+    await writeQueue.forgetFailedChat(message.localId);
   };
 
   // Poll Modal mit useIonModal Hook (iOS Card Design)
@@ -257,7 +401,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     if (!room?.id) return;
     // Ungelesen-Anzahl einfrieren, BEVOR markRoomAsRead sie auf 0 setzt.
     // Fallback auf room.unread_count (vom Server am room-Objekt), falls der
-    // Badge-Context beim Oeffnen noch nicht aktualisiert hat -> sonst waere die
+    // Badge-Context beim Oeffnen noch nicht aktualisiert hat -> sonst wäre die
     // Zahl 0 und der "Neu"-Trenner + Scrollziel wuerden fehlen.
     if (initialUnreadRef.current === null) {
       initialUnreadRef.current = chatUnreadByRoom[room.id] ?? (room as any).unread_count ?? 0;
@@ -285,12 +429,14 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
         if (data.roomId === room.id) {
           if (data.message?.client_id) {
             pendingSendsRef.current.delete(data.message.client_id);
+            // Server-Kopie ist da -> "endgueltig fehlgeschlagen"-Merker hinfaellig
+            writeQueue.forgetFailedChat(data.message.client_id);
           }
           setMessages(prev => {
             // Avoid duplicates
             if (prev.some(m => m.id === data.message.id)) return prev;
             // Eigene Nachricht: die optimistische Kopie in-place ersetzen
-            // (Match ueber client_id) statt zusaetzlich anzuhaengen — sonst
+            // (Match über client_id) statt zusaetzlich anzuhaengen — sonst
             // erscheint die Nachricht kurz doppelt, bis der Reload aufraeumt.
             if (data.message.client_id) {
               const optIdx = prev.findIndex(m => m.clientId === data.message.client_id);
@@ -311,6 +457,16 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
           setMessages(prev => prev.map(m =>
             m.id === data.messageId ? { ...m, deleted_at: new Date().toISOString() } : m
           ));
+        }
+      });
+
+      // Team-Chat wurde von der Leitung geleert: alle Nachrichten sind weg,
+      // der Raum bleibt. Auch die Cache-Kopie auffrischen, sonst kommen die
+      // geleerten Nachrichten beim naechsten Oeffnen aus dem Cache zurueck.
+      socket.on('chatCleared', (data: { roomId: number }) => {
+        if (data.roomId === room.id) {
+          setMessages([]);
+          refreshMessagesCache();
         }
       });
 
@@ -373,7 +529,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
       });
     }
 
-    // Fallback: 30s-Poll als Backup fuer den Fall, dass der Socket still
+    // Fallback: 30s-Poll als Backup für den Fall, dass der Socket still
     // gestorben ist (bewusster Anker, NICHT entfernen). Zwei Optimierungen
     // 
     // 1. Inkrementell via loadMissedMessages(lastId) statt jedes Mal die vollen
@@ -381,9 +537,9 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     // 2. Nur pollen, wenn die Seite sichtbar ist (Web-Tab im Hintergrund pollt
     //    nicht). Auf Native ist visibilityState 'visible', solange die App im
     //    Vordergrund ist; im Hintergrund pausiert das OS den Timer ohnehin.
-    // Hinweis: Deletes aelterer Nachrichten kommen ueber das 'messageDeleted'-
+    // Hinweis: Deletes aelterer Nachrichten kommen über das 'messageDeleted'-
     // Socket-Event. Mit after= gehen sie im Poll verloren -- das ist ok, der
-    // Poll ist nur der Fallback fuer NEUE Nachrichten bei totem Socket.
+    // Poll ist nur der Fallback für NEUE Nachrichten bei totem Socket.
     const interval = setInterval(async () => {
       if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       const currentMessages = messagesRef.current;
@@ -405,7 +561,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
       clearInterval(interval);
       // Marker-Zustand zuruecksetzen: Der "Neue Nachrichten"-Trenner ist ein
       // einmaliger Einstiegs-Indikator — beim Verlassen des Raums (oder
-      // Raumwechsel) wird er verworfen und beim naechsten Betreten nur bei
+      // Raumwechsel) wird er verworfen und beim nächsten Betreten nur bei
       // wirklich neuen Nachrichten neu berechnet (shownMarkerAnchors).
       initialUnreadRef.current = null;
       newDividerAnchorRef.current = null;
@@ -417,6 +573,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
         socket.off('connect');
         socket.off('newMessage');
         socket.off('messageDeleted');
+        socket.off('chatCleared');
         socket.off('userTyping');
         socket.off('reactionAdded');
         socket.off('reactionRemoved');
@@ -429,7 +586,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   // Effekt pro empfangener Nachricht einen POST /mark-read. Wichtig: Der lokale
   // Badge geht trotzdem SOFORT weg -- badgeMarkRoomAsRead() im BadgeContext
   // macht ein optimistisches Update. Gedrosselt wird NUR der Server-POST.
-  // Verhalten: erster Aufruf (Chat-Oeffnen) laeuft sofort (leading), damit der
+  // Verhalten: erster Aufruf (Chat-Oeffnen) läuft sofort (leading), damit der
   // Badge zuegig verschwindet; Folgenachrichten werden mit 1.5s gebuendelt
   // (letzter Aufruf gewinnt).
   const markReadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -461,7 +618,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   // Beim Initial-Load am "Neu"-Trenner geparkt? Dann KEIN Auto-Scroll nach unten,
   // bis der Nutzer selbst nach unten scrollt. Verhindert, dass die API-
   // Revalidierung (2. messages-Update nach Cache-Treffer) die Divider-Position
-  // mit einem Sprung ans Listenende ueberschreibt.
+  // mit einem Sprung ans Listenende überschreibt.
   const parkedAtDividerRef = useRef(false);
 
   useEffect(() => {
@@ -471,7 +628,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
         // Initial load: wenn ungelesene Nachrichten existieren, zur ERSTEN neuen
         // scrollen (so kann man von dort nach unten lesen). Sonst ganz nach unten.
         // WICHTIG: isInitialLoad erst NACH erfolgreichem Scroll abschalten, sonst
-        // ueberschreibt die API-Revalidierung (2. messages-Update) die Position
+        // überschreibt die API-Revalidierung (2. messages-Update) die Position
         // mit einem Auto-Scroll nach unten.
         const unread = initialUnreadRef.current ?? 0;
         const targetDivider = unread > 0 && unread <= messages.length;
@@ -497,7 +654,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
         contentRef.current.scrollToBottom(0);
       } else if (messages.length > prevMessageCountRef.current) {
         // Neue Nachricht, aber KEIN Auto-Scroll (Nutzer liest weiter oben):
-        // Der Abstand zum Ende hat sich geaendert, ohne dass ein Scroll-Event
+        // Der Abstand zum Ende hat sich geändert, ohne dass ein Scroll-Event
         // feuert -> Sichtbarkeit des "Nach unten"-Buttons nachziehen.
         handleScroll();
       }
@@ -529,7 +686,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     // Obersten Tages-Trenner finden, der gerade noch oberhalb der Sichtgrenze
     // liegt -> dessen Tag im schwebenden Chip anzeigen.
     // WICHTIG: Marker liegen im LIGHT DOM (geslotteter ion-content-Inhalt), NICHT
-    // im scrollEl (.inner-scroll im Shadow DOM) -> ueber contentRef suchen, sonst
+    // im scrollEl (.inner-scroll im Shadow DOM) -> über contentRef suchen, sonst
     // findet querySelectorAll nichts und floatingDay bleibt leer.
     const markers = contentRef.current.querySelectorAll<HTMLElement>('[data-day-divider]');
     const containerTop = scrollEl.getBoundingClientRect().top;
@@ -560,7 +717,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     if (!room) return;
     try {
       const response = await api.get(`/chat/rooms/${room.id}/messages?limit=100`);
-      setMessages(response.data);
+      setMessages(prev => mergeMitLokalen(response.data, prev));
 
       // Don't pre-load images anymore - use lazy loading instead for better performance
     } catch (err) {
@@ -661,7 +818,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     setReplyToMessage(null);
     clearSelectedFile();
     setShouldAutoScroll(true);
-    // Eigene Nachricht: am Divider-Park loesen, sonst bleibt der Scroll oben haengen.
+    // Eigene Nachricht: am Divider-Park lösen, sonst bleibt der Scroll oben hängen.
     parkedAtDividerRef.current = false;
     // Doppel-rAF statt setTimeout(100): direkt nach dem Rendern der optimistischen
     // Bubble instant ans Ende springen — kein animiertes Nachziehen.
@@ -700,62 +857,34 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
         setShouldAutoScroll(true);
       } catch (err) {
         pendingSendsRef.current.delete(clientId);
-        // Bei Fehler: optimistic msg als error markieren
-        setMessages(prev => prev.map(m =>
-          m.localId === localId ? { ...m, queueStatus: 'error' as const } : m
-        ));
+        // Fehlgeschlagener Online-Versand: Die Nachricht lebte bisher NUR im
+        // React-State — Raum verlassen oder App neu gestartet, und sie war
+        // weg (verschwundene Nachricht). Jetzt wird sie in die Queue
+        // persistiert und automatisch neu versucht; die client_id macht den
+        // Neuversand serverseitig idempotent, falls nur die Antwort verloren
+        // ging (kein Doppelversand).
+        try {
+          await chatNachrichtEinreihen(room.id, { clientId, content, file, replyToId });
+          if (networkMonitor.isOnline) writeQueue.flush();
+        } catch (queueErr) {
+          console.error('Nachricht konnte nicht in die Queue gesichert werden:', queueErr);
+          setMessages(prev => prev.map(m =>
+            m.localId === localId ? { ...m, queueStatus: 'error' as const } : m
+          ));
+        }
       } finally {
         setUploading(false);
       }
     } else {
-      // Offline: In Queue schreiben
-      let hasFileUpload = false;
-      const queueBody: Record<string, any> = { content, client_id: clientId };
-
-      if (file) {
-        // Bild lokal speichern
-        hasFileUpload = true;
-        try {
-          const reader = new FileReader();
-          const base64 = await new Promise<string>((resolve, reject) => {
-            reader.onload = () => resolve(reader.result as string);
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-          });
-          const fileName = `queue_${clientId}_${file.name}`;
-          await Filesystem.writeFile({
-            path: `queue-uploads/${fileName}`,
-            data: base64,
-            directory: Directory.Data,
-          });
-          queueBody._localFilePath = `queue-uploads/${fileName}`;
-          queueBody._fileName = file.name;
-          queueBody._fileType = file.type;
-        } catch (fileErr) {
-          console.error('Fehler beim lokalen Speichern der Datei:', fileErr);
-          setMessages(prev => prev.map(m =>
-            m.localId === localId ? { ...m, queueStatus: 'error' as const } : m
-          ));
-          return;
-        }
+      // Offline: In Queue schreiben (Datei wird dabei lokal gesichert)
+      try {
+        await chatNachrichtEinreihen(room.id, { clientId, content, file, replyToId });
+      } catch (fileErr) {
+        console.error('Fehler beim Einreihen der Nachricht:', fileErr);
+        setMessages(prev => prev.map(m =>
+          m.localId === localId ? { ...m, queueStatus: 'error' as const } : m
+        ));
       }
-
-      if (replyToId) queueBody.reply_to = replyToId.toString();
-
-      await writeQueue.enqueue({
-        method: 'POST',
-        url: `/chat/rooms/${room.id}/messages`,
-        body: queueBody,
-        headers: { 'Content-Type': file ? 'multipart/form-data' : 'application/json' },
-        maxRetries: 5,
-        hasFileUpload,
-        metadata: {
-          type: 'chat',
-          clientId,
-          roomId: room.id,
-          label: 'Chat-Nachricht',
-        },
-      });
     }
   };
 
@@ -772,9 +901,13 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
       // Optimistisch den Vote anzeigen
       setMessages(prev => prev.map(m => {
         if (m.id === messageId && m.votes) {
+          // user.type direkt uebernehmen: Der Server speichert 'teamer' als
+          // eigenen Wert. Wurde hier 'admin' angenommen, erkannte die Anzeige
+          // (MessageBubble prüft vote.user_type === user.type) die eigene
+          // Stimme einer Teamer:in offline nicht als gesetzt.
           const newVote: PollVote = {
             user_id: user?.id ?? 0,
-            user_type: (user?.role_name === 'konfi' ? 'konfi' : 'admin') as 'admin' | 'konfi',
+            user_type: (user?.type ?? 'konfi') as PollVote['user_type'],
             option_index: optionIndex,
           };
           return { ...m, votes: [...m.votes, newVote] };
@@ -815,7 +948,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   };
 
   const deleteMessage = (messageId: number) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Nachricht löschen?',
       message: 'Diese Nachricht unwiderruflich löschen?',
@@ -946,7 +1079,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     if (!picked) return;
 
     // Bilder vor Upload resizen + komprimieren (max 1920px lange Kante). Andere
-    // Dateien (Videos, PDFs) bleiben unveraendert.
+    // Dateien (Videos, PDFs) bleiben unverändert.
     let file = picked;
     let previewUrl: string | null = null;
     if (picked.type.startsWith('image/')) {
@@ -980,7 +1113,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   }, [selectedFilePreview]);
 
   // Tastatur oeffnet sich (Eingabefeld fokussiert): ans LISTENENDE scrollen, damit
-  // die letzte Nachricht ueber der Tastatur sichtbar bleibt (WhatsApp-Verhalten).
+  // die letzte Nachricht über der Tastatur sichtbar bleibt (WhatsApp-Verhalten).
   // Sonst verdeckt die Tastatur das Chat-Ende. Mehrere Scroll-Versuche, weil die
   // Tastatur-/Viewport-Animation je nach Plattform ~150-350ms dauert.
   const handleTextareaFocus = async () => {
@@ -998,7 +1131,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   // scrollen, damit die letzte Nachricht NICHT von der Tastatur verdeckt wird.
   // Bei resize:'ionic' passt Ionic die ion-content-Hoehe an — aber teils ERST
   // nach keyboardDidShow. Ein einzelnes scrollToBottom landet dann noch am alten
-  // Ende (hinter der Tastatur). Darum: mehrfach ueber rAF + kurze Timeouts ans
+  // Ende (hinter der Tastatur). Darum: mehrfach über rAF + kurze Timeouts ans
   // Ende scrollen, sodass nach dem Layout-Reflow nachgezogen wird.
   useEffect(() => {
     const handles: any[] = [];
@@ -1008,7 +1141,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
       const el = contentRef.current;
       if (!el) return;
       const go = () => el.scrollToBottom(150);
-      // Sofort, im naechsten Frame (nach Reflow) und nochmal verzoegert, weil die
+      // Sofort, im nächsten Frame (nach Reflow) und nochmal verzoegert, weil die
       // Keyboard-/Resize-Animation je nach Geraet ~150-400ms dauert.
       go();
       requestAnimationFrame(() => { go(); requestAnimationFrame(go); });
@@ -1164,7 +1297,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
         <IonHeader>
           <IonToolbar>
             <IonButtons slot="start">
-              <IonButton onClick={onBack}>
+              <IonButton aria-label="Zurück" onClick={onBack}>
                 <IonIcon icon={arrowBack} />
               </IonButton>
             </IonButtons>
@@ -1237,7 +1370,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     // Admins duerfen NIEMALS einen Chat verlassen
     if (user?.type === 'admin') return false;
     // Event-Chats sind an die Event-Teilnahme gekoppelt: Konfis verlassen sie
-    // nur ueber die Event-Abmeldung, nicht direkt im Chat.
+    // nur über die Event-Abmeldung, nicht direkt im Chat.
     if (user?.type === 'konfi' && room.event_id) return false;
     // Teamer:innen duerfen group und admin-Chats verlassen
     if (room.type === 'group') return true;
@@ -1245,8 +1378,105 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     return false;
   };
 
+  // Nur admin/org_admin/super_admin duerfen exportieren — der Server prüft
+  // das ebenfalls, hier nur zum Ein-/Ausblenden des Menuepunkts.
+  const istLeitung = user?.type === 'admin'
+    && ['admin', 'org_admin', 'super_admin'].includes(user?.role_name || '');
+
+  // Das Backend hat recht: super_admin ist organisationsuebergreifend und
+  // fuer die Org-VERWALTUNG zustaendig (rbac.js:57) — Inhalte einer fremden
+  // Gemeinde zu loeschen gehoert nicht dazu.
+  const darfTeamChatLeeren = user?.type === 'admin'
+    && ['admin', 'org_admin'].includes(user?.role_name || '');
+
+  // Chat-Export (nur Leitung): laedt den kompletten Verlauf als Textdatei.
+  // Anlass: Inhalte aus Konfi-Chats für die Gottesdienst-Vorbereitung
+  // aufbereiten. Auf dem Geraet über das Teilen-Blatt, im Web als Download.
+  const handleExportChat = async () => {
+    if (!room || !isOnline) return;
+    try {
+      const res = await api.get(`/chat/rooms/${room.id}/export`, { responseType: 'blob' });
+      const dateiname = `${getDisplayRoomName().replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 50) || 'chat'}_${new Date().toISOString().slice(0, 10)}.txt`;
+
+      if (Capacitor.isNativePlatform()) {
+        // Auf dem Geraet: in den Dokumenten ablegen und das Teilen-Blatt oeffnen,
+        // damit die Datei in Mail, Notizen o.ae. weiterwandern kann.
+        const text = await (res.data as Blob).text();
+        await Filesystem.writeFile({
+          path: dateiname,
+          data: text,
+          directory: Directory.Cache,
+          encoding: Encoding.UTF8,
+        });
+        const { uri } = await Filesystem.getUri({ path: dateiname, directory: Directory.Cache });
+        await Share.share({ title: 'Chat-Verlauf', url: uri });
+      } else {
+        const url = URL.createObjectURL(res.data as Blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = dateiname;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (err: any) {
+      if (err?.response?.status === 403) {
+        setError('Nur die Leitung darf Chats exportieren');
+      } else {
+        setError('Export fehlgeschlagen');
+      }
+    }
+  };
+
+  // Sammelt die Optionen hinter dem Menue-Button: Export (Leitung) und
+  // Verlassen (wer darf). Frueher loeste der Button direkt das Verlassen aus.
+  const handleChatOptions = () => {
+    const buttons: any[] = [];
+    if (istLeitung) {
+      buttons.push({
+        text: 'Chat-Verlauf exportieren',
+        handler: () => { handleExportChat(); }
+      });
+    }
+    if (canLeaveChat()) {
+      buttons.push({
+        text: 'Chat verlassen',
+        role: 'destructive',
+        handler: () => { handleLeaveChat(); }
+      });
+    }
+    buttons.push({ text: 'Abbrechen', role: 'cancel' });
+    presentActionSheet({ header: getDisplayRoomName(), buttons });
+  };
+
+  // Team-Chat leeren (nur Leitung, nur im automatischen Team-Chat): löscht
+  // ALLE Nachrichten samt Dateianhaengen unwiderruflich, der Chat selbst und
+  // seine Mitglieder bleiben bestehen. Mit klarer Rückfrage.
+  const handleClearChat = () => {
+    if (offlineBlockiert(isOnline, setError)) return;
+    presentAlert({
+      header: 'Team-Chat leeren?',
+      message: 'Alle Nachrichten dieses Chats werden endgültig gelöscht — auch Dateien, Bilder und Umfragen. Das lässt sich nicht rückgängig machen. Der Chat selbst bleibt bestehen.',
+      buttons: [
+        { text: 'Abbrechen', role: 'cancel' },
+        {
+          text: 'Endgültig leeren',
+          role: 'destructive',
+          handler: async () => {
+            try {
+              await api.delete(`/chat/rooms/${room?.id}/messages`);
+              setMessages([]);
+              refreshMessagesCache();
+            } catch (err: any) {
+              setError(err.response?.data?.error || 'Fehler beim Leeren des Chats');
+            }
+          }
+        }
+      ]
+    });
+  };
+
   const handleLeaveChat = () => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Chat verlassen',
       message: 'Chat wirklich verlassen? Du erhältst keine Nachrichten mehr aus diesem Chat.',
@@ -1274,12 +1504,17 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
         roomName={getDisplayRoomName()}
         roomType={room?.type ?? 'group'}
         isAdmin={user?.type === 'admin'}
-        canLeave={canLeaveChat()}
+        // Menue-Button auch für die Leitung zeigen, wenn sie den Chat zwar
+        // nicht verlassen darf, aber exportieren kann.
+        canLeave={canLeaveChat() || istLeitung}
         isOnline={isOnline}
         onBack={onBack}
         onOpenMembers={openMembersModal}
         onOpenPoll={openPollModal}
-        onLeaveChat={handleLeaveChat}
+        onLeaveChat={handleChatOptions}
+        // Mülleimer nur im automatischen Team-Chat und nur für die Leitung —
+        // der Server prüft beides ebenfalls.
+        onClearChat={darfTeamChatLeeren && room?.is_team_chat ? handleClearChat : null}
         eventId={room?.event_id ?? null}
         partnerType={
           room?.type === 'direct'

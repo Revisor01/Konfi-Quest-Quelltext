@@ -1,11 +1,11 @@
-// Lokaler Cache fuer Chat-Medien (Bilder + Videos).
+// Lokaler Cache für Chat-Medien (Bilder + Videos).
 //
 // Problem davor: LazyImage/VideoPreview luden jedes Medium bei jedem
 // Sichtbarwerden NEU vom Server (GET /chat/files/:path) und erzeugten dabei
 // Object-URLs, die nie freigegeben wurden (Memory-Leak). Bei jedem Chat-Oeffnen
 // + Scrollen = wiederholte grosse Downloads.
 //
-// Loesung: geladene Medien werden binaer im Filesystem (Directory.Cache)
+// Lösung: geladene Medien werden binaer im Filesystem (Directory.Cache)
 // abgelegt (key = Hash des filePath). Beim erneuten Anzeigen kommt das Medium
 // aus dem Cache statt vom Server. Es gibt eine "Cache leeren"-Funktion samt
 // Groessenanzeige.
@@ -22,14 +22,14 @@ const CACHE_DIR = 'media-cache';
 // filePath (z.B. wenn dasselbe Bild mehrfach im Viewport erscheint).
 const inflight = new Map<string, Promise<Blob>>();
 
-// Persistenter In-Memory-Object-URL-Cache: haelt fertige blob:-URLs ueber
+// Persistenter In-Memory-Object-URL-Cache: haelt fertige blob:-URLs über
 // Mount/Unmount der Chat-Komponenten hinweg. So ist ein Bild beim erneuten
 // Oeffnen des Chats SOFORT da (kein Re-Download aus dem Filesystem, kein
 // Spinner, kein Layout-Sprung). Die URLs werden NICHT pro-Komponente revoked
-// (das wuerde den geteilten Cache zerstoeren) — nur clearMediaCache() raeumt auf.
+// (das wuerde den geteilten Cache zerstoeren) — nur clearMediaCache() räumt auf.
 const objectUrlCache = new Map<string, string>();
 
-// Stabiler, dateisystemsicherer Schluessel aus dem filePath (djb2-Hash).
+// Stabiler, dateisystemsicherer Schlüssel aus dem filePath (djb2-Hash).
 const cacheKey = (filePath: string): string => {
   let hash = 5381;
   for (let i = 0; i < filePath.length; i++) {
@@ -144,15 +144,15 @@ export function getCachedObjectUrl(filePath: string): string | null {
 }
 
 /**
- * Liefert eine persistente blob:-Object-URL fuer das Medium. Die URL wird im
- * In-Memory-Cache gehalten und ueber Mount/Unmount hinweg wiederverwendet — der
- * AUFRUFER darf sie NICHT selbst revoken (nur clearMediaCache() raeumt auf).
+ * Liefert eine persistente blob:-Object-URL für das Medium. Die URL wird im
+ * In-Memory-Cache gehalten und über Mount/Unmount hinweg wiederverwendet — der
+ * AUFRUFER darf sie NICHT selbst revoken (nur clearMediaCache() räumt auf).
  */
 export async function getMediaObjectUrl(filePath: string): Promise<string> {
   const cached = objectUrlCache.get(filePath);
   if (cached) return cached;
   const blob = await getMediaBlob(filePath);
-  // Doppelpruefung: ein paralleler Aufruf koennte die URL inzwischen gesetzt
+  // Doppelpruefung: ein paralleler Aufruf könnte die URL inzwischen gesetzt
   // haben -> dann die eigene verwerfen und die geteilte nehmen.
   const existing = objectUrlCache.get(filePath);
   if (existing) return existing;

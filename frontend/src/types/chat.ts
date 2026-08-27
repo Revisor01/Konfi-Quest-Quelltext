@@ -1,6 +1,17 @@
+/**
+ * Nutzertyp im Chat: DREI Werte, wie sie chat_participants.user_type,
+ * chat_poll_votes.user_type und chat_message_reactions.user_type fuehren.
+ * 'teamer' fehlte in mehreren Typen unten, obwohl die Datenbank ihn speichert —
+ * dadurch fielen Vergleiche wie `=== 'admin'` für "gehört zum Team" nicht auf.
+ */
+export type ChatUserType = 'admin' | 'teamer' | 'konfi';
+
 export interface PollVote {
-  user_id: number;
-  user_type: 'admin' | 'konfi';
+  // Bei anonymen Umfragen liefert der Server für FREMDE Stimmen null: sonst
+  // liesse sich über die Teilnehmerliste aufloesen, wer was gewählt hat. Die
+  // eigene Stimme behält ihre Kennung, damit sie markiert werden kann.
+  user_id: number | null;
+  user_type: ChatUserType | null;
   option_index: number;
   user_name?: string;
 }
@@ -9,7 +20,7 @@ export interface Reaction {
   id: number;
   emoji: string;
   user_id: number;
-  user_type: 'admin' | 'konfi';
+  user_type: ChatUserType;
   user_name: string;
 }
 
@@ -20,7 +31,7 @@ export interface Message {
   sender_name: string;
   sender_role_title?: string;
   sender_role_display_name?: string;
-  sender_type: 'admin' | 'konfi' | 'teamer';
+  sender_type: ChatUserType;
   created_at: string;
   file_path?: string;
   file_name?: string;
@@ -50,14 +61,14 @@ export interface Message {
   queueStatus?: 'pending' | 'error';
   localId?: string;
   // client_id der eigenen optimistischen Nachricht — Match gegen das
-  // newMessage-Event (message.client_id) fuer In-Place-Ersetzen ohne Flackern
+  // newMessage-Event (message.client_id) für In-Place-Ersetzen ohne Flackern
   clientId?: string;
   client_id?: string;
 }
 
 export interface ChatParticipant {
   user_id: number;
-  user_type: 'admin' | 'konfi';
+  user_type: ChatUserType;
   name: string;
   display_name?: string;
 }
@@ -68,6 +79,9 @@ export interface ChatRoomBase {
   type: 'group' | 'direct' | 'jahrgang' | 'admin';
   event_id?: number | null;
   participants?: ChatParticipant[];
+  // Automatischer Team-Chat der Organisation (Migration 104) — nur er
+  // laesst sich über den Mülleimer im Header leeren.
+  is_team_chat?: boolean;
 }
 
 export interface ChatRoomOverview extends ChatRoomBase {
@@ -81,8 +95,8 @@ export interface ChatRoomOverview extends ChatRoomBase {
   };
   unread_count: number;
   jahrgang_name?: string;
-  // Rolle des Direktchat-Partners (nur bei type='direct'): admin=Teamer:in, konfi=Konfi.
-  partner_user_type?: 'admin' | 'konfi';
+  // Rolle des Direktchat-Partners (nur bei type='direct').
+  partner_user_type?: ChatUserType;
   // Reiner Team-Gruppenchat: alle Teilnehmer sind Teamer:innen (nur bei type='group' relevant).
   is_team_only?: boolean;
 }

@@ -3,19 +3,19 @@ import { PushNotifications, type PushNotificationSchema } from '@capacitor/push-
 
 // Zugestellte Notifications aus dem Mitteilungszentrum/Sperrbildschirm entfernen.
 //
-// Strategie (bewusst NICHT "beim App-Start alles loeschen", damit ungelesene
+// Strategie (bewusst NICHT "beim App-Start alles löschen", damit ungelesene
 // Erinnerungen nicht verschwinden, nur weil die App geoeffnet wurde):
 //   1) Beim Antippen einer Notification -> genau diese entfernen.
-//   2) Beim Oeffnen des zugehoerigen Bereichs (Chat-Raum, Events) -> die
+//   2) Beim Oeffnen des zugehörigen Bereichs (Chat-Raum, Events) -> die
 //      Notifications dieses Bereichs entfernen (an die Read-/Badge-Logik gekoppelt).
 //
 // Alle Funktionen sind no-ops im Web (kein natives Mitteilungszentrum) und
-// schlucken Fehler defensiv: ein fehlgeschlagenes Aufraeumen darf den Flow
+// schlucken Fehler defensiv: ein fehlgeschlagenes Aufräumen darf den Flow
 // (Navigation, Mark-Read) nie blockieren.
 
 // ALLE zugestellten Notifications entfernen. Bewusst sparsam einsetzen
-// (z.B. fuer Admins, die ohnehin laufend Erinnerungen bekommen) — fuer
-// normale Nutzer waere "beim App-Start alles weg" zu aggressiv.
+// (z.B. für Admins, die ohnehin laufend Erinnerungen bekommen) — für
+// normale Nutzer wäre "beim App-Start alles weg" zu aggressiv.
 export const removeAllDelivered = async (): Promise<void> => {
   if (!Capacitor.isNativePlatform()) return;
   try {
@@ -42,7 +42,7 @@ export const removeDeliveredById = async (id: string): Promise<void> => {
 // Das Praedikat bekommt das vom Plugin gelieferte PushNotificationSchema
 // (inkl. data-Payload). Liefert getDeliveredNotifications keine data (kommt
 // auf manchen iOS-Versionen vor), wird die Notification NICHT entfernt
-// (lieber liegen lassen als faelschlich loeschen).
+// (lieber liegen lassen als faelschlich löschen).
 export const removeDeliveredWhere = async (
   predicate: (n: PushNotificationSchema) => boolean
 ): Promise<void> => {

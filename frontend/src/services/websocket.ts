@@ -30,9 +30,9 @@ export const initializeWebSocket = (token: string): Socket => {
     // Token bei JEDEM (Re-)Connect frisch besorgen: ein statisches auth-Objekt
     // friert den Token vom Erstellzeitpunkt ein — nach Ablauf (15 Min) lehnt der
     // Server dann jeden Reconnect mit "jwt expired" ab und Chat/Live-Updates
-    // haengen, bis der Auth-Error-Umweg den Socket komplett neu aufgebaut hat.
-    // ensureFreshToken refresht bei Bedarf, faellt bei Fehlern auf den
-    // gespeicherten Token zurueck (dann greift weiterhin der Recovery-Pfad).
+    // hängen, bis der Auth-Error-Umweg den Socket komplett neu aufgebaut hat.
+    // ensureFreshToken refresht bei Bedarf, fällt bei Fehlern auf den
+    // gespeicherten Token zurück (dann greift weiterhin der Recovery-Pfad).
     auth: (cb) => {
       ensureFreshToken()
         .then((fresh) => cb({ token: fresh ?? getToken() ?? token }))
@@ -83,7 +83,7 @@ export const initializeWebSocket = (token: string): Socket => {
     // Abgelaufenes/ungueltiges Token: Server lehnt den Handshake mit einer
     // Auth-Meldung ab ("jwt expired" / "Authentifizierung fehlgeschlagen" o.ae.).
     // Ohne API-Call zu diesem Zeitpunkt wuerde sonst niemand den Token-Refresh
-    // ausloesen — der Chat-Tab haengt dann scheinbar grundlos. Wir stossen den
+    // auslösen — der Chat-Tab hängt dann scheinbar grundlos. Wir stossen den
     // zentralen Refresh-/Relogin-Flow an (api.ts -> auth:relogin-required).
     const msg = (error?.message || '').toLowerCase();
     if (msg.includes('jwt') || msg.includes('token') || msg.includes('auth') || msg.includes('unauthorized')) {
@@ -102,8 +102,8 @@ export const getSocket = (): Socket | null => socket;
 
 // Erzwingt einen Reconnect-Versuch, wenn der Socket existiert aber getrennt ist.
 // Wird beim Wiedererlangen der Netzwerkverbindung (online-Event) aufgerufen:
-// nach einem Netzwerkwechsel haengt socket.io manchmal im getrennten Zustand,
-// ohne von selbst neu zu verbinden. connect() stoesst das aktiv an.
+// nach einem Netzwerkwechsel hängt socket.io manchmal im getrennten Zustand,
+// ohne von selbst neu zu verbinden. connect() stößt das aktiv an.
 export const ensureSocketConnected = (): void => {
   if (socket && !socket.connected) {
     socket.connect();
@@ -118,9 +118,15 @@ export const disconnectWebSocket = () => {
   _hasConnectedOnce = false;
 };
 
+if (typeof window !== 'undefined') {
+  window.addEventListener('auth:relogin-required', () => {
+    disconnectWebSocket();
+  });
+}
+
 // Socket mit frischem Token neu aufbauen (nach erfolgreichem Token-Refresh).
 // Der alte Socket wird verworfen, damit die Listener im LiveUpdateContext beim
-// naechsten initializeWebSocket sauber neu gebunden werden.
+// nächsten initializeWebSocket sauber neu gebunden werden.
 export const reconnectWithToken = (token: string): void => {
   if (socket) {
     socket.disconnect();

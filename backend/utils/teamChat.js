@@ -1,26 +1,26 @@
-// teamChat.js — Zentrale Sync-Logik fuer den automatischen Team-Chat.
+// teamChat.js — Zentrale Sync-Logik für den automatischen Team-Chat.
 //
 // Sollregel (vom Nutzer festgelegt):
-//   - EIN Chat pro Organisation, heisst "Team", type 'admin' (-> pink, Team-Tab).
+//   - EIN Chat pro Organisation, heißt "Team", type 'admin' (-> pink, Team-Tab).
 //   - Drin sind ALLE aktiven Org-Admins, Admins und Teamer:innen der Organisation.
 //   - Konfis sind NIE drin.
-//   - Auto-Hinzufuegen/Entfernen: wird jemand Teamer/Admin (oder verlaesst die Rolle),
-//     passt sich die Mitgliedschaft beim naechsten Sync an.
+//   - Auto-Hinzufuegen/Entfernen: wird jemand Teamer/Admin (oder verlässt die Rolle),
+//     passt sich die Mitgliedschaft beim nächsten Sync an.
 //
 // user_type-Konsistenz (wie beim Jahrgangs-Chat): teamer -> 'teamer',
 // org_admin/admin -> 'admin'. So finden Teamer ihren Raum wieder.
 //
 // Identifikation des Auto-Chats: chat_rooms.is_team_chat = true (Migration 104),
-// nicht ueber den Namen (den koennte der Nutzer theoretisch aendern).
+// nicht über den Namen (den könnte der Nutzer theoretisch ändern).
 
 /**
- * Stellt sicher, dass fuer eine Organisation ein Team-Chat existiert und die
+ * Stellt sicher, dass für eine Organisation ein Team-Chat existiert und die
  * Mitgliedschaft exakt der Sollregel entspricht. Idempotent.
  *
  * @param {object} db        Pool ODER Client (muss .query haben). Innerhalb einer
  *                           Transaktion den Client uebergeben.
  * @param {number} organizationId
- * @param {number|null} createdBy  User-ID fuer created_by bei Neuanlage.
+ * @param {number|null} createdBy  User-ID für created_by bei Neuanlage.
  * @returns {Promise<number|null>} room_id des Team-Chats (oder null bei Fehler).
  */
 async function syncTeamChat(db, organizationId, createdBy = null) {
@@ -45,7 +45,7 @@ async function syncTeamChat(db, organizationId, createdBy = null) {
   // 2. SOLL-Mitglieder: alle aktiven Org-Admins/Admins/Teamer der Org.
   //    WICHTIG Multi-Org (Migration 101): Mitgliedschaft kann aus der Primaer-Org
   //    (users.organization_id + users.role_id) ODER aus user_organizations
-  //    (Org-Switcher) kommen — beide Quellen zaehlen, sonst entfernt der Sync
+  //    (Org-Switcher) kommen — beide Quellen zählen, sonst entfernt der Sync
   //    eingewechselte Mitglieder aus dem Team-Chat.
   const { rows: sollMembers } = await db.query(
     `

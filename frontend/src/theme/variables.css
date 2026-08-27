@@ -6,7 +6,7 @@ http://ionicframework.com/docs/theming/ */
 @import '@rdlabo/ionic-theme-ios26/dist/css/ionic-theme-ios26.css';
 @import '@rdlabo/ionic-theme-ios26/dist/css/md-remove-ios-class-effect.css';
 
-/* Material Design 3 Theme - fuer Android */
+/* Material Design 3 Theme - für Android */
 @import '@rdlabo/ionic-theme-md3/dist/css/default-variables.css';
 @import '@rdlabo/ionic-theme-md3/dist/css/ionic-theme-md3.css';
 
@@ -57,7 +57,7 @@ ion-list-header ion-label {
   /* ============================================
      APP COLOR TOKENS (Single Source of Truth)
      ============================================ */
-  /* Domain-Farben - hier aendern wirkt ueberall */
+  /* Domain-Farben - hier ändern wirkt ueberall */
   --app-color-events: #dc2626;
   --app-color-events-rgb: 220, 38, 38;
   --app-color-activities: #047857;
@@ -66,6 +66,8 @@ ion-list-header ion-label {
   --app-color-konfis-rgb: 91, 33, 182;
   --app-color-teamer: #be185d;
   --app-color-teamer-rgb: 190, 24, 93;
+  --app-color-challenges: #be185d;
+  --app-color-challenges-rgb: 190, 24, 93;
   --app-color-users: #667eea;
   --app-color-users-rgb: 102, 126, 234;
   --app-color-badges: #f59e0b;
@@ -84,6 +86,11 @@ ion-list-header ion-label {
   --app-color-level-rgb: 236, 72, 153;
   --app-color-group: #f97316;
   --app-color-group-rgb: 249, 115, 22;
+  /* Verlauf der Teamer-Kopfbereiche. Es gab drei verschiedene "Teamer-Pink"-
+     Verlaeufe an drei Stellen (Profil, Detail-Header, Dashboard-Kachel) —
+     seit 11.08. dieser eine. Mittlerer Stopp ist --app-color-teamer. */
+  --app-gradient-teamer: linear-gradient(135deg, #ec4899 0%, #be185d 50%, #9d174d 100%);
+
   /* Punkte-Typen */
   --app-color-gottesdienst: #3b82f6;
   --app-color-gottesdienst-rgb: 59, 130, 246;
@@ -92,6 +99,8 @@ ion-list-header ion-label {
   /* Status */
   --app-color-success: #34c759;
   --app-color-success-rgb: 52, 199, 89;
+  --app-color-success-strong: #059669;
+  --app-color-success-strong-rgb: 5, 150, 105;
   --app-color-warning: #ff9500;
   --app-color-warning-rgb: 255, 149, 0;
   --app-color-danger: #dc3545;
@@ -120,7 +129,7 @@ ion-list-header ion-label {
 
   --app-description-font-size: 0.85rem;
 
-  /* Generische Textfarben — Single source of truth fuer Inline-Style colors */
+  /* Generische Textfarben — Single source of truth für Inline-Style colors */
   --app-text-primary: #333;
   --app-text-secondary: #666;
   --app-text-tertiary: #888;
@@ -133,7 +142,7 @@ ion-list-header ion-label {
   --background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
 }
 
-/* App Card Styling - zentrale Klasse fuer alle Cards */
+/* App Card Styling - zentrale Klasse für alle Cards */
 ion-card.app-card {
   --background: white;
   box-shadow: none;
@@ -173,7 +182,7 @@ ion-card.app-card ion-item ion-label h2 {
    ============================================ */
 
 /* === List Items === */
-/* App List Item - Basis-Klasse fuer alle Listenelemente mit farbiger Border */
+/* App List Item - Basis-Klasse für alle Listenelemente mit farbiger Border */
 .app-list-item {
   border-top: 1px solid rgba(0,0,0,0.06);
   border-right: 1px solid rgba(0,0,0,0.06);
@@ -225,7 +234,7 @@ ion-item-sliding:last-child {
   margin-bottom: 0;
 }
 
-/* Farbvarianten fuer List Items - linke Border */
+/* Farbvarianten für List Items - linke Border */
 .app-list-item--events, ion-item.app-list-item--events { border-left-color: var(--app-color-events); }
 .app-list-item--chat, ion-item.app-list-item--chat { border-left-color: var(--app-color-chat); }
 .app-list-item--success, ion-item.app-list-item--success { border-left-color: var(--app-color-success); }
@@ -240,6 +249,7 @@ ion-item-sliding:last-child {
 .app-list-item--activities, ion-item.app-list-item--activities { border-left-color: var(--app-color-activities); }
 .app-list-item--teamer, ion-item.app-list-item--teamer { border-left-color: var(--app-color-teamer); }
 .app-list-item--team, ion-item.app-list-item--team { border-left-color: var(--app-color-teamer); }
+.app-list-item--challenges, ion-item.app-list-item--challenges { border-left-color: var(--app-color-challenges); }
 .app-list-item--users, ion-item.app-list-item--users { border-left-color: var(--app-color-users); }
 .app-list-item--level, ion-item.app-list-item--level { border-left-color: var(--app-color-level); }
 .app-list-item--organizations, ion-item.app-list-item--organizations { border-left-color: var(--app-color-users); }
@@ -263,6 +273,7 @@ ion-item-sliding:last-child {
 .app-list-item--chat.app-list-item--selected { background: rgba(var(--app-color-chat-rgb), 0.08); }
 .app-list-item--team.app-list-item--selected { background: rgba(var(--app-color-teamer-rgb), 0.08); }
 .app-list-item--teamer.app-list-item--selected { background: rgba(var(--app-color-teamer-rgb), 0.08); }
+.app-list-item--challenges.app-list-item--selected { background: rgba(var(--app-color-challenges-rgb), 0.08); }
 .app-list-item--warning.app-list-item--selected { background: rgba(var(--app-color-warning-rgb), 0.08); }
 .app-list-item--primary.app-list-item--selected { background: rgba(var(--app-color-konfis-rgb), 0.08); }
 .app-list-item--purple.app-list-item--selected { background: rgba(var(--app-color-konfis-rgb), 0.08); }
@@ -280,7 +291,7 @@ ion-item-sliding:last-child {
 .app-list-item--jahrgang.app-list-item--selected { background: rgba(var(--app-color-jahrgang-rgb), 0.08); }
 
 /* === Reason Boxes === */
-/* App Reason Box - fuer Abmeldungen, Ablehnungen, etc. */
+/* App Reason Box - für Abmeldungen, Ablehnungen, etc. */
 /* Kein eigener linker Farbbalken: Reason-Boxen sitzen in app-list-item,
    das bereits einen farbigen border-left hat (sonst Doppelung) */
 .app-reason-box {
@@ -310,7 +321,7 @@ ion-item-sliding:last-child {
 .app-reason-box--info .app-reason-box__label { color: #007aff; }
 
 /* === Status Chips === */
-/* App Status Chip - fuer Status-Anzeigen */
+/* App Status Chip - für Status-Anzeigen */
 .app-chip {
   font-size: 0.7rem;
   font-weight: 600;
@@ -348,9 +359,16 @@ ion-item-sliding:last-child {
   background-color: rgba(91, 33, 182, 0.15);
   color: #5b21b6;
 }
+/* Challenges: Rosa bewusst nur als Akzent (Chip/Icon), nicht als Vollflaeche */
+.app-chip--challenges {
+  background-color: rgba(var(--app-color-challenges-rgb), 0.12);
+  color: var(--app-color-challenges);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 
 /* === Corner Badges === */
-/* Flex-Container fuer mehrere Badges nebeneinander (oben rechts) */
+/* Flex-Container für mehrere Badges nebeneinander (oben rechts) */
 .app-corner-badges {
   position: absolute;
   top: 0;
@@ -359,7 +377,7 @@ ion-item-sliding:last-child {
   flex-direction: row;
   z-index: 10;
 }
-/* Trenner zwischen Badges (2px weiss) */
+/* Trenner zwischen Badges (2px weiß) */
 .app-corner-badges__separator {
   width: 2px;
   background: white;
@@ -398,6 +416,7 @@ ion-item-sliding:last-child {
 /* Chat-Raumtyp-Farben */
 .app-corner-badge--team { background-color: var(--app-color-teamer); }
 .app-corner-badge--teamer { background-color: var(--app-color-teamer); }
+.app-corner-badge--challenges { background-color: var(--app-color-challenges); }
 .app-corner-badge--chat-jahrgang { background-color: var(--app-color-chat); }
 .app-corner-badge--konfi { background-color: var(--app-color-konfis); }
 .app-corner-badge--group { background-color: var(--app-color-group); }
@@ -451,6 +470,7 @@ ion-item-sliding:last-child {
 .app-section-icon--jahrgang { background-color: var(--app-color-jahrgang); }
 .app-section-icon--settings { background-color: var(--app-color-users); }
 .app-section-icon--teamer { background-color: var(--app-color-teamer); }
+.app-section-icon--challenges { background-color: var(--app-color-challenges); }
 .app-section-icon ion-icon {
   color: white;
   font-size: 0.8rem;
@@ -463,7 +483,7 @@ ion-list[inset] ion-list-header {
 }
 
 /* === Info Rows === */
-/* App Info Row - fuer Info-Zeilen mit Icon */
+/* App Info Row - für Info-Zeilen mit Icon */
 .app-info-row {
   display: flex;
   align-items: flex-start;
@@ -487,7 +507,7 @@ ion-list[inset] ion-list-header {
 }
 
 /* === Icon Circles === */
-/* App Icon Circle - runder Icon-Container fuer Listen-Items */
+/* App Icon Circle - runder Icon-Container für Listen-Items */
 .app-icon-circle {
   width: 28px;
   height: 28px;
@@ -515,6 +535,7 @@ ion-list[inset] ion-list-header {
 .app-icon-circle--activities { background-color: var(--app-color-activities); }
 .app-icon-circle--teamer { background-color: var(--app-color-teamer); }
 .app-icon-circle--team { background-color: var(--app-color-teamer); }
+.app-icon-circle--challenges { background-color: var(--app-color-challenges); }
 .app-icon-circle--users { background-color: var(--app-color-users); }
 .app-icon-circle--level { background-color: var(--app-color-level); }
 .app-icon-circle--organizations { background-color: var(--app-color-users); }
@@ -640,7 +661,7 @@ ion-list[inset] ion-list-header {
   font-size: 0.8rem;
   flex-shrink: 0;
 }
-/* Multiline-Variante: Icon oben buendig statt mittig (fuer lange Texte wie "Mitbringen") */
+/* Multiline-Variante: Icon oben buendig statt mittig (für lange Texte wie "Mitbringen") */
 .app-list-item__meta-item--multiline {
   align-items: flex-start;
 }
@@ -701,9 +722,11 @@ ion-tab-bar.md {
   padding-bottom: env(safe-area-inset-bottom, 0px) !important;
   height: calc(56px + env(safe-area-inset-bottom, 0px)) !important;
   box-sizing: content-box !important;
+  padding-left: env(safe-area-inset-left, 0px) !important;
+  padding-right: env(safe-area-inset-right, 0px) !important;
 }
 
-/* Aeussere Tab-Buttons leicht einruecken, damit lange Labels (Aktivitaeten)
+/* Aeussere Tab-Buttons leicht einruecken, damit lange Labels (Aktivitäten)
    nicht am Bildschirmrand abgeschnitten werden. */
 ion-tab-bar.md ion-tab-button {
   padding-left: 1px !important;
@@ -714,11 +737,16 @@ ion-tab-bar.md ion-tab-button ion-label,
 ion-tab-bar.md ion-tab-button .tab-button-text {
   font-size: 0.6rem !important;
   white-space: nowrap !important;
-  overflow: visible !important;
+  /* Frueher overflow: visible — damit lief eine zu lange Beschriftung über
+     den Reiter hinaus, statt sich zu kuerzen, und schob die Nachbarn optisch
+     zusammen. Mit Auslassungspunkten bleibt die Leiste in jedem Fall heil. */
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  max-width: 100% !important;
 }
 
 /* iOS26-Library Content-Gradient komplett neutralisieren */
-/* Die Library setzt ::before/::after Pseudo-Elemente fuer einen weissen Bottom-Gradient. */
+/* Die Library setzt ::before/::after Pseudo-Elemente für einen weissen Bottom-Gradient. */
 /* Stoert auf allen Plattformen — weg damit. */
 ion-content::part(background)::before,
 ion-content::part(background)::after {
@@ -884,6 +912,11 @@ ion-item {
   background: linear-gradient(135deg, var(--app-color-teamer) 0%, #be123c 100%);
 }
 
+/* === Challenges Domain Color === */
+.app-header-banner--challenges {
+  background: linear-gradient(135deg, var(--app-color-challenges) 0%, #be123c 100%);
+}
+
 /* === Stats Row === */
 .app-stats-row {
   display: flex;
@@ -894,17 +927,49 @@ ion-item {
   flex-wrap: wrap;
 }
 
+/* Gilt für beide Varianten: <div> (reine Anzeige) und <button> (klickbar).
+   box-sizing MUSS hier stehen — ein <button> bringt border-box vom Browser mit,
+   ein <div> erbt content-box. Ohne die Vereinheitlichung zieht der Button das
+   Padding nach innen und wird bei gleichem max-width schmaler als die Nachbarn.
+   */
 .app-stats-row__item {
+  box-sizing: border-box;
   background: rgba(255, 255, 255, 0.2);
+  border: none;
   border-radius: 12px;
-  padding: 10px 12px;
+  padding: 10px 12px !important;
   text-align: center;
+  font-family: inherit;
+  line-height: normal !important;
   flex: 1 1 0;
   min-width: 80px;
   max-width: 100px;
+  /* Container-Bezug für die cqw-Schriftgroessen der Kinder. */
+  container-type: inline-size;
 }
 
-/* Grid-Variante fuer 5+ Stats (z.B. Profil mit 6 Stats) */
+/* Klickbare Kacheln (springen zum passenden Reiter). Optik kommt komplett aus
+   .app-stats-row__item — hier nur noch das Interaktionsverhalten. */
+.app-stats-row__item--clickable {
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: background 0.15s ease, transform 0.1s ease;
+  /* Touch-Ziel: die Kachel ist mit Padding bereits über 44px hoch. */
+}
+
+.app-stats-row__item--clickable:active {
+  transform: scale(0.96);
+  background: rgba(255, 255, 255, 0.32);
+}
+
+/* Aktiver Reiter: deutlich hellere Kachel, damit die Auswahl sichtbar bleibt. */
+.app-stats-row__item--active {
+  background: rgba(255, 255, 255, 0.38);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, 0.55);
+}
+
+/* Grid-Variante für 5+ Stats (z.B. Profil mit 6 Stats) */
 .app-stats-row--grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -919,17 +984,34 @@ ion-item {
 }
 
 .app-stats-row__value {
+  /* Skaliert mit, damit auch drei- bis vierstellige Werte (oder "∞") in der
+     schmalsten Kachel einzeilig bleiben. */
   font-size: 1.3rem;
+  font-size: clamp(1rem, 28cqi, 1.3rem);
   font-weight: 800;
   color: white;
+  white-space: nowrap;
 }
 
 .app-stats-row__label {
+  /* Skaliert mit der Kachelbreite (cqi = 1% der Container-Breite), damit auch
+     lange Labels wie "TEAMER:IN" oder "CHALLENGES" einzeilig hineinpassen —
+     frueher stand dort eine feste Groesse und lange Woerter ragten heraus.
+     cqi bezieht sich auf die INHALTSbreite (Kachel minus 24px Padding), nicht
+     auf die volle Kachel. Faktor so gewaehlt, dass "CHALLENGES" (laengstes
+     Label) auch in der schmalsten Kachel mit Reserve einzeilig passt.
+     Die erste Zeile ist der Fallback fuer Engines ohne Container-Queries. */
   font-size: 0.65rem;
+  font-size: clamp(0.48rem, 12cqi, 0.68rem);
   color: rgba(255, 255, 255, 0.85);
   font-weight: 600;
   letter-spacing: 0.3px;
   text-transform: uppercase;
+  /* Lange Labels (z.B. CHALLENGES) duerfen nie zweizeilig werden */
+  white-space: nowrap;
+  /* Notnagel für extreme Fälle: lieber gekuerzt als gesprengt. */
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* === Empty States === */
@@ -1009,6 +1091,24 @@ ion-item {
   margin: 2px 0 0 0;
 }
 
+/* === Schalter mit Erklärungstext (Muster aus "Challenge erstellen") ===
+   Ionic schneidet Texte in ion-label standardmäßig einzeilig mit "…" ab.
+   Diese Klassen lassen Titel und Erklärung mehrzeilig umbrechen — für alle
+   Einstellungs-Schalter verwenden, statt white-space inline zu setzen. */
+.app-toggle-item__title {
+  color: #333;
+  margin: 0 0 4px 0;
+  font-weight: 600;
+  white-space: normal;
+}
+.app-toggle-item__hint {
+  color: #666;
+  margin: 0;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  white-space: normal;
+}
+
 /* === Segment Tabs === */
 .app-segment-wrapper {
   margin: 16px;
@@ -1040,6 +1140,11 @@ ion-item {
   background: rgba(var(--app-color-teamer-rgb), 0.08);
   border: 1px solid rgba(var(--app-color-teamer-rgb), 0.2);
   color: var(--app-color-teamer);
+}
+.app-info-box--challenges {
+  background: rgba(var(--app-color-challenges-rgb), 0.08);
+  border: 1px solid rgba(var(--app-color-challenges-rgb), 0.2);
+  color: var(--app-color-challenges);
 }
 
 /* === Progress Bars === */
@@ -1130,7 +1235,7 @@ ion-item {
 }
 
 /* === Transparentes IonItem Wrapper === */
-/* IonItem das nur als Container fuer app-list-item dient */
+/* IonItem das nur als Container für app-list-item dient */
 ion-item.app-item-transparent {
   --background: transparent;
   --padding-start: 0;
@@ -1142,10 +1247,10 @@ ion-item.app-item-transparent {
 }
 
 /* === Swipe-Actions (global) ===
- * Einzige Quelle der Wahrheit fuer Swipe-Buttons (Groesse, Form, Farbe, Abstaende).
+ * Einzige Quelle der Wahrheit für Swipe-Buttons (Größe, Form, Farbe, Abstaende).
  * Views setzen NUR die Klassen .app-swipe-actions / .app-swipe-action und je einen
  * Farb-Modifier (--danger/--warning/...) am inneren .app-icon-circle.
- * KEINE Inline-Styles fuer Groesse/Farbe/Abstand mehr — hier zentral aendern.
+ * KEINE Inline-Styles für Größe/Farbe/Abstand mehr — hier zentral ändern.
  */
 ion-item-options.app-swipe-actions {
   --ion-item-background: transparent;
@@ -1163,7 +1268,7 @@ ion-item-option.app-swipe-action {
   --border-width: 0;
   --border-style: none;
   /* ion-item-option hat ein inneres native-Padding (Default ~0.7em je Seite),
-   * das ueber die CSS-Variablen --padding-* gesteuert wird. Bei zwei Buttons
+   * das über die CSS-Variablen --padding-* gesteuert wird. Bei zwei Buttons
    * nebeneinander wuerde sich rechtes + linkes Padding verdoppeln, daher
    * NUR links Abstand (10px), rechts 0 -> exakt 10px zwischen den Icons. */
   --padding-start: 10px;
@@ -1179,7 +1284,7 @@ ion-item-option.app-swipe-action::part(native) {
   padding-left: 10px;
   padding-right: 0;
 }
-/* Innerer Icon-Kreis im Swipe-Button: einheitliche Groesse/Form ueberall.
+/* Innerer Icon-Kreis im Swipe-Button: einheitliche Größe/Form ueberall.
  * Ueberschreibt das margin-top der Listen-Variante, damit der Kreis mittig sitzt. */
 .app-swipe-action .app-icon-circle {
   width: 40px;
@@ -1207,7 +1312,7 @@ ion-item-option.app-swipe-action::part(native) {
   align-items: flex-start;
 }
 
-/* === Section-Inset (margin: 16px fuer IonList inset) === */
+/* === Section-Inset (margin: 16px für IonList inset) === */
 ion-list.app-section-inset {
   margin: 16px;
 }
@@ -1266,7 +1371,7 @@ ion-card-content.app-card-content {
   padding: 0 4px;
 }
 
-/* === Titel mit Corner-Badge Platz (paddingRight fuer app-corner-badge) === */
+/* === Titel mit Corner-Badge Platz (paddingRight für app-corner-badge) === */
 .app-list-item__title--with-badge {
   padding-right: 70px;
 }
@@ -1329,11 +1434,34 @@ ion-button.app-action-button {
   min-width: 24px;
   text-align: center;
 }
+/* Hoechstwert rechts — GRAU wie das Minimum links, damit die Skala als Skala
+   lesbar bleibt. Frueher stand rechts der farbige Wert (oder, im BonusModal,
+   sogar der fest verdrahtete Hoechstwert in Farbe): beides sah aus wie der
+   eingestellte Wert. Die Skalenenden gehoeren in Grau, der echte Wert in Farbe. */
+.app-range-row__max {
+  font-size: 0.75rem;
+  color: #8e8e93;
+  min-width: 24px;
+  text-align: center;
+}
+/* Der eingestellte Wert — farbig und fett, deutlich vom Skalenende abgesetzt.
+   Sitzt bei der Beschriftung ueber dem Regler, nicht am Skalenende. */
 .app-range-row__value {
   font-size: 0.85rem;
   font-weight: 600;
   min-width: 28px;
   text-align: center;
+}
+.app-range-label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.app-range-label__wert {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--ion-color-primary);
 }
 ion-range.app-range {
   flex: 1;
@@ -1351,7 +1479,7 @@ ion-range.app-range--events + .app-range-row__value,
 .app-range-row .app-range--events ~ .app-range-row__value {
   color: var(--app-color-events);
 }
-/* Toggle in Events-Rot fuer Konsistenz */
+/* Toggle in Events-Rot für Konsistenz */
 ion-toggle.app-toggle--events {
   --track-background-checked: var(--app-color-events);
   --handle-background-checked: #fff;
@@ -1397,7 +1525,7 @@ ion-toggle.app-toggle--events {
 .app-icon-color--jahrgang { color: var(--app-color-jahrgang); }
 .app-icon-color--success { color: var(--app-color-success); }
 .app-icon-color--danger { color: var(--app-color-danger); }
-/* Semantische Aliase fuer Events-Listen */
+/* Semantische Aliase für Events-Listen */
 .app-icon-color--team { color: var(--app-color-konfis); }
 .app-icon-color--waitlist { color: var(--app-color-bonus); }
 .app-icon-color--points { color: var(--app-color-warning); }
@@ -1407,6 +1535,7 @@ ion-toggle.app-toggle--events {
 .app-icon-color--material { color: var(--app-color-material); }
 .app-icon-color--muted { color: #999; }
 .app-icon-color--teamer { color: var(--app-color-teamer); }
+.app-icon-color--challenges { color: var(--app-color-challenges); }
 .app-icon-color--konfis { color: var(--app-color-konfis); }
 .app-icon-color--system { color: var(--app-text-system); }
 .app-icon-color--text-primary { color: var(--app-text-primary); }
@@ -1457,11 +1586,11 @@ ion-toggle.app-toggle--events {
 }
 
 /* === EventDetailView Helper-Klassen === */
-/* Icon mit leichtem Top-Offset fuer vertikale Ausrichtung */
+/* Icon mit leichtem Top-Offset für vertikale Ausrichtung */
 .app-event-detail__icon--align-top { margin-top: 4px; }
 .app-event-detail__icon--align-top-sm { margin-top: 2px; }
 
-/* Flex-Container fuer Zeitslot-Spalte */
+/* Flex-Container für Zeitslot-Spalte */
 .app-event-detail__timeslot-list { flex: 1; }
 
 /* Zeitslot-Eintrag Abstand */
@@ -1520,7 +1649,7 @@ ion-toggle.app-toggle--events {
 /* Button-Wrapper: gleicht Ionic ion-button margin (7px) aus */
 .app-event-detail__add-button-wrapper { margin-top: 12px; margin-bottom: -7px; }
 
-/* Icon etwas groesser (z.B. Abmeldungs-Icon) */
+/* Icon etwas größer (z.B. Abmeldungs-Icon) */
 .app-event-detail__icon-lg { font-size: 1.2rem; }
 
 /* Reason-Box Einrueckung */
@@ -1533,7 +1662,7 @@ ion-toggle.app-toggle--events {
 }
 
 /* === Stepper === */
-/* Plus/Minus-Stepper fuer Punkte-Eingabe */
+/* Plus/Minus-Stepper für Punkte-Eingabe */
 .app-stepper {
   display: flex;
   align-items: center;
@@ -1578,13 +1707,13 @@ ion-toggle.app-toggle--events {
    ============================================ */
 
 /* === Modal Section === */
-/* Container fuer eine Formular-Sektion in einem Modal */
+/* Container für eine Formular-Sektion in einem Modal */
 .app-modal-section {
   margin: 16px;
 }
 
 /* === Modal Section Header === */
-/* Flexbox-Container fuer Section-Header in Modals */
+/* Flexbox-Container für Section-Header in Modals */
 .app-modal-section-header {
   display: flex;
   align-items: center;
@@ -1600,7 +1729,7 @@ ion-toggle.app-toggle--events {
 }
 
 /* === Modal Footer === */
-/* Footer-Bereich fuer Modal-Buttons */
+/* Footer-Bereich für Modal-Buttons */
 .app-modal-footer {
   padding: 16px;
   background: var(--ion-background-color, #f4f5f8);
@@ -1648,6 +1777,10 @@ ion-button.app-modal-submit-btn--settings {
 }
 ion-button.app-modal-submit-btn--teamer {
   --background: var(--app-color-teamer);
+  --background-hover: #831843;
+}
+ion-button.app-modal-submit-btn--challenges {
+  --background: var(--app-color-challenges);
   --background-hover: #831843;
 }
 ion-button.app-modal-submit-btn--level {
@@ -1749,7 +1882,7 @@ ion-button.app-modal-submit-btn--bonus {
   color: white;
 }
 
-/* App-Icon als Hero (Legacy fuer Register) */
+/* App-Icon als Hero (Legacy für Register) */
 .app-auth-hero__logo {
   width: 112px;
   height: 112px;
@@ -1759,7 +1892,7 @@ ion-button.app-modal-submit-btn--bonus {
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(255, 255, 255, 0.1);
 }
 
-/* Hero-Title — weiss auf dem Verlauf-BG */
+/* Hero-Title — weiß auf dem Verlauf-BG */
 .app-auth-hero__title--cosmic {
   font-family: 'Bebas Neue', sans-serif;
   font-size: 5.8rem;
@@ -2168,7 +2301,21 @@ ion-button.app-modal-submit-btn--bonus {
   margin-top: 8px;
 }
 
-/* Lila Glass-Circle fuer Auth-Header-Icons (z.B. Mail/Lock) */
+/* Knopf für die biometrische Anmeldung (Face ID / Touch ID / Fingerabdruck).
+   Bewusst als Zweitaktion gestaltet: das Passwort bleibt der Hauptweg. */
+.app-auth-biometrie-button {
+  --background: transparent;
+  --color: #7c3aed;
+  --border-color: rgba(124, 58, 237, 0.4);
+  --border-radius: 12px;
+  --border-width: 1px;
+  --border-style: solid;
+  height: 44px;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+/* Lila Glass-Circle für Auth-Header-Icons (z.B. Mail/Lock) */
 .app-auth-hero__cosmic-circle {
   width: 84px;
   height: 84px;
@@ -2219,7 +2366,7 @@ ion-button.app-modal-submit-btn--bonus {
   font-size: 2rem;
 }
 
-/* Shake Animation fuer Auth-Seiten */
+/* Shake Animation für Auth-Seiten */
 @keyframes app-auth-shake {
   0%, 100% { transform: translateX(0); }
   10%, 30%, 50%, 70%, 90% { transform: translateX(-5px); }
@@ -2323,6 +2470,11 @@ ion-button.app-modal-submit-btn--bonus {
   box-shadow: 0 8px 32px rgba(var(--app-color-teamer-rgb), 0.25);
 }
 
+.app-dashboard-section--challenges {
+  background: linear-gradient(135deg, var(--app-color-challenges) 0%, #831843 100%);
+  box-shadow: 0 8px 32px rgba(var(--app-color-challenges-rgb), 0.25);
+}
+
 .app-dashboard-section--ranking {
   background: linear-gradient(135deg, #28a745 0%, #155724 100%);
   box-shadow: 0 8px 32px rgba(40, 167, 69, 0.25);
@@ -2375,7 +2527,7 @@ ion-button.app-modal-submit-btn--bonus {
   font-weight: 600;
 }
 
-/* Glass-Card fuer innere Elemente (Ranking-Header, Event-Items) */
+/* Glass-Card für innere Elemente (Ranking-Header, Event-Items) */
 .app-dashboard-glass-card {
   background: rgba(255, 255, 255, 0.15);
   backdrop-filter: blur(10px);
@@ -2512,6 +2664,7 @@ ion-item.app-dashboard-settings-item::part(native) {
 ion-toggle.app-toggle--users { --background-checked: var(--app-color-users) !important; --track-background-checked: var(--app-color-users) !important; --ion-color-base: var(--app-color-users) !important; --handle-background-checked: #fff !important; }
 ion-toggle.app-toggle--konfis { --background-checked: var(--app-color-konfis) !important; --track-background-checked: var(--app-color-konfis) !important; --ion-color-base: var(--app-color-konfis) !important; --handle-background-checked: #fff !important; }
 ion-toggle.app-toggle--teamer { --background-checked: var(--app-color-teamer) !important; --track-background-checked: var(--app-color-teamer) !important; --ion-color-base: var(--app-color-teamer) !important; --handle-background-checked: #fff !important; }
+ion-toggle.app-toggle--challenges { --background-checked: var(--app-color-challenges) !important; --track-background-checked: var(--app-color-challenges) !important; --ion-color-base: var(--app-color-challenges) !important; --handle-background-checked: #fff !important; }
 ion-toggle.app-toggle--events { --background-checked: var(--app-color-events) !important; --track-background-checked: var(--app-color-events) !important; --ion-color-base: var(--app-color-events) !important; --handle-background-checked: #fff !important; }
 ion-toggle.app-toggle--badges { --background-checked: var(--app-color-badges) !important; --track-background-checked: var(--app-color-badges) !important; --ion-color-base: var(--app-color-badges) !important; --handle-background-checked: #fff !important; }
 ion-toggle.app-toggle--chat { --background-checked: var(--app-color-chat) !important; --track-background-checked: var(--app-color-chat) !important; --ion-color-base: var(--app-color-chat) !important; --handle-background-checked: #fff !important; }
@@ -2640,6 +2793,12 @@ ion-toggle.app-toggle--info { --background-checked: var(--app-color-info) !impor
 .attendance-matrix__dot--open {
   color: #9ca3af;
 }
+/* Abgemeldet: eigener Status statt "ausstehend".
+   Dunkles Grau + gefuelltes Icon, damit die Zelle klar von "Offen"
+   (helles Outline-Grau) und "Fehlt" (rot) unterscheidbar ist. */
+.attendance-matrix__dot--opted_out {
+  color: #6b7280;
+}
 .attendance-matrix__legend {
   display: flex;
   flex-wrap: wrap;
@@ -2695,3 +2854,149 @@ ion-toggle.app-toggle--info { --background-checked: var(--app-color-info) !impor
   touch-action: pan-y;
 }
 
+/* === Audio-Player Seekbar (AudioPlayer.tsx) ===
+   Eigenes Styling statt "accent-color": Safari/iOS faerbt damit Track UND
+   Thumb in der uebergebenen Farbe ein, was bei dunklen Akzentfarben auf iOS
+   zu kraeftig/verfaelscht wirkt. Der Fortschritt kommt stattdessen ueber
+   einen per Inline-Style gesetzten linear-gradient in der echten
+   Challenge-Farbe (siehe AudioPlayer, SEEK_PROGRESS_COLOR = color-Prop),
+   hier wird nur der native Track transparent gemacht und der Thumb passend
+   dazu gestylt.
+
+   Thumb-Vertikalausrichtung (WebKit): der Track ist 4px hoch, der Thumb hat
+   width/height 14px + 2px Border rundum, also insgesamt 18px sichtbare
+   Groesse. WebKit zentriert den Thumb NICHT automatisch auf einem custom
+   gestylten Track, daher explizit per margin-top:
+     margin-top = (trackHeight - thumbTotalHeight) / 2 = (4px - 18px) / 2 = -7px
+   Firefox zentriert ueber -moz-range-thumb selbststaendig korrekt und
+   braucht kein margin-top-Aequivalent. */
+.app-audio-seekbar {
+  -webkit-appearance: none;
+  appearance: none;
+  border-radius: 2px;
+  outline: none;
+}
+.app-audio-seekbar::-webkit-slider-runnable-track {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: transparent;
+}
+.app-audio-seekbar::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--app-audio-seek-color, var(--app-color-challenges));
+  border: 2px solid #fff;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.25);
+  margin-top: -7px;
+  cursor: pointer;
+}
+.app-audio-seekbar::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: transparent;
+}
+.app-audio-seekbar::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--app-audio-seek-color, var(--app-color-challenges));
+  border: 2px solid #fff;
+  box-shadow: 0 0 2px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+.app-audio-seekbar:disabled::-webkit-slider-thumb {
+  background: #c7c7cc;
+  cursor: default;
+}
+.app-audio-seekbar:disabled::-moz-range-thumb {
+  background: #c7c7cc;
+  cursor: default;
+}
+
+
+.app-whatsnew {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  cursor: pointer;
+  background: linear-gradient(135deg, #ec4899 0%, var(--app-color-challenges) 60%, #9d174d 100%);
+  box-shadow: 0 4px 14px rgba(var(--app-color-challenges-rgb), 0.28);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.app-whatsnew--mitmachen {
+  background: linear-gradient(135deg, #10b981 0%, var(--app-color-activities) 60%, #065f46 100%);
+}
+/* Einstieg in den Challenges-Bereich. Behaelt bewusst den Farbverlauf des
+   Grundbanners: Challenges ist der Bereich, dessen Farbe das ist. */
+.app-whatsnew--challenges {
+  background: linear-gradient(135deg, #ec4899 0%, var(--app-color-challenges) 60%, #9d174d 100%);
+}
+
+.app-whatsnew:active {
+  transform: scale(0.985);
+  box-shadow: 0 2px 8px rgba(var(--app-color-challenges-rgb), 0.22);
+}
+.app-whatsnew:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.app-whatsnew__icon {
+  flex-shrink: 0;
+  font-size: 1.5rem;
+  color: #fff;
+}
+.app-whatsnew__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.app-whatsnew__title {
+  font-weight: 700;
+  font-size: 1rem;
+  color: #fff;
+  line-height: 1.25;
+}
+.app-whatsnew__sub {
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.85);
+  line-height: 1.3;
+}
+.app-whatsnew__chevron {
+  flex-shrink: 0;
+  font-size: 1.1rem;
+  color: rgba(255, 255, 255, 0.75);
+}
+/* X der Neuigkeiten-Karte auf der Startseite (UpdateHinweisKarte) */
+.app-whatsnew__close {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  margin: -4px -6px -4px 0;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 1.15rem;
+  cursor: pointer;
+}
+.app-whatsnew__close:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-whatsnew { transition: none; }
+  .app-whatsnew:active { transform: none; }
+}

@@ -78,7 +78,7 @@ const sendEmail = async ({ to, subject, text, html }) => {
 };
 
 // ====================================================================
-// GEMEINSAMES MAIL-LAYOUT (Header + Footer) — eine Quelle fuer alle Templates
+// GEMEINSAMES MAIL-LAYOUT (Header + Footer) — eine Quelle für alle Templates
 // ====================================================================
 
 const WEBSITE_URL = 'https://konfi-quest.de';
@@ -104,7 +104,7 @@ const BASE_STYLES = `
     .footer a { color: #667eea; text-decoration: none; }
 `;
 
-// headerGradient: optionaler eigener Verlauf (z.B. gruen fuer Bestaetigungen)
+// headerGradient: optionaler eigener Verlauf (z.B. gruen für Bestaetigungen)
 const renderHeader = (headerGradient = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)') => `
     <div class="header" style="background: ${headerGradient};">
       <img src="${LOGO_URL}" alt="Konfi Quest" />
@@ -255,8 +255,8 @@ Dein Konfi Quest Team
 };
 
 /**
- * "Letzte Chance"-Warnung an Admins, bevor ein Jahrgang automatisch geloescht
- * wird. Bewusst "geloescht" (NICHT "archiviert") -- das interne Backup/Archiv
+ * "Letzte Chance"-Warnung an Admins, bevor ein Jahrgang automatisch gelöscht
+ * wird. Bewusst "gelöscht" (NICHT "archiviert") -- das interne Backup/Archiv
  * wird nach aussen nicht kommuniziert. Mit Hinweis aufs Befoerdern.
  */
 const sendJahrgangDeletionWarningEmail = async (email, name, orgName, jahrgangName, daysLeft) => {
@@ -287,7 +287,7 @@ Dein Konfi Quest Team
   return sendEmail({ to: email, subject, text, html });
 };
 
-// HTML-Escaping fuer Nutzereingaben (Konfi-Namen, Freitext-Sprueche) im Mail-HTML.
+// HTML-Escaping für Nutzereingaben (Konfi-Namen, Freitext-Sprueche) im Mail-HTML.
 const escapeHtml = (value) => String(value == null ? '' : value)
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -319,7 +319,7 @@ const sendKonfiMatrixEmail = async (email, adminName, jahrgangName, type, rows =
   const isSprueche = type === 'sprueche';
   const titel = isSprueche ? 'Konfisprüche' : 'Anwesenheit';
   // CR/LF aus dem Subject entfernen (Header-Injection-Schutz): jahrgangName ist
-  // admin-kontrolliert, darf den SMTP-Header aber nicht aufbrechen koennen.
+  // admin-kontrolliert, darf den SMTP-Header aber nicht aufbrechen können.
   const safeJahrgangName = String(jahrgangName).replace(/[\r\n]+/g, ' ').trim();
   const subject = `${titel} - Jahrgang ${safeJahrgangName} - Konfi Quest`;
 

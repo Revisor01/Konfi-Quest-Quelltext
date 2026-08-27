@@ -50,12 +50,14 @@ interface Jahrgang {
 
 interface UserManagementModalProps {
   userId?: number | null;
+  festeRolle?: string;
   onClose: () => void;
   onSuccess: () => void;
 }
 
 const UserManagementModal: React.FC<UserManagementModalProps> = ({
   userId,
+  festeRolle,
   onClose,
   onSuccess
 }) => {
@@ -111,6 +113,10 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
 
   const isEditMode = !!userId;
 
+  const farbe = festeRolle === 'teamer' ? 'teamer' : 'users';
+
+  const nameAutomatisch = !isEditMode && !!festeRolle;
+
   // Hierarchie-Check: Kann der aktuelle User diese Rolle zuweisen?
   const canAssignRole = (roleName: string) => {
     const userRole = currentUser?.role_name;
@@ -146,6 +152,13 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
       ]);
       setRoles(rolesResponse.data);
       setJahrgaenge(jahrgaengeResponse.data);
+
+      // Feste Rolle direkt setzen — der Dialog zeigt dann keine Auswahl mehr,
+      // das Feld muss aber trotzdem befuellt sein (isValid prüft role_id > 0).
+      if (festeRolle && !isEditMode) {
+        const rolle = rolesResponse.data.find((r: Role) => r.name === festeRolle);
+        if (rolle) setFormData(prev => ({ ...prev, role_id: rolle.id }));
+      }
     } catch (err) {
  console.error('Error loading initial data:', err);
       setError('Fehler beim Laden der Daten');
@@ -189,8 +202,12 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
   };
 
   const handleSave = async () => {
-    if (!formData.username.trim() || !formData.display_name.trim() || !formData.role_id) {
-      setError('Benutzername, Anzeigename und Rolle sind erforderlich');
+    if (!nameAutomatisch && !formData.username.trim()) {
+      setError('Benutzername ist erforderlich');
+      return;
+    }
+    if (!formData.display_name.trim() || !formData.role_id) {
+      setError('Anzeigename und Rolle sind erforderlich');
       return;
     }
 
@@ -202,7 +219,8 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
     await guard(async () => {
       try {
         const userData: any = {
-          username: formData.username.trim(),
+          // Leer lassen, wenn der Server ihn erzeugen soll.
+          username: nameAutomatisch ? undefined : formData.username.trim(),
           email: formData.email.trim() || null,
           display_name: formData.display_name.trim(),
           role_title: formData.role_title.trim() || null,
@@ -281,23 +299,24 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
   // Klare Beschreibung je Rolle (unabhaengig vom technischen DB-Text).
   const getRoleDescription = (roleName: string) => {
     switch (roleName) {
-      case 'org_admin': return 'Voller Zugriff auf Konfis, Anträge, Aktivitäten, Badges und Events – über alle Jahrgänge. Verwaltet zusätzlich die Benutzer:innen und deren Jahrgangs-Zuordnung.';
-      case 'admin': return 'Voller Zugriff auf Konfis, Anträge, Aktivitäten, Badges und Events – nur für die zugewiesenen Jahrgänge.';
-      case 'teamer': return 'Eigenes Dashboard mit eigenen Badges, Team-Material und Team-Chat. Kann sich zu Events anmelden, bei denen Teamer:innen gebraucht werden. Vergibt keine Punkte und genehmigt keine Anträge.';
+      case 'org_admin': return 'Voller Zugriff auf Konfis, Aktivitäten, Badges und Events – über alle Jahrgänge. Verwaltet zusätzlich die Benutzer:innen und deren Jahrgangs-Zuordnung.';
+      case 'admin': return 'Voller Zugriff auf Konfis, Aktivitäten, Badges und Events – nur für die zugewiesenen Jahrgänge.';
+      case 'teamer': return 'Eigenes Dashboard mit eigenen Badges, Team-Material und Team-Chat. Kann sich zu Events anmelden, bei denen Teamer:innen gebraucht werden. Vergibt keine Punkte und genehmigt keine Aktivitäten.';
       default: return '';
     }
   };
 
-  const isValid = formData.username.trim() && formData.display_name.trim() && formData.role_id > 0;
+  const isValid = (nameAutomatisch || formData.username.trim())
+    && formData.display_name.trim() && formData.role_id > 0;
 
   if (loading) {
     return (
       <IonPage>
         <IonHeader>
           <IonToolbar>
-            <IonTitle>{isEditMode ? 'Benutzer bearbeiten' : 'Neuer Benutzer'}</IonTitle>
+            <IonTitle>{isEditMode ? 'Benutzer bearbeiten' : (festeRolle === 'teamer' ? 'Neue Teamer:in' : 'Neuer Benutzer')}</IonTitle>
             <IonButtons slot="start">
-              <IonButton onClick={handleClose} className="app-modal-close-btn">
+              <IonButton aria-label="Schließen" onClick={handleClose} className="app-modal-close-btn">
                 <IonIcon icon={closeOutline} />
               </IonButton>
             </IonButtons>
@@ -316,14 +335,14 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
     <IonPage>
       <IonHeader>
         <IonToolbar>
-          <IonTitle>{isEditMode ? 'Benutzer bearbeiten' : 'Neuer Benutzer'}</IonTitle>
+          <IonTitle>{isEditMode ? 'Benutzer bearbeiten' : (festeRolle === 'teamer' ? 'Neue Teamer:in' : 'Neuer Benutzer')}</IonTitle>
           <IonButtons slot="start">
-            <IonButton onClick={onClose} disabled={isSubmitting} className="app-modal-close-btn">
+            <IonButton aria-label="Schließen" onClick={onClose} disabled={isSubmitting} className="app-modal-close-btn">
               <IonIcon icon={closeOutline} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
-            <IonButton onClick={handleSave} disabled={!isValid || isSubmitting || !isOnline} className="app-modal-submit-btn app-modal-submit-btn--settings">
+            <IonButton aria-label="Benutzer:in speichern" onClick={handleSave} disabled={!isValid || isSubmitting || !isOnline} className={`app-modal-submit-btn app-modal-submit-btn--${festeRolle === "teamer" ? "teamer" : "settings"}`}>
               {!isOnline ? <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</> : isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} />}
             </IonButton>
           </IonButtons>
@@ -334,7 +353,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
         {/* SEKTION: Persönliche Daten */}
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
-            <div className="app-section-icon app-section-icon--users">
+            <div className={`app-section-icon app-section-icon--${farbe}`}>
               <IonIcon icon={personOutline} />
             </div>
             <IonLabel>Persönliche Daten</IonLabel>
@@ -352,6 +371,10 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                   />
                 </IonItem>
 
+                {/* Benutzername: Beim Anlegen mit fester Rolle erzeugt ihn der
+                    Server aus dem Anzeigenamen (wie bei Konfis). Beim
+                    Bearbeiten bleibt er sichtbar und aenderbar. */}
+                {!nameAutomatisch && (
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Benutzername *</IonLabel>
                   <IonInput
@@ -361,6 +384,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                     disabled={isSubmitting}
                   />
                 </IonItem>
+                )}
 
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Funktionsbeschreibung (optional)</IonLabel>
@@ -400,17 +424,20 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
           </IonCard>
         </IonList>
 
-        {/* SEKTION: Rolle und Status */}
+        {(!festeRolle || isEditMode) && (
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
-            <div className="app-section-icon app-section-icon--users">
+            <div className={`app-section-icon app-section-icon--${farbe}`}>
               <IonIcon icon={shieldOutline} />
             </div>
-            <IonLabel>Rolle & Status</IonLabel>
+            <IonLabel>{festeRolle ? 'Status' : 'Rolle & Status'}</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
             <IonCardContent style={{ padding: '16px 16px 8px 16px' }}>
-              {/* Rolle - klickbare Liste */}
+              {/* Rolle - klickbare Liste. Entfaellt, wenn die Rolle von aussen
+                  festgelegt ist (festeRolle): Der Dialog heisst dann bereits
+                  nach der Rolle, eine Auswahl waere widerspruechlich. */}
+              {!festeRolle && (
               <div style={{ marginBottom: '16px' }}>
                 <IonLabel style={{ fontSize: '0.85rem', color: '#666', marginBottom: '8px', display: 'block' }}>
                   Rolle *
@@ -459,8 +486,9 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                   })}
                 </div>
               </div>
+              )}
 
-              {/* Konto aktiv Toggle */}
+              {isEditMode && (
               <div style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -475,20 +503,22 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                   </p>
                 </div>
                 <IonToggle
-                  className="app-toggle--users"
+                  className={`app-toggle--${farbe}`}
                   checked={formData.is_active}
                   onIonChange={(e) => setFormData({ ...formData, is_active: e.detail.checked })}
                   disabled={isSubmitting}
                 />
               </div>
+              )}
             </IonCardContent>
           </IonCard>
         </IonList>
+        )}
 
         {/* SEKTION: Jahrgang-Zuweisungen */}
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
-            <div className="app-section-icon app-section-icon--users">
+            <div className={`app-section-icon app-section-icon--${farbe}`}>
               <IonIcon icon={schoolOutline} />
             </div>
             <IonLabel>Jahrgang-Zuweisungen</IonLabel>
@@ -509,7 +539,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                   return (
                     <div
                       key={jahrgang.id}
-                      className="app-list-item app-list-item--users"
+                      className={`app-list-item app-list-item--${farbe}`}
                       onClick={() => !isSubmitting && handleJahrgangAssignment(jahrgang.id, !isAssigned)}
                       style={{
                         cursor: isSubmitting ? 'default' : 'pointer',
@@ -536,7 +566,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
         {isEditMode && user?.assigned_jahrgaenge && user.assigned_jahrgaenge.length > 0 && (
           <IonList inset={true} className="app-modal-section">
             <IonListHeader>
-              <div className="app-section-icon app-section-icon--users">
+              <div className={`app-section-icon app-section-icon--${farbe}`}>
                 <IonIcon icon={checkmarkCircle} />
               </div>
               <IonLabel>Aktuelle Zuweisungen</IonLabel>
@@ -547,7 +577,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                   {user.assigned_jahrgaenge.map(assignment => (
                     <div
                       key={assignment.id}
-                      className="app-list-item app-list-item--users"
+                      className={`app-list-item app-list-item--${farbe}`}
                       style={{
                         display: 'flex',
                         alignItems: 'center',

@@ -35,6 +35,7 @@ import { filterBySearchTerm } from '../../utils/helpers';
 import { SectionHeader, ListSection, TrialBanner } from '../shared';
 import api from '../../services/api';
 import { useApp } from '../../contexts/AppContext';
+import { closeOpenSlidingItems } from '../../utils/slidingItems';
 
 interface Konfi {
   id: number;
@@ -75,8 +76,11 @@ interface KonfisViewProps {
   onSelectKonfi: (konfi: Konfi) => void;
   onDeleteKonfi: (konfi: Konfi) => void;
   onDeleteTeamer: (teamer: any) => void | Promise<void>;
-  // Im iPad-Split-View aktuell rechts geoeffneter Konfi (fuer Highlighting).
+  // Im iPad-Split-View aktuell rechts geoeffneter Konfi (für Highlighting).
   selectedKonfiId?: number | null;
+  onViewModeChange?: (mode: 'konfis' | 'teamer') => void;
+  ohneJahrgang?: boolean;
+
 }
 
 const KonfisView: React.FC<KonfisViewProps> = ({
@@ -88,9 +92,11 @@ const KonfisView: React.FC<KonfisViewProps> = ({
   onSelectKonfi,
   onDeleteKonfi,
   onDeleteTeamer,
-  selectedKonfiId
+  selectedKonfiId,
+  ohneJahrgang = false,
+  onViewModeChange
 }) => {
-  const { user } = useApp();
+  const { user, setError } = useApp();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedJahrgang, setSelectedJahrgang] = useState('alle');
   const [sortBy, setSortBy] = useState('name');
@@ -119,15 +125,18 @@ const KonfisView: React.FC<KonfisViewProps> = ({
     return () => { cancelled = true; };
   }, [user?.organization_id]);
 
-  // Teamer laden (wiederverwendbar: Segment-Wechsel + Reload nach Loeschen)
+  // Teamer laden (wiederverwendbar: Segment-Wechsel + Reload nach Löschen)
   const loadTeamers = useCallback(async () => {
     setTeamerLoading(true);
     try {
       const response = await api.get('/admin/konfis/teamer');
       setTeamers(response.data || []);
     } catch (err) {
+      // Fehler NICHT als Leerzustand ausgeben — eine leere Liste sieht aus,
+      // als gaebe es keine Teamer:innen.
       console.error('Error loading teamers:', err);
       setTeamers([]);
+      setError('Teamer:innen konnten nicht geladen werden');
     } finally {
       setTeamerLoading(false);
     }
@@ -170,7 +179,7 @@ const KonfisView: React.FC<KonfisViewProps> = ({
     if (sortBy === 'points') {
       result = [...result].sort((a, b) => getTotalPoints(b) - getTotalPoints(a));
     } else {
-      result = [...result].sort((a, b) => a.name.localeCompare(b.name));
+      result = [...result].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     }
 
     return result;
@@ -230,7 +239,11 @@ const KonfisView: React.FC<KonfisViewProps> = ({
       {/* Konfis / Teamer:innen Segment */}
       <IonSegment
         value={viewMode}
-        onIonChange={(e) => setViewMode(e.detail.value as 'konfis' | 'teamer')}
+        onIonChange={(e) => {
+          const mode = e.detail.value as 'konfis' | 'teamer';
+          setViewMode(mode);
+          onViewModeChange?.(mode);
+        }}
         style={{ margin: '0 16px 8px', maxWidth: 'calc(100% - 32px)' }}
       >
         <IonSegmentButton value="konfis">
@@ -378,7 +391,8 @@ const KonfisView: React.FC<KonfisViewProps> = ({
               {(user?.role_name === 'org_admin' || user?.is_super_admin === true) && (
                 <IonItemOptions side="end" className="app-swipe-actions">
                   <IonItemOption
-                    onClick={async () => { await onDeleteTeamer(teamer); await loadTeamers(); }}
+                    onClick={async () => { closeOpenSlidingItems(); await onDeleteTeamer(teamer); await loadTeamers(); }}
+                    aria-label="Teamer:in löschen"
                     className="app-swipe-action"
                   >
                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
@@ -399,8 +413,14 @@ const KonfisView: React.FC<KonfisViewProps> = ({
         iconColorClass="primary"
         isEmpty={filteredAndSortedKonfis.length === 0}
         emptyIcon={peopleOutline}
-        emptyTitle="Keine Konfis gefunden"
-        emptyMessage={searchTerm ? 'Versuche andere Suchbegriffe' : 'Noch keine Konfis angelegt'}
+        emptyTitle={ohneJahrgang && !searchTerm ? 'Kein Jahrgang zugewiesen' : 'Keine Konfis gefunden'}
+        emptyMessage={
+          searchTerm
+            ? 'Versuche andere Suchbegriffe'
+            : ohneJahrgang
+              ? 'Dir ist noch kein Jahrgang zugewiesen. Die Leitung deiner Gemeinde kann das in den Einstellungen ändern.'
+              : 'Noch keine Konfis angelegt'
+        }
         emptyIconColor="#5b21b6"
       >
         {filteredAndSortedKonfis.map((konfi, index) => {
@@ -555,7 +575,8 @@ const KonfisView: React.FC<KonfisViewProps> = ({
 
                       <IonItemOptions side="end" className="app-swipe-actions">
                         <IonItemOption
-                          onClick={() => onDeleteKonfi(konfi)}
+                          onClick={() => { closeOpenSlidingItems(); onDeleteKonfi(konfi); }}
+                          aria-label="Konfi löschen"
                           className="app-swipe-action"
                         >
                           <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">

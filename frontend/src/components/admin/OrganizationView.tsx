@@ -289,6 +289,7 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
                       onSelectOrganization(organization);
                     }}
                     className="app-swipe-action"
+                    aria-label="Organisation bearbeiten"
                   >
                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--organizations">
                       <IonIcon icon={createOutline} />
@@ -300,6 +301,7 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
                       onDeleteOrganization(organization);
                     }}
                     className="app-swipe-action"
+                    aria-label="Organisation löschen"
                   >
                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
                       <IonIcon icon={trash} />

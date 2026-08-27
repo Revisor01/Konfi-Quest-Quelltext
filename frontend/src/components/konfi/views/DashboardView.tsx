@@ -14,7 +14,12 @@ import {
   eyeOff,
   helpCircle,
   chevronForward,
-  time
+  time,
+  timeOutline,
+  eyeOutline,
+  megaphoneOutline,
+  constructOutline,
+  flagOutline
 } from 'ionicons/icons';
 import { Badge, DashboardEvent, RankingEntry } from '../../../types/dashboard';
 import {
@@ -35,7 +40,11 @@ import {
   LevelProgress
 } from './DashboardSections';
 import api from '../../../services/api';
+import { useApp } from '../../../contexts/AppContext';
 import BibleTranslationModal, { getTranslationName } from '../../shared/BibleTranslationModal';
+import { DEFAULT_KONFI_SECTION_ORDER } from '../../../utils/sectionOrder';
+import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
+import { CACHE_TTL } from '../../../services/offlineCache';
 
 interface DashboardData {
   konfi: {
@@ -110,6 +119,15 @@ interface DailyVerse {
   cached?: boolean;
 }
 
+/** Minimaldaten der Dashboard-Karte für aktive Challenges. */
+interface ChallengeTeaser {
+  id: number;
+  title: string;
+  ends_at: string;
+  has_submission: boolean;
+  challenge_type?: string;
+}
+
 interface BadgeStats {
   totalAvailable: number;
   totalEarned: number;
@@ -128,13 +146,27 @@ interface DashboardConfig {
   show_losung: boolean;
   show_badges: boolean;
   show_ranking: boolean;
+  show_challenges?: boolean;
 }
 
-const DEFAULT_KONFI_ORDER = ['konfirmation', 'konfispruch', 'events', 'losung', 'badges', 'ranking'];
+const DEFAULT_KONFI_ORDER = DEFAULT_KONFI_SECTION_ORDER;
+
+/** Icon je Challenge-Typ für die Dashboard-Karte (Schlüssel: challenge_type). */
+const CHALLENGE_TYPE_ICON: Record<string, string> = {
+  wahrnehmung: eyeOutline,
+  beitrag: megaphoneOutline,
+  praxis: constructOutline,
+  frei: flagOutline
+};
+const getChallengeTypeIcon = (type?: string): string =>
+  CHALLENGE_TYPE_ICON[type || ''] || flagOutline;
 
 interface DashboardViewProps {
   dashboardData: DashboardData;
-  dailyVerse: DailyVerse | null;
+  // Wird von der Page nicht mehr uebergeben — die View laedt selbst
+  // (siehe Kommentar in KonfiDashboardPage). Bleibt optional für Aufrufer,
+  // die sie noch setzen.
+  dailyVerse?: DailyVerse | null;
   badgeStats: BadgeStats;
   allBadges: AllBadgesData;
   upcomingEvents: DashboardEvent[];
@@ -164,6 +196,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   sectionOrder
 }) => {
   const router = useIonRouter();
+  const { setError } = useApp();
   const [presentAlert] = useIonAlert();
   const [actualDailyVerse, setActualDailyVerse] = useState<DailyVerse | null>(null);
   const [loadingVerse, setLoadingVerse] = useState(true);
@@ -195,8 +228,11 @@ const DashboardView: React.FC<DashboardViewProps> = ({
       await api.put('/konfi/bible-translation', { translation: code });
       setSelectedTranslation(code);
       await reloadTageslosung();
-    } catch (err) {
+    } catch (err: any) {
+      // Vorher nur console.error: Das Modal schloss, der Text blieb der alte —
+      // eine bewusste Auswahl blieb sichtbar folgenlos.
       console.error('Bibeluebersetzung speichern fehlgeschlagen:', err);
+      setError(err.response?.data?.error || 'Übersetzung konnte nicht gespeichert werden');
     }
   };
 
@@ -206,6 +242,41 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     onSelect: (code: string) => { handleTranslationChange(code); dismissBibleModal(); },
   });
   const [showLosung, setShowLosung] = useState(true);
+
+  // Aktive Challenges für die Dashboard-Karte. Der Dashboard-Endpoint liefert
+  // sie nicht mit, deshalb ein eigener, schlanker Abruf — nur wenn die Karte
+  // überhaupt eingeschaltet ist.
+  const [activeChallenges, setActiveChallenges] = useState<ChallengeTeaser[]>([]);
+  useEffect(() => {
+    if (dashboardConfig?.show_challenges === false) {
+      setActiveChallenges([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.get('/challenges/konfi');
+        if (cancelled) return;
+        const active = Array.isArray(res.data?.active) ? res.data.active : [];
+        setActiveChallenges(
+          active
+            .map((c: any) => ({
+              id: c.id,
+              title: c.title,
+              ends_at: c.ends_at,
+              has_submission: !!c.has_submission,
+              challenge_type: c.challenge_type
+            }))
+            .sort((a: ChallengeTeaser, b: ChallengeTeaser) =>
+              new Date(a.ends_at).getTime() - new Date(b.ends_at).getTime())
+        );
+      } catch {
+        // Challenges sind eine Zusatzkarte — ein Fehler darf das Dashboard nicht stoeren.
+        if (!cancelled) setActiveChallenges([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [dashboardConfig?.show_challenges]);
 
   // Level Popover via useIonPopover
   const levelPopoverRef = useRef<LevelPopoverData>({ level: null, isReached: false });
@@ -221,42 +292,42 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     dataRef: badgePopoverRef
   });
 
-  // Load Tageslosung directly from backend
+  // Tageslosung aus dem Cache statt per Direkt-Abruf: Sie wechselt einmal am
+  // Tag, war offline aber gar nicht da — die Teamer-Startseite cachte sie
+  // laengst mit 24-Std-TTL, die Konfi-Seite nicht.
+  const losungAktiv = dashboardConfig?.show_losung !== false;
+  const { data: gecachteLosung, loading: losungLaedt } = useOfflineQuery<DailyVerse | null>(
+    'konfi:tageslosung:' + new Date().toISOString().split('T')[0],
+    async () => {
+      const response = await api.get('/konfi/tageslosung');
+      if (response.data && response.data.success) {
+        const { losung, lehrtext } = response.data.data;
+        return {
+          losungstext: losung?.text,
+          losungsvers: losung?.reference,
+          lehrtext: lehrtext?.text,
+          lehrtextvers: lehrtext?.reference,
+          translation: response.data.translation
+        };
+      }
+      return null;
+    },
+    { ttl: CACHE_TTL.TAGESLOSUNG, enabled: losungAktiv }
+  );
+
   useEffect(() => {
-    if (dashboardConfig?.show_losung === false) {
+    if (!losungAktiv) {
       setLoadingVerse(false);
       setActualDailyVerse(null);
       return;
     }
     setShowLosung(Math.random() > 0.5);
-
-    const loadTageslosung = async () => {
-      try {
-        const response = await api.get('/konfi/tageslosung');
-        if (response.data && response.data.success) {
-          const { losung, lehrtext } = response.data.data;
-          const translation = response.data.translation;
-          setActualDailyVerse({
-            losungstext: losung?.text,
-            losungsvers: losung?.reference,
-            lehrtext: lehrtext?.text,
-            lehrtextvers: lehrtext?.reference,
-            translation
-          });
-          if (translation) setSelectedTranslation(translation);
-        } else {
- console.error('Invalid response from backend:', response.data);
-          setActualDailyVerse(null);
-        }
-      } catch (error: unknown) {
- console.error('Failed to load Tageslosung from backend:', error);
-        setActualDailyVerse(null);
-      } finally {
-        setLoadingVerse(false);
-      }
-    };
-    loadTageslosung();
-  }, [dailyVerse, dashboardConfig?.show_losung]);
+    setLoadingVerse(losungLaedt);
+    if (gecachteLosung !== null && gecachteLosung !== undefined) {
+      setActualDailyVerse(gecachteLosung);
+      if (gecachteLosung.translation) setSelectedTranslation(gecachteLosung.translation);
+    }
+  }, [losungAktiv, gecachteLosung, losungLaedt]);
 
   const gottesdienstPoints = dashboardData.konfi.gottesdienst_points || 0;
   const gemeindePoints = dashboardData.konfi.gemeinde_points || 0;
@@ -269,7 +340,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     .sort((a, b) => new Date(a.event_date || a.date || '').getTime() - new Date(b.event_date || b.date || '').getTime()),
   [upcomingEvents]);
 
-  // Konfirmations-Termin ueber das is_konfirmation-Flag (Phase 117, Migration 091).
+  // Konfirmations-Termin über das is_konfirmation-Flag (Phase 117, Migration 091).
   const isKonfirmation = (e: typeof myRegisteredEvents[number]) =>
     e.is_konfirmation === true;
 
@@ -428,6 +499,85 @@ const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             ) : null
           ),
+          challenges: () => {
+            // Bewusst ohne Zähler/Fortschritt: nur die laufenden Challenges und
+            // der Weg hinein. Ohne aktive Challenge verschwindet die Karte ganz.
+            if (dashboardConfig?.show_challenges === false || activeChallenges.length === 0) {
+              return null;
+            }
+            const remainingFor = (endsAt: string) => {
+              const diff = new Date(endsAt).getTime() - Date.now();
+              if (isNaN(diff) || diff <= 0) return 'Zeit abgelaufen';
+              const days = Math.floor(diff / 86400000);
+              if (days >= 1) return days === 1 ? '1 Tag' : `${days} Tage`;
+              const hours = Math.floor(diff / 3600000);
+              if (hours >= 1) return hours === 1 ? '1 Stunde' : `${hours} Stunden`;
+              return 'endet heute';
+            };
+            // Bis zu 3 laufende Challenges als eigene Karten, exakt nach dem
+            // Muster der Events-Sektion (eine Karte je Eintrag, Button darunter
+            // nur textbreit). Weitere Challenges gibt es nur noch im Tab selbst,
+            // kein "+X weitere"-Hinweis mehr — Events verhalten sich genauso.
+            const visibleChallenges = activeChallenges.slice(0, 3);
+
+            return (
+              // Farbverlauf kommt aus der gemeinsamen Klasse — jede
+              // Dashboard-Sektion trägt ihre Bereichsfarbe, dort wäre ein
+              // neutraler Sonderweg der Bruch.
+              <div className="app-dashboard-section app-dashboard-section--challenges" key="challenges">
+                <div className="app-dashboard-section__bg-text">
+                  <h2 className="app-dashboard-section__bg-label">DEINE</h2>
+                  <h2 className="app-dashboard-section__bg-label">CHALLENGE</h2>
+                </div>
+                <div className="app-dashboard-section__content app-dashboard-section__content--compact">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {visibleChallenges.map((challenge) => (
+                      <div
+                        key={challenge.id}
+                        className="app-dashboard-glass-card"
+                        onClick={() => router.push('/konfi/challenges')}
+                        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px' }}
+                      >
+                        <div style={{
+                          width: '40px', height: '40px', borderRadius: '50%',
+                          background: 'rgba(255, 255, 255, 0.2)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          flexShrink: 0
+                        }}>
+                          <IonIcon icon={getChallengeTypeIcon(challenge.challenge_type)} style={{ fontSize: '1.2rem', color: 'white' }} />
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div className="app-headline" style={{
+                            fontSize: '1rem', fontWeight: '700', color: 'white',
+                            marginBottom: '4px', lineHeight: 1.25
+                          }}>
+                            {challenge.title}
+                          </div>
+                          <div className="app-dashboard-meta">
+                            <IonIcon icon={timeOutline} style={{ fontSize: '0.9rem' }} />
+                            <span>{remainingFor(challenge.ends_at)}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    <div
+                      className="app-dashboard-glass-chip"
+                      onClick={() => router.push('/konfi/challenges')}
+                      style={{
+                        alignSelf: 'center',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px'
+                      }}
+                    >
+                      Alle Challenges anzeigen <IonIcon icon={chevronForward} />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          },
           konfispruch: () => {
             // Card-Gate: nur sichtbar, wenn der Jahrgang die Konfispruch-Auswahl
             // freigegeben hat (konfspruch_visible aus dem Dashboard-Endpoint).

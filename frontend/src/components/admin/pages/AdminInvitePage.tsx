@@ -37,10 +37,12 @@ import {
   cloudOfflineOutline
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
 import api from '../../../services/api';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../../services/offlineCache';
 import QRCode from 'qrcode';
+import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 
 interface Jahrgang {
   id: number;
@@ -72,7 +74,7 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
     }
   };
 
-  // Offline-Query: Jahrgaenge
+  // Offline-Query: Jahrgänge
   const { data: jahrgaenge, refresh: refreshJahrgaenge } = useOfflineQuery<Jahrgang[]>(
     'admin:jahrgaenge:' + user?.organization_id,
     async () => { const res = await api.get('/admin/jahrgaenge'); return res.data; },
@@ -126,7 +128,7 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
   }, [jahrgaenge, existingInvites, initialQrShown, selectedJahrgang]);
 
   const generateInviteCode = async () => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     if (!selectedJahrgang) {
       setError('Bitte wähle einen Jahrgang aus');
       return;
@@ -162,7 +164,7 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
   };
 
   const extendInvite = async (inviteId: number) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     try {
       setExtendingInvite(inviteId);
       await api.post(`/auth/invite-codes/${inviteId}/extend`);
@@ -175,7 +177,7 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
   };
 
   const deleteInvite = (invite: ExistingInvite) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Code löschen',
       message: `Einladungscode "${invite.invite_code}" wirklich löschen?`,
@@ -261,7 +263,7 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
       <IonHeader>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={handleClose}>
+            <IonButton onClick={handleClose} aria-label="Schließen">
               <IonIcon icon={closeOutline} slot="icon-only" />
             </IonButton>
           </IonButtons>
@@ -399,7 +401,8 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
                           </IonItem>
                           <IonItemOptions side="end" className="app-swipe-actions">
                             <IonItemOption
-                              onClick={() => extendInvite(invite.id)}
+                              onClick={() => { closeOpenSlidingItems(); extendInvite(invite.id); }}
+                              aria-label="Einladung verlängern"
                               className="app-swipe-action"
                             >
                               <div className="app-icon-circle app-icon-circle--lg app-icon-circle--success">
@@ -407,7 +410,8 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
                               </div>
                             </IonItemOption>
                             <IonItemOption
-                              onClick={() => deleteInvite(invite)}
+                              onClick={() => { closeOpenSlidingItems(); deleteInvite(invite); }}
+                              aria-label="Einladung löschen"
                               className="app-swipe-action"
                             >
                               <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">

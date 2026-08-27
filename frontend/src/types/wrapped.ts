@@ -23,7 +23,6 @@ export interface KonfiBadgesSlide {
   total_earned: number;
   total_available: number;
   badges: Array<{ name: string; icon: string; color: string }>;
-  percentile?: number;
 }
 
 export interface KonfiAktivsterMonatSlide {
@@ -62,10 +61,24 @@ export interface KonfiPflichtSlide {
   gesamt: number;
 }
 
-export interface KonfiRankSlide {
-  position: number;
-  total_in_jahrgang: number;
+/** Ein einzelner Challenge-Beitrag des Konfi (Quelle: challenge_submissions). */
+export interface KonfiChallengeMoment {
+  challenge_title: string;
+  badge_icon: string;
+  media_type: 'text' | 'photo' | 'audio' | 'video' | 'link';
+  file_path?: string | null;
+  file_name?: string | null;
+  text_content?: string | null;
+  link_url?: string | null;
+  /** Musikdienst-Metadaten; in Snapshots vor der Erlaubnisliste nicht enthalten. */
+  link_title?: string | null;
+  link_author?: string | null;
+  link_album?: string | null;
+  created_at: string;
 }
+
+/** Slide "Deine Momente" — ab Snapshot-Version 2. */
+export type KonfiChallengeMomenteSlide = KonfiChallengeMoment[];
 
 export type HighlightType =
   | 'events_held'
@@ -76,6 +89,7 @@ export type HighlightType =
   | 'ueber_das_ziel';
 
 export interface KonfiWrappedData {
+  /** 1 = Alt-Snapshots (History), ab 2 = Challenges-Wrapped. */
   version: number;
   highlight_type: HighlightType;
   formulierung_seed: number;
@@ -84,13 +98,17 @@ export interface KonfiWrappedData {
     events: KonfiEventsSlide;
     badges: KonfiBadgesSlide;
     aktivster_monat: KonfiAktivsterMonatSlide;
-    chat: KonfiChatSlide;
     endspurt: KonfiEndspurtSlide;
     zeitraum: KonfiZeitraumSlide;
-    gottesdienst: KonfiGottesdienstSlide;
     kategorie: KonfiKategorieSlide;
-    pflicht: KonfiPflichtSlide;
-    rank: KonfiRankSlide;
+    /** Ab Version 2. Bei Version-1-Snapshots nicht vorhanden. */
+    challenge_momente?: KonfiChallengeMomenteSlide;
+    /** Nur noch Alt-Daten (Version 1), wird nicht mehr gerendert. */
+    chat?: KonfiChatSlide;
+    /** Nur noch Alt-Daten (Version 1), wird nicht mehr gerendert. */
+    gottesdienst?: KonfiGottesdienstSlide;
+    /** Backend liefert es weiter, wird aber nicht mehr gerendert. */
+    pflicht?: KonfiPflichtSlide;
   };
 }
 

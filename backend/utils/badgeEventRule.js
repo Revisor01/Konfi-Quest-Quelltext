@@ -1,12 +1,12 @@
 // backend/utils/badgeEventRule.js
-// Single Source of Truth fuer die Frage "welche Events zaehlen fuer Badges".
+// Single Source of Truth für die Frage "welche Events zählen für Badges".
 //
 // REGEL:
 // - KONFIS: Pflicht-Events (events.mandatory) und Konfirmationen
-//   (events.is_konfirmation) zaehlen NIE fuer Badges. Nur freiwillig besuchte,
+//   (events.is_konfirmation) zählen NIE für Badges. Nur freiwillig besuchte,
 //   bestaetigte Events.
-// - TEAMER: ALLE bestaetigten Events zaehlen (sie arbeiten bei Pflicht/
-//   Konfirmation mit -> legitime Zaehlung).
+// - TEAMER: ALLE bestaetigten Events zählen (sie arbeiten bei Pflicht/
+//   Konfirmation mit -> legitime Zählung).
 //
 // Diese Bedingung MUSS in der Wertung (badges.js) UND der Fortschrittsanzeige
 // (konfi.js) identisch verwendet werden, sonst laufen Wertung und Progress

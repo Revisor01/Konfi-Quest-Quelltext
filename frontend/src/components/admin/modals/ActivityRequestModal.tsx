@@ -32,7 +32,7 @@ import api from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
-// triggerRefresh nicht direkt nutzen — Modal rendert via useIonModal ausserhalb des Provider-Trees
+// triggerRefresh nicht direkt nutzen — Modal rendert via useIonModal außerhalb des Provider-Trees
 // Stattdessen onSuccess Callback nutzen, Parent-Page hat useLiveRefresh
 
 interface ActivityRequest {
@@ -100,10 +100,10 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
           loadPhoto(foundRequest.id);
         }
       } else {
-        setError('Antrag nicht gefunden');
+        setError('Aktivität nicht gefunden');
       }
     } catch (err) {
-      setError('Fehler beim Laden des Antrags');
+      setError('Fehler beim Laden der Aktivität');
  console.error('Error loading request:', err);
     } finally {
       setLoading(false);
@@ -162,7 +162,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
           onSuccess();
           onClose();
         } catch (err: any) {
-          setError(err.response?.data?.error || `Fehler beim ${selectedAction === 'approve' ? 'Genehmigen' : 'Ablehnen'} des Antrags`);
+          setError(err.response?.data?.error || `Fehler beim ${selectedAction === 'approve' ? 'Genehmigen' : 'Ablehnen'} der Aktivität`);
         }
       } else {
         await writeQueue.enqueue({
@@ -174,7 +174,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
           metadata: {
             type: 'admin',
             clientId: safeUUID(),
-            label: `Antrag ${selectedAction === 'approve' ? 'genehmigen' : 'ablehnen'}`
+            label: `Aktivität ${selectedAction === 'approve' ? 'genehmigen' : 'ablehnen'}`
           }
         });
         setSuccess('Wird gespeichert sobald du wieder online bist');
@@ -212,9 +212,9 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
       <IonPage>
         <IonHeader>
           <IonToolbar>
-            <IonTitle>Antrag laden...</IonTitle>
+            <IonTitle>Aktivität laden...</IonTitle>
             <IonButtons slot="start">
-              <IonButton onClick={onClose} className="app-modal-close-btn">
+              <IonButton aria-label="Schließen" onClick={onClose} className="app-modal-close-btn">
                 <IonIcon icon={closeOutline} />
               </IonButton>
             </IonButtons>
@@ -233,15 +233,15 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
     <IonPage>
       <IonHeader>
         <IonToolbar>
-          <IonTitle>Antrag prüfen</IonTitle>
+          <IonTitle>Aktivität prüfen</IonTitle>
           <IonButtons slot="start">
-            <IonButton onClick={onClose} disabled={isSubmitting} className="app-modal-close-btn">
+            <IonButton aria-label="Schließen" onClick={onClose} disabled={isSubmitting} className="app-modal-close-btn">
               <IonIcon icon={closeOutline} />
             </IonButton>
           </IonButtons>
           {isPending && selectedAction && (
             <IonButtons slot="end">
-              <IonButton onClick={handleSubmit} disabled={isSubmitting || (selectedAction === 'reject' && !adminComment.trim())} className="app-modal-submit-btn app-modal-submit-btn--activities">
+              <IonButton aria-label="Entscheidung speichern" onClick={handleSubmit} disabled={isSubmitting || (selectedAction === 'reject' && !adminComment.trim())} className="app-modal-submit-btn app-modal-submit-btn--activities">
                 {isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} />}
               </IonButton>
             </IonButtons>
@@ -250,13 +250,13 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
       </IonHeader>
 
       <IonContent className="app-gradient-background">
-        {/* SEKTION: Antragsdaten */}
+        {/* SEKTION: Daten zur Aktivität */}
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--requests">
               <IonIcon icon={documentText} />
             </div>
-            <IonLabel>Antragsdaten</IonLabel>
+            <IonLabel>Daten zur Aktivität</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
             <IonCardContent>
@@ -340,7 +340,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                 {photoUrl ? (
                   <img
                     src={photoUrl}
-                    alt="Antragsfoto"
+                    alt="Foto zur Aktivität"
                     style={{
                       maxWidth: '100%',
                       borderRadius: '8px',

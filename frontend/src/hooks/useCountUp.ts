@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 /**
  * Animierter Count-up Hook mit requestAnimationFrame.
  * Startet nur wenn isActive true ist (Swiper onSlideChange).
- * Ease-out cubic fuer natuerliches Gefuehl, ~1.5s Dauer.
+ * Ease-out cubic für natuerliches Gefuehl, ~1.5s Dauer.
  */
 export function useCountUp(target: number, isActive: boolean, duration = 1500): number {
   const [value, setValue] = useState(0);

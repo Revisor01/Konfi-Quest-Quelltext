@@ -330,7 +330,7 @@ ion-modal.wrapped-modal-fullscreen {
   animation: wrapped-number-pop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
 }
 
-/* Animation-Delays fuer gestaffeltes Einblenden */
+/* Animation-Delays für gestaffeltes Einblenden */
 .wrapped-slide--active .wrapped-anim-delay-1 {
   animation-delay: 0.2s;
 }
@@ -478,12 +478,6 @@ ion-modal.wrapped-modal-fullscreen {
 }
 
 /* ========================================
-   Chat Slide
-   ======================================== */
-
-.chat-slide { background: linear-gradient(135deg, #06b6d4 0%, #0891b2 50%, #0e7490 100%); }
-
-/* ========================================
    Endspurt Slide - Progress-Bar
    ======================================== */
 
@@ -616,12 +610,6 @@ ion-modal.wrapped-modal-fullscreen {
 .kategorie-bar-count { font-size: 0.85rem; color: rgba(255,255,255,0.7); min-width: 30px; }
 
 /* ========================================
-   Gottesdienst Slide
-   ======================================== */
-
-.gottesdienst-slide { background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%); }
-
-/* ========================================
    Ueber-das-Ziel Slide - Gold + Konfetti
    ======================================== */
 
@@ -692,5 +680,125 @@ ion-modal.wrapped-modal-fullscreen {
 
 /* Neue Slide Backgrounds */
 .konfirmation-slide { background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #d946ef 100%); }
-.pflicht-slide { background: linear-gradient(135deg, #2563eb 0%, #3b82f6 50%, #60a5fa 100%); }
-.rank-slide { background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%); position: relative; overflow: hidden; }
+
+/* ========================================
+   Challenge-Momente Slide
+   (Challenges-Rosa, siehe --app-color-challenges)
+   ======================================== */
+
+.challenge-momente-slide {
+  background: linear-gradient(135deg, var(--app-color-challenges, #be185d) 0%, #9d174d 50%, #831843 100%);
+  justify-content: flex-start;
+}
+
+.challenge-momente-liste {
+  width: 100%;
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Der Slide-Inhalt darf scrollen, ohne den Swiper zu sprengen. */
+  max-height: 50vh;
+  padding-right: 4px;
+}
+
+.challenge-moment {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 16px;
+  padding: 12px 14px;
+  backdrop-filter: blur(8px);
+  text-align: left;
+}
+
+.challenge-moment-kopf {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.challenge-moment-abzeichen {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--app-color-challenges, #be185d);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+}
+
+.challenge-moment-titel {
+  flex: 1;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.95);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.challenge-moment-medienart {
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.challenge-moment-text {
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.9);
+  margin: 8px 0 0 0;
+  font-style: italic;
+}
+
+.challenge-moment-foto {
+  margin-top: 10px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 120px;
+  max-height: 180px;
+}
+
+.challenge-moment-foto img {
+  width: 100%;
+  max-height: 180px;
+  object-fit: cover;
+  display: block;
+}
+
+.challenge-moment-foto--laedt {
+  animation: challenge-foto-puls 1.4s ease-in-out infinite;
+}
+
+.challenge-moment-foto--leer {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 1.6rem;
+}
+
+@keyframes challenge-foto-puls {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.6; }
+}
+
+.challenge-moment-link {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 10px;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.85);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

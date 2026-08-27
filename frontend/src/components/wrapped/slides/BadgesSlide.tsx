@@ -2,7 +2,7 @@ import React from 'react';
 import { IonIcon } from '@ionic/react';
 import { ribbonOutline } from 'ionicons/icons';
 import SlideBase from './SlideBase';
-import { getIconFromString } from '../../konfi/views/DashboardSections';
+import { getIconFromString } from '../../../utils/badgeIcons';
 import type { SlideProps, KonfiBadgesSlide } from '../../../types/wrapped';
 
 interface BadgesSlideProps extends SlideProps {

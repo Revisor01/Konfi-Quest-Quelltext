@@ -28,6 +28,7 @@ import {
   filterOutline
 } from 'ionicons/icons';
 import { SectionHeader, ListSection, StatusBadge } from '../../shared';
+import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 
 interface ActivityRequest {
   id: number;
@@ -55,9 +56,12 @@ interface RequestsViewProps {
   getStatusText: (status: string) => string;
   getTypeIcon: (type: string) => string;
   getTypeText: (type: string) => string;
-  // Teamer-Aktivitaeten haben keine Gottesdienst/Gemeinde-Punkte-Logik —
+  // Teamer-Aktivitäten haben keine Gottesdienst/Gemeinde-Punkte-Logik —
   // im Teamer-Modus wird stattdessen "Team" gezeigt und die Punktzahl ausgeblendet.
   teamerMode?: boolean;
+  // Haupt-Segment der Page (Events | Anträge) - wird direkt unter dem
+  // Grafik-Header gerendert, damit die Seitenstruktur zu den anderen Tabs passt.
+  headerSlot?: React.ReactNode;
 }
 
 const RequestsView: React.FC<RequestsViewProps> = ({
@@ -71,7 +75,8 @@ const RequestsView: React.FC<RequestsViewProps> = ({
   getStatusText,
   getTypeIcon,
   getTypeText,
-  teamerMode = false
+  teamerMode = false,
+  headerSlot
 }) => {
   const [searchText, setSearchText] = useState('');
 
@@ -92,7 +97,7 @@ const RequestsView: React.FC<RequestsViewProps> = ({
     const isRejected = request.status === 'rejected';
 
     const statusColor = isPending ? '#ff9500' : isApproved ? '#059669' : '#dc3545';
-    const statusText = isPending ? 'Offen' : isApproved ? 'Verbucht' : 'Abgelehnt';
+    const statusText = isPending ? 'Offen' : isApproved ? 'Angerechnet' : 'Abgelehnt';
     const statusIcon = isPending ? hourglass : isApproved ? checkmarkCircle : closeCircle;
 
     return { statusColor, statusText, statusIcon, isPending, isApproved, isRejected };
@@ -106,15 +111,18 @@ const RequestsView: React.FC<RequestsViewProps> = ({
     <div>
       <SectionHeader
         title="Deine Aktivitäten"
-        subtitle="Anträge und Verbuchungen"
+        subtitle="Was du gemeldet hast"
         icon={checkmarkCircle}
         preset="konfi-requests"
         stats={[
-          { value: pendingRequests.length, label: 'Offen' },
-          { value: approvedRequests.length, label: 'Verbucht' },
-          { value: rejectedRequests.length, label: 'Abgelehnt' }
+          // Die Kacheln entsprechen den drei Reitern und schalten dorthin.
+          { value: pendingRequests.length, label: 'Offen', onClick: () => onTabChange('pending'), active: activeTab === 'pending' },
+          { value: approvedRequests.length, label: 'Erledigt', onClick: () => onTabChange('approved'), active: activeTab === 'approved' },
+          { value: rejectedRequests.length, label: 'Abgelehnt', onClick: () => onTabChange('rejected'), active: activeTab === 'rejected' }
         ]}
       />
+
+      {headerSlot}
 
       {/* Suche & Filter — wie Chat-Pattern */}
       <IonList inset={true} style={{ margin: '16px' }}>
@@ -146,7 +154,7 @@ const RequestsView: React.FC<RequestsViewProps> = ({
             <IonLabel>Offen</IonLabel>
           </IonSegmentButton>
           <IonSegmentButton value="approved">
-            <IonLabel>Verbucht</IonLabel>
+            <IonLabel>Angerechnet</IonLabel>
           </IonSegmentButton>
           <IonSegmentButton value="rejected">
             <IonLabel>Abgelehnt</IonLabel>
@@ -154,7 +162,7 @@ const RequestsView: React.FC<RequestsViewProps> = ({
         </IonSegment>
       </div>
 
-      {/* Anträge Liste */}
+      {/* Aktivitäten-Liste — neue Aktivitäten laufen ueber den Plus-Button im Header */}
       <ListSection
         icon={documentTextOutline}
         title="Aktivitäten"
@@ -162,8 +170,8 @@ const RequestsView: React.FC<RequestsViewProps> = ({
         iconColorClass="success"
         isEmpty={filteredRequests.length === 0}
         emptyIcon={documentTextOutline}
-        emptyTitle="Keine Anträge gefunden"
-        emptyMessage="Noch keine Anträge gestellt"
+        emptyTitle="Keine Aktivitäten gefunden"
+        emptyMessage="Noch keine Aktivitäten gemeldet"
         emptyIconColor="#059669"
       >
         {filteredRequests.map((request, index) => {
@@ -299,7 +307,8 @@ const RequestsView: React.FC<RequestsViewProps> = ({
               {isPending && onDeleteRequest && (
                 <IonItemOptions side="end" className="app-swipe-actions">
                   <IonItemOption
-                    onClick={() => onDeleteRequest(request)}
+                    onClick={() => { closeOpenSlidingItems(); onDeleteRequest(request); }}
+                    aria-label="Aktivität löschen"
                     className="app-swipe-action"
                   >
                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">

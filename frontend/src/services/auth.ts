@@ -1,15 +1,23 @@
-import api from './api';
+import axios from 'axios';
+import api, { API_URL } from './api';
 import { Device } from '@capacitor/device';
 import { Capacitor } from '@capacitor/core';
 import { getUser, setToken, setUser, setRefreshToken, getRefreshToken, clearAuth, getDeviceId, setDeviceId, setLoggingOut } from './tokenStore';
+import {
+  mitBiometrieEntsperren,
+  gespeichertenTokenAuffrischen,
+  biometrieVergessen,
+  istBiometrieAktiv
+} from './biometrics';
 import { offlineCache } from './offlineCache';
 import { writeQueue } from './writeQueue';
+import { disconnectWebSocket } from './websocket';
 import { networkMonitor } from './networkMonitor';
 import { BaseUser } from '../types/user';
 
-// Race Condition User-Wechsel: Backend POST /device-token loescht alte Tokens
+// Race Condition User-Wechsel: Backend POST /device-token löscht alte Tokens
 // (anderer user_id mit gleichem device_token) automatisch VOR dem INSERT.
-// Frontend-seitig wird logout() mit await ausgefuehrt und blockiert bis DELETE durch ist.
+// Frontend-seitig wird logout() mit await ausgeführt und blockiert bis DELETE durch ist.
 export const loginWithAutoDetection = async (username: string, password: string): Promise<BaseUser> => {
 
   try {
@@ -41,7 +49,7 @@ export const loginWithAutoDetection = async (username: string, password: string)
 let logoutInProgress = false;
 
 // Erlaubt anderen Modulen (api.ts 401-Interceptor) zu erkennen, dass gerade ein
-// BEWUSSTER Logout laeuft — dann darf ein 401 NICHT als "Sitzung abgelaufen"
+// BEWUSSTER Logout läuft — dann darf ein 401 NICHT als "Sitzung abgelaufen"
 // gemeldet werden (der User loggt sich ja absichtlich aus).
 export const isLoggingOut = (): boolean => logoutInProgress;
 
@@ -52,30 +60,43 @@ export const logout = async (): Promise<void> => {
   }
   
   logoutInProgress = true;
-  // 401-Interceptor (api.ts) soll waehrend des bewussten Logouts NICHT
-  // "Sitzung abgelaufen" melden — der Push-Cleanup-Call nach clearAuth() laeuft
+  // 401-Interceptor (api.ts) soll während des bewussten Logouts NICHT
+  // "Sitzung abgelaufen" melden — der Push-Cleanup-Call nach clearAuth() läuft
   // ohne Token und liefert sonst einen 401.
   setLoggingOut(true);
 
   // WICHTIG: Der LOKALE Logout (clearAuth) darf NIEMALS an haengenden
-  // Netzwerk-Calls scheitern (frueher blieb der User offline nach Reload
+  // Netzwerk-Calls scheitern (früher blieb der User offline nach Reload
   // eingeloggt). Alle Server-Calls laufen mit hartem Timeout.
   //
   // REIHENFOLGE: Push-Token-DELETE MUSS VOR clearAuth laufen — der Endpoint
   // verlangt Auth (verifyTokenRBAC). Frueher lief er danach, bekam 401, der
   // Token blieb registriert und der alte Account erhielt nach Account-Wechsel
-  // weiter Pushes auf diesem Geraet. Best-effort: schlaegt der DELETE fehl
-  // (offline/Timeout), haengt POST /device-token den Token beim naechsten
+  // weiter Pushes auf diesem Geraet. Best-effort: schlägt der DELETE fehl
+  // (offline/Timeout), hängt POST /device-token den Token beim nächsten
   // Login serverseitig an den neuen User um.
 
   // Helper: Request mit hartem Timeout, damit ein falsch-positives isOnline
-  // (Network-Plugin meldet sporadisch connected trotz keiner Verbindung) nicht haengt.
+  // (Network-Plugin meldet sporadisch connected trotz keiner Verbindung) nicht hängt.
   const withTimeout = <T>(p: Promise<T>, ms = 4000): Promise<T | undefined> =>
     Promise.race([p, new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ms))]);
 
-  // Push-Token serverseitig loeschen (best-effort, mit Timeout, NOCH authentifiziert)
+  // Ungesendete Queue-Items (z.B. Chat-Nachrichten) JETZT noch zustellen,
+  // solange das Token gilt. Items, die den Logout ueberleben wuerden, gingen
+  // beim naechsten Login unter dem DANN angemeldeten Konto raus — also unter
+  // falscher Identitaet, wenn sich jemand anderes anmeldet. Deshalb unten
+  // nach clearAuth auch writeQueue.clear().
   try {
-    let deviceId: string | undefined;
+    if (networkMonitor.isOnline) {
+      await withTimeout(writeQueue.flush(), 8000);
+    }
+  } catch (error) {
+    console.warn('Queue-Flush beim Logout fehlgeschlagen (unkritisch):', error);
+  }
+
+  // Push-Token serverseitig löschen (best-effort, mit Timeout, NOCH authentifiziert)
+  let deviceId: string | undefined;
+  try {
     if (Capacitor.isNativePlatform()) {
       try {
         const deviceInfo = await Device.getId();
@@ -101,21 +122,51 @@ export const logout = async (): Promise<void> => {
   try {
     const refreshToken = getRefreshToken();
     if (refreshToken && networkMonitor.isOnline) {
-      await withTimeout(api.post('/auth/logout', { refresh_token: refreshToken }));
+      await withTimeout(api.post('/auth/logout', {
+        refresh_token: refreshToken,
+        device_id: deviceId,
+        platform: Capacitor.getPlatform()
+      }));
     }
   } catch (error) {
     console.warn('Serverseitiges Token-Revoke fehlgeschlagen (wird lokal geloescht):', error);
   }
 
-  // GARANTIERT: lokale Auth-Daten loeschen. Ab hier ist der User ausgeloggt.
+  // GARANTIERT: lokale Auth-Daten löschen. Ab hier ist der User ausgeloggt.
   await clearAuth();
+
+  // Ausdrueckliches Abmelden loescht IMMER auch die biometrisch gesicherte
+  // Sitzung. Bliebe sie liegen, koennte man sich nach dem Abmelden per Face ID
+  // wieder in genau das Konto entsperren, aus dem man gerade herausgegangen ist.
+  try {
+    await biometrieVergessen();
+  } catch (error) {
+    console.warn('Biometrie-Aufraeumen beim Logout fehlgeschlagen:', error);
+  }
+
+  // Queue leeren: was jetzt noch drin ist, darf nach dem naechsten Login
+  // nicht unter fremdem Konto gesendet werden (siehe Flush oben).
+  try {
+    await writeQueue.clear();
+  } catch (error) {
+    console.warn('Queue-Clear beim Logout fehlgeschlagen:', error);
+  }
+
+  // Socket trennen: ohne das ueberlebt die Verbindung den Logout und der
+  // nächste angemeldete Nutzer sitzt weiter in den Räumen des vorherigen
+  // Der Aufbau erfolgt beim nächsten Login neu.
+  try {
+    disconnectWebSocket();
+  } catch (error) {
+    console.warn('Socket-Trennung beim Logout fehlgeschlagen:', error);
+  }
   try {
     await offlineCache.clearAll();
   } catch (error) {
     console.warn('Cache-Clear beim Logout fehlgeschlagen:', error);
   }
 
-  // Device ID NICHT loeschen - bleibt fuer das Geraet persistent
+  // Device ID NICHT löschen - bleibt für das Geraet persistent
   logoutInProgress = false;
   // Kurz verzoegert zuruecksetzen, damit auch ein knapp nachlaufender 401 vom
   // Push-Cleanup noch unterdrueckt wird, dann wieder normales Verhalten.
@@ -130,3 +181,85 @@ export const checkAuthAsync = async (): Promise<BaseUser | null> => {
   return getUser();
 };
 
+
+// ---------------------------------------------------------------------------
+// Biometrische Anmeldung: Sitzung wiederherstellen
+// ---------------------------------------------------------------------------
+
+export type BiometrieAnmeldung =
+  | { status: 'ok'; user: BaseUser }
+  /** Abgebrochen oder nicht erkannt — normaler Anmeldeweg, keine Fehlermeldung. */
+  | { status: 'abgebrochen' }
+  /** Nichts gespeichert / Frist abgelaufen — normaler Anmeldeweg. */
+  | { status: 'nichts-gespeichert' }
+  /** Der gespeicherte Token gilt nicht mehr — normaler Anmeldeweg mit Hinweis. */
+  | { status: 'abgelaufen' }
+  /** Kein Netz — der gespeicherte Token laesst sich gerade nicht einloesen. */
+  | { status: 'offline' }
+  /** Unerwarteter Fehler — normaler Anmeldeweg mit Hinweis. */
+  | { status: 'fehler' };
+
+/**
+ * Stellt die Sitzung nach erfolgreicher Biometrie wieder her.
+ *
+ * Ablauf: Token biometrisch aus dem sicheren Speicher lesen -> beim Server
+ * gegen ein frisches Token-Paar tauschen -> das rotierte Token zurueck in den
+ * sicheren Speicher schreiben.
+ *
+ * Der Tausch laeuft bewusst ueber direktes axios statt ueber api.ts: der
+ * dortige 401-Interceptor wuerde bei einem abgelaufenen Token ein
+ * 'auth:relogin-required'-Event feuern und clearAuth() aufrufen. Wir sind hier
+ * aber noch GAR NICHT angemeldet — das Event traefe ins Leere und der
+ * Fehlerfall waere nicht mehr sauber unterscheidbar. Hier entscheidet allein
+ * der Rueckgabewert, was die Oberflaeche anzeigt.
+ */
+export const mitBiometrieAnmelden = async (): Promise<BiometrieAnmeldung> => {
+  const entsperrt = await mitBiometrieEntsperren();
+
+  if (entsperrt.status === 'abgebrochen') return { status: 'abgebrochen' };
+  if (entsperrt.status === 'nichts-gespeichert') return { status: 'nichts-gespeichert' };
+  if (entsperrt.status === 'fehler') return { status: 'fehler' };
+
+  // Ohne Netz laesst sich der gespeicherte Token nicht einloesen. Die Sitzung
+  // wird NICHT verworfen — beim naechsten Versuch mit Netz klappt es wieder.
+  if (!networkMonitor.isOnline) return { status: 'offline' };
+
+  try {
+    const antwort = await axios.post(`${API_URL}/auth/refresh`, {
+      refresh_token: entsperrt.refreshToken
+    });
+    const { token, refresh_token: neuerRefreshToken } = antwort.data || {};
+    if (!token || !neuerRefreshToken) return { status: 'fehler' };
+
+    // Reihenfolge wie in api.ts performRefresh: erst der langlebige Schluessel.
+    await setRefreshToken(neuerRefreshToken);
+    await setToken(token);
+    await setUser(entsperrt.user);
+
+    // Rotierten Token zurueckschreiben, solange auf Android das Zeitfenster der
+    // gerade erfolgten Pruefung noch traegt. Die urspruengliche Frist bleibt
+    // stehen (gespeichertAm wird durchgereicht, nicht erneuert).
+    await gespeichertenTokenAuffrischen(neuerRefreshToken, entsperrt.gespeichertAm);
+
+    return { status: 'ok', user: entsperrt.user };
+  } catch (fehler: unknown) {
+    const status = (fehler as { response?: { status?: number } })?.response?.status;
+    if (status === 401) {
+      // Der Server kennt den Token nicht mehr (abgelaufen, widerrufen, oder auf
+      // einem anderen Geraet abgemeldet). Aufraeumen, sonst fragt die App bei
+      // jedem Start nach Face ID und scheitert danach still — genau die
+      // Schleife, die es nicht geben darf.
+      await biometrieVergessen();
+      return { status: 'abgelaufen' };
+    }
+    console.warn('Anmeldung per Biometrie fehlgeschlagen:', fehler);
+    return { status: 'fehler' };
+  }
+};
+
+/**
+ * true, wenn die Anmeldemaske einen Knopf fuer die biometrische Anmeldung
+ * zeigen soll. Prueft NUR den Schalter, loest also keine Abfrage aus.
+ */
+export const biometrieAnmeldungMoeglich = async (): Promise<boolean> =>
+  istBiometrieAktiv();

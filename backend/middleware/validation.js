@@ -53,7 +53,7 @@ const commonValidations = {
   type: body('type').isIn(['gottesdienst', 'gemeinde']).withMessage('Typ muss "gottesdienst" oder "gemeinde" sein'),
   email: body('email').trim().isEmail().withMessage('Gültige E-Mail-Adresse erforderlich'),
   // KEIN trim(): Leerzeichen sollen NICHT still entfernt werden, sondern eine
-  // klare Fehlermeldung ausloesen (Regex unten verbietet sie).
+  // klare Fehlermeldung auslösen (Regex unten verbietet sie).
   // Erlaubt sind nur Buchstaben, Zahlen, Punkt und Bindestrich (KEIN Unterstrich,
   // KEINE Leerzeichen). Gross-/Kleinschreibung bleibt erhalten — der Login ist
   // case-insensitiv (LOWER-Vergleich), gespeichert wird die Original-Schreibweise.

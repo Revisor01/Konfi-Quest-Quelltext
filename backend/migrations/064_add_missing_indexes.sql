@@ -213,8 +213,19 @@ CREATE INDEX IF NOT EXISTS idx_categories_organization_id ON categories(organiza
 -- invite_codes (auth.js, organizations.js)
 -- (idx_invite_codes_code und idx_invite_codes_expires existieren bereits)
 -- WHERE ic.organization_id = $1
+--
+-- ACHTUNG: invite_codes wird erst in Migration 079
+-- angelegt. In Produktion lief 064 auf einer Datenbank, in der die Tabelle
+-- schon existierte — auf einer FRISCHEN Datenbank brach hier die gesamte
+-- Migration ab und alle nachfolgenden Indizes dieser Datei entfielen.
+-- Deshalb bedingt: 079 legt den Index selbst an, wenn er hier ausfaellt.
 -- ====================================================================
-CREATE INDEX IF NOT EXISTS idx_invite_codes_organization_id ON invite_codes(organization_id);
+DO $$
+BEGIN
+  IF to_regclass('public.invite_codes') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS idx_invite_codes_organization_id ON invite_codes(organization_id);
+  END IF;
+END $$;
 
 -- ====================================================================
 -- certificate_types (teamer.js, organizations.js)

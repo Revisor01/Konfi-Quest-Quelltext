@@ -2,10 +2,14 @@ const express = require('express');
 const router = express.Router();
 const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
-const { fetchTageslosung } = require('../services/losungService');
+const { fetchTageslosung, tageslosungFallback } = require('../services/losungService');
 const { computeCurrentStreak } = require('../utils/streakCalculation');
+const { berechneBadgeProgress, bedingungFehlt } = require('../utils/badgeProgress');
+const { determineBookingStatus } = require('../utils/bookingUtils');
 const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
+const { addToEventChat, removeFromEventChat } = require('../utils/eventChat');
+const { deletePhotoFile } = require('../utils/photoStorage');
 
 module.exports = (db, rbacVerifier, roleHelpers) => {
   const { requireTeamer, requireOrgAdmin, requireAdmin } = roleHelpers;
@@ -71,10 +75,10 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       `;
       const { rows: [konfiProfile] } = await db.query(profileQuery, [userId]);
 
-      // Beförderter Teamer = hat ueberhaupt ein konfi_profiles (Konfi-Vergangenheit).
-      // NICHT am jahrgang_name festmachen: wird der alte Jahrgang geloescht, ist
+      // Beförderter Teamer = hat überhaupt ein konfi_profiles (Konfi-Vergangenheit).
+      // NICHT am jahrgang_name festmachen: wird der alte Jahrgang gelöscht, ist
       // jahrgang_id=NULL -> jahrgang_name=NULL, aber die WERTE (Punkte/Badges)
-      // bleiben und muessen weiter sichtbar sein. Reine Teamer ohne Konfi-
+      // bleiben und müssen weiter sichtbar sein. Reine Teamer ohne Konfi-
       // Vergangenheit haben kein konfi_profiles -> konfi_data=null.
       const isPromotedKonfi = !!konfiProfile;
       let badges = [];
@@ -326,7 +330,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
           "SELECT teamer_since FROM users WHERE id = $1",
           [userId]
         ),
-        // Pro Kategorie: Anzahl Teamer-Aktivitaeten + anwesende Events (fuer
+        // Pro Kategorie: Anzahl Teamer-Aktivitäten + anwesende Events (für
         // category_activities-Progress). Identische Logik wie die Wertung in
         // badges.js (checkAndAwardTeamerBadges, case 'category_activities').
         db.query(
@@ -344,7 +348,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
           GROUP BY c.name`,
           [userId, orgId]
         ),
-        // Teamer-Aktivitaets-Namen + Anzahl (fuer specific_activity / activity_combination).
+        // Teamer-Aktivitaets-Namen + Anzahl (für specific_activity / activity_combination).
         db.query(
           `SELECT a.name, COUNT(*) AS count FROM user_activities ua
            JOIN activities a ON ua.activity_id = a.id
@@ -352,15 +356,15 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
            GROUP BY a.name`,
           [userId, orgId]
         ),
-        // Besuchte Event-Namen (fuer activity_combination required_events).
-        // events-Spalte heisst 'name' (nicht 'title') -> als title aliasen.
+        // Besuchte Event-Namen (für activity_combination required_events).
+        // events-Spalte heißt 'name' (nicht 'title') -> als title aliasen.
         db.query(
           `SELECT DISTINCT e.name AS title FROM event_bookings eb
            JOIN events e ON eb.event_id = e.id
            WHERE eb.user_id = $1 AND eb.attendance_status = 'present' AND eb.organization_id = $2`,
           [userId, orgId]
         ),
-        // Alle Aktivitaets-/Event-Daten (fuer streak / time_based).
+        // Alle Aktivitaets-/Event-Daten (für streak / time_based).
         db.query(
           `SELECT ua.completed_date AS date FROM user_activities ua
            JOIN activities a ON ua.activity_id = a.id
@@ -376,25 +380,22 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       const activityCount = parseInt(actCountRes.rows[0].count);
       const eventCount = parseInt(evCountRes.rows[0].count);
       const uniqueActivities = parseInt(uniqueActRes.rows[0].count);
-      // Map Kategorie-Name -> Anzahl (fuer category_activities-Progress).
-      const categoryCounts = {};
-      for (const row of categoryCountsRes.rows) {
-        categoryCounts[row.category] = parseInt(row.count);
-      }
-      // Map Aktivitaets-Name -> Anzahl (specific_activity / activity_combination).
-      const activityNameCounts = {};
-      for (const row of actNamesRes.rows) {
-        activityNameCounts[row.name] = parseInt(row.count);
-      }
-      const completedActivityNames = actNamesRes.rows.map(r => r.name);
-      const attendedEventTitles = eventTitlesRes.rows.map(r => r.title);
-      // Datums-Liste (Strings/Dates) fuer streak / time_based.
+      const categoryCounts = new Map(
+        categoryCountsRes.rows.map(r => [r.category, parseInt(r.count)])
+      );
+      const activityNameCounts = new Map(
+        actNamesRes.rows.map(r => [r.name, parseInt(r.count)])
+      );
+      // Set statt Array: activity_combination fragt nur nach Enthaltensein.
+      const attendedEventTitles = new Set(eventTitlesRes.rows.map(r => r.title));
+      // Datums-Liste (Strings/Dates) für streak / time_based.
       const allDates = allDatesRes.rows.map(r => r.date).filter(Boolean);
-      // Array der aktiven Jahre (INTEGER) — fuer Startjahr-Filter im teamer_year-Case.
+      // Array der aktiven Jahre (INTEGER) — für Startjahr-Filter im teamer_year-Case.
       const activeYearValues = activeYearsRes.rows.map(r => r.year);
+      const currentStreak = computeCurrentStreak(allDates);
 
-      // Startjahr fuer teamer_year (konsistent zur Wertung badges.js):
-      // 1. users.teamer_since; 2. Fallback aelteste aktive Jahr (entspricht aelteste Teamer-Aktivitaet).
+      // Startjahr für teamer_year (konsistent zur Wertung badges.js):
+      // 1. users.teamer_since; 2. Fallback aelteste aktive Jahr (entspricht aelteste Teamer-Aktivität).
       let teamerStartYear = null;
       const teamerSince = teamerSinceRes.rows[0]?.teamer_since;
       if (teamerSince) {
@@ -403,101 +404,73 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
         teamerStartYear = Math.min(...activeYearValues);
       }
 
-      // Punkte-basierte Kriterien (irrelevant für Teamer)
-      const pointsCriteria = ['total_points', 'gottesdienst_points', 'gemeinde_points', 'both_categories', 'bonus_points'];
-
-      // Fortschritt für jede Badge berechnen
+      // Der Kern liefert `percentage` ungerundet; die Antwortform hier ist
+      // bewusst unveraendert geblieben (flaches Array, `progress_points` /
+      // `progress_percentage`, Zaehler in Kopfzeilen), weil zwei Ansichten und
+      // vier Tests daran haengen. Deshalb der Adapter statt einer neuen Huelle.
       const enrichedBadges = badges.map(badge => {
         if (badge.earned) {
           return { ...badge, progress_points: badge.criteria_value, progress_percentage: 100 };
         }
 
-        let progressPoints = 0;
-        const criteriaValue = badge.criteria_value || 1;
+        const progress = berechneBadgeProgress(badge, {
+          // Teamer:innen haben kein Punktekonto — alle Punkte-Kriterien
+          // bleiben 0. `beideKategorien: null` sagt dem Kern ausdruecklich
+          // "gibt es hier nicht", statt eine 0 vorzutaeuschen.
+          beideKategorien: null,
+          // ACHTUNG, Namensfalle: `activityCount` enthaelt hier Aktivitaeten
+          // UND anwesende Events (die Query addiert beides), beim Konfi nicht.
+          // Deshalb heisst das Feld im Kern `aktivitaetenUndEvents`.
+          // Deckungsgleich mit der Wertung (`badges.js:395`).
+          aktivitaetenUndEvents: activityCount,
+          events: eventCount,
+          verschiedeneAktivitaeten: uniqueActivities,
+          // Nur Jahre ab dem Startjahr (teamer_since) zaehlen — identisch zur
+          // Wertung, sonst zeigte die Anzeige mehr Jahre als angerechnet werden.
+          teamerJahre: teamerStartYear === null
+            ? 0
+            : activeYearValues.filter(y => y >= teamerStartYear).length,
+          proKategorie: categoryCounts,
+          proAktivitaetsname: activityNameCounts,
+          // Der Teamer-Pfad zaehlt bei activity_combination auch
+          // required_events mit (wie die Wertung in `badges.js:391`); der
+          // Konfi-Pfad liefert dieses Feld bewusst nicht.
+          erfuellteEventTitel: attendedEventTitles,
+          streak: currentStreak,
+          alleDaten: allDates
+        });
 
-        if (pointsCriteria.includes(badge.criteria_type)) {
-          progressPoints = 0;
-        } else {
-          switch (badge.criteria_type) {
-            case 'activity_count':
-              progressPoints = activityCount;
-              break;
-            case 'event_count':
-              progressPoints = eventCount;
-              break;
-            case 'unique_activities':
-              progressPoints = uniqueActivities;
-              break;
-            case 'teamer_year':
-              // Nur Jahre ab Startjahr (teamer_since) zaehlen — identisch zur Wertung (kein Mismatch).
-              progressPoints = teamerStartYear === null
-                ? 0
-                : activeYearValues.filter(y => y >= teamerStartYear).length;
-              break;
-            case 'category_activities': {
-              // Echter Progress: Anzahl Teamer-Aktivitaeten + anwesende Events der
-              // geforderten Kategorie (deckungsgleich mit der Wertung in badges.js).
-              const extra = typeof badge.criteria_extra === 'object' && badge.criteria_extra !== null
-                ? badge.criteria_extra
-                : JSON.parse(badge.criteria_extra || '{}');
-              progressPoints = extra.required_category
-                ? (categoryCounts[extra.required_category] || 0)
-                : 0;
-              break;
-            }
-            case 'specific_activity': {
-              // Anzahl der geforderten Teamer-Aktivitaet (Name), wie Wertung badges.js:476.
-              const extra = typeof badge.criteria_extra === 'object' && badge.criteria_extra !== null
-                ? badge.criteria_extra : JSON.parse(badge.criteria_extra || '{}');
-              progressPoints = extra.required_activity_name
-                ? (activityNameCounts[extra.required_activity_name] || 0)
-                : 0;
-              break;
-            }
-            case 'activity_combination': {
-              // Anzahl erfuellter Teilbedingungen (Aktivitaeten + Events), wie Wertung
-              // badges.js:391. Ziel ist die Gesamtanzahl der geforderten Eintraege.
-              const extra = typeof badge.criteria_extra === 'object' && badge.criteria_extra !== null
-                ? badge.criteria_extra : JSON.parse(badge.criteria_extra || '{}');
-              const reqActs = extra.required_activities || [];
-              const reqEvents = extra.required_events || [];
-              const actMatch = reqActs.filter(n => completedActivityNames.includes(n)).length;
-              const evMatch = reqEvents.filter(t => attendedEventTitles.includes(t)).length;
-              progressPoints = actMatch + evMatch;
-              break;
-            }
-            case 'streak':
-              // Aktueller Wochen-Streak (gleiche Util wie Wertung badges.js checkStreakCriteria).
-              progressPoints = computeCurrentStreak(allDates);
-              break;
-            case 'time_based': {
-              // Anzahl Aktivitaeten/Events im Zeitfenster, wie Wertung badges.js:522.
-              const extra = typeof badge.criteria_extra === 'object' && badge.criteria_extra !== null
-                ? badge.criteria_extra : JSON.parse(badge.criteria_extra || '{}');
-              const days = extra.days || (extra.weeks ? extra.weeks * 7 : null);
-              if (days) {
-                const cutoff = Date.now() - (days * 24 * 60 * 60 * 1000);
-                progressPoints = allDates.filter(d => new Date(d).getTime() >= cutoff).length;
-              } else {
-                progressPoints = 0;
-              }
-              break;
-            }
-            case 'collection':
-            case 'yearly':
-              // Noch nicht in der Wertung implementiert -> 0.
-              progressPoints = 0;
-              break;
-            default:
-              progressPoints = 0;
-          }
-        }
-
-        const progressPercentage = Math.min(100, Math.round((progressPoints / criteriaValue) * 100));
-        return { ...badge, progress_points: progressPoints, progress_percentage: progressPercentage };
+        return {
+          ...badge,
+          progress_points: progress.current,
+          progress_percentage: Math.round(progress.percentage)
+        };
       });
 
-      res.json(enrichedBadges);
+      // Geheime Abzeichen erst zeigen, wenn sie verdient sind. Die Ansicht
+      // verlässt sich darauf, dass sie gar nicht erst geliefert werden — beim
+      // Konfi tut das Backend das (konfiBadgeProgress.js), hier fehlte es, und
+      // Name, Beschreibung und Fortschritt standen offen da.
+      //
+      // Die Punktearten-Haelfte der Konfi-Pruefung (gottesdienst_enabled /
+      // gemeinde_enabled am Jahrgang) gilt hier NICHT: Teamer:innen haben kein
+      // Punktekonto, die Punkte-Kriterien sind fuer sie ohnehin immer 0.
+      const sichtbareBadges = enrichedBadges.filter(
+        b => (!b.is_hidden || b.earned) && (b.earned || !bedingungFehlt(b))
+      );
+
+      // Die Gesamtzahl der Geheimnisse gehört MIT in die Antwort: Die Ansicht
+      // zählte sie bisher aus der Liste, und die enthält jetzt nur noch die
+      // verdienten. Ohne diese Zahl hätte der Hinweis "x Geheimnisse zu
+      // entdecken" nach dem Filtern still auf null gestanden.
+      // Bewusst als Kopfzeile und nicht im Rumpf: Die Antwort ist ein Array,
+      // und zwei Ansichten lesen sie so (TeamerBadgesPage, TeamerDashboardPage).
+      // Eine neue Huelle hätte beide gebrochen.
+      const aktiv = enrichedBadges.filter(b => b.is_active);
+      res.set('X-Badges-Secret-Total', String(aktiv.filter(b => b.is_hidden).length));
+      res.set('X-Badges-Visible-Total', String(aktiv.filter(b => !b.is_hidden).length));
+
+      res.json(sichtbareBadges);
     } catch (err) {
       console.error('Error loading teamer badges:', err);
       res.status(500).json({ error: 'Fehler beim Laden der Teamer-Badges' });
@@ -540,6 +513,49 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
     }
   });
 
+  // GET /teamer/:userId/badges - Erreichte Badges EINER Teamer:in (Leitungs-
+  // Einsicht für die Detailseite). Bewusst ohne Fortschritt zu den noch
+  // offenen Badges: die Detailseite zeigt nur, was erreicht wurde — die
+  // Fortschrittsberechnung in GET /teamer/badges ist teuer und wäre hier
+  // ungenutzt. Zugriff wie bei den Zertifikaten: requireAdmin.
+  router.get('/:userId/badges', rbacVerifier, requireAdmin, async (req, res) => {
+    try {
+      const { userId } = req.params;
+
+      // Org-Zugehoerigkeit + Teamer-Rolle prüfen (analog zur Konfi-Variante
+      // in konfi-management.js, die auf r.name = 'konfi' filtert).
+      const { rows: [teamer] } = await db.query(
+        `SELECT u.id FROM users u
+         JOIN roles r ON u.role_id = r.id
+         WHERE u.id = $1 AND r.name = 'teamer' AND u.organization_id = $2 AND u.deleted_at IS NULL`,
+        [userId, req.user.organization_id]
+      );
+
+      if (!teamer) {
+        return res.status(404).json({ error: 'Teamer:in nicht gefunden' });
+      }
+
+      const { rows: badges } = await db.query(
+        `SELECT cb.id, cb.name, cb.description, cb.icon, cb.color,
+                cb.criteria_type, cb.criteria_value, cb.is_hidden,
+                -- Feldname wie beim Konfi-Endpunkt, damit die Detailseite
+                -- dieselbe Komponente nutzen kann.
+                ub.awarded_date AS earned_at
+         FROM user_badges ub
+         JOIN custom_badges cb ON ub.badge_id = cb.id
+         WHERE ub.user_id = $1 AND ub.organization_id = $2
+           AND cb.target_role = 'teamer'
+         ORDER BY ub.awarded_date DESC NULLS LAST, cb.name`,
+        [userId, req.user.organization_id]
+      );
+
+      res.json({ earned: badges });
+    } catch (err) {
+      console.error('Database error in GET /teamer/:userId/badges:', err);
+      res.status(500).json({ error: 'Datenbankfehler' });
+    }
+  });
+
   // ====================================================================
   // ZERTIFIKAT-TYPEN CRUD (Admin-only)
   // ====================================================================
@@ -561,8 +577,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
     }
   });
 
-  // POST /teamer/certificate-types - Neuen Typ erstellen
-  router.post('/certificate-types', rbacVerifier, requireOrgAdmin, validateCreateCertificateType, async (req, res) => {
+  router.post('/certificate-types', rbacVerifier, requireAdmin, validateCreateCertificateType, async (req, res) => {
     try {
       const { name, icon } = req.body;
       if (!name || !name.trim()) {
@@ -586,7 +601,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
   });
 
   // PUT /teamer/certificate-types/:id - Typ bearbeiten
-  router.put('/certificate-types/:id', rbacVerifier, requireOrgAdmin, validateUpdateCertificateType, async (req, res) => {
+  router.put('/certificate-types/:id', rbacVerifier, requireAdmin, validateUpdateCertificateType, async (req, res) => {
     try {
       const { name, icon, is_active } = req.body;
       const updates = [];
@@ -634,7 +649,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
   });
 
   // DELETE /teamer/certificate-types/:id - Typ löschen (nur wenn nicht zugewiesen)
-  router.delete('/certificate-types/:id', rbacVerifier, requireOrgAdmin, async (req, res) => {
+  router.delete('/certificate-types/:id', rbacVerifier, requireAdmin, async (req, res) => {
     try {
       // Prüfen ob Zertifikate zugewiesen sind
       const { rows: [usage] } = await db.query(
@@ -687,7 +702,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
   });
 
   // POST /teamer/:userId/certificates - Zertifikat zuweisen
-  router.post('/:userId/certificates', rbacVerifier, requireOrgAdmin, validateCertificate, async (req, res) => {
+  router.post('/:userId/certificates', rbacVerifier, requireAdmin, validateCertificate, async (req, res) => {
     try {
       const { certificate_type_id, issued_date, expiry_date } = req.body;
 
@@ -729,15 +744,11 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       // Push + Live-Update an die Empfaenger:in (Teamer:in). Seiteneffekt NACH res,
       // in try/catch — ein Push-Fehler darf die erfolgreiche Zuweisung nicht kippen.
       try {
-        await PushService.sendToUser(db, req.params.userId, {
-          title: 'Neues Zertifikat',
-          body: `Du hast das Zertifikat "${certType.name}" erhalten.`,
-          data: { type: 'certificate' }
-        });
+        await PushService.sendCertificateToTeamer(db, req.params.userId, certType.name, req.user.organization_id);
       } catch (pushErr) {
         console.error('Error sending certificate push:', pushErr);
       }
-      // Zertifikate haengen an den Teamer-Badge-/Dashboard-Ansichten -> 'badges'.
+      // Zertifikate hängen an den Teamer-Badge-/Dashboard-Ansichten -> 'badges'.
       liveUpdate.sendToUserByRole(req.params.userId, 'badges', 'update');
     } catch (err) {
       if (err.code === '23505') {
@@ -749,7 +760,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
   });
 
   // DELETE /teamer/:userId/certificates/:certId - Zertifikat entfernen
-  router.delete('/:userId/certificates/:certId', rbacVerifier, requireOrgAdmin, async (req, res) => {
+  router.delete('/:userId/certificates/:certId', rbacVerifier, requireAdmin, async (req, res) => {
     try {
       const { rowCount } = await db.query(
         'DELETE FROM user_certificates WHERE id = $1 AND user_id = $2 AND organization_id = $3',
@@ -809,7 +820,11 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       `;
       const { rows: certificates } = await db.query(certificatesQuery, [userId, orgId]);
 
-      // 3. Events: Naechste 3 anstehende Events (Teamer-Events + Teamer-gesucht)
+      // 3. Events: Naechste anstehende Termine, die Teamer:innen betreffen --
+      // eigene Buchungen UND Termine, fuer die Teamer:innen gesucht werden.
+      //
+      // Der Filter auf teamer_only/teamer_needed fehlte ebenfalls ganz; ohne
+      // ihn stuenden auch reine Konfi-Termine auf der Teamer-Startseite.
       const eventsQuery = `
         SELECT e.id, e.name AS title, e.event_date, e.event_end_time, e.location, e.type,
                e.teamer_only, e.teamer_needed, e.bring_items, e.cancelled,
@@ -820,7 +835,11 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
         WHERE e.organization_id = $2
           AND e.event_date >= CURRENT_DATE
           AND (e.cancelled IS NOT TRUE)
-          AND eb.id IS NOT NULL
+          AND (
+            eb.id IS NOT NULL          -- eigene Buchung: immer zeigen
+            OR e.teamer_only = true    -- reiner Team-Termin
+            OR e.teamer_needed = true  -- "Teamer:innen gesucht"
+          )
         ORDER BY e.event_date ASC
         LIMIT 5
       `;
@@ -866,6 +885,8 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       let teamerSectionOrder = null;
       const config = {
         show_zertifikate: true,
+        show_challenges: true,
+        show_konfispruch: true,
         show_events: true,
         show_badges: true,
         show_losung: true
@@ -878,9 +899,17 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
           config[row.key.replace('teamer_dashboard_show_', 'show_')] = row.value === 'true' || row.value === '1';
         }
       });
-      config.section_order = teamerSectionOrder || ['zertifikate', 'events', 'badges', 'losung'];
+      config.section_order = teamerSectionOrder || ['zertifikate', 'challenges', 'konfispruch', 'events', 'badges', 'losung'];
 
-      // Wrapped-Verfuegbarkeit pruefen (Teamer: direkt auf wrapped_snapshots)
+      // 6. Konfispruch: aus konfi_profiles — beförderte Teamer:innen haben ihn
+      // aus ihrer Konfi-Zeit, direkt angelegte können ihn über PATCH /profile
+      // eintragen. Bei abgeschalteter Karte wird gar nicht erst abgefragt.
+      let konfspruch = null;
+      if (config.show_konfispruch !== false) {
+        konfspruch = await loadKonfspruch(userId, orgId);
+      }
+
+      // Wrapped-Verfuegbarkeit prüfen (Teamer: direkt auf wrapped_snapshots)
       const { rows: [wrappedResult] } = await db.query(
         `SELECT EXISTS(
           SELECT 1 FROM wrapped_snapshots
@@ -890,10 +919,201 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       );
       const has_wrapped = wrappedResult?.has_wrapped || false;
 
-      res.json({ greeting, certificates, events, badges, config, has_wrapped });
+      res.json({ greeting, certificates, events, badges, config, has_wrapped, konfspruch });
     } catch (err) {
       console.error('Error loading teamer dashboard:', err);
       res.status(500).json({ error: 'Fehler beim Laden des Teamer-Dashboards' });
+    }
+  });
+
+  // ====================================================================
+  // KONFISPRUCH (Teamer) — gleiche Daten wie bei Konfis (konfi_profiles),
+  // damit ein bei der Beförderung mitgebrachter Spruch erhalten bleibt.
+  // ====================================================================
+
+  // Gueltige Translation-Keys wie in routes/konfi.js (deskriptive Keys der
+  // Tabelle konfspruch_uebersetzungen, NICHT die Tageslosungs-Kuerzel).
+  const KONFSPRUCH_TRANSLATIONS = ['luther2017', 'bigs', 'gute_nachricht', 'elberfelder'];
+
+  // Loest den gespeicherten Konfispruch eines Users auf (Listen-Wahl oder
+  // Freitext) — Rueckgabeform wie in GET /konfi/profile.
+  async function loadKonfspruch(userId, organizationId) {
+    const { rows: [kp] } = await db.query(
+      `SELECT konfspruch_id, konfspruch_freitext, konfspruch_freitext_referenz,
+              konfspruch_translation
+       FROM konfi_profiles WHERE user_id = $1`,
+      [userId]
+    );
+    if (!kp) return null;
+
+    if (kp.konfspruch_id) {
+      const spruchTranslation = kp.konfspruch_translation || 'luther2017';
+      const { rows: [spruch] } = await db.query(
+        `SELECT ks.id, ks.reference, ku.text
+         FROM konfsprueche ks
+         LEFT JOIN konfspruch_uebersetzungen ku
+           ON ku.spruch_id = ks.id AND ku.translation = $2
+         WHERE ks.id = $1 AND ks.is_active = true
+           AND (ks.organization_id IS NULL OR ks.organization_id = $3)`,
+        [kp.konfspruch_id, spruchTranslation, organizationId]
+      );
+      if (spruch) {
+        return {
+          source: 'liste',
+          id: spruch.id,
+          reference: spruch.reference,
+          text: spruch.text || '',
+          translation: kp.konfspruch_translation || null
+        };
+      }
+      return null;
+    }
+
+    if (kp.konfspruch_freitext) {
+      return {
+        source: 'freitext',
+        text: kp.konfspruch_freitext,
+        reference: kp.konfspruch_freitext_referenz
+      };
+    }
+    return null;
+  }
+
+  // GET /teamer/konfsprueche — kuratierte Liste für das Auswahl-Modal
+  // (org-gefiltert, gleiche Aufbereitung wie GET /konfi/konfsprueche).
+  router.get('/konfsprueche', rbacVerifier, requireTeamer, async (req, res) => {
+    if (req.user.role_name !== 'teamer') {
+      return res.status(403).json({ error: 'Nur Teamer können die Spruchliste abrufen' });
+    }
+    try {
+      const orgId = req.user.organization_id;
+      const { rows } = await db.query(
+        `SELECT ks.id, ks.reference, ks.book, ks.chapter, ks.verse,
+                COALESCE(
+                  json_object_agg(ku.translation, ku.text) FILTER (WHERE ku.translation IS NOT NULL),
+                  '{}'::json
+                ) AS uebersetzungen
+         FROM konfsprueche ks
+         LEFT JOIN konfspruch_uebersetzungen ku ON ku.spruch_id = ks.id
+         WHERE ks.is_active = true
+           AND (ks.organization_id IS NULL OR ks.organization_id = $1)
+         GROUP BY ks.id, ks.reference, ks.book, ks.chapter, ks.verse, ks.sort_order
+         ORDER BY ks.sort_order, ks.id`,
+        [orgId]
+      );
+
+      const sprueche = rows.map((row) => {
+        const uebersetzungen = {};
+        for (const key of KONFSPRUCH_TRANSLATIONS) {
+          uebersetzungen[key] = (row.uebersetzungen && row.uebersetzungen[key]) || '';
+        }
+        return {
+          id: row.id,
+          reference: row.reference,
+          book: row.book,
+          chapter: row.chapter,
+          verse: row.verse,
+          uebersetzungen
+        };
+      });
+
+      res.json(sprueche);
+    } catch (err) {
+      console.error('Database error in GET /teamer/konfsprueche:', err);
+      res.status(500).json({ error: 'Datenbankfehler' });
+    }
+  });
+
+  // PATCH /teamer/profile — eigenen Konfispruch setzen (Listen-Wahl ODER
+  // Freitext, genau EINE Quelle aktiv). Anders als bei Konfis wird die
+  // konfi_profiles-Zeile per Upsert angelegt: direkt als Teamer:in angelegte
+  // Accounts haben noch keine.
+  router.patch('/profile', rbacVerifier, requireTeamer, async (req, res) => {
+    if (req.user.role_name !== 'teamer') {
+      return res.status(403).json({ error: 'Nur Teamer können ihren Konfispruch setzen' });
+    }
+    try {
+      const userId = req.user.id;
+      const orgId = req.user.organization_id;
+      const { konfspruch_id, translation, konfspruch_freitext, konfspruch_freitext_referenz } = req.body;
+
+      // Modus 1: Listen-Wahl
+      if (konfspruch_id !== undefined && konfspruch_id !== null) {
+        const spruchId = parseInt(konfspruch_id, 10);
+        if (Number.isNaN(spruchId)) {
+          return res.status(400).json({ error: 'Ungültige Spruch-ID' });
+        }
+        if (!KONFSPRUCH_TRANSLATIONS.includes(translation)) {
+          return res.status(400).json({
+            error: 'Ungültige Bibelübersetzung',
+            valid_translations: KONFSPRUCH_TRANSLATIONS
+          });
+        }
+        const { rows: [spruch] } = await db.query(
+          `SELECT id FROM konfsprueche
+           WHERE id = $1 AND is_active = true
+             AND (organization_id IS NULL OR organization_id = $2)`,
+          [spruchId, orgId]
+        );
+        if (!spruch) {
+          return res.status(404).json({ error: 'Konfispruch nicht gefunden' });
+        }
+        await db.query(
+          `INSERT INTO konfi_profiles (user_id, organization_id, konfspruch_id, konfspruch_translation)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (user_id) DO UPDATE
+           SET konfspruch_id = EXCLUDED.konfspruch_id,
+               konfspruch_translation = EXCLUDED.konfspruch_translation,
+               konfspruch_freitext = NULL, konfspruch_freitext_referenz = NULL`,
+          [userId, orgId, spruchId, translation]
+        );
+        return res.json({
+          success: true,
+          konfspruch: { source: 'liste', id: spruchId, translation }
+        });
+      }
+
+      // Modus 2: Freitext
+      if (konfspruch_freitext !== undefined && konfspruch_freitext !== null) {
+        const freitext = String(konfspruch_freitext).trim();
+        const referenz = konfspruch_freitext_referenz != null
+          ? String(konfspruch_freitext_referenz).trim()
+          : '';
+        if (!freitext) {
+          return res.status(400).json({ error: 'Der Spruchtext darf nicht leer sein' });
+        }
+        if (!referenz) {
+          return res.status(400).json({
+            error: 'Bei einem eigenen Spruch ist die Stellenangabe (Referenz) verpflichtend'
+          });
+        }
+        if (referenz.length > 100) {
+          return res.status(400).json({ error: 'Die Stellenangabe darf höchstens 100 Zeichen lang sein' });
+        }
+        if (freitext.length > 1000) {
+          return res.status(400).json({ error: 'Der Spruchtext ist zu lang' });
+        }
+        await db.query(
+          `INSERT INTO konfi_profiles (user_id, organization_id, konfspruch_freitext, konfspruch_freitext_referenz)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (user_id) DO UPDATE
+           SET konfspruch_freitext = EXCLUDED.konfspruch_freitext,
+               konfspruch_freitext_referenz = EXCLUDED.konfspruch_freitext_referenz,
+               konfspruch_id = NULL`,
+          [userId, orgId, freitext, referenz]
+        );
+        return res.json({
+          success: true,
+          konfspruch: { source: 'freitext', text: freitext, reference: referenz }
+        });
+      }
+
+      return res.status(400).json({
+        error: 'Bitte entweder einen Spruch aus der Liste (konfspruch_id + translation) oder einen eigenen Spruch (konfspruch_freitext + konfspruch_freitext_referenz) angeben'
+      });
+    } catch (err) {
+      console.error('Database error in PATCH /teamer/profile:', err);
+      res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
 
@@ -903,13 +1123,48 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
   router.get('/tageslosung', rbacVerifier, requireTeamer, async (req, res) => {
     try {
       // Bevorzugte Uebersetzung des Teamers (users.bible_translation, Default LUT).
+      // Wie in der Konfi-Route: abgeschaltete Losung wird nicht abgerufen.
+      // Hier gilt der Teamer-Schalter aus den Dashboard-Einstellungen.
+      const { rows: [losungSetting] } = await db.query(
+        "SELECT value FROM settings WHERE organization_id = $1 AND key = 'teamer_dashboard_show_losung'",
+        [req.user.organization_id]
+      );
+      if (losungSetting && (losungSetting.value === 'false' || losungSetting.value === '0')) {
+        return res.status(204).end();
+      }
+
       const { rows: [u] } = await db.query('SELECT bible_translation FROM users WHERE id = $1', [req.user.id]);
       const translation = u?.bible_translation || 'LUT';
       const result = await fetchTageslosung(db, translation);
       res.json({ success: true, ...result });
     } catch (err) {
       console.error('Tageslosung error:', err.message);
-      res.status(500).json({ success: false, error: 'Tageslosung konnte nicht geladen werden' });
+
+      // Fallback wie in der Konfi-Route: letzte gecachte Losung ausliefern,
+      // statt die Karte mit einem 500er leer zu lassen.
+      try {
+        const { rows: [fallbackCached] } = await db.query(
+          'SELECT verse_data, translation FROM daily_verses ORDER BY date DESC LIMIT 1'
+        );
+        if (fallbackCached) {
+          return res.json({
+            success: true,
+            data: fallbackCached.verse_data,
+            translation: fallbackCached.translation,
+            fallback: true,
+            error: 'Aktuelle Tageslosung nicht verfügbar - verwende letzte verfügbare Losung'
+          });
+        }
+      } catch (fallbackErr) {
+        console.error('Fallback cache error:', fallbackErr.message);
+      }
+
+      res.json({
+        success: true,
+        data: tageslosungFallback(),
+        fallback: true,
+        error: 'Losungen API nicht erreichbar - Fallback verwendet'
+      });
     }
   });
 
@@ -917,7 +1172,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
   router.put('/bible-translation', rbacVerifier, requireTeamer, async (req, res) => {
     try {
       const { translation } = req.body;
-      const validTranslations = ['LUT', 'ELB', 'GNB', 'BIGS', 'NIV', 'LSG', 'RVR60'];
+      const validTranslations = ['LUT', 'ELB', 'GNB', 'BIGS', 'NIV', 'LSG'];
       if (!validTranslations.includes(translation)) {
         return res.status(400).json({ error: 'Ungültige Bibelübersetzung', valid_translations: validTranslations });
       }
@@ -962,12 +1217,13 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
     }
   });
 
-  // GET /teamer/requests — eigene Antraege (nur Teamer-Aktivitaeten)
+  // GET /teamer/requests — eigene Anträge (nur Teamer-Aktivitäten)
   router.get('/requests', rbacVerifier, requireTeamer, async (req, res) => {
     try {
       const userId = req.user.id;
       const query = `
-        SELECT ar.*, a.name as activity_name, a.points as activity_points, a.type as activity_type
+        SELECT ar.*, a.name as activity_name, a.points as activity_points, a.type as activity_type,
+               a.target_role as activity_target_role
         FROM activity_requests ar
         JOIN activities a ON ar.activity_id = a.id
         WHERE ar.user_id = $1
@@ -984,6 +1240,135 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
   });
 
   // POST /teamer/requests — neuen Antrag stellen
+  // ====================================================================
+  // Zusage / Absage zu einem Termin ("Ich bin dabei" / "Ich bin nicht dabei")
+  // ====================================================================
+  //
+  // BEWUSST OHNE Begruendungszwang — anders als bei Konfis auf Pflichtterminen
+  // (konfi.js POST /events/:id/opt-out, dort mind. 5 Zeichen plus Eltern-
+  // Hinweis). Teamer:innen arbeiten selbststaendig; es geht nur darum, dass
+  // die Rueckmeldung ueberhaupt da ist. Ein freiwilliger Grund wird gespeichert,
+  // wenn einer mitgeschickt wird.
+  router.post('/events/:id/zusage', rbacVerifier, requireTeamer,
+    [param('id').isInt({ min: 1 }), handleValidationErrors],
+    async (req, res) => {
+      const eventId = parseInt(req.params.id, 10);
+      const { dabei, reason } = req.body;
+
+      if (typeof dabei !== 'boolean') {
+        return res.status(400).json({ error: 'Bitte "dabei" als true oder false angeben' });
+      }
+
+      const client = await db.getClient();
+      try {
+        await client.query('BEGIN');
+
+        const { rows: [event] } = await client.query(
+          `SELECT id, name, event_date, teamer_needed, teamer_only, cancelled,
+                  teamer_max_participants, teamer_waitlist_enabled, teamer_max_waitlist_size
+             FROM events WHERE id = $1 AND organization_id = $2 FOR UPDATE`,
+          [eventId, req.user.organization_id]
+        );
+        if (!event) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Termin nicht gefunden' });
+        }
+        if (event.cancelled) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Dieser Termin ist abgesagt' });
+        }
+        // Nur dort, wo Teamer:innen ueberhaupt gebraucht werden. Bei reinen
+        // Konfi-Terminen gibt es nichts zuzusagen.
+        if (!event.teamer_needed && !event.teamer_only) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Für diesen Termin werden keine Teamer:innen gesucht' });
+        }
+        if (new Date(event.event_date) <= new Date()) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Der Termin liegt bereits in der Vergangenheit' });
+        }
+
+        // determineBookingStatus statt eigener Logik -- dieselbe Funktion, die
+        // der regulaere Weg benutzt. Eine dritte Kopie der Kapazitaetsregeln
+        // waere genau die Fehlerklasse, die dieses Projekt schon oft getroffen
+        // hat.
+        let status;
+        if (dabei) {
+          // Eine BESTEHENDE eigene Buchung zaehlt nicht als neuer Platz --
+          // sonst koennte man sich durch Absage und erneute Zusage selbst
+          // aussperren, obwohl der Platz noch einem gehoert.
+          const { rows: [zahlen] } = await client.query(
+            `SELECT COUNT(*) FILTER (WHERE eb.status = 'confirmed' AND eb.user_id <> $2)::int AS confirmed_count,
+                    COUNT(*) FILTER (WHERE eb.status = 'waitlist'  AND eb.user_id <> $2)::int AS waitlist_count
+               FROM event_bookings eb
+               JOIN users u ON eb.user_id = u.id
+               JOIN roles r ON u.role_id = r.id
+              WHERE eb.event_id = $1 AND r.name = 'teamer' AND u.deleted_at IS NULL`,
+            [eventId, req.user.id]
+          );
+          const ergebnis = determineBookingStatus(
+            event, zahlen.confirmed_count, zahlen.waitlist_count,
+            event.teamer_max_participants || 0,
+            { waitlistEnabledField: 'teamer_waitlist_enabled', maxWaitlistSizeField: 'teamer_max_waitlist_size' }
+          );
+          if (typeof ergebnis === 'object') {
+            await client.query('ROLLBACK');
+            return res.status(ergebnis.status).json({ error: ergebnis.error });
+          }
+          status = ergebnis; // 'confirmed' oder 'waitlist'
+        } else {
+          status = 'opted_out';
+        }
+        const grund = typeof reason === 'string' && reason.trim() ? reason.trim().slice(0, 500) : null;
+
+        // Vorhandene Buchung aktualisieren oder neu anlegen. Die Meinung darf
+        // jederzeit geaendert werden — auch von 'nicht dabei' zurueck auf
+        // 'dabei' (wie im Konfi-Zweig, konfi.js:1943).
+        const { rowCount } = await client.query(
+          `UPDATE event_bookings
+              SET status = $3,
+                  opt_out_reason = CASE WHEN $3 = 'opted_out' THEN $4 ELSE NULL END,
+                  opt_out_date   = CASE WHEN $3 = 'opted_out' THEN NOW() ELSE NULL END
+            WHERE user_id = $1 AND event_id = $2 AND organization_id = $5`,
+          [req.user.id, eventId, status, grund, req.user.organization_id]
+        );
+        if (rowCount === 0) {
+          await client.query(
+            `INSERT INTO event_bookings
+               (user_id, event_id, status, organization_id, opt_out_reason, opt_out_date)
+             VALUES ($1, $2, $3, $4, $5, CASE WHEN $3 = 'opted_out' THEN NOW() ELSE NULL END)`,
+            [req.user.id, eventId, status, req.user.organization_id, grund]
+          );
+        }
+
+        await client.query('COMMIT');
+        res.json({
+          status,
+          message: dabei ? 'Zusage gespeichert' : 'Absage gespeichert'
+        });
+
+        // Chat-Mitgliedschaft dem Stand anpassen und die Leitung informieren.
+        // NACH COMMIT und fehlertolerant: daran darf die Zusage nie scheitern.
+        try {
+          if (dabei) {
+            await addToEventChat(db, eventId, req.user.id, req.user.organization_id);
+          } else {
+            await removeFromEventChat(db, eventId, req.user.id, req.user.organization_id);
+          }
+        } catch (chatErr) {
+          console.error('Event-Chat nach Teamer-Zusage:', chatErr.message);
+        }
+        liveUpdate.sendToUserByRole(req.user.id, 'events', 'update', { eventId });
+        liveUpdate.sendToOrgAdmins(req.user.organization_id, 'events', 'update', { eventId, action: 'teamer_zusage' });
+      } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (_) { /* Connection evtl. tot */ }
+        console.error('Database error in POST /teamer/events/:id/zusage:', eventId, err);
+        res.status(500).json({ error: 'Datenbankfehler' });
+      } finally {
+        client.release();
+      }
+    });
+
   router.post('/requests', rbacVerifier, requireTeamer, validateCreateTeamerRequest, async (req, res) => {
     try {
       const userId = req.user.id;
@@ -1033,21 +1418,49 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
         console.error('Notification error (teamer request):', notifErr);
       }
 
-      // Push an alle Admins/Org-Admins der Organisation (analog konfi.js:776).
-      // In try/catch — ein Push-Fehler darf den Antrag nicht kippen.
-      try {
-        await PushService.sendNewActivityRequestToAdmins(
-          db,
-          req.user.organization_id,
-          req.user.display_name,
-          activity.name,
-          activity.points
-        );
-      } catch (pushErr) {
-        console.error('Error sending admin push (teamer request):', pushErr);
-      }
-
       res.status(201).json({ id: newRequest.id, message: 'Antrag eingereicht' });
+
+      (async () => {
+        try {
+          const { rows: admins } = await db.query(
+            `SELECT u.id FROM users u
+             JOIN roles r ON u.role_id = r.id
+             WHERE r.name IN ('admin', 'org_admin') AND u.organization_id = $1`,
+            [req.user.organization_id]
+          );
+
+          if (admins.length > 0) {
+            await db.query(
+              `INSERT INTO notifications (user_id, title, message, type, data, organization_id)
+               SELECT unnest($1::int[]), $2, $3, $4, $5, $6`,
+              [
+                admins.map(a => a.id),
+                'Neuer Antrag eingegangen',
+                `${req.user.display_name} hat einen Antrag für "${activity.name}" (${activity.points} ${activity.points === 1 ? 'Punkt' : 'Punkte'}) eingereicht.`,
+                'new_activity_request',
+                JSON.stringify({
+                  request_id: newRequest.id,
+                  konfi_id: userId,
+                  konfi_name: req.user.display_name,
+                  activity_name: activity.name,
+                  points: activity.points
+                }),
+                req.user.organization_id
+              ]
+            );
+          }
+
+          await PushService.sendNewActivityRequestToAdmins(
+            db,
+            req.user.organization_id,
+            req.user.display_name,
+            activity.name,
+            activity.points
+          );
+        } catch (notifErr) {
+          console.error('Error sending admin notifications (teamer request):', notifErr);
+        }
+      })();
 
       // Live-Update an alle Admins/Org-Admins/Teamer:innen der Org (neuer Antrag)
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'requests', 'create');
@@ -1057,15 +1470,15 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
     }
   });
 
-  // DELETE /teamer/requests/:id — eigenen Antrag loeschen
+  // DELETE /teamer/requests/:id — eigenen Antrag löschen
   router.delete('/requests/:id', rbacVerifier, requireTeamer, [param('id').isInt({ min: 1 }), handleValidationErrors], async (req, res) => {
     try {
       const userId = req.user.id;
       const requestId = req.params.id;
 
-      // Nur pending eigene Antraege darf der Teamer selbst loeschen
+      // Nur pending eigene Anträge darf der Teamer selbst löschen
       const { rows: [existing] } = await db.query(
-        "SELECT id, status FROM activity_requests WHERE id = $1 AND user_id = $2 AND organization_id = $3",
+        "SELECT id, status, photo_filename FROM activity_requests WHERE id = $1 AND user_id = $2 AND organization_id = $3",
         [requestId, userId, req.user.organization_id]
       );
       if (!existing) return res.status(404).json({ error: 'Antrag nicht gefunden' });
@@ -1074,6 +1487,11 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       }
 
       await db.query('DELETE FROM activity_requests WHERE id = $1', [requestId]);
+
+      if (existing.photo_filename) {
+        await deletePhotoFile(existing.photo_filename);
+      }
+
       res.json({ message: 'Antrag gelöscht' });
 
       // Live-Update an alle Admins/Org-Admins/Teamer:innen der Org (Antrag entfernt)

@@ -1,4 +1,5 @@
 const { sendFirebasePushNotification, sendFirebaseSilentPush } = require('../push/firebase');
+const { appIconSummeOderNull } = require('../utils/appIconBadge');
 
 /**
  * Push Notification Type Registry
@@ -21,6 +22,8 @@ const { sendFirebasePushNotification, sendFirebaseSilentPush } = require('../pus
  * level_up                    | sendLevelUpToKonfi                   | Konfi           | ja
  * event_reminder              | sendEventReminderToKonfi             | Konfi           | ja
  * waitlist_promotion          | sendWaitlistPromotionToKonfi         | Konfi           | ja
+ * event_registered            | sendEventRegisteredToTeamer          | Teamer:in       | ja
+ * waitlist_promotion          | sendWaitlistPromotionToTeamer        | Teamer:in       | ja
  * event_cancelled             | sendEventCancellationToKonfis        | Konfi (multi)   | ja
  * event_changed               | sendEventChangedToKonfis             | Konfi (multi)   | ja
  * new_event                   | sendNewEventToOrgKonfis              | Org-Konfis      | ja
@@ -29,11 +32,22 @@ const { sendFirebasePushNotification, sendFirebaseSilentPush } = require('../pus
  * new_konfi_registration      | sendNewKonfiRegistrationToAdmins     | Jahrgangs-Admins| ja
  * event_opt_out               | sendEventOptOutToAdmins              | Org-Admins      | ja
  * event_opt_in                | sendEventOptInToAdmins               | Org-Admins      | ja
+ * challenge_started           | sendChallengeStartedToJahrgaenge     | Jahrgangs-Konfis| ja
+ * challenge_submission        | sendChallengeSubmissionToLeadership  | Leitung         | ja
+ * challenge_badge_earned      | sendChallengeBadgeEarnedToKonfi      | Konfi           | ja
+ * challenge_submission_hidden | sendChallengeSubmissionHiddenToUser  | Einreichende:r  | ja
  *
  * Helper-Methoden (nicht direkt als Push-Type):
  * - getTokensForUser(db, userId)
  * - sendToUser(db, userId, notification)
  * - sendToMultipleUsers(db, userIds, notification)
+ * - resolveRecipientOrgId(db, userId)
+ *
+ * Multi-Org: JEDER Payload trägt data.organization_id (als String, FCM-data
+ * ist immer String) — die Organisation des INHALTS. Der Client wechselt beim
+ * Antippen automatisch in diese Organisation, bevor er navigiert. Fehlt die
+ * Content-Org an der Aufrufstelle, setzt sendToUser die Primär-Org des
+ * Empfängers ein (für Single-Org-Empfänger identisch).
  */
 
 class PushService {
@@ -42,7 +56,7 @@ class PushService {
    */
   static async getTokensForUser(db, userId) {
     // Master-Schalter: Hat der User Push global deaktiviert, gar keine Tokens
-    // zurueckgeben -> es wird nichts gesendet (gilt fuer alle Push-Typen).
+    // zurueckgeben -> es wird nichts gesendet (gilt für alle Push-Typen).
     // DISTINCT ON (token): derselbe FCM-Token darf nie mehrfach beliefert werden,
     // auch wenn er (noch) unter mehreren device_ids gespeichert ist (Alt-Daten).
     const query = `
@@ -63,6 +77,86 @@ class PushService {
   }
 
   /**
+   * Helper: Primär-Org eines Empfängers als String auflösen.
+   *
+   * Fallback für Payloads OHNE explizite Content-Org: Für Konfis (immer
+   * Single-Org) ist die Primär-Org automatisch die richtige Organisation.
+   * Aufrufstellen, deren Empfänger Multi-Org sein können (Admins,
+   * Teamer:innen), setzen die Content-Org explizit im data-Objekt — dieser
+   * Fallback greift dann nicht.
+   */
+  static async resolveRecipientOrgId(db, userId) {
+    try {
+      const { rows: [row] } = await db.query(
+        'SELECT organization_id FROM users WHERE id = $1',
+        [userId]
+      );
+      return row && row.organization_id != null ? String(row.organization_id) : null;
+    } catch (err) {
+      console.error('resolveRecipientOrgId error:', err);
+      return null;
+    }
+  }
+
+  /**
+   * Der Push-Weg kennt nur die userId — fuer die Summe braucht es aber auch
+   * Rolle und (bei Teamer:innen) die zugewiesenen Jahrgaenge, weil sich die
+   * Zaehler je Rolle unterscheiden.
+   *
+   * Gibt null zurueck, wenn der User nicht auffindbar ist; der Aufrufer
+   * laesst den Badge dann weg.
+   */
+  static async ladeEmpfaengerFuerBadge(db, userId) {
+    try {
+      const { rows: [row] } = await db.query(
+        `SELECT u.id, u.organization_id, r.name AS role_name
+           FROM users u
+           JOIN roles r ON u.role_id = r.id
+          WHERE u.id = $1 AND u.deleted_at IS NULL`,
+        [userId]
+      );
+      if (!row) return null;
+
+      // user_type wie im Token: konfi bleibt konfi, teamer bleibt teamer,
+      // alle Leitungsrollen zaehlen als 'admin'.
+      const type = row.role_name === 'konfi'
+        ? 'konfi'
+        : (row.role_name === 'teamer' ? 'teamer' : 'admin');
+
+      let assigned_jahrgaenge = [];
+      if (type === 'teamer') {
+        const { rows } = await db.query(
+          'SELECT jahrgang_id AS id, can_view FROM user_jahrgang_assignments WHERE user_id = $1',
+          [userId]
+        );
+        assigned_jahrgaenge = rows;
+      }
+
+      return {
+        id: row.id,
+        type,
+        role_name: row.role_name,
+        organization_id: row.organization_id,
+        assigned_jahrgaenge
+      };
+    } catch (err) {
+      console.error('ladeEmpfaengerFuerBadge error:', err);
+      return null;
+    }
+  }
+
+  /**
+   * Fehlertolerant: Bei einem Fehler kommt null zurueck und der Badge wird
+   * weggelassen — eine Nachricht darf nicht daran scheitern, dass eine Zahl
+   * fehlt.
+   */
+  static async berechneBadge(db, userId) {
+    const empfaenger = await this.ladeEmpfaengerFuerBadge(db, userId);
+    if (!empfaenger) return null;
+    return appIconSummeOderNull(db, empfaenger);
+  }
+
+  /**
    * Helper: Sendet Push an einen User
    */
   static async sendToUser(db, userId, notification) {
@@ -74,20 +168,39 @@ class PushService {
         return { success: false, message: 'No tokens found' };
       }
 
-      let successCount = 0;
-      let errorCount = 0;
+      // organization_id gehört in JEDEN Push-Payload: Multi-Org-Empfänger
+      // wechseln beim Antippen automatisch in die Organisation des Inhalts.
+      // Fehlt die Content-Org, wird die Primär-Org des Empfängers eingesetzt
+      // (für Single-Org-Empfänger identisch). FCM-data ist IMMER String —
+      // deshalb String() und der Vergleich im Client ebenfalls per String().
+      // Kopie statt Mutation: notification wird bei sendToMultipleUsers über
+      // mehrere Empfänger geteilt.
+      const data = { ...(notification.data || {}) };
+      if (data.organization_id != null && data.organization_id !== '') {
+        data.organization_id = String(data.organization_id);
+      } else {
+        const recipientOrgId = await this.resolveRecipientOrgId(db, userId);
+        if (recipientOrgId) data.organization_id = recipientOrgId;
+      }
 
-      for (const token of tokens) {
+      const berechneterBadge = notification.badge != null
+        ? notification.badge
+        : await this.berechneBadge(db, userId);
+
+      // Tokens PARALLEL abarbeiten: vorher lief je
+      // Token ein FCM-Roundtrip nacheinander — bei mehreren Geraeten summierte
+      // sich das auf. Die Tokens sind voneinander unabhaengig, ihre DB-Updates
+      // betreffen jeweils nur die eigene Zeile.
+      const results = await Promise.all(tokens.map(async (token) => {
         const result = await sendFirebasePushNotification(token.token, {
           title: notification.title,
           body: notification.body,
-          badge: notification.badge || 1,
+          badge: berechneterBadge != null ? berechneterBadge : 1,
           sound: 'default',
-          data: notification.data || {}
+          data: data
         });
 
         if (result.success) {
-          successCount++;
           // Error-Count zurücksetzen bei Erfolg (nur wenn vorher > 0)
           if (token.error_count > 0) {
             await db.query(
@@ -95,26 +208,30 @@ class PushService {
               [token.id]
             );
           }
-        } else {
-          // Fatale Errors: Token sofort löschen
-          const fatalCodes = [
-            'messaging/registration-token-not-registered',
-            'messaging/invalid-registration-token'
-          ];
-          if (fatalCodes.includes(result.errorCode)) {
-            await db.query('DELETE FROM push_tokens WHERE id = $1', [token.id]);
-            console.warn(`Token ${token.id} gelöscht (${result.errorCode})`);
-          } else {
-            // Sonstige Errors: Counter erhöhen
-            await db.query(
-              'UPDATE push_tokens SET error_count = error_count + 1, last_error_at = NOW() WHERE id = $1',
-              [token.id]
-            );
-            console.error('Push failed for token:', result.error);
-          }
-          errorCount++;
+          return true;
         }
-      }
+
+        // Fatale Errors: Token sofort löschen
+        const fatalCodes = [
+          'messaging/registration-token-not-registered',
+          'messaging/invalid-registration-token'
+        ];
+        if (fatalCodes.includes(result.errorCode)) {
+          await db.query('DELETE FROM push_tokens WHERE id = $1', [token.id]);
+          console.warn(`Token ${token.id} gelöscht (${result.errorCode})`);
+        } else {
+          // Sonstige Errors: Counter erhöhen
+          await db.query(
+            'UPDATE push_tokens SET error_count = error_count + 1, last_error_at = NOW() WHERE id = $1',
+            [token.id]
+          );
+          console.error('Push failed for token:', result.error);
+        }
+        return false;
+      }));
+
+      const successCount = results.filter(Boolean).length;
+      const errorCount = results.length - successCount;
 
       return { success: true, sent: successCount, errors: errorCount, total: tokens.length };
     } catch (error) {
@@ -127,12 +244,15 @@ class PushService {
    * Helper: Sendet Push an mehrere User (z.B. alle Admins)
    */
   static async sendToMultipleUsers(db, userIds, notification) {
-    const results = [];
-    for (const userId of userIds) {
-      const result = await this.sendToUser(db, userId, notification);
-      results.push({ userId, ...result });
-    }
-    return results;
+    // Empfaenger PARALLEL: vorher wurde jeder User
+    // nacheinander abgearbeitet, und in sendToUser wiederum jedes Geraet — bei
+    // 5 Admins mit je 2 Geraeten also 10 FCM-Roundtrips in Reihe.
+    return Promise.all(
+      userIds.map(async (userId) => {
+        const result = await this.sendToUser(db, userId, notification);
+        return { userId, ...result };
+      })
+    );
   }
 
   /**
@@ -141,6 +261,25 @@ class PushService {
   static async sendChatNotification(db, userId, notificationData) {
     try {
 
+      // Content-Org des Chat-Raums (Multi-Org: der Tap wechselt in die
+      // Organisation des Raums, NICHT in die Primär-Org des Empfängers).
+      let chatOrgId = notificationData.data?.organization_id != null
+        ? String(notificationData.data.organization_id)
+        : '';
+      if (!chatOrgId && notificationData.roomId) {
+        try {
+          const { rows: [roomRow] } = await db.query(
+            'SELECT organization_id FROM chat_rooms WHERE id = $1',
+            [notificationData.roomId]
+          );
+          if (roomRow && roomRow.organization_id != null) {
+            chatOrgId = String(roomRow.organization_id);
+          }
+        } catch (orgErr) {
+          console.error('Chat-Push: Raum-Org konnte nicht aufgelöst werden:', orgErr);
+        }
+      }
+
       // Hole zuerst die Tokens des Senders um sie auszuschließen
       const senderTokensQuery = `SELECT token FROM push_tokens WHERE user_id = $1`;
       const { rows: senderTokens } = await db.query(senderTokensQuery, [notificationData.data?.sender_id]);
@@ -148,7 +287,7 @@ class PushService {
 
       // Neuestes Token pro Device verwenden
       // UND Sender-Tokens ausschließen (für den Fall dass gleicher Token bei verschiedenen Accounts)
-      // UND Master-Schalter pruefen (u.push_enabled): bei false keine Tokens.
+      // UND Master-Schalter prüfen (u.push_enabled): bei false keine Tokens.
       // DISTINCT ON (token): nie denselben FCM-Token doppelt beliefern (Alt-Daten
       // mit gleichem Token unter mehreren device_ids).
       let query = `
@@ -181,12 +320,20 @@ class PushService {
       let successCount = 0;
       let errorCount = 0;
 
+      // Anders als in sendToUser wird der uebergebene Wert deshalb bewusst
+      // ERSETZT, nicht bevorzugt: Er ist per Definition zu niedrig. Nur wenn
+      // die Zaehlung fehlschlaegt, gilt er als Rueckfall.
+      const gesamtBadge = await this.berechneBadge(db, userId);
+      const badgeWert = gesamtBadge != null
+        ? gesamtBadge
+        : (notificationData.badge || 1);
+
       // An alle Devices senden
       for (const token of tokens) {
         const result = await sendFirebasePushNotification(token.token, {
           title: notificationData.title || 'Neue Nachricht',
           body: notificationData.body,
-          badge: notificationData.badge || 1,
+          badge: badgeWert,
           sound: 'default',
           data: {
             type: 'chat',
@@ -194,7 +341,8 @@ class PushService {
             messageId: notificationData.messageId?.toString() || '',
             sender_id: notificationData.data?.sender_id?.toString() || '',
             sender_name: notificationData.data?.sender_name || '',
-            room_name: notificationData.data?.room_name || ''
+            room_name: notificationData.data?.room_name || '',
+            organization_id: chatOrgId
           }
         });
 
@@ -243,14 +391,38 @@ class PushService {
 
   /**
    * Sendet Badge Update (für Background App Badge Count)
+   *
+   * Die Zahl wird HIER gerechnet, nicht vom Aufrufer uebernommen.
+   * Der Hintergrunddienst uebergab bisher seinen eigenen
+   * Wert, und der zaehlte NUR ungelesene Chat-Nachrichten
+   * (`backgroundService.js:162`). Am App-Icon steht aber dieselbe Zahl, die
+   * jeder Push aus `appIconSummeOderNull` setzt — Chat PLUS Antraege, Termine
+   * und Abzeichen. Ergebnis: Ein Push setzte korrekt "7", und bis zu fuenf
+   * Minuten spaeter ueberschrieb der Hintergrund-Sync sie mit "2".
+   *
+   * Das ist derselbe Fehler wie B2b, nur an der letzten Stelle, die damals
+   * aussen vor blieb: Wer die Zahl setzt, muss sie auch rechnen.
+   *
+   * Die Funktion nimmt bewusst KEINE Zahl mehr entgegen: Wer sie setzt, holt
+   * sie aus der einen Quelle. Laesst sie sich nicht ermitteln (Person
+   * geloescht oder Datenbankfehler), wird NICHT gesendet — eine geratene Zahl
+   * am App-Icon ist schlechter als keine.
+   *
+   * @param {object} db
+   * @param {number} userId
    */
-  static async sendBadgeUpdate(db, userId, badgeCount) {
+  static async sendBadgeUpdate(db, userId) {
     try {
 
       const tokens = await this.getTokensForUser(db, userId);
 
       if (tokens.length === 0) {
         return { success: false, message: 'No tokens found' };
+      }
+
+      const badgeCount = await this.berechneBadge(db, userId);
+      if (badgeCount == null) {
+        return { success: false, message: 'Badge nicht ermittelbar' };
       }
 
       let successCount = 0;
@@ -285,7 +457,12 @@ class PushService {
         }
       }
 
-      return { success: true, sent: successCount, errors: errorCount, total: tokens.length };
+      // `badge` mit zurueckgeben: Der Hintergrunddienst merkt sich den zuletzt
+      // gesendeten Stand, um nicht bei jedem Lauf zu senden. Er kennt die
+      // Gesamtzahl aber nicht — er zaehlt nur den Chat. Ohne diesen Rueckgabe-
+      // wert vergliche er Aepfel mit Birnen und feuerte entweder dauernd oder
+      // gar nicht mehr.
+      return { success: true, sent: successCount, errors: errorCount, total: tokens.length, badge: badgeCount };
 
     } catch (error) {
  console.error('PushService.sendBadgeUpdate error:', error);
@@ -318,7 +495,16 @@ class PushService {
         return { success: false, message: 'No admins found' };
       }
       const adminIds = admins.map(a => a.id);
-      return await this.sendToMultipleUsers(db, adminIds, notification);
+      // Content-Org in den Payload: Admins können Multi-Org sein, der Tap
+      // muss in DIESE Organisation wechseln (nicht in ihre Primär-Org).
+      const enriched = {
+        ...notification,
+        data: {
+          ...(notification.data || {}),
+          organization_id: String(notification.data?.organization_id ?? organizationId)
+        }
+      };
+      return await this.sendToMultipleUsers(db, adminIds, enriched);
     } catch (error) {
       console.error('sendToOrgAdmins error:', error);
       return { success: false, error: error.message };
@@ -361,7 +547,7 @@ class PushService {
   /**
    * Antrag genehmigt/abgelehnt - Push an Konfi
    */
-  static async sendActivityRequestStatusToKonfi(db, konfiId, activityName, points, status, adminComment = null, requestId = null) {
+  static async sendActivityRequestStatusToKonfi(db, konfiId, activityName, points, status, adminComment = null, requestId = null, organizationId = null) {
     try {
 
       const isApproved = status === 'approved';
@@ -375,7 +561,8 @@ class PushService {
           status: status,
           activity_name: activityName,
           points: points.toString(),
-          request_id: requestId?.toString() || ''
+          request_id: requestId?.toString() || '',
+          ...(organizationId != null ? { organization_id: String(organizationId) } : {})
         }
       };
 
@@ -393,7 +580,7 @@ class PushService {
   /**
    * Badge erhalten - Push an Konfi
    */
-  static async sendBadgeEarnedToKonfi(db, konfiId, badgeName, badgeIcon, badgeDescription, badgeId = null) {
+  static async sendBadgeEarnedToKonfi(db, konfiId, badgeName, badgeIcon, badgeDescription, badgeId = null, organizationId = null) {
     try {
 
       const notification = {
@@ -403,7 +590,8 @@ class PushService {
           type: 'badge_earned',
           badge_name: badgeName,
           badge_icon: badgeIcon,
-          badge_id: badgeId?.toString() || ''
+          badge_id: badgeId?.toString() || '',
+          ...(organizationId != null ? { organization_id: String(organizationId) } : {})
         }
       };
 
@@ -475,7 +663,7 @@ class PushService {
    * Event-Anmeldung bestätigt - Push an Konfi
    * @param {Object} timeslot - Optional: {start_time, end_time} des gebuchten Timeslots
    */
-  static async sendEventRegisteredToKonfi(db, konfiId, eventName, eventDate, status, eventId = null, timeslot = null) {
+  static async sendEventRegisteredToKonfi(db, konfiId, eventName, eventDate, status, eventId = null, timeslot = null, organizationId = null) {
     try {
 
       const dateFormatted = new Date(eventDate).toLocaleDateString('de-DE', {
@@ -507,7 +695,9 @@ class PushService {
           type: 'event_registered',
           event_name: eventName,
           status: status,
-          event_id: eventId?.toString() || ''
+          event_id: eventId?.toString() || '',
+          // Event-Org explizit: Teamer:innen können Multi-Org sein.
+          ...(organizationId != null ? { organization_id: String(organizationId) } : {})
         }
       };
 
@@ -516,6 +706,19 @@ class PushService {
  console.error('sendEventRegisteredToKonfi error:', error);
       return { success: false, error: error.message };
     }
+  }
+
+  /**
+   * Event-Anmeldung bestätigt - Push an Teamer:in
+   *
+   * Teamer:innen haben seit dem Teamer-Kontingent ebenfalls eine Warteliste,
+   * brauchen also dieselbe Rueckmeldung wie Konfis. Die Texte sind identisch
+   * (sendEventRegisteredToKonfi ist rollenagnostisch und sendet nur an eine
+   * User-ID) — daher wird sie hier bewusst wiederverwendet.
+   * @param {string} status - 'confirmed' oder 'waitlist'
+   */
+  static async sendEventRegisteredToTeamer(db, teamerId, eventName, eventDate, status, eventId = null, organizationId = null) {
+    return await this.sendEventRegisteredToKonfi(db, teamerId, eventName, eventDate, status, eventId, null, organizationId);
   }
 
   /**
@@ -568,7 +771,8 @@ class PushService {
         data: {
           type: 'event_unregistration',
           event_name: eventName,
-          konfi_name: konfiName
+          konfi_name: konfiName,
+          organization_id: String(organizationId)
         }
       };
 
@@ -587,7 +791,7 @@ class PushService {
   static async checkAndSendLevelUp(db, konfiId, organizationId) {
     try {
       // 1. Aktuelle Punkte, gespeichertes Level UND Jahrgang-Config holen.
-      // WICHTIG: nur AKTIVIERTE Punkt-Kategorien zaehlen (gemeinde_enabled /
+      // WICHTIG: nur AKTIVIERTE Punkt-Kategorien zählen (gemeinde_enabled /
       // gottesdienst_enabled des Jahrgangs) — sonst wuerde ein Single-Kategorie-
       // Jahrgang anhand zu hoher Punkte ins falsche Level eingestuft (+ falsche
       // Level-Up-Pushes). Identische Logik wie der Dashboard-Endpoint.
@@ -678,7 +882,7 @@ class PushService {
   /**
    * Event-Erinnerung - Push an Konfi (1 Tag oder 1 Stunde vorher)
    */
-  static async sendEventReminderToKonfi(db, konfiId, eventName, eventDate, eventTime, reminderType) {
+  static async sendEventReminderToKonfi(db, konfiId, eventName, eventDate, eventTime, reminderType, organizationId = null) {
     try {
 
       const isOneDay = reminderType === '1_day';
@@ -690,7 +894,8 @@ class PushService {
         data: {
           type: 'event_reminder',
           reminder_type: reminderType,
-          event_name: eventName
+          event_name: eventName,
+          ...(organizationId != null ? { organization_id: String(organizationId) } : {})
         }
       };
 
@@ -704,7 +909,7 @@ class PushService {
   /**
    * Von Warteliste aufgerückt - Push an Konfi
    */
-  static async sendWaitlistPromotionToKonfi(db, konfiId, eventName, eventDate = null, eventId = null) {
+  static async sendWaitlistPromotionToKonfi(db, konfiId, eventName, eventDate = null, eventId = null, organizationId = null) {
     try {
 
       let dateInfo = '';
@@ -719,7 +924,8 @@ class PushService {
         data: {
           type: 'waitlist_promotion',
           event_name: eventName,
-          event_id: eventId?.toString() || ''
+          event_id: eventId?.toString() || '',
+          ...(organizationId != null ? { organization_id: String(organizationId) } : {})
         }
       };
 
@@ -731,9 +937,20 @@ class PushService {
   }
 
   /**
+   * Von der Teamer-Warteliste aufgerückt - Push an Teamer:in
+   *
+   * Gleiche Nachricht wie bei Konfis (sendWaitlistPromotionToKonfi ist
+   * rollenagnostisch), eigener Einstiegspunkt für die Lesbarkeit der
+   * Aufrufstellen und der Registry oben.
+   */
+  static async sendWaitlistPromotionToTeamer(db, teamerId, eventName, eventDate = null, eventId = null, organizationId = null) {
+    return await this.sendWaitlistPromotionToKonfi(db, teamerId, eventName, eventDate, eventId, organizationId);
+  }
+
+  /**
    * Event abgesagt - Push an alle angemeldeten Konfis
    */
-  static async sendEventCancellationToKonfis(db, userIds, eventName, eventDate) {
+  static async sendEventCancellationToKonfis(db, userIds, eventName, eventDate, organizationId = null) {
     try {
 
       let dateInfo = eventDate;
@@ -747,7 +964,10 @@ class PushService {
         body: `Leider abgesagt: "${eventName}" am ${dateInfo}`,
         data: {
           type: 'event_cancelled',
-          event_name: eventName
+          event_name: eventName,
+          // Event-Org explizit: unter den Gebuchten können Teamer:innen mit
+          // anderer Primär-Org sein.
+          ...(organizationId != null ? { organization_id: String(organizationId) } : {})
         }
       };
 
@@ -759,10 +979,10 @@ class PushService {
   }
 
   /**
-   * Event geaendert (Termin/Uhrzeit/Ort) - Push an alle gebuchten Teilnehmer
-   * @param {Object} changes - { newDate, newEndTime, newLocation } - nur gesetzte Felder haben sich geaendert
+   * Event geändert (Termin/Uhrzeit/Ort) - Push an alle gebuchten Teilnehmer
+   * @param {Object} changes - { newDate, newEndTime, newLocation } - nur gesetzte Felder haben sich geändert
    */
-  static async sendEventChangedToKonfis(db, userIds, eventName, changes = {}, eventId = null) {
+  static async sendEventChangedToKonfis(db, userIds, eventName, changes = {}, eventId = null, organizationId = null) {
     try {
       const parts = [];
 
@@ -791,7 +1011,8 @@ class PushService {
         data: {
           type: 'event_changed',
           event_name: eventName,
-          event_id: eventId?.toString() || ''
+          event_id: eventId?.toString() || '',
+          ...(organizationId != null ? { organization_id: String(organizationId) } : {})
         }
       };
 
@@ -808,11 +1029,12 @@ class PushService {
   static async sendNewEventToOrgKonfis(db, organizationId, eventName, eventDate, eventId = null) {
     try {
 
-      // Hole alle Konfi-IDs der Organisation
       const konfisQuery = `
         SELECT u.id FROM users u
         JOIN roles r ON u.role_id = r.id
         WHERE u.organization_id = $1 AND r.name = 'konfi'
+          AND u.deleted_at IS NULL
+          AND u.is_active = true
       `;
       const { rows: konfis } = await db.query(konfisQuery, [organizationId]);
       const konfiIds = konfis.map(k => k.id);
@@ -834,7 +1056,8 @@ class PushService {
         data: {
           type: 'new_event',
           event_name: eventName,
-          event_id: eventId?.toString() || ''
+          event_id: eventId?.toString() || '',
+          organization_id: String(organizationId)
         }
       };
 
@@ -845,10 +1068,206 @@ class PushService {
     }
   }
 
+  // ====================================================================
+  // CHALLENGE NOTIFICATIONS
+  // ====================================================================
+
+  /**
+   * Challenge gestartet - Push an alle Konfis der zugewiesenen Jahrgänge.
+   * Empfaenger kommen über challenge_jahrgang_assignments, NICHT über die
+   * ganze Organisation: eine Challenge läuft immer nur für bestimmte
+   * Jahrgänge.
+   *
+   * @param {object} db - DB-Pool
+   * @param {number} challengeId - Challenge ID
+   * @param {string} challengeTitle - Titel der Challenge
+   */
+  static async sendChallengeStartedToJahrgaenge(db, challengeId, challengeTitle) {
+    try {
+      const { rows: konfis } = await db.query(
+        `SELECT DISTINCT kp.user_id
+         FROM konfi_profiles kp
+         JOIN users u ON kp.user_id = u.id
+         JOIN roles r ON u.role_id = r.id
+         JOIN challenge_jahrgang_assignments cja ON cja.jahrgang_id = kp.jahrgang_id
+         WHERE cja.challenge_id = $1
+           AND r.name = 'konfi'
+           AND u.deleted_at IS NULL`,
+        [challengeId]
+      );
+
+      const konfiIds = konfis.map(k => k.user_id);
+      if (konfiIds.length === 0) {
+        return { success: true, sent: 0 };
+      }
+
+      // Content-Org der Challenge (nicht der Empfänger) für den Org-Wechsel
+      // beim Antippen.
+      const { rows: [challengeRow] } = await db.query(
+        'SELECT organization_id FROM challenges WHERE id = $1',
+        [challengeId]
+      );
+
+      const notification = {
+        title: 'Neue Challenge',
+        body: `"${challengeTitle}" ist gestartet — schau rein und mach mit!`,
+        data: {
+          type: 'challenge_started',
+          challengeId: challengeId.toString(),
+          ...(challengeRow && challengeRow.organization_id != null
+            ? { organization_id: String(challengeRow.organization_id) }
+            : {})
+        }
+      };
+
+      return await this.sendToMultipleUsers(db, konfiIds, notification);
+    } catch (error) {
+      console.error('sendChallengeStartedToJahrgaenge error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Stempel einer Challenge erhalten - Push an die einreichende Person.
+   * Der Stempel ist abgeleitet (EXISTS eigene APPROVED-Submission, siehe
+   * challenges.js) und zählt erst, wenn ein Beitrag wirklich freigegeben ist:
+   * Ohne Moderation feuert der Push bei der ersten eigenen Submission (die ist
+   * sofort approved), bei moderierten Challenges erst bei der Freigabe durch
+   * die Leitung (PUT /admin/submissions/:id/moderate, action 'approve').
+   *
+   * @param {object} db - DB-Pool
+   * @param {number} konfiId - User-ID der einreichenden Person
+   * @param {number} challengeId - Challenge ID
+   * @param {string} challengeTitle - Titel der Challenge
+   */
+  static async sendChallengeBadgeEarnedToKonfi(db, konfiId, challengeId, challengeTitle) {
+    try {
+      // Content-Org der Challenge (nicht der Empfänger) für den Org-Wechsel
+      // beim Antippen (Multi-Org).
+      const { rows: [challengeRow] } = await db.query(
+        'SELECT organization_id FROM challenges WHERE id = $1',
+        [challengeId]
+      );
+
+      const notification = {
+        title: 'Stempel erhalten',
+        body: `Du hast den Stempel für "${challengeTitle}" bekommen!`,
+        data: {
+          type: 'challenge_badge_earned',
+          challengeId: challengeId.toString(),
+          ...(challengeRow && challengeRow.organization_id != null
+            ? { organization_id: String(challengeRow.organization_id) }
+            : {})
+        }
+      };
+
+      return await this.sendToUser(db, konfiId, notification);
+    } catch (error) {
+      console.error('sendChallengeBadgeEarnedToKonfi error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Challenge-Beitrag ausgeblendet - Push an die einreichende Person, optional
+   * mit der Begründung der Leitung. Die Aufrufstelle sendet NICHT, wenn jemand
+   * den eigenen Beitrag ausblendet (der weiss es dann ohnehin).
+   *
+   * @param {object} db - DB-Pool
+   * @param {number} userId - User-ID der einreichenden Person
+   * @param {number} challengeId - Challenge ID
+   * @param {string} challengeTitle - Titel der Challenge
+   * @param {string|null} reason - Optionale Begründung der Leitung
+   */
+  static async sendChallengeSubmissionHiddenToUser(db, userId, challengeId, challengeTitle, reason = null) {
+    try {
+      // Content-Org der Challenge für den Org-Wechsel beim Antippen (Multi-Org).
+      const { rows: [challengeRow] } = await db.query(
+        'SELECT organization_id FROM challenges WHERE id = $1',
+        [challengeId]
+      );
+
+      const notification = {
+        title: 'Beitrag nicht veröffentlicht',
+        body: reason
+          ? `Dein Beitrag zu "${challengeTitle}" wurde ausgeblendet. Begründung: ${reason}`
+          : `Dein Beitrag zu "${challengeTitle}" wurde ausgeblendet. Bei Fragen melde dich bei deiner Leitung.`,
+        data: {
+          type: 'challenge_submission_hidden',
+          challengeId: challengeId.toString(),
+          ...(challengeRow && challengeRow.organization_id != null
+            ? { organization_id: String(challengeRow.organization_id) }
+            : {})
+        }
+      };
+
+      return await this.sendToUser(db, userId, notification);
+    } catch (error) {
+      console.error('sendChallengeSubmissionHiddenToUser error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Neuer Challenge-Beitrag - Push an die Leitung (Org-Admins + die Teamer der
+   * zugewiesenen Jahrgänge). Wird bei JEDER Challenge gesendet (auch wenn der
+   * Beitrag sofort oeffentlich ist) — bei moderierten Challenges mit Zusatz-
+   * Hinweis, dass eine Freigabe noch aussteht.
+   *
+   * @param {object} db - DB-Pool
+   * @param {number} organizationId - Organisation ID
+   * @param {number} challengeId - Challenge ID
+   * @param {string} challengeTitle - Titel der Challenge
+   * @param {string} konfiName - Anzeigename des einreichenden Konfis (die
+   *   Leitung sieht IMMER den echten Namen — Anonymitaet gilt nur für die Galerie)
+   * @param {boolean} moderated - Ob die Challenge moderiert ist (Freigabe nötig)
+   */
+  static async sendChallengeSubmissionToLeadership(db, organizationId, challengeId, challengeTitle, konfiName, moderated = false) {
+    try {
+      const notification = {
+        title: 'Neuer Challenge-Beitrag',
+        body: moderated
+          ? `${konfiName} hat bei "${challengeTitle}" etwas eingereicht. Wartet auf Freigabe.`
+          : `${konfiName} hat bei "${challengeTitle}" etwas eingereicht.`,
+        data: {
+          type: 'challenge_submission',
+          challengeId: challengeId.toString(),
+          organization_id: String(organizationId)
+        }
+      };
+
+      await this.sendToOrgAdmins(db, organizationId, notification);
+
+      // Teamer hängen über user_jahrgang_assignments an den Jahrgängen der
+      // Challenge und werden von sendToOrgAdmins nicht erfasst.
+      const { rows: teamers } = await db.query(
+        `SELECT DISTINCT u.id
+         FROM users u
+         JOIN roles r ON u.role_id = r.id
+         JOIN user_jahrgang_assignments uja ON uja.user_id = u.id
+         JOIN challenge_jahrgang_assignments cja ON cja.jahrgang_id = uja.jahrgang_id
+         WHERE r.name = 'teamer'
+           AND u.organization_id = $1
+           AND u.deleted_at IS NULL
+           AND cja.challenge_id = $2`,
+        [organizationId, challengeId]
+      );
+
+      if (teamers.length > 0) {
+        await this.sendToMultipleUsers(db, teamers.map(t => t.id), notification);
+      }
+
+      return { success: true };
+    } catch (error) {
+      console.error('sendChallengeSubmissionToLeadership error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
   /**
    * Event-Anwesenheit verbucht - Push an Konfi
    */
-  static async sendEventAttendanceToKonfi(db, konfiId, eventName, status, points = 0, eventId = null) {
+  static async sendEventAttendanceToKonfi(db, konfiId, eventName, status, points = 0, eventId = null, organizationId = null) {
     try {
 
       const isPresent = status === 'present';
@@ -862,7 +1281,8 @@ class PushService {
           status: status,
           event_name: eventName,
           points: points.toString(),
-          event_id: eventId?.toString() || ''
+          event_id: eventId?.toString() || '',
+          ...(organizationId != null ? { organization_id: String(organizationId) } : {})
         }
       };
 
@@ -896,7 +1316,8 @@ class PushService {
         body: `${eventCount} Event${eventCount > 1 ? 's' : ''} warten auf Anwesenheitsverbuchung`,
         data: {
           type: 'events_pending_approval',
-          count: eventCount.toString()
+          count: eventCount.toString(),
+          organization_id: String(organizationId)
         }
       };
 
@@ -909,7 +1330,7 @@ class PushService {
 
   /**
    * "Letzte Chance"-Warnung an Org-Admins: ein Jahrgang wird in wenigen Tagen
-   * automatisch geloescht. Wir nennen es bewusst "geloescht" (das interne Archiv
+   * automatisch gelöscht. Wir nennen es bewusst "gelöscht" (das interne Archiv
    * bleibt unerwaehnt). Hinweis aufs Befoerdern der Konfis zu Teamer:innen.
    */
   static async sendJahrgangDeletionWarningToAdmins(db, organizationId, jahrgangName, daysLeft) {
@@ -932,7 +1353,8 @@ class PushService {
         data: {
           type: 'jahrgang_deletion_warning',
           jahrgang_name: jahrgangName,
-          days_left: String(daysLeft)
+          days_left: String(daysLeft),
+          organization_id: String(organizationId)
         }
       };
 
@@ -1019,7 +1441,8 @@ class PushService {
           type: 'event_opt_out',
           event_name: eventName,
           konfi_name: konfiName,
-          reason: reason
+          reason: reason,
+          organization_id: String(organizationId)
         }
       };
 
@@ -1054,13 +1477,127 @@ class PushService {
         data: {
           type: 'event_opt_in',
           event_name: eventName,
-          konfi_name: konfiName
+          konfi_name: konfiName,
+          organization_id: String(organizationId)
         }
       };
 
       return await this.sendToMultipleUsers(db, adminIds, notification);
     } catch (error) {
       console.error('sendEventOptInToAdmins error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  // Deshalb gilt jetzt: KEIN Payload ausserhalb dieser Datei. Wer eine neue
+  // Meldung braucht, legt hier eine Methode an.
+  // ==========================================================================
+
+  /**
+   * Neues Pflicht-Event - Push an die Konfis der betroffenen Jahrgaenge.
+   */
+  static async sendMandatoryEventCreated(db, userIds, eventName, eventDate, eventId, organizationId) {
+    try {
+      if (!userIds || userIds.length === 0) return { success: true, sent: 0 };
+
+      return await this.sendToMultipleUsers(db, userIds, {
+        title: 'Neues Pflicht-Event',
+        body: `${eventName} am ${new Date(eventDate).toLocaleDateString('de-DE')}`,
+        data: {
+          type: 'mandatory_event_created',
+          eventId: String(eventId),
+          organization_id: String(organizationId)
+        }
+      });
+    } catch (error) {
+      console.error('sendMandatoryEventCreated error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Teamer:in hat sich zu einem Event angemeldet - Push an die Leitung.
+   * @param {string} status 'confirmed' oder 'waitlist'
+   */
+  static async sendTeamerEventBookingToAdmins(db, organizationId, teamerName, eventName, status, eventId) {
+    try {
+      return await this.sendToOrgAdmins(db, organizationId, {
+        title: 'Teamer:in angemeldet',
+        body: status === 'confirmed'
+          ? `${teamerName} hat sich für '${eventName}' angemeldet`
+          : `${teamerName} steht auf der Warteliste für '${eventName}'`,
+        data: {
+          type: 'teamer_event_booking',
+          eventId: String(eventId),
+          organization_id: String(organizationId)
+        }
+      });
+    } catch (error) {
+      console.error('sendTeamerEventBookingToAdmins error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Teamer:in hat sich von einem Event abgemeldet - Push an die Leitung.
+   */
+  static async sendTeamerEventCancellationToAdmins(db, organizationId, teamerName, eventName, eventId) {
+    try {
+      return await this.sendToOrgAdmins(db, organizationId, {
+        title: 'Teamer:in abgemeldet',
+        body: `${teamerName} hat sich von '${eventName}' abgemeldet`,
+        data: {
+          type: 'teamer_event_cancellation',
+          eventId: String(eventId),
+          organization_id: String(organizationId)
+        }
+      });
+    } catch (error) {
+      console.error('sendTeamerEventCancellationToAdmins error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Zertifikat vergeben - Push an die Teamer:in.
+   */
+  static async sendCertificateToTeamer(db, userId, certificateName, organizationId) {
+    try {
+      return await this.sendToUser(db, userId, {
+        title: 'Neues Zertifikat',
+        body: `Du hast das Zertifikat "${certificateName}" erhalten.`,
+        data: {
+          type: 'certificate',
+          organization_id: String(organizationId)
+        }
+      });
+    } catch (error) {
+      console.error('sendCertificateToTeamer error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Jahresrueckblick freigegeben - Push an Konfis oder Teamer:innen.
+   * Wird an zwei Stellen gebraucht: bei der Freigabe von Hand und im Cron.
+   * @param {'konfi'|'teamer'} wrappedType
+   */
+  static async sendWrappedReleased(db, userIds, wrappedType, organizationId) {
+    try {
+      if (!userIds || userIds.length === 0) return { success: true, sent: 0 };
+
+      const istKonfi = wrappedType === 'konfi';
+      return await this.sendToMultipleUsers(db, userIds, {
+        title: istKonfi ? 'Dein Konfi-Jahr ist da!' : 'Dein Teamer-Jahr ist da!',
+        body: 'Schau dir jetzt deinen persönlichen Jahresrückblick an!',
+        data: {
+          type: 'wrapped',
+          wrappedType,
+          organization_id: String(organizationId)
+        }
+      });
+    } catch (error) {
+      console.error('sendWrappedReleased error:', error);
       return { success: false, error: error.message };
     }
   }

@@ -36,6 +36,7 @@ import {
   pricetagOutline
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import api from '../../../services/api';
@@ -47,6 +48,7 @@ import LoadingSpinner from '../../common/LoadingSpinner';
 import { SectionHeader, ListSection } from '../../shared';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { safeUUID } from '../../../utils/uuid';
+import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 
 interface Category {
   id: number;
@@ -155,12 +157,12 @@ const CategoryModal: React.FC<CategoryModalProps> = ({
             {category ? 'Kategorie bearbeiten' : 'Neue Kategorie'}
           </IonTitle>
           <IonButtons slot="start">
-            <IonButton onClick={handleClose} disabled={loading}>
+            <IonButton aria-label="Schließen" onClick={handleClose} disabled={loading}>
               <IonIcon icon={closeOutline} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
-            <IonButton
+            <IonButton aria-label="Kategorie speichern"
               onClick={handleSubmit}
               disabled={!formData.name.trim() || loading}
             >
@@ -220,7 +222,7 @@ const AdminCategoriesPage: React.FC = () => {
   const { user, setSuccess, setError, isOnline } = useApp();
 
   // Offline-Query: Categories
-  const { data: categories, loading, refresh: refreshCategories } = useOfflineQuery<Category[]>(
+  const { data: categories, loading, refresh: refreshCategories, refreshLive: refreshCategoriesLive } = useOfflineQuery<Category[]>(
     'admin:categories:' + user?.organization_id,
     async () => { const res = await api.get('/admin/categories'); return res.data; },
     { ttl: CACHE_TTL.STAMMDATEN }
@@ -243,7 +245,7 @@ const AdminCategoriesPage: React.FC = () => {
   });
 
   // Subscribe to live updates for categories
-  useLiveRefresh('categories', refreshCategories);
+  useLiveRefresh('categories', refreshCategoriesLive);
 
   const handleRefresh = async (event: CustomEvent) => {
     await refreshCategories();
@@ -251,7 +253,7 @@ const AdminCategoriesPage: React.FC = () => {
   };
 
   const handleDelete = async (category: Category) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Kategorie löschen',
       message: `Kategorie "${category.name}" wirklich löschen?`,
@@ -314,14 +316,14 @@ const AdminCategoriesPage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()}>
+            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
               <IonIcon icon={arrowBack} />
             </IonButton>
           </IonButtons>
           <IonTitle>Kategorien</IonTitle>
           {canCreate && (
             <IonButtons slot="end">
-              <IonButton onClick={openCreateModal}>
+              <IonButton aria-label="Neue Kategorie anlegen" onClick={openCreateModal}>
                 <IonIcon icon={add} />
               </IonButton>
             </IonButtons>
@@ -417,7 +419,8 @@ const AdminCategoriesPage: React.FC = () => {
                       {canDelete && (
                         <IonItemOptions side="end" className="app-swipe-actions">
                           <IonItemOption
-                            onClick={() => handleDelete(category)}
+                            onClick={() => { closeOpenSlidingItems(); handleDelete(category); }}
+                            aria-label="Kategorie löschen"
                             className="app-swipe-action"
                           >
                             <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">

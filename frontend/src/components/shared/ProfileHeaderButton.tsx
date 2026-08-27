@@ -17,7 +17,7 @@ const ProfileHeaderButton: React.FC<ProfileHeaderButtonProps> = ({ href, variant
   const colorClass = `app-icon-color--${variant}`;
   return (
     <IonButtons slot="end">
-      <IonButton onClick={() => router.push(href)}>
+      <IonButton onClick={() => router.push(href)} aria-label="Profil öffnen">
         <IonIcon
           slot="icon-only"
           icon={personCircleOutline}

@@ -11,7 +11,7 @@ import { useApp } from './AppContext';
 import { useLiveRefresh, useLiveUpdate, LiveUpdateType } from './LiveUpdateContext';
 
 // Stabiles Array (Modul-Ebene) -> useLiveRefresh re-subscribt nicht bei jedem Render.
-const BADGE_LIVE_TYPES: LiveUpdateType[] = ['requests', 'events'];
+const BADGE_LIVE_TYPES: LiveUpdateType[] = ['requests', 'events', 'challenges'];
 
 // Badge Context Interface
 interface BadgeContextType {
@@ -21,6 +21,10 @@ interface BadgeContextType {
   // Admin-only
   pendingRequestsCount: number;
   pendingEventsCount: number;
+  // Leitung (Admin + Teamer): offene Challenge-Freigaben
+  pendingChallengesCount: number;
+  /** Ungesehene Abzeichen (Konfis und Teamer:innen). Die Leitung kann keine verdienen -> immer 0. */
+  newBadgesCount: number;
   // Gesamt (Role-abhaengig)
   totalBadgeCount: number;
   // Actions
@@ -38,7 +42,7 @@ const BadgeContext = createContext<BadgeContextType | undefined>(undefined);
 export const BadgeProvider = ({ children }: { children: ReactNode }) => {
   const { user } = useApp();
   // Erhoeht sich nach Socket-Reconnect-mit-neuem-Token (LiveUpdateContext). Als
-  // Dependency des newMessage-Effekts unten noetig, damit der Listener nach
+  // Dependency des newMessage-Effekts unten nötig, damit der Listener nach
   // reconnectWithToken am NEUEN Socket-Objekt neu gebunden wird (der alte Socket
   // wurde verworfen -> ohne Neubindung kaeme kein 'newMessage' mehr an).
   const { socketEpoch } = useLiveUpdate();
@@ -47,22 +51,29 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
   const [chatUnreadTotal, setChatUnreadTotal] = useState(0);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const [pendingEventsCount, setPendingEventsCount] = useState(0);
+  const [pendingChallengesCount, setPendingChallengesCount] = useState(0);
+  const [newBadgesCount, setNewBadgesCount] = useState(0);
 
   const isAdmin = user?.type === 'admin' && user?.role_name !== 'super_admin';
+  // Challenge-Freigaben betreffen die ganze Leitung — Teamer moderieren ihre
+  // zugewiesenen Jahrgänge selbst (das Backend zählt entsprechend gefiltert).
+  const isLeadership = isAdmin || user?.type === 'teamer';
 
-  // totalBadgeCount: Admin = chat + requests + events, Konfi = nur chat
   const totalBadgeCount = useMemo(() => {
     if (isAdmin) {
-      return chatUnreadTotal + pendingRequestsCount + pendingEventsCount;
+      return chatUnreadTotal + pendingRequestsCount + pendingEventsCount + pendingChallengesCount;
     }
-    return chatUnreadTotal;
-  }, [chatUnreadTotal, pendingRequestsCount, pendingEventsCount, isAdmin]);
+    if (isLeadership) {
+      return chatUnreadTotal + pendingChallengesCount + newBadgesCount;
+    }
+    return chatUnreadTotal + newBadgesCount;
+  }, [chatUnreadTotal, pendingRequestsCount, pendingEventsCount, pendingChallengesCount, newBadgesCount, isAdmin, isLeadership]);
 
-  // Zentraler Refresh aller Counts. Nutzt den leichtgewichtigen Zaehler-Endpoint
+  // Zentraler Refresh aller Counts. Nutzt den leichtgewichtigen Zähler-Endpoint
   // statt der frueheren drei Voll-Fetches (/chat/rooms +
-  // /admin/activities/requests + /events), die nur fuer Zahlen geladen wurden.
-  // Die Semantik der Zaehler repliziert der Server exakt aus den Listen-Queries
-  // (unread pro Raum, pending-Antraege, unverarbeitete vergangene Events).
+  // /admin/activities/requests + /events), die nur für Zahlen geladen wurden.
+  // Die Semantik der Zähler repliziert der Server exakt aus den Listen-Queries
+  // (unread pro Raum, pending-Anträge, unverarbeitete vergangene Events).
   const refreshAllCounts = useCallback(async () => {
     if (!user) return;
 
@@ -70,7 +81,7 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
       const { data } = await api.get('/notifications/badge-counts');
 
       // chatUnreadByRoom-Struktur (Record<number, number>) beibehalten —
-      // ChatRoom (initialUnreadRef) und ChatOverview (Effect-Trigger) haengen dran.
+      // ChatRoom (initialUnreadRef) und ChatOverview (Effect-Trigger) hängen dran.
       const byRoomRaw: Record<string, number> = data?.chat?.byRoom || {};
       const unreadByRoom: Record<number, number> = {};
       let totalUnread = 0;
@@ -79,17 +90,27 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
         unreadByRoom[Number(roomId)] = unread;
         totalUnread += unread;
       });
-      setChatUnreadByRoom(unreadByRoom);
+      setChatUnreadByRoom(prev => {
+        const prevKeys = Object.keys(prev);
+        const nextKeys = Object.keys(unreadByRoom);
+        const unveraendert = prevKeys.length === nextKeys.length
+          && nextKeys.every(k => prev[Number(k)] === unreadByRoom[Number(k)]);
+        return unveraendert ? prev : unreadByRoom;
+      });
       setChatUnreadTotal(totalUnread);
 
       if (isAdmin) {
         setPendingRequestsCount(Number(data?.pendingRequests) || 0);
         setPendingEventsCount(Number(data?.pendingEvents) || 0);
       }
+      if (isLeadership) {
+        setPendingChallengesCount(Number(data?.pendingChallenges) || 0);
+        setNewBadgesCount(Number(data?.newBadges) || 0);
+      }
     } catch (error) {
       console.error('BadgeContext: refreshAllCounts fehlgeschlagen:', error);
     }
-  }, [user, isAdmin]);
+  }, [user, isAdmin, isLeadership]);
 
   // markRoomAsRead: Optimistisch + API Call
   const markRoomAsRead = useCallback((roomId: number) => {
@@ -171,7 +192,7 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
 
     // Push-Empfang/-Tap: Counts sofort aktualisieren. Der Push-Listener
     // (inkl. Navigation) liegt zentral in AppContext und feuert dieses Event,
-    // damit hier KEIN zweiter PushNotifications-Listener noetig ist.
+    // damit hier KEIN zweiter PushNotifications-Listener nötig ist.
     window.addEventListener('sync:reconnect', handleSyncReconnect);
     window.addEventListener('push:received', handleSyncReconnect);
     return () => {
@@ -182,7 +203,7 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
 
   // Initialer Load der Counts. KEIN Dauer-Polling mehr:
   // - Chat-Unread aktualisiert der WebSocket ('newMessage')
-  // - Anträge/Events aktualisiert LiveUpdate ('requests'/'events', s. useLiveRefresh oben)
+  // - Aktivitäten/Events aktualisiert LiveUpdate ('requests'/'events', s. useLiveRefresh oben)
   // - Nach Verbindungsabriss/Push feuert sync:reconnect bzw. push:received einen Refresh
   // Das frühere 30s-Intervall war durch diese Live-Kanäle redundant und erzeugte den
   // Großteil des /chat/rooms-Traffics (Admin-App offen = 120 Requests/h ohne Nutzen).
@@ -198,6 +219,8 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
       setChatUnreadTotal(0);
       setPendingRequestsCount(0);
       setPendingEventsCount(0);
+      setPendingChallengesCount(0);
+      setNewBadgesCount(0);
     }
   }, [user]);
 
@@ -207,6 +230,8 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
       chatUnreadTotal,
       pendingRequestsCount,
       pendingEventsCount,
+      pendingChallengesCount,
+      newBadgesCount,
       totalBadgeCount,
       refreshAllCounts,
       markRoomAsRead,

@@ -17,6 +17,7 @@ import {
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
 import { add, checkboxOutline } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import api from '../../../services/api';
@@ -25,11 +26,15 @@ import { CACHE_TTL } from '../../../services/offlineCache';
 import KonfisView from '../KonfisView';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import KonfiModal from '../modals/KonfiModal';
+import UserManagementModal from '../modals/UserManagementModal';
 import AttendanceMatrixModal from '../modals/AttendanceMatrixModal';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { OrgSwitcherButton } from '../../shared';
 import AdminOnboardingModal from '../modals/AdminOnboardingModal';
-import { useOnboardingOnce } from '../../../hooks/useOnboardingOnce';
+import AdminUpdateWalkthroughModal from '../modals/AdminUpdateWalkthroughModal';
+import { useOnboardingWithUpdateOnce } from '../../../hooks/useOnboardingOnce';
+import NeuerungenBanner from '../../shared/NeuerungenBanner';
+import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
 
 interface Konfi {
   id: number;
@@ -65,7 +70,7 @@ interface AdminKonfisPageProps {
   // navigieren). Fehlt der Callback (iPhone/Portrait), wird wie bisher
   // per Route auf die Detail-Seite navigiert.
   onSelectKonfi?: (konfiId: number) => void;
-  // Aktuell ausgewaehlter Konfi (fuer Highlighting im Split-View).
+  // Aktuell ausgewaehlter Konfi (für Highlighting im Split-View).
   selectedKonfiId?: number | null;
 }
 
@@ -74,25 +79,39 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
   const router = useIonRouter();
   const { pageRef, presentingElement, cleanupModals } = useModalPage('admin-konfis');
   // Onboarding-Tour einmal pro Admin-Account (beim ersten Betreten der Konfis-Seite,
-  // der Landing-Page fuer Admins/Org-Admins).
-  const [showOnboarding, closeOnboarding] = useOnboardingOnce('admin_onboarding_seen', user?.id);
+  // der Landing-Page für Admins/Org-Admins) — bzw. für Bestandsnutzer die
+  // Neuigkeiten-Karte "Was ist neu in Version 2.0". Der Walkthrough öffnet
+  // sich über die Karte oder dauerhaft über "Was ist neu?" in den Einstellungen.
+  const {
+    showOnboarding, closeOnboarding,
+    showUpdateHinweis, markUpdateHinweisGesehen,
+    showMitmachenHinweis, markMitmachenHinweisGesehen
+  } = useOnboardingWithUpdateOnce('admin_onboarding_seen', user?.id);
+  const [showUpdateWalkthrough, setShowUpdateWalkthrough] = useState(false);
+  const [showMitmachenErklaerung, setShowMitmachenErklaerung] = useState(false);
   
+  const [ohneJahrgang, setOhneJahrgang] = useState(false);
+
   // Offline-Query: Konfis
-  const { data: konfis, loading: konfisLoading, refresh: refreshKonfis } = useOfflineQuery<Konfi[]>(
+  const { data: konfis, loading: konfisLoading, refresh: refreshKonfis, refreshLive: refreshKonfisLive } = useOfflineQuery<Konfi[]>(
     'admin:konfis:' + user?.organization_id,
-    async () => { const res = await api.get('/admin/konfis'); return res.data; },
+    async () => {
+      const res = await api.get('/admin/konfis');
+      setOhneJahrgang(res.headers?.['x-kein-jahrgang-zugewiesen'] === 'true');
+      return res.data;
+    },
     { ttl: CACHE_TTL.KONFIS }
   );
 
-  // Offline-Query: Jahrgaenge
-  const { data: jahrgaenge, refresh: refreshJahrgaenge } = useOfflineQuery<Jahrgang[]>(
+  // Offline-Query: Jahrgänge
+  const { data: jahrgaenge, refresh: refreshJahrgaenge, refreshLive: refreshJahrgaengeLive } = useOfflineQuery<Jahrgang[]>(
     'admin:jahrgaenge:' + user?.organization_id,
     async () => { const res = await api.get('/admin/jahrgaenge'); return res.data; },
     { ttl: CACHE_TTL.STAMMDATEN }
   );
 
   // Offline-Query: Settings
-  const { data: settings, refresh: refreshSettings } = useOfflineQuery<Settings>(
+  const { data: settings, refresh: refreshSettings, refreshLive: refreshSettingsLive } = useOfflineQuery<Settings>(
     'admin:settings:' + user?.organization_id,
     async () => { const res = await api.get('/settings'); return res.data; },
     { ttl: CACHE_TTL.SETTINGS }
@@ -120,21 +139,33 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
     onClose: () => dismissMatrixModal()
   });
 
+  const [viewMode, setViewMode] = useState<'konfis' | 'teamer'>('konfis');
+
+  const [presentTeamerModalHook, dismissTeamerModalHook] = useIonModal(UserManagementModal, {
+    userId: null,
+    festeRolle: 'teamer',
+    onClose: () => dismissTeamerModalHook(),
+    onSuccess: () => {
+      dismissTeamerModalHook();
+      refreshKonfis();
+    }
+  });
+
   // Memoized refresh function for live updates
   const refreshAll = useCallback(() => {
-    refreshKonfis();
-    refreshJahrgaenge();
-    refreshSettings();
-  }, [refreshKonfis, refreshJahrgaenge, refreshSettings]);
+    refreshKonfisLive();
+    refreshJahrgaengeLive();
+    refreshSettingsLive();
+  }, [refreshKonfisLive, refreshJahrgaengeLive, refreshSettingsLive]);
 
   // Subscribe to live updates for konfis
   useLiveRefresh('konfis', refreshAll);
 
   const handleDeleteKonfi = async (konfi: Konfi) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Konfi wirklich löschen?',
-      message: `"${konfi.name}" wird unwiderruflich gelöscht.\n\nDabei gehen alle Punkte, Abzeichen, Anträge und Chat-Nachrichten dieses Konfis dauerhaft verloren. Das lässt sich nicht rückgängig machen.`,
+      message: `"${konfi.name}" wird unwiderruflich gelöscht.\n\nDabei gehen alle Punkte, Abzeichen, Aktivitäten und Chat-Nachrichten dieses Konfis dauerhaft verloren. Das lässt sich nicht rückgängig machen.`,
       buttons: [
         { text: 'Abbrechen', role: 'cancel' },
         {
@@ -153,10 +184,10 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
     });
   };
 
-  // Gibt ein Promise zurueck, das erst nach abgeschlossenem Delete (oder Abbruch)
+  // Gibt ein Promise zurück, das erst nach abgeschlossenem Delete (oder Abbruch)
   // resolved — so kann KonfisView danach die lokale Teamer-Liste neu laden.
   const handleDeleteTeamer = (teamer: any): Promise<void> => {
-    if (!isOnline) return Promise.resolve();
+    if (offlineBlockiert(isOnline, setError)) return Promise.resolve();
     return new Promise<void>((resolve) => {
       presentAlert({
         header: 'Teamer:in löschen',
@@ -319,10 +350,15 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
           <IonButtons slot="end">
             {['org_admin', 'admin'].includes(user?.role_name || '') && (
               <>
-                <IonButton onClick={() => presentMatrixModal({ presentingElement: presentingElement })}>
+                <IonButton aria-label="Anwesenheit und Konfisprüche anzeigen" onClick={() => presentMatrixModal({ presentingElement: presentingElement })}>
                   <IonIcon icon={checkboxOutline} />
                 </IonButton>
-                <IonButton onClick={presentKonfiModal}>
+                <IonButton
+                  aria-label={viewMode === 'teamer' ? 'Neue Teamer:in anlegen' : 'Neuen Konfi anlegen'}
+                  onClick={() => viewMode === 'teamer'
+                    ? presentTeamerModalHook({ presentingElement: presentingElement })
+                    : presentKonfiModal()}
+                >
                   <IonIcon icon={add} />
                 </IonButton>
               </>
@@ -343,7 +379,20 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
         }} onIonPull={triggerPullHaptic}>
           <IonRefresherContent></IonRefresherContent>
         </IonRefresher>
-        
+
+        {/* Beide Neuerungs-Karten: einmalig nach dem Update, X blendet dauerhaft
+            aus. Die Leitung hatte hier bislang nur die "Was ist neu"-Karte --
+            die Mitmachen-Karte gab es fuer sie nur unter "Mehr". */}
+        <NeuerungenBanner
+          style={{ margin: '8px 16px 12px' }}
+          updateSichtbar={showUpdateHinweis}
+          mitmachenSichtbar={showMitmachenHinweis}
+          onUpdateOeffnen={() => { markUpdateHinweisGesehen(); setShowUpdateWalkthrough(true); }}
+          onUpdateAusblenden={markUpdateHinweisGesehen}
+          onMitmachenOeffnen={() => { markMitmachenHinweisGesehen(); setShowMitmachenErklaerung(true); }}
+          onMitmachenAusblenden={markMitmachenHinweisGesehen}
+        />
+
         {loading ? (
           <LoadingSpinner message="Konfis werden geladen..." />
         ) : (
@@ -353,10 +402,12 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
             settings={settings || {}}
             onUpdate={refreshAll}
             onAddKonfiClick={presentKonfiModal}
+            onViewModeChange={setViewMode}
             onSelectKonfi={handleSelectKonfi}
             onDeleteKonfi={handleDeleteKonfi}
             onDeleteTeamer={handleDeleteTeamer}
             selectedKonfiId={selectedKonfiId}
+            ohneJahrgang={ohneJahrgang}
           />
         )}
       </IonContent>
@@ -365,6 +416,18 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
         <AdminOnboardingModal
           onClose={closeOnboarding}
           displayName={(user?.display_name || '').split(' ')[0]}
+        />
+      )}
+
+      {/* "Was ist neu"-Walkthrough — geöffnet über die Neuigkeiten-Karte */}
+      {showUpdateWalkthrough && (
+        <AdminUpdateWalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
+      )}
+
+      {showMitmachenErklaerung && (
+        <MitmachenErklaerungModal
+          rolle="admin"
+          onClose={() => setShowMitmachenErklaerung(false)}
         />
       )}
     </IonPage>

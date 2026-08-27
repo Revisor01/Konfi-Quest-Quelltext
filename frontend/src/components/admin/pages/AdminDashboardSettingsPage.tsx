@@ -33,9 +33,16 @@ import { SectionHeader } from '../../shared';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { safeUUID } from '../../../utils/uuid';
+import {
+  mergeSectionOrder,
+  DEFAULT_KONFI_SECTION_ORDER,
+  DEFAULT_TEAMER_SECTION_ORDER
+} from '../../../utils/sectionOrder';
 
 interface DashboardConfig {
   show_konfirmation: boolean;
+  show_challenges: boolean;
+  show_konfispruch: boolean;
   show_events: boolean;
   show_losung: boolean;
   show_badges: boolean;
@@ -44,6 +51,8 @@ interface DashboardConfig {
 
 interface TeamerDashboardConfig {
   show_zertifikate: boolean;
+  show_challenges: boolean;
+  show_konfispruch: boolean;
   show_events: boolean;
   show_badges: boolean;
   show_losung: boolean;
@@ -51,6 +60,8 @@ interface TeamerDashboardConfig {
 
 const KONFI_LABELS: Record<string, string> = {
   konfirmation: 'Countdown',
+  challenges: 'Challenges',
+  konfispruch: 'Konfispruch',
   events: 'Events',
   losung: 'Tageslosung',
   badges: 'Badges',
@@ -59,13 +70,17 @@ const KONFI_LABELS: Record<string, string> = {
 
 const TEAMER_LABELS: Record<string, string> = {
   zertifikate: 'Zertifikate',
+  challenges: 'Challenges',
+  konfispruch: 'Konfispruch',
   events: 'Events',
   badges: 'Badges',
   losung: 'Tageslosung'
 };
 
-const DEFAULT_KONFI_ORDER = ['konfirmation', 'events', 'losung', 'badges', 'ranking'];
-const DEFAULT_TEAMER_ORDER = ['zertifikate', 'events', 'badges', 'losung'];
+// Gemeinsame Default-Reihenfolgen (utils/sectionOrder) — sonst driften die
+// Listen zwischen Einstellungen und Dashboards auseinander.
+const DEFAULT_KONFI_ORDER = DEFAULT_KONFI_SECTION_ORDER;
+const DEFAULT_TEAMER_ORDER = DEFAULT_TEAMER_SECTION_ORDER;
 
 
 const AdminDashboardSettingsPage: React.FC = () => {
@@ -74,6 +89,8 @@ const AdminDashboardSettingsPage: React.FC = () => {
 
   const [dashboardConfig, setDashboardConfig] = useState<DashboardConfig>({
     show_konfirmation: true,
+    show_challenges: true,
+    show_konfispruch: true,
     show_events: true,
     show_losung: true,
     show_badges: true,
@@ -82,6 +99,8 @@ const AdminDashboardSettingsPage: React.FC = () => {
 
   const [teamerDashboardConfig, setTeamerDashboardConfig] = useState<TeamerDashboardConfig>({
     show_zertifikate: true,
+    show_challenges: true,
+    show_konfispruch: true,
     show_events: true,
     show_badges: true,
     show_losung: true
@@ -118,6 +137,8 @@ const AdminDashboardSettingsPage: React.FC = () => {
       onSuccess: (data: any) => {
         setDashboardConfig({
           show_konfirmation: data.dashboard_show_konfirmation ?? true,
+          show_challenges: data.dashboard_show_challenges ?? true,
+          show_konfispruch: data.dashboard_show_konfispruch ?? true,
           show_events: data.dashboard_show_events ?? true,
           show_losung: data.dashboard_show_losung ?? true,
           show_badges: data.dashboard_show_badges ?? true,
@@ -125,12 +146,18 @@ const AdminDashboardSettingsPage: React.FC = () => {
         });
         setTeamerDashboardConfig({
           show_zertifikate: data.teamer_dashboard_show_zertifikate ?? true,
+          show_challenges: data.teamer_dashboard_show_challenges ?? true,
+          show_konfispruch: data.teamer_dashboard_show_konfispruch ?? true,
           show_events: data.teamer_dashboard_show_events ?? true,
           show_badges: data.teamer_dashboard_show_badges ?? true,
           show_losung: data.teamer_dashboard_show_losung ?? true
         });
-        setKonfiOrder(data.dashboard_section_order || DEFAULT_KONFI_ORDER);
-        setTeamerOrder(data.teamer_dashboard_section_order || DEFAULT_TEAMER_ORDER);
+        // Mergen statt ersetzen: gespeicherte Reihenfolgen aus Bestands-Orgs
+        // kennen neuere Sektionen (z.B. 'challenges') nicht. Ohne Merge fehlten
+        // sie hier in der Liste — und wuerden beim nächsten Speichern dauerhaft
+        // aus der Reihenfolge verschwinden.
+        setKonfiOrder(mergeSectionOrder(data.dashboard_section_order, DEFAULT_KONFI_ORDER));
+        setTeamerOrder(mergeSectionOrder(data.teamer_dashboard_section_order, DEFAULT_TEAMER_ORDER));
       }
     }
   );
@@ -205,7 +232,7 @@ const AdminDashboardSettingsPage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()}>
+            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
               <IonIcon icon={arrowBack} />
             </IonButton>
           </IonButtons>
@@ -233,8 +260,9 @@ const AdminDashboardSettingsPage: React.FC = () => {
           icon={appsOutline}
           colors={{ primary: '#667eea', secondary: '#5a67d8' }}
           stats={[
-            { value: Object.values(dashboardConfig).filter(Boolean).length, label: 'Konfi' },
-            { value: Object.values(teamerDashboardConfig).filter(Boolean).length, label: 'Team' }
+            // Die Kacheln entsprechen den beiden Reitern und schalten dorthin.
+            { value: Object.values(dashboardConfig).filter(Boolean).length, label: 'Konfi', onClick: () => setDashboardSegment('konfi'), active: dashboardSegment === 'konfi' },
+            { value: Object.values(teamerDashboardConfig).filter(Boolean).length, label: 'Team', onClick: () => setDashboardSegment('teamer'), active: dashboardSegment === 'teamer' }
           ]}
         />
 

@@ -38,7 +38,7 @@ const BibleTranslationModal: React.FC<BibleTranslationModalProps> = ({
       <IonToolbar>
         <IonTitle>Bibelübersetzung</IonTitle>
         <IonButtons slot="start">
-          <IonButton className="app-modal-close-btn" onClick={onClose}>
+          <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose}>
             <IonIcon icon={closeOutline} />
           </IonButton>
         </IonButtons>

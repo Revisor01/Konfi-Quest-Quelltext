@@ -17,6 +17,7 @@ interface UseOfflineQueryResult<T> {
   isStale: boolean;
   isOffline: boolean;
   refresh: () => Promise<void>;
+  refreshLive: () => Promise<void>;
 }
 
 const DEFAULT_TTL = 5 * 60 * 1000; // 5 Min
@@ -45,6 +46,14 @@ export function useOfflineQuery<T>(
   const currentKeyRef = useRef(cacheKey);
   const mountedRef = useRef(true);
 
+  const inflightRef = useRef<Promise<void> | null>(null);
+  const inflightKeyRef = useRef<string | null>(null);
+
+  const nachfolgeRef = useRef(false);
+
+  const lastSuccessRef = useRef<{ key: string; t: number } | null>(null);
+  const JUST_FETCHED_MS = 1500;
+
   // Refs für Callbacks (vermeidet Dependency-Probleme)
   const onSuccessRef = useRef(onSuccess);
   const onErrorRef = useRef(onError);
@@ -55,37 +64,77 @@ export function useOfflineQuery<T>(
   selectRef.current = select;
   fetcherRef.current = fetcher;
 
-  const revalidate = useCallback(async () => {
-    try {
-      const freshData = await fetcherRef.current();
-      // Race-Condition: Prüfen ob Key sich geändert hat
-      if (!mountedRef.current || currentKeyRef.current !== cacheKey) return;
-
-      // Raw-Daten in Cache speichern (vor select)
-      await offlineCache.set(cacheKey, freshData, ttl);
-
-      const transformed = selectRef.current ? selectRef.current(freshData) : freshData;
-      setData(transformed);
-      dataRef.current = transformed;
-      setIsStale(false);
-      setError(null);
-      setLoading(false);
-      onSuccessRef.current?.(transformed);
-    } catch (err) {
-      if (!mountedRef.current || currentKeyRef.current !== cacheKey) return;
-
-      const message = err instanceof Error ? err.message : 'Unbekannter Fehler';
-
-      // Wenn Cache vorhanden: Daten behalten, als stale markieren
-      if (dataRef.current !== null) {
-        setIsStale(true);
-      } else {
-        setError(message);
-        setLoading(false);
-      }
-      onErrorRef.current?.(err instanceof Error ? err : new Error(message));
+  const revalidate = useCallback(async (istLive = false) => {
+    // Läuft bereits ein Fetch für DENSELBEN Key, dessen Ergebnis abwarten
+    // statt einen zweiten identischen Request zu starten.
+    if (inflightRef.current && inflightKeyRef.current === cacheKey) {
+      // Mitwarten. Bei einem Live-Ereignis zusaetzlich einen Nachfolge-Abruf
+      // vormerken: Der laufende Abruf startete VOR der Aenderung und kann sie
+      // noch nicht enthalten. Beim Mount-Pfad (gleicher Stand, nur doppelt
+      // angefordert) waere ein Nachfolge-Abruf dagegen reine Verschwendung.
+      if (istLive) nachfolgeRef.current = true;
+      return inflightRef.current;
     }
+
+    const doFetch = async () => {
+      try {
+        const freshData = await fetcherRef.current();
+        // Race-Condition: Prüfen ob Key sich geändert hat
+        if (!mountedRef.current || currentKeyRef.current !== cacheKey) return;
+
+        // Raw-Daten in Cache speichern (vor select)
+        await offlineCache.set(cacheKey, freshData, ttl);
+
+        const transformed = selectRef.current ? selectRef.current(freshData) : freshData;
+        setData(transformed);
+        dataRef.current = transformed;
+        lastSuccessRef.current = { key: cacheKey, t: Date.now() };
+        setIsStale(false);
+        setError(null);
+        setLoading(false);
+        onSuccessRef.current?.(transformed);
+      } catch (err) {
+        if (!mountedRef.current || currentKeyRef.current !== cacheKey) return;
+
+        const message = err instanceof Error ? err.message : 'Unbekannter Fehler';
+
+        // Wenn Cache vorhanden: Daten behalten, als stale markieren
+        if (dataRef.current !== null) {
+          setIsStale(true);
+        } else {
+          setError(message);
+          setLoading(false);
+        }
+        onErrorRef.current?.(err instanceof Error ? err : new Error(message));
+      } finally {
+        if (inflightKeyRef.current === cacheKey) {
+          inflightRef.current = null;
+          inflightKeyRef.current = null;
+        }
+      }
+
+      // Waehrend des Abrufs kam mindestens eine weitere Anforderung herein.
+      // Genau EINEN Nachfolge-Abruf starten — egal wie viele es waren, sonst
+      // loest eine Ereignis-Salve (z.B. Sammel-Anwesenheit) einen Abruf-Sturm
+      // aus. Das Flag wird VOR dem Abruf zurueckgesetzt, damit Anforderungen
+      // waehrend des Nachfolge-Abrufs erneut greifen koennen.
+      if (nachfolgeRef.current && mountedRef.current && currentKeyRef.current === cacheKey) {
+        nachfolgeRef.current = false;
+        await revalidateRef.current(true);
+      }
+    };
+
+    // Frischer Abruf: dieser Stand ist aktuell, alte Vormerkung verfaellt.
+    nachfolgeRef.current = false;
+    inflightKeyRef.current = cacheKey;
+    inflightRef.current = doFetch();
+    return inflightRef.current;
   }, [cacheKey, ttl]);
+
+  // Selbstbezug fuer den Nachfolge-Abruf in doFetch (revalidate referenziert
+  // sich sonst in seiner eigenen Definition).
+  const revalidateRef = useRef(revalidate);
+  revalidateRef.current = revalidate;
 
   // Initial Load
   useEffect(() => {
@@ -102,6 +151,12 @@ export function useOfflineQuery<T>(
 
       if (cancelled) return;
 
+      // Gerade eben (z.B. durch useIonViewWillEnter -> refresh) erfolgreich
+      // geladen? Dann keinen sofortigen zweiten, identischen Request starten.
+      const justFetched = lastSuccessRef.current !== null
+        && lastSuccessRef.current.key === cacheKey
+        && Date.now() - lastSuccessRef.current.t < JUST_FETCHED_MS;
+
       if (cached) {
         const transformed = selectRef.current ? selectRef.current(cached.data) : cached.data;
         setData(transformed);
@@ -111,19 +166,24 @@ export function useOfflineQuery<T>(
 
         if (offlineCache.isStale(cached)) {
           setIsStale(true);
-          if (networkMonitor.isOnline) {
+          if (networkMonitor.isOnline && !justFetched) {
             revalidate();
           }
         } else {
           setIsStale(false);
           // Auch bei frischem Cache im Hintergrund revalidieren (SWR)
-          if (networkMonitor.isOnline) {
+          if (networkMonitor.isOnline && !justFetched) {
             revalidate();
           }
         }
       } else if (networkMonitor.isOnline) {
-        // Kein Cache, aber online — direkt laden
-        revalidate();
+        // Kein Cache, aber online — direkt laden (justFetched: Daten sind
+        // bereits im State, ein erneuter Fetch braechte nichts Neues)
+        if (!justFetched) {
+          revalidate();
+        } else {
+          setLoading(false);
+        }
       } else {
         // Kein Cache + offline
         setError('Keine Daten verfügbar (offline)');
@@ -198,5 +258,13 @@ export function useOfflineQuery<T>(
     await revalidate();
   }, [revalidate]);
 
-  return { data, loading, error, isStale, isOffline, refresh };
+  // Fuer Live-Ereignisse (Socket). Anders als refresh() sorgt es dafuer, dass
+  // die Aenderung auch dann ankommt, wenn beim Eintreffen gerade schon ein
+  // Abruf laeuft — der wuerde sonst den Stand VON VOR der Aenderung liefern.
+  const refreshLive = useCallback(async () => {
+    if (!networkMonitor.isOnline) return;
+    await revalidate(true);
+  }, [revalidate]);
+
+  return { data, loading, error, isStale, isOffline, refresh, refreshLive };
 }

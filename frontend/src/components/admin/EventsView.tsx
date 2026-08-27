@@ -40,9 +40,10 @@ import {
 import { useApp } from '../../contexts/AppContext';
 import { filterBySearchTerm } from '../../utils/helpers';
 import { parseLocalTime, getLocalNow } from '../../utils/dateUtils';
-import { SectionHeader, ListSection, StatusBadge, EventLegendModal, EventCornerBadges, formatEventDate as formatDate, formatEventTime as formatTime } from '../shared';
+import { SectionHeader, ListSection, StatusBadge, EventLegendModal, EventCornerBadges, formatEventDate as formatDate, formatEventTime as formatTime, istVergangen, eventEnde } from '../shared';
 import { getStatusIcon } from '../shared/StatusBadge';
 import { Event } from '../../types/event';
+import { closeOpenSlidingItems } from '../../utils/slidingItems';
 
 interface EventsViewProps {
   events: Event[];
@@ -64,10 +65,13 @@ interface EventsViewProps {
   onJahrgangChange?: (jahrgangId: number | null) => void;
   searchText?: string;
   onSearchChange?: (text: string) => void;
-  // Fuer Card-Modal-Optik (Sheet ueber der Seite statt Vollbild).
+  // Für Card-Modal-Optik (Sheet über der Seite statt Vollbild).
   presentingElement?: HTMLElement | null;
-  // Im iPad-Split-View aktuell rechts geoeffnetes Event (fuer Highlighting).
+  // Im iPad-Split-View aktuell rechts geoeffnetes Event (für Highlighting).
   selectedEventId?: number | null;
+  // Zusaetzlicher Inhalt DIREKT UNTER dem SectionHeader (z.B. das Events|Aktivitäten-
+  // Hauptsegment der Page, analog zum Konfi-Pattern in KonfiEventsPage).
+  headerSlot?: React.ReactNode;
 }
 
 const EventsView: React.FC<EventsViewProps> = ({
@@ -87,7 +91,8 @@ const EventsView: React.FC<EventsViewProps> = ({
   searchText,
   onSearchChange,
   presentingElement,
-  selectedEventId
+  selectedEventId,
+  headerSlot
 }) => {
   const slidingRefs = useRef<Map<number, HTMLIonItemSlidingElement>>(new Map());
 
@@ -99,8 +104,7 @@ const EventsView: React.FC<EventsViewProps> = ({
   // Events werden bereits von der Page sortiert übergeben
   const filteredAndSortedEvents = events;
 
-  // Mehrtaegige Events gelten erst nach ihrem ENDE (event_end_time) als vergangen.
-  const eventEndDate = (event: Event) => new Date(event.event_end_time || event.event_date);
+  const eventEndDate = eventEnde;
 
   const getUpcomingEvents = () => {
     const now = new Date();
@@ -152,7 +156,7 @@ const EventsView: React.FC<EventsViewProps> = ({
   };
 
   const getAverageParticipation = () => {
-    // Nur Events mit echter Kapazitaet (max_participants > 0) zaehlen in die
+    // Nur Events mit echter Kapazität (max_participants > 0) zählen in die
     // Auslastungs-Statistik. Unbegrenzte Events (max_participants = 0) wuerden
     // sonst eine Division durch 0 (-> NaN) verursachen.
     const capped = events.filter(event => (event.max_participants || 0) > 0);
@@ -170,21 +174,36 @@ const EventsView: React.FC<EventsViewProps> = ({
         preset="events"
         onInfo={() => presentLegend({ presentingElement: presentingElement || undefined })}
         stats={[
-          // Stats GLOBAL ueber alle Events zaehlen (eventCounts von der Page),
-          // NICHT nur ueber die Events des aktiven Tabs (`events`) — sonst waren
+          // Stats GLOBAL über alle Events zählen (eventCounts von der Page),
+          // NICHT nur über die Events des aktiven Tabs (`events`) — sonst waren
           // zwei der drei Werte je nach Tab faelschlich 0.
-          { value: eventCounts?.aktuell ?? getUpcomingEvents().length, label: 'Anstehend' },
+          // Die drei Kacheln entsprechen genau den drei Reitern und schalten
+          // beim Antippen dorthin.
+          {
+            value: eventCounts?.aktuell ?? getUpcomingEvents().length,
+            label: 'Anstehend',
+            onClick: onTabChange ? () => onTabChange('aktuell') : undefined,
+            active: activeTab === 'aktuell'
+          },
           {
             value: eventCounts?.verbuchen ?? events.filter(e =>
               new Date(e.event_date) < new Date() &&
               (e.pending_bookings_count ?? 0) > 0
             ).length,
-            label: 'Verbuchen'
+            label: 'Verbuchen',
+            onClick: onTabChange ? () => onTabChange('verbuchen') : undefined,
+            active: activeTab === 'verbuchen'
           },
-          { value: eventCounts?.vergangen ?? getPastEvents().length, label: 'Vergangen' }
+          {
+            value: eventCounts?.vergangen ?? getPastEvents().length,
+            label: 'Vergangen',
+            onClick: onTabChange ? () => onTabChange('vergangen') : undefined,
+            active: activeTab === 'vergangen'
+          }
         ]}
       />
 
+      {headerSlot}
 
       {/* Suche & Filter */}
       <IonList inset={true} style={{ margin: '16px' }}>
@@ -264,12 +283,13 @@ const EventsView: React.FC<EventsViewProps> = ({
         emptyIconColor="#dc2626"
       >
         {filteredAndSortedEvents.map((event, index) => {
-              const isPastEvent = new Date(event.event_date) < new Date();
+              const isPastEvent = istVergangen(event);
               const isCancelled = event.registration_status === 'cancelled';
-              // Konfirmations-Event ueber das is_konfirmation-Flag (Phase 117, Migration 091).
+              // Konfirmations-Event über das is_konfirmation-Flag (Phase 117, Migration 091).
               const isKonfirmationEvent = event.is_konfirmation === true;
-              const hasUnprocessedBookings = isPastEvent && event.registered_count > 0 && event.pending_bookings_count && event.pending_bookings_count > 0;
-              const isFullyProcessed = isPastEvent && event.registered_count > 0 && (!event.pending_bookings_count || event.pending_bookings_count === 0);
+              const hatBuchungen = (event.registered_count || 0) > 0 || (event.teamer_count || 0) > 0;
+              const hasUnprocessedBookings = isPastEvent && hatBuchungen && !!event.pending_bookings_count && event.pending_bookings_count > 0;
+              const isFullyProcessed = isPastEvent && hatBuchungen && (!event.pending_bookings_count || event.pending_bookings_count === 0);
               const shouldGrayOut = isPastEvent && !hasUnprocessedBookings;
 
               // Farbe basierend auf Status - Konfirmation in Lila!
@@ -277,7 +297,7 @@ const EventsView: React.FC<EventsViewProps> = ({
                 if (isCancelled) return '#dc3545';
                 if (event.mandatory && isPastEvent && hasUnprocessedBookings) return '#007aff';
                 if (event.mandatory && isPastEvent) return '#6c757d';
-                // KEIN pauschales Rot fuer Pflicht-Events: Pflicht ist ein eigenes
+                // KEIN pauschales Rot für Pflicht-Events: Pflicht ist ein eigenes
                 // Badge. Die Farbe richtet sich nach dem Anmeldestatus (offen=gruen,
                 // nur-Warteliste=orange, ausgebucht-ohne-Warteliste=rot) — wie im
                 // Detail. Sonst war jedes offene Pflicht-Event faelschlich rot.
@@ -286,7 +306,7 @@ const EventsView: React.FC<EventsViewProps> = ({
                 if (hasUnprocessedBookings) return '#007aff'; // Blau für Verbuchen
                 if (isPastEvent) return '#6c757d';
                 // Pflicht-Events haben registration_status='mandatory' (Backend) — sie
-                // werden wie 'open' nach Kapazitaet gefaerbt (sonst fielen sie unten
+                // werden wie 'open' nach Kapazität gefaerbt (sonst fielen sie unten
                 // auf Rot durch). Anmeldbar = open ODER mandatory.
                 const regStatus = calculateRegistrationStatus(event);
                 const isAnmeldbar = regStatus === 'open' || regStatus === 'mandatory';
@@ -382,19 +402,23 @@ const EventsView: React.FC<EventsViewProps> = ({
                             </div>
                           )}
 
-                          {/* Zeile 2: Buchungen + Teamer + Warteliste + Punkte */}
+                          {/* Zeile 2: Buchungen + Teamer + Warteliste + Punkte.
+                              Bei "Nur Teamer:innen" gibt es keine Konfi-Teilnahme \u2014
+                              dann waere "0/\u221E" irrefuehrend, es zaehlt nur das Team. */}
                           <div className="app-list-item__meta">
-                            <span className="app-list-item__meta-item">
-                              <IonIcon icon={people} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--participants'} />
-                              {event.mandatory
-                                ? `${event.registered_count - (event.teamer_count || 0)} Konfis`
-                                : `${event.registered_count - (event.teamer_count || 0)}/${(event.max_participants || 0) > 0 ? event.max_participants : '\u221E'}`
-                              }
-                            </span>
-                            {(event.teamer_count || 0) > 0 && (
+                            {!event.teamer_only && (
+                              <span className="app-list-item__meta-item">
+                                <IonIcon icon={people} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--participants'} />
+                                {event.mandatory
+                                  ? `${(event.registered_count || 0)} Konfis`
+                                  : `${(event.registered_count || 0)}/${(event.max_participants || 0) > 0 ? event.max_participants : '\u221E'}`
+                                }
+                              </span>
+                            )}
+                            {(event.teamer_only || event.teamer_needed) && (
                               <span className="app-list-item__meta-item">
                                 <IonIcon icon={people} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--team'} />
-                                {event.teamer_count} Team
+                                {(event.teamer_count || 0)}/{(event.teamer_max_participants || 0) > 0 ? event.teamer_max_participants : '\u221E'} Team
                               </span>
                             )}
                             {event.waitlist_enabled && (event.waitlist_count ?? 0) > 0 && (
@@ -403,7 +427,8 @@ const EventsView: React.FC<EventsViewProps> = ({
                                 {event.waitlist_count}/{event.max_waitlist_size || 10}
                               </span>
                             )}
-                            {event.points > 0 && (
+                            {/* Bei reinen Teamer-Events gibt es keine Punkte */}
+                            {event.points > 0 && !event.teamer_only && (
                               <span className="app-list-item__meta-item">
                                 <IonIcon icon={trophy} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--points'} />
                                 {event.points}P
@@ -460,7 +485,8 @@ const EventsView: React.FC<EventsViewProps> = ({
                   <IonItemOptions side="end" className="app-swipe-actions">
                     {onCancelEvent && (
                       <IonItemOption
-                        onClick={() => onCancelEvent(event)}
+                        onClick={() => { closeOpenSlidingItems(); onCancelEvent(event); }}
+                        aria-label="Event absagen"
                         className="app-swipe-action"
                       >
                         <div className="app-icon-circle app-icon-circle--lg app-icon-circle--warning">
@@ -470,7 +496,8 @@ const EventsView: React.FC<EventsViewProps> = ({
                     )}
                     {onDeleteEvent && (
                       <IonItemOption
-                        onClick={() => onDeleteEvent(event)}
+                        onClick={() => { closeOpenSlidingItems(); onDeleteEvent(event); }}
+                        aria-label="Event löschen"
                         className="app-swipe-action"
                       >
                         <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">

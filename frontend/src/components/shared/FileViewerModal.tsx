@@ -105,7 +105,7 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
     onClose
   } = props;
 
-  // Einzel-Datei in Array wrappen wenn noetig
+  // Einzel-Datei in Array wrappen wenn nötig
   const files: FileItem[] = (filesProp && filesProp.length > 0)
     ? filesProp
     : (blobUrl ? [{ url: blobUrl, fileName: fileName || 'Datei', mimeType: mimeType || 'application/octet-stream' }] : []);

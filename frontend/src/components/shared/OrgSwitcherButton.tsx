@@ -15,8 +15,8 @@ import { swapHorizontalOutline, checkmark, businessOutline } from 'ionicons/icon
 import { useApp } from '../../contexts/AppContext';
 import { UserOrganization } from '../../contexts/AppContext';
 
-// Kurzname fuer die Header-Anzeige (Platz neben dem Seitentitel ist knapp).
-// Explizites Mapping fuer die bekannten Orgs; Fallback fuer kuenftige Orgs ist
+// Kurzname für die Header-Anzeige (Platz neben dem Seitentitel ist knapp).
+// Explizites Mapping für die bekannten Orgs; Fallback für kuenftige Orgs ist
 // das letzte Slug-Segment, kapitalisiert (z.B. 'kirchengemeinde-heide' -> 'Heide').
 const ORG_SHORT_NAMES: Record<string, string> = {
   'test-demo': 'Test'
@@ -35,9 +35,9 @@ const shortOrgName = (org?: UserOrganization): string => {
 /**
  * Org-Switcher oben links im Header. Erscheint NUR, wenn der eingeloggte User in
  * mehreren Organisationen Mitglied ist (Multi-Org). Der Button zeigt das Wechsel-
- * Symbol UND den Namen der aktuell aktiven Org (so weiss man immer, wo man ist).
+ * Symbol UND den Namen der aktuell aktiven Org (so weiß man immer, wo man ist).
  * Tippen oeffnet ein Popover mit allen Orgs; die aktive ist mit Haekchen markiert.
- * Bei Auswahl wird ueber den AppContext gewechselt (neues Token, Cache-Reset,
+ * Bei Auswahl wird über den AppContext gewechselt (neues Token, Cache-Reset,
  * org:switched-Event + Root-Navigation -> alle Views laden frisch in der neuen Org).
  *
  * Das Icon hat KEINE Farbklasse -> Standard-Toolbar-Farbe, genau wie die
@@ -98,7 +98,7 @@ const OrgSwitcherButton: React.FC = () => {
         onDidDismiss={() => setIsOpen(false)}
         side="bottom"
         alignment="start"
-        // Mehr Hoehe + komfortable Breite fuer die Org-Liste
+        // Mehr Hoehe + komfortable Breite für die Org-Liste
         style={{ '--width': '280px', '--max-height': '70vh' } as React.CSSProperties}
       >
         <IonContent>

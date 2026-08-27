@@ -4,7 +4,7 @@ import { timeOutline, alertCircleOutline } from 'ionicons/icons';
 import { useApp } from '../../contexts/AppContext';
 
 /**
- * Hinweis-Banner fuer laufende Testphasen.
+ * Hinweis-Banner für laufende Testphasen.
  * Zeigt nur etwas an, wenn der eingeloggte User eine Org mit aktivem
  * trial_ends_at hat. Wird auf Konfi-, Teamer- und Admin-Dashboard verwendet.
  * super_admin (eigene Org NULL) sieht hier nichts.

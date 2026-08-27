@@ -38,10 +38,13 @@ import {
   cloudOfflineOutline
 } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
+import { offlineBlockiert } from '../../../utils/offlineAktion';
 import api from '../../../services/api';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { ChatUser } from '../../../types/user';
 import { triggerPullHaptic } from '../../../utils/haptics';
+import { closeOpenSlidingItems } from '../../../utils/slidingItems';
+import { istTeamTyp } from '../../../utils/chatRoles';
 
 interface Participant {
   user_id: number;
@@ -57,8 +60,8 @@ interface Participant {
 
 // Team-Mitglied = Admin/Org-Admin ODER Teamer:in (NICHT Konfi). Teamer wurden bisher
 // faelschlich wie Konfis dargestellt (lila, ohne Funktion), weil nur auf 'admin'
-// geprueft wurde. Diese Helfer behandeln 'teamer' konsistent als Team.
-const isTeamType = (t?: string) => t === 'admin' || t === 'teamer';
+// geprüft wurde. Diese Helfer behandeln 'teamer' konsistent als Team.
+const isTeamType = istTeamTyp;
 const isTeamUser = (u: { user_type?: string; type?: string }) =>
   isTeamType('user_type' in u ? u.user_type : u.type);
 
@@ -226,7 +229,7 @@ const MembersModal: React.FC<MembersModalProps> = ({
   };
 
   const confirmRemoveUser = (participant: Participant) => {
-    if (!isOnline) return;
+    if (offlineBlockiert(isOnline, setError)) return;
     presentRemoveAlert({
       header: 'Mitglied entfernen',
       message: `${participant.name} wirklich aus dem Chat entfernen?`,
@@ -369,7 +372,7 @@ const MembersModal: React.FC<MembersModalProps> = ({
       <IonHeader>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton className="app-modal-close-btn" onClick={handleClose}>
+            <IonButton className="app-modal-close-btn" onClick={handleClose} aria-label="Schließen">
               <IonIcon icon={closeOutline} slot="icon-only" />
             </IonButton>
           </IonButtons>
@@ -385,11 +388,12 @@ const MembersModal: React.FC<MembersModalProps> = ({
                   className="app-modal-submit-btn app-modal-submit-btn--chat"
                   onClick={addSelectedUsers}
                   disabled={selectedUsers.size === 0 || adding || !isOnline}
+                  aria-label="Ausgewählte Mitglieder hinzufügen"
                 >
                   {!isOnline ? <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</> : adding ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} slot="icon-only" />}
                 </IonButton>
               ) : (
-                <IonButton onClick={() => setShowAddMode(true)}>
+                <IonButton onClick={() => setShowAddMode(true)} aria-label="Mitglieder hinzufügen">
                   <IonIcon icon={personAddOutline} slot="icon-only" />
                 </IonButton>
               )}
@@ -517,7 +521,8 @@ const MembersModal: React.FC<MembersModalProps> = ({
                               {canManageMembers && (
                                 <IonItemOptions side="end" className="app-swipe-actions">
                                   <IonItemOption
-                                    onClick={() => confirmRemoveUser(p)}
+                                    onClick={() => { closeOpenSlidingItems(); confirmRemoveUser(p); }}
+                                    aria-label="Mitglied entfernen"
                                     className="app-swipe-action"
                                   >
                                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">

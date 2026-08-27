@@ -3,8 +3,9 @@ const cron = require('node-cron');
 const { deleteKonfiCascade } = require('../utils/konfiDeletion');
 const emailService = require('./emailService');
 const apm = require('../utils/apm');
+const { appIconSummenFuerAlle } = require('../utils/appIconBadge');
 
-// Vorlauf fuer die Lizenz-Ablauf-Erinnerung (Tage vor trial_ends_at)
+// Vorlauf für die Lizenz-Ablauf-Erinnerung (Tage vor trial_ends_at)
 const LICENSE_REMINDER_DAYS = 14;
 
 class BackgroundService {
@@ -16,7 +17,13 @@ class BackgroundService {
   static autoDeletionCronTask = null;
   static trialExpiryCronTask = null;
   static apmSnapshotInterval = null;
+  static challengeStartInterval = null;
   static wrappedRouter = null;
+  static badgeCheckInterval = null;
+  // Zuletzt an das jeweilige Geraet gesendeter Zaehlerstand. Verhindert, dass
+  // jeder Takt dieselbe Zahl erneut schickt, und erlaubt trotzdem das
+  // Zuruecknehmen auf null (siehe updateAllUserBadges).
+  static letzterZaehler = new Map();
 
   /**
    * Startet regelmäßige Badge Updates für alle User (alle 5 Minuten)
@@ -26,14 +33,31 @@ class BackgroundService {
       return;
     }
 
-    const FIVE_MINUTES = 5 * 60 * 1000;
+    // Zwei Aufgaben mit sehr verschiedener Dringlichkeit, deshalb zwei Takte:
+    //
+    //   Der App-Icon-Zähler soll zeitnah stimmen -> alle 5 Minuten.
+    //   Die Abzeichen-Prüfung hängt an Wochen und Jahren (streak,
+    //   time_based, teamer_year); alle anderen Kriterien werden ohnehin sofort
+    //   nach dem ausloesenden Ereignis geprüft. Ein Fuenf-Minuten-Takt fragte
+    //   288-mal täglich etwas ab, das sich höchstens einmal täglich ändert.
+    const FUENF_MINUTEN = 5 * 60 * 1000;
+    const EINE_STUNDE = 60 * 60 * 1000;
+
     this.badgeUpdateInterval = setInterval(async () => {
       try {
-        await this.updateAllUserBadges(db);
+        await this.updateAllUserBadges(db, { nurZaehler: true });
       } catch (error) {
         console.error('Background badge update failed:', error);
       }
-    }, FIVE_MINUTES);
+    }, FUENF_MINUTEN);
+
+    this.badgeCheckInterval = setInterval(async () => {
+      try {
+        await this.updateAllUserBadges(db);
+      } catch (error) {
+        console.error('Background badge check failed:', error);
+      }
+    }, EINE_STUNDE);
   }
 
   /**
@@ -44,22 +68,43 @@ class BackgroundService {
       clearInterval(this.badgeUpdateInterval);
       this.badgeUpdateInterval = null;
     }
+    if (this.badgeCheckInterval) {
+      clearInterval(this.badgeCheckInterval);
+      this.badgeCheckInterval = null;
+    }
   }
 
   /**
    * Aktualisiert Badge Counts für alle User mit Push Tokens
    */
-  static async updateAllUserBadges(db) {
+  /**
+   * @param {object} db
+   * @param {{nurZaehler?: boolean}} optionen  nurZaehler = App-Icon-Zähler
+   *        aktualisieren, die teure Abzeichen-Prüfung auslassen.
+   */
+  static async updateAllUserBadges(db, optionen = {}) {
+    const { nurZaehler = false } = optionen;
     try {
-      // Alle User mit Push Tokens laden (Admins ausschliessen)
+      // Alle Konfis und Teamer:innen laden — NICHT nur die mit Push-Token.
+      //
+      // Das Setzen des App-Icon-Zaehlers braucht ein Token, die
+      // Abzeichen-Prüfung nicht. Beides ist unten getrennt.
       const usersQuery = `
-        SELECT DISTINCT pt.user_id, pt.user_type,
-          r.name as role_name
-        FROM push_tokens pt
-        JOIN users u ON pt.user_id = u.id
+        SELECT u.id AS user_id,
+               u.organization_id,
+               CASE WHEN r.name = 'konfi' THEN 'konfi'
+                    WHEN r.name = 'teamer' THEN 'teamer'
+                    ELSE 'admin' END AS user_type,
+               r.name as role_name,
+               EXISTS (
+                 SELECT 1 FROM push_tokens pt
+                 WHERE pt.user_id = u.id AND pt.token IS NOT NULL
+               ) AS hat_push
+        FROM users u
         JOIN roles r ON u.role_id = r.id
-        WHERE pt.token IS NOT NULL
-          AND r.name != 'admin'
+        WHERE r.name IN ('konfi', 'teamer', 'admin', 'org_admin')
+          AND u.deleted_at IS NULL
+          AND u.is_active = true
       `;
       const { rows: users } = await db.query(usersQuery, []);
 
@@ -70,42 +115,74 @@ class BackgroundService {
       let updatedCount = 0;
       const checkAndAwardBadges = require('../routes/badges').checkAndAwardBadges;
 
-      // BULK: Chat-Unread fuer ALLE User auf einmal berechnen (statt N einzelne Queries)
-      const chatUnreadQuery = `
-        SELECT cp.user_id, cp.user_type, COUNT(DISTINCT cm.id)::int as chat_unread
-        FROM chat_participants cp
-        JOIN chat_messages cm ON cm.room_id = cp.room_id
-        LEFT JOIN chat_read_status crs ON cm.room_id = crs.room_id
-          AND crs.user_id = cp.user_id AND crs.user_type = cp.user_type
-        WHERE cm.created_at > COALESCE(crs.last_read_at, '1970-01-01')
-          AND cm.deleted_at IS NULL
-          AND NOT (cm.user_id = cp.user_id AND cm.user_type = cp.user_type)
-        GROUP BY cp.user_id, cp.user_type
-        HAVING COUNT(DISTINCT cm.id) > 0
-      `;
-      const { rows: unreadRows } = await db.query(chatUnreadQuery);
-      const chatUnreadMap = {};
-      for (const row of unreadRows) {
-        chatUnreadMap[`${row.user_id}_${row.user_type}`] = row.chat_unread;
+      // Eintraege zu Konten, die es nicht mehr gibt, aus dem Merker werfen —
+      // sonst waechst er über die Laufzeit mit jedem geloeschten Konto.
+      if (this.letzterZaehler.size > users.length) {
+        const aktuell = new Set(users.map(u => `${u.user_id}_${u.user_type}`));
+        for (const schluessel of this.letzterZaehler.keys()) {
+          if (!aktuell.has(schluessel)) this.letzterZaehler.delete(schluessel);
+        }
       }
+
+      // BULK: Die App-Icon-Summe fuer ALLE auf einmal, nicht pro Person.
+      //
+      // Gerechnet wird fuer alle, gesendet nur an Geraete mit Token — die
+      // Abzeichen-Pruefung unten braucht ohnehin die volle Liste.
+      // Jahrgaenge nur fuer Teamer:innen, und in EINER Abfrage: Nur bei ihnen
+      // haengt die Zahl der offenen Freigaben an der Zuweisung.
+      const teamerIds = users.filter(u => u.user_type === 'teamer').map(u => u.user_id);
+      const jahrgaengeProTeamer = new Map();
+      if (teamerIds.length > 0) {
+        const { rows: zuweisungen } = await db.query(
+          'SELECT user_id, jahrgang_id AS id, can_view FROM user_jahrgang_assignments WHERE user_id = ANY($1::int[])',
+          [teamerIds]
+        );
+        for (const z of zuweisungen) {
+          if (!jahrgaengeProTeamer.has(z.user_id)) jahrgaengeProTeamer.set(z.user_id, []);
+          jahrgaengeProTeamer.get(z.user_id).push({ id: z.id, can_view: z.can_view });
+        }
+      }
+
+      const empfaenger = users.map(u => ({
+        id: u.user_id,
+        type: u.user_type,
+        role_name: u.role_name,
+        organization_id: u.organization_id,
+        assigned_jahrgaenge: jahrgaengeProTeamer.get(u.user_id) || []
+      }));
+      const summen = await appIconSummenFuerAlle(db, empfaenger);
 
       for (const user of users) {
         try {
-          // Chat-Unread aus Bulk-Map lesen (kein DB-Query mehr pro User)
-          const badgeCount = chatUnreadMap[`${user.user_id}_${user.user_type}`] || 0;
+          // App-Icon-Zähler nachfuehren. Nur für Geraete mit Token — ohne
+          // Token gibt es kein App-Icon.
+          //
+          // Auch die NULL wird gesendet, und das ist der Kern: Vorher lief das
+          // unter `badgeCount > 0`, eine Zahl wurde also nie zurückgenommen.
+          // Wer alles gelesen hatte, behielt seinen Zähler, bis die App ihn
+          // beim nächsten Start selbst loeschte — auf Android blieb er
+          // dadurch oft einfach stehen.
+          //
+          // Damit daraus kein Dauerfeuer wird, merken wir uns den zuletzt
+          // gesendeten Stand und schicken nur bei Änderung. Im Regelfall
+          // bedeutet das genau EINEN zusaetzlichen Push, wenn der Zähler auf
+          // null fällt.
+          if (user.hat_push) {
+            const schluessel = `${user.user_id}_${user.user_type}`;
+            // Erst vergleichen, dann senden — sonst ginge bei JEDEM Lauf ein
+            // stiller Push raus und der Merker liefe leer.
+            const zuSenden = summen.get(schluessel);
 
-          // Silent badge-count update (App-Icon Badge) wenn Count > 0
-          if (badgeCount > 0) {
-            await PushService.sendBadgeUpdate(db, user.user_id, badgeCount);
-            updatedCount++;
+            if (zuSenden != null && this.letzterZaehler.get(schluessel) !== zuSenden) {
+              await PushService.sendBadgeUpdate(db, user.user_id);
+              this.letzterZaehler.set(schluessel, zuSenden);
+              updatedCount++;
+            }
           }
 
-          // Badge-Check durchfuehren (Streak, zeitbasiert etc.).
-          // checkAndAwardBadges() vergibt neue Badges UND sendet dafuer bereits
-          // selbst die Push + In-App-Notification (via insertBadgesAndNotify ->
-          // sendBadgeEarnedToKonfi). KEIN zweiter Push hier — sonst bekommt der
-          // Konfi pro neuem Badge zwei Benachrichtigungen.
-          await checkAndAwardBadges(db, user.user_id);
+          if (!nurZaehler && (user.user_type === 'konfi' || user.user_type === 'teamer')) {
+            await checkAndAwardBadges(db, user.user_id);
+          }
         } catch (error) {
           console.error(`Badge update failed for user ${user.user_id}:`, error);
         }
@@ -155,11 +232,11 @@ class BackgroundService {
   }
 
   /**
-   * Startet den "Anmeldung moeglich"-Push-Service.
-   * Sendet fuer Events, deren Anmeldezeitraum geoeffnet hat (z.B. registration_opens_at
+   * Startet den "Anmeldung möglich"-Push-Service.
+   * Sendet für Events, deren Anmeldezeitraum geoeffnet hat (z.B. registration_opens_at
    * in der Zukunft beim Anlegen, jetzt erreicht), den "Neues Event"-Push an die
-   * Org-Konfis. Flanke ueber events.registration_open_notified (Erstellen/Aendern
-   * setzen/reset das Flag synchron, dieser Cron faengt die zeitgesteuerten Faelle).
+   * Org-Konfis. Flanke über events.registration_open_notified (Erstellen/Ändern
+   * setzen/reset das Flag synchron, dieser Cron faengt die zeitgesteuerten Fälle).
    */
   static startRegistrationOpenService(db) {
     if (this.registrationOpenInterval) return;
@@ -188,15 +265,15 @@ class BackgroundService {
   }
 
   /**
-   * Findet Events, die JETZT fuer Konfis anmeldbar sind, aber noch nicht
-   * benachrichtigt wurden, und sendet den "Anmeldung moeglich"-Push.
+   * Findet Events, die JETZT für Konfis anmeldbar sind, aber noch nicht
+   * benachrichtigt wurden, und sendet den "Anmeldung möglich"-Push.
    */
   static async sendRegistrationOpenPushes(db) {
     try {
       // ATOMAR: Flag in DERSELBEN Query auf true flippen und nur die geflippten
       // Zeilen zurueckgeben (RETURNING). So kann KEIN Event doppelt gepusht werden
       // (auch nicht bei parallelen Laeufen / Race mit POST/PUT) — wer die Zeile von
-      // false->true setzt, ist allein fuer den Push zustaendig.
+      // false->true setzt, ist allein für den Push zustaendig.
       // Anmeldbar = Fenster offen, nicht abgesagt, kein reines Teamer-Event,
       // kein Pflicht-Event (eigener Erstellungs-Push).
       const { rows: events } = await db.query(`
@@ -223,6 +300,78 @@ class BackgroundService {
     }
   }
 
+  // ====================================================================
+  // CHALLENGE-START-PUSH SERVICE
+  // ====================================================================
+
+  /**
+   * Startet den Challenge-Start-Push-Service (alle 5 Minuten).
+   * Challenges werden geplant (starts_at in der Zukunft) und sollen genau dann
+   * einen Push an die Konfis der zugewiesenen Jahrgänge auslösen, wenn sie
+   * tatsaechlich starten. Idempotent über challenges.start_push_sent.
+   */
+  static startChallengeStartService(db) {
+    if (this.challengeStartInterval) return;
+
+    // Erstlauf verzoegert (30s), damit beim Boot zuerst die Migrations durch
+    // sind (sonst Race: Tabelle challenges evtl. noch nicht vorhanden).
+    setTimeout(() => {
+      this.sendChallengeStartPushes(db).catch(err =>
+        console.error('Challenge-Start-Push (initial) failed:', err));
+    }, 30 * 1000);
+
+    const FIVE_MINUTES = 5 * 60 * 1000;
+    this.challengeStartInterval = setInterval(async () => {
+      try {
+        await this.sendChallengeStartPushes(db);
+      } catch (error) {
+        console.error('Challenge-Start-Push-Service failed:', error);
+      }
+    }, FIVE_MINUTES);
+  }
+
+  static stopChallengeStartService() {
+    if (this.challengeStartInterval) {
+      clearInterval(this.challengeStartInterval);
+      this.challengeStartInterval = null;
+    }
+  }
+
+  /**
+   * Findet Challenges, die JETZT gestartet sind, aber noch keinen Start-Push
+   * ausgelöst haben, und benachrichtigt die Konfis der zugewiesenen Jahrgänge.
+   *
+   * ATOMAR: das Flag wird in DERSELBEN Query auf true geflippt und nur die
+   * geflippten Zeilen zurueckgegeben (RETURNING) — so kann KEINE Challenge
+   * doppelt gepusht werden, auch nicht bei parallelen Laeufen.
+   * Beendete Challenges werden übersprungen (ends_at > NOW()): eine Challenge,
+   * die während eines Ausfalls komplett durchgelaufen ist, soll nicht
+   * nachträglich noch "mach mit!" pushen.
+   */
+  static async sendChallengeStartPushes(db) {
+    try {
+      const { rows: challenges } = await db.query(`
+        UPDATE challenges
+        SET start_push_sent = true
+        WHERE start_push_sent = false
+          AND is_draft = false
+          AND starts_at <= NOW()
+          AND ends_at > NOW()
+        RETURNING id, title
+      `);
+
+      for (const challenge of challenges) {
+        try {
+          await PushService.sendChallengeStartedToJahrgaenge(db, challenge.id, challenge.title);
+        } catch (err) {
+          console.error(`Challenge-Start-Push failed for challenge ${challenge.id}:`, err.message);
+        }
+      }
+    } catch (error) {
+      console.error('sendChallengeStartPushes error:', error);
+    }
+  }
+
   /**
    * Sendet Event-Erinnerungen (1 Tag und 1 Stunde vorher)
    */
@@ -236,10 +385,11 @@ class BackgroundService {
       const oneDayWindowEnd = new Date(oneDayFromNow.getTime() + 15 * 60 * 1000);
 
       const oneDayQuery = `
-        SELECT DISTINCT e.id, e.name, e.event_date, eb.user_id
+        SELECT DISTINCT e.id, e.name, e.event_date, e.organization_id, eb.user_id
         FROM events e
         JOIN event_bookings eb ON e.id = eb.event_id
         WHERE eb.status = 'confirmed'
+          AND e.cancelled IS NOT TRUE
           AND e.event_date::date = $1::date
           AND NOT EXISTS (
             SELECT 1 FROM event_reminders er
@@ -262,7 +412,8 @@ class BackgroundService {
             event.name,
             event.event_date,
             eventTime,
-            '1_day'
+            '1_day',
+            event.organization_id
           );
 
           // Erinnerung als gesendet markieren
@@ -281,10 +432,11 @@ class BackgroundService {
       const oneHourWindowEnd = new Date(oneHourFromNow.getTime() + 15 * 60 * 1000);
 
       const oneHourQuery = `
-        SELECT DISTINCT e.id, e.name, e.event_date, eb.user_id
+        SELECT DISTINCT e.id, e.name, e.event_date, e.organization_id, eb.user_id
         FROM events e
         JOIN event_bookings eb ON e.id = eb.event_id
         WHERE eb.status = 'confirmed'
+          AND e.cancelled IS NOT TRUE
           AND e.event_date BETWEEN $1 AND $2
           AND NOT EXISTS (
             SELECT 1 FROM event_reminders er
@@ -305,7 +457,8 @@ class BackgroundService {
             event.name,
             event.event_date,
             eventTime,
-            '1_hour'
+            '1_hour',
+            event.organization_id
           );
 
           await db.query(
@@ -340,7 +493,7 @@ class BackgroundService {
 
     console.log('Pending-Events-Cron: Starte node-cron 0 9 * * * Europe/Berlin');
 
-    // '0 9 * * *' = taeglich um 09:00 Uhr
+    // '0 9 * * *' = täglich um 09:00 Uhr
     this.pendingEventsCronTask = cron.schedule('0 9 * * *', async () => {
       try {
         await this.checkPendingEvents(db);
@@ -367,12 +520,17 @@ class BackgroundService {
    */
   static async checkPendingEvents(db) {
     try {
-      // Events die vorbei sind und noch nicht alle Teilnehmer verbucht haben
+      // Events die vorbei sind und noch nicht alle Teilnehmer verbucht haben.
+      //
+      // Geloeschte Konten zaehlen nicht mit: Sonst erinnerte die App ewig an
+      // eine Buchung, die niemand mehr verbuchen kann.
       const query = `
         SELECT e.organization_id, COUNT(DISTINCT e.id) as pending_count
         FROM events e
         JOIN event_bookings eb ON e.id = eb.event_id
+        JOIN users u ON eb.user_id = u.id AND u.deleted_at IS NULL
         WHERE e.event_date < CURRENT_DATE
+          AND e.cancelled IS NOT TRUE
           AND eb.status = 'confirmed'
           AND eb.attendance_status IS NULL
         GROUP BY e.organization_id
@@ -472,7 +630,7 @@ class BackgroundService {
 
   /**
    * Startet den Wrapped-Cron Service (jaehrlich am 6. Januar um 06:00 Uhr)
-   * - Teamer-Wrapped: Jaehrlich am 6.1. fuer alle Organisationen generieren
+   * - Teamer-Wrapped: Jaehrlich am 6.1. für alle Organisationen generieren
    * - Konfi-Wrapped wird NICHT mehr per Cron getriggert (Toggle pro Jahrgang, 119)
    */
   static startWrappedCron(db) {
@@ -483,7 +641,7 @@ class BackgroundService {
     console.log('Wrapped-Cron: Starte node-cron (0 6 6 1 * -- jaehrlich am 6.1. um 06:00 Uhr)');
 
     // '0 6 6 1 *' = Jaehrlich am 6. Januar um 06:00 Uhr
-    // node-cron berechnet nach Neustart den naechsten Trigger korrekt
+    // node-cron berechnet nach Neustart den nächsten Trigger korrekt
     this.wrappedCronTask = cron.schedule('0 6 6 1 *', async () => {
       console.log('Wrapped-Cron: Ausfuehrung gestartet (jaehrlich am 6.1.)');
       try {
@@ -507,8 +665,8 @@ class BackgroundService {
   }
 
   /**
-   * Prueft ob Wrapped-Snapshots automatisch generiert werden muessen.
-   * Laeuft jaehrlich am 6.1. (Teamer-Wrapped fuer alle Organisationen).
+   * Prueft ob Wrapped-Snapshots automatisch generiert werden müssen.
+   * Laeuft jaehrlich am 6.1. (Teamer-Wrapped für alle Organisationen).
    * Konfi-Wrapped wird NICHT mehr automatisch getriggert (Toggle pro Jahrgang, 119).
    */
   static async checkWrappedTriggers(db) {
@@ -517,7 +675,7 @@ class BackgroundService {
 
       let teamerOrgsGenerated = 0;
 
-      // Teamer-Wrapped: Jaehrlich (Cron feuert nur am 6.1.) fuer alle Organisationen
+      // Teamer-Wrapped: Jaehrlich (Cron feuert nur am 6.1.) für alle Organisationen
       const { rows: orgs } = await db.query('SELECT id FROM organizations');
 
       for (const org of orgs) {
@@ -548,9 +706,9 @@ class BackgroundService {
 
 
   /**
-   * Startet den Auto-Loesch-Cron (taeglich 02:00 Uhr Europe/Berlin).
+   * Startet den Auto-Loesch-Cron (täglich 02:00 Uhr Europe/Berlin).
    * Prueft je Jahrgang ab dem Stichtag (is_konfirmation-Event): Tag 60 ->
-   * Soft-Loeschung, Tag 120 -> kaskadierende Hard-Loeschung.
+   * Soft-Löschung, Tag 120 -> kaskadierende Hard-Löschung.
    */
   static startAutoDeletionCron(db) {
     if (this.autoDeletionCronTask) {
@@ -559,9 +717,9 @@ class BackgroundService {
 
     console.log('Auto-Deletion-Cron: Starte node-cron 0 2 * * * Europe/Berlin');
 
-    // '0 2 * * *' = taeglich um 02:00 Uhr
+    // '0 2 * * *' = täglich um 02:00 Uhr
     this.autoDeletionCronTask = cron.schedule('0 2 * * *', async () => {
-      // ERST warnen (7 Tage vor Loeschung), DANN loeschen — beides im selben
+      // ERST warnen (7 Tage vor Löschung), DANN löschen — beides im selben
       // 02:00-Lauf, aber getrennt fehler-isoliert.
       try {
         await this.runJahrgangDeletionReminders(db);
@@ -591,8 +749,8 @@ class BackgroundService {
   /**
    * Startet den Trial-Ablauf-Cron: setzt Organisationen mit abgelaufener
    * Testphase (trial_ends_at < jetzt) auf is_active = false (Sperre).
-   * Login + Refresh pruefen trial_ends_at zusaetzlich direkt, daher ist der
-   * Cron nur die persistente Sperre fuer bestehende Sessions/Listen-Anzeige.
+   * Login + Refresh prüfen trial_ends_at zusaetzlich direkt, daher ist der
+   * Cron nur die persistente Sperre für bestehende Sessions/Listen-Anzeige.
    */
   static startTrialExpiryCron(db) {
     if (this.trialExpiryCronTask) {
@@ -601,7 +759,7 @@ class BackgroundService {
 
     console.log('Trial-Expiry-Cron: Starte node-cron 0 3 * * * Europe/Berlin');
 
-    // '0 3 * * *' = taeglich um 03:00 Uhr (nach Auto-Deletion um 02:00)
+    // '0 3 * * *' = täglich um 03:00 Uhr (nach Auto-Deletion um 02:00)
     this.trialExpiryCronTask = cron.schedule('0 3 * * *', async () => {
       try {
         await this.runTrialExpiry(db);
@@ -609,7 +767,7 @@ class BackgroundService {
         console.error('Trial-Expiry-Cron failed:', e);
       }
       try {
-        // Lizenz-Erinnerung (bezahlte Lizenzen ~14 Tage vor Ablauf) — laeuft NACH
+        // Lizenz-Erinnerung (bezahlte Lizenzen ~14 Tage vor Ablauf) — läuft NACH
         // der Sperrung, damit gerade abgelaufene Orgs nicht mehr erinnert werden.
         await this.runLicenseReminders(db);
       } catch (e) {
@@ -657,11 +815,11 @@ class BackgroundService {
 
   /**
    * Lizenz-Ablauf-Erinnerung per Mail an Org-Admins.
-   * Nur fuer BEZAHLTE Lizenzen (is_trial = false) mit gesetztem trial_ends_at,
+   * Nur für BEZAHLTE Lizenzen (is_trial = false) mit gesetztem trial_ends_at,
    * die in <= LICENSE_REMINDER_DAYS Tagen ablaufen, noch nicht abgelaufen sind
-   * und fuer die noch keine Erinnerung verschickt wurde (license_reminder_sent_at IS NULL).
+   * und für die noch keine Erinnerung verschickt wurde (license_reminder_sent_at IS NULL).
    * Trials (is_trial = true) bekommen KEINE Mail — die zeigen den App-Banner.
-   * Pro Org wird einmal erinnert; der Marker wird beim Aendern von trial_ends_at zurueckgesetzt.
+   * Pro Org wird einmal erinnert; der Marker wird beim Ändern von trial_ends_at zurückgesetzt.
    */
   static async runLicenseReminders(db) {
     let sent = 0;
@@ -708,7 +866,7 @@ class BackgroundService {
             }
           }
 
-          // Marker nur setzen, wenn mindestens eine Mail rausging — sonst naechster
+          // Marker nur setzen, wenn mindestens eine Mail rausging — sonst nächster
           // Lauf erneut versuchen (z.B. SMTP-Ausfall).
           if (anySent) {
             await db.query(
@@ -735,22 +893,22 @@ class BackgroundService {
    * Der Stichtag wird je Jahrgang aus dem is_konfirmation-Event abgeleitet
    * (frueheste, nicht-cancelled Konfirmation, org-gescopt). Hat ein Jahrgang
    * KEIN is_konfirmation-Event, gibt es keinen Stichtag -> keine Aufbewahrungs-
-   * frist -> KEINE Auto-Loeschung (sicherer Default, kein versehentlicher
+   * frist -> KEINE Auto-Löschung (sicherer Default, kein versehentlicher
    * Datenverlust).
    *
    * Die 120er-Schwelle hat Vorrang; die 60er-Query grenzt mit `< 120` ab, damit
    * ein Konfi nie gleichzeitig in beiden Buckets landet (T-114-17).
    */
   /**
-   * "Letzte Chance"-Reminder: 7 Tage VOR der automatischen Loeschung (Tag 60
+   * "Letzte Chance"-Reminder: 7 Tage VOR der automatischen Löschung (Tag 60
    * nach Konfirmation = Soft-Delete) bekommen die Org-Admins eine Mail + Push,
-   * dass der Jahrgang geloescht wird und sie jetzt noch Konfis befoerdern
-   * koennen. Idempotent pro Jahrgang via deletion_reminder_sent_at.
+   * dass der Jahrgang gelöscht wird und sie jetzt noch Konfis befoerdern
+   * können. Idempotent pro Jahrgang via deletion_reminder_sent_at.
    *
    * Stichtag-Logik identisch zu runAutoDeletion (frueheste, nicht-cancelled
    * is_konfirmation, org-gescopt). Fenster: Tag 53..59 (>= 60-WARN, < 60),
    * damit ein verpasster Tag (Cron-Ausfall) bis zur Soft-Delete-Grenze noch
-   * nachgeholt wird. Kein Konfirmationstermin = keine Loeschung = kein Reminder.
+   * nachgeholt wird. Kein Konfirmationstermin = keine Löschung = kein Reminder.
    */
   static async runJahrgangDeletionReminders(db) {
     const SOFT_DELETE_DAY = 60;   // ab diesem Tag greift die Loeschung (runAutoDeletion)
@@ -786,7 +944,7 @@ class BackgroundService {
           if (alreadySent) continue;
           if (age < (SOFT_DELETE_DAY - WARN_LEAD_DAYS) || age >= SOFT_DELETE_DAY) continue;
 
-          // Gibt es ueberhaupt noch AKTIVE Konfis, die geloescht wuerden?
+          // Gibt es überhaupt noch AKTIVE Konfis, die gelöscht wuerden?
           // Sonst ist die Warnung sinnlos (nur befoerderte/keine).
           const { rows: [{ count: konfiCount }] } = await db.query(
             `SELECT COUNT(*)::int AS count
@@ -839,8 +997,8 @@ class BackgroundService {
             console.error(`Jahrgang-Loesch-Reminder: Push fuer Org ${jg.organization_id} fehlgeschlagen:`, pushErr.message);
           }
 
-          // Marker setzen, wenn die Warnung ueber MINDESTENS einen Kanal raus ist
-          // (Mail ODER Push) -- sonst (beides fehlgeschlagen) naechster Lauf erneut.
+          // Marker setzen, wenn die Warnung über MINDESTENS einen Kanal raus ist
+          // (Mail ODER Push) -- sonst (beides fehlgeschlagen) nächster Lauf erneut.
           // Push ist der robuste Kanal; bei reinem SMTP-Ausfall reicht der Push.
           if (anySent || pushSent || admins.length === 0) {
             await db.query('UPDATE jahrgaenge SET deletion_reminder_sent_at = NOW() WHERE id = $1', [jg.id]);
@@ -891,7 +1049,7 @@ class BackgroundService {
         );
         const stichtag = stichtagRows[0] && stichtagRows[0].stichtag;
 
-        // Kein Konfirmationstermin -> keine Aufbewahrungsfrist -> keine Loeschung
+        // Kein Konfirmationstermin -> keine Aufbewahrungsfrist -> keine Löschung
         // (sicherer Default, verhindert versehentlichen Datenverlust).
         if (!stichtag) {
           continue;
@@ -900,9 +1058,9 @@ class BackgroundService {
         // --- HARD-DELETE (>= 120 Tage) ---
         // Nur aktive Konfis (r.name='konfi'); promotete Teamer (role gewechselt,
         // teamer_since gesetzt) werden durch den Rollen-Filter NIE erfasst.
-        // Bewusst KEIN deleted_at-Guard: ab Tag 120 wird hart geloescht, auch wenn
+        // Bewusst KEIN deleted_at-Guard: ab Tag 120 wird hart gelöscht, auch wenn
         // der Soft-Delete-Lauf (Tag 60-120) nie stattfand (z.B. Cron-Ausfall) —
-        // sonst bliebe der Datensatz ueber die Aufbewahrungsfrist hinaus erhalten.
+        // sonst bliebe der Datensatz über die Aufbewahrungsfrist hinaus erhalten.
         // deleteKonfiCascade entfernt den User physisch -> kein wiederholter Lauf.
         const { rows: hardKandidaten } = await db.query(
           `SELECT u.id
@@ -956,7 +1114,7 @@ class BackgroundService {
         );
         totalSoft += softUpdated.length;
       } catch (jgErr) {
-        // Fehler pro Jahrgang isolieren -> Job laeuft weiter.
+        // Fehler pro Jahrgang isolieren -> Job läuft weiter.
         console.error(`Auto-Deletion: Jahrgang ${jg.id} fehlgeschlagen:`, jgErr.message);
       }
     }
@@ -977,7 +1135,7 @@ class BackgroundService {
    */
   /**
    * Schreibt alle 5 Minuten einen APM-Snapshot in apm_snapshots (persistente
-   * Historie ueber Deploys hinweg) und raeumt Snapshots aelter als 30 Tage auf.
+   * Historie über Deploys hinweg) und räumt Snapshots aelter als 30 Tage auf.
    */
   static startApmSnapshotService(db) {
     if (this.apmSnapshotInterval) return;
@@ -990,7 +1148,7 @@ class BackgroundService {
            VALUES ($1, $2, $3, $4, $5)`,
           [s.totalRequests, s.totalErrors, s.maxInFlight, s.worstP95Ms, s.worstRoute]
         );
-        // Aufraeumen: nur die letzten 30 Tage behalten.
+        // Aufräumen: nur die letzten 30 Tage behalten.
         await db.query("DELETE FROM apm_snapshots WHERE captured_at < NOW() - INTERVAL '30 days'");
       } catch (error) {
         console.error('APM-Snapshot fehlgeschlagen:', error.message);
@@ -1019,6 +1177,7 @@ class BackgroundService {
     this.startAutoDeletionCron(db);
     this.startTrialExpiryCron(db);
     this.startApmSnapshotService(db);
+    this.startChallengeStartService(db);
   }
 
   /**
@@ -1034,6 +1193,7 @@ class BackgroundService {
     this.stopAutoDeletionCron();
     this.stopTrialExpiryCron();
     this.stopApmSnapshotService();
+    this.stopChallengeStartService();
   }
 }
 

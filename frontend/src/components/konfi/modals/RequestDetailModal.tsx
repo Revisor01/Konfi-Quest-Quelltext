@@ -32,8 +32,12 @@ interface ActivityRequest {
   id: number;
   activity_id: number;
   activity_name: string;
-  activity_points: number;
-  activity_type: 'gottesdienst' | 'gemeinde';
+  // Punkte und Typ gibt es NUR bei Konfi-Aktivitäten. Bei Teamer-Anträgen
+  // ist points 0 und type NULL — deshalb hier nullable, sonst zeigt die
+  // Ansicht "(Gemeinde)" und "0 Punkte" (User-Hinweis 11.08.).
+  activity_points?: number | null;
+  activity_type?: 'gottesdienst' | 'gemeinde' | null;
+  activity_target_role?: 'konfi' | 'teamer' | null;
   requested_date: string;
   comment?: string;
   photo_filename?: string;
@@ -57,6 +61,12 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
   const { setError } = useApp();
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [loadingPhoto, setLoadingPhoto] = useState(false);
+  const [photoLoadFailed, setPhotoLoadFailed] = useState(false);
+
+  // Dieses Modal wird auch von der Teamer-Seite genutzt (TeamerEventsPage).
+  // Teamer-Anträge haben weder Punkte noch Gottesdienst/Gemeinde — die Rolle
+  // kommt aus den Daten, damit die Aufrufer nichts setzen müssen.
+  const isTeamerRequest = request?.activity_target_role === 'teamer';
 
   useEffect(() => {
     if (request?.photo_filename && request.status === 'pending') {
@@ -71,6 +81,7 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
 
   const loadPhoto = async (id: number) => {
     setLoadingPhoto(true);
+    setPhotoLoadFailed(false);
     try {
       const response = await api.get(`/konfi/activity-requests/${id}/photo`, {
         responseType: 'blob'
@@ -78,7 +89,11 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
       const url = URL.createObjectURL(response.data);
       setPhotoUrl(url);
     } catch (err) {
- console.error('Error loading photo:', err);
+      // Ladefehler MERKEN: sonst fällt die Anzeige unten in den Leerzustand
+      // und behauptet "Kein Foto hochgeladen", obwohl eines existiert
+      // 
+      console.error('Error loading photo:', err);
+      setPhotoLoadFailed(true);
     } finally {
       setLoadingPhoto(false);
     }
@@ -107,9 +122,9 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
       <IonPage>
         <IonHeader>
           <IonToolbar>
-            <IonTitle>Antrag laden...</IonTitle>
+            <IonTitle>Aktivität laden...</IonTitle>
             <IonButtons slot="start">
-              <IonButton className="app-modal-close-btn" onClick={onClose}>
+              <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose}>
                 <IonIcon icon={closeOutline} />
               </IonButton>
             </IonButtons>
@@ -132,9 +147,9 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
     <IonPage>
       <IonHeader>
         <IonToolbar>
-          <IonTitle>Antragsdetails</IonTitle>
+          <IonTitle>Deine Meldung</IonTitle>
           <IonButtons slot="start">
-            <IonButton className="app-modal-close-btn" onClick={onClose}>
+            <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose}>
               <IonIcon icon={closeOutline} />
             </IonButton>
           </IonButtons>
@@ -142,37 +157,39 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
       </IonHeader>
 
       <IonContent className="app-gradient-background">
-        {/* SEKTION: Antragsdaten */}
+        {/* SEKTION: Worum geht es */}
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--requests">
               <IonIcon icon={documentTextOutline} />
             </div>
-            <IonLabel>Antragsdaten</IonLabel>
+            <IonLabel>Worum geht es</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
             <IonCardContent>
               <IonList>
-                {/* Aktivität */}
+                {/* Aktivität — Gottesdienst/Gemeinde nur bei Konfis */}
                 <IonItem lines="inset">
                   <IonLabel>
-                    <p>Aktivität ({request.activity_type === 'gottesdienst' ? 'Gottesdienst' : 'Gemeinde'})</p>
+                    <p>Aktivität{!isTeamerRequest && ` (${request.activity_type === 'gottesdienst' ? 'Gottesdienst' : 'Gemeinde'})`}</p>
                     <h2>{request.activity_name}</h2>
                   </IonLabel>
                 </IonItem>
 
-                {/* Punkte */}
-                <IonItem lines="inset">
-                  <IonLabel>
-                    <p>Punkte</p>
-                    <h2>{request.activity_points} {request.activity_points === 1 ? 'Punkt' : 'Punkte'}</h2>
-                  </IonLabel>
-                </IonItem>
+                {/* Punkte — bei Teamer:innen gibt es keine */}
+                {!isTeamerRequest && (
+                  <IonItem lines="inset">
+                    <IonLabel>
+                      <p>Punkte</p>
+                      <h2>{request.activity_points ?? 0} {request.activity_points === 1 ? 'Punkt' : 'Punkte'}</h2>
+                    </IonLabel>
+                  </IonItem>
+                )}
 
-                {/* Teilnahmedatum */}
+                {/* Wann war das */}
                 <IonItem lines="inset">
                   <IonLabel>
-                    <p>Teilnahmedatum</p>
+                    <p>Wann war das?</p>
                     <h2>{formatDate(request.requested_date)}</h2>
                   </IonLabel>
                 </IonItem>
@@ -206,7 +223,7 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
               <div className="app-section-icon app-section-icon--requests">
                 <IonIcon icon={camera} />
               </div>
-              <IonLabel>Nachweis-Foto</IonLabel>
+              <IonLabel>Dein Foto</IonLabel>
             </IonListHeader>
             <IonCard className="app-card">
               <IonCardContent>
@@ -225,7 +242,7 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                 ) : photoUrl ? (
                   <img
                     src={photoUrl}
-                    alt="Antragsfoto"
+                    alt="Foto zur Aktivität"
                     style={{
                       maxWidth: '100%',
                       borderRadius: '8px',
@@ -245,7 +262,9 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                       style={{ fontSize: '2.5rem', color: '#999', marginBottom: '12px', display: 'block' }}
                     />
                     <p style={{ margin: '0', fontSize: '0.9rem', color: '#666' }}>
-                      Kein Foto hochgeladen
+                      {photoLoadFailed
+                        ? 'Dein Foto konnte nicht geladen werden. Zieh die Seite nach unten, um es erneut zu versuchen.'
+                        : 'Kein Foto hochgeladen'}
                     </p>
                   </div>
                 )}
@@ -272,9 +291,11 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
               <IonList>
                 <IonItem lines="inset">
                   <IonLabel>
-                    <p>Bearbeitungsstatus</p>
+                    <p>Stand</p>
                     <h2 style={{ color: isPending ? '#ff9500' : isApproved ? '#059669' : '#dc3545' }}>
-                      {isPending ? 'Wartend auf Bearbeitung' : isApproved ? 'Genehmigt und verbucht' : 'Abgelehnt'}
+                      {isPending ? 'Dein Team schaut es sich an'
+                        : isApproved ? (isTeamerRequest ? 'Angerechnet' : 'Punkte sind da')
+                        : 'Abgelehnt'}
                     </h2>
                   </IonLabel>
                 </IonItem>
@@ -310,7 +331,7 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
               }}
             >
               <IonIcon icon={trashOutline} slot="start" />
-              Antrag löschen
+              Aktivität löschen
             </IonButton>
           </div>
         )}

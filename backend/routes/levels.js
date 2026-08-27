@@ -181,16 +181,15 @@ router.delete('/:id', verifyTokenRBAC, validateLevelId, async (req, res) => {
       return res.status(404).json({ error: 'Level nicht gefunden' });
     }
 
-    // Prüfe ob Level verwendet wird (Konfis haben dieses Level erreicht)
     const levelUsage = await db.query(`
       SELECT COUNT(*) as count FROM konfi_profiles kp
       JOIN users u ON kp.user_id = u.id
-      WHERE u.organization_id = $1 AND kp.current_level_id = $2 AND u.deleted_at IS NULL
+      WHERE u.organization_id = $1 AND kp.current_level_id = $2
     `, [organizationId, levelId]);
 
     if (parseInt(levelUsage.rows[0].count) > 0) {
       return res.status(409).json({
-        error: 'Level kann nicht gelöscht werden, da es von Konfis verwendet wird',
+        error: 'Dieses Level ist noch vergeben — benenne es um oder ordne die betroffenen Konfis um.',
         usage_count: parseInt(levelUsage.rows[0].count)
       });
     }
@@ -206,20 +205,36 @@ router.delete('/:id', verifyTokenRBAC, validateLevelId, async (req, res) => {
     liveUpdate.sendToOrgAdmins(req.user.organization_id, 'levels', 'delete');
   } catch (error) {
  console.error('Fehler beim Löschen des Levels:', error);
+    // Sicherheitsnetz: Sollte doch noch eine Referenz auftauchen, die der
+    // Verwendungs-Check nicht kennt, wird der FK-Fehler (23503) als 409
+    // gemeldet statt als anonymer 500er.
+    if (error.code === '23503') {
+      return res.status(409).json({
+        error: 'Dieses Level ist noch vergeben — benenne es um oder ordne die betroffenen Konfis um.'
+      });
+    }
     res.status(500).json({ error: 'Fehler beim Löschen des Levels' });
   }
 });
 
 // GET /api/levels/konfi/:userId - Level-Info für bestimmten Konfi
+// Punktestand und Level einer Konfi.
+//
+// Jetzt: eigene Daten immer, fremde nur für Leitung und Teamer:innen. Die
+// Route hat derzeit keinen Aufrufer im Frontend.
 router.get('/konfi/:userId', verifyTokenRBAC, async (req, res) => {
   try {
     const userId = parseInt(req.params.userId);
     const organizationId = req.user.organization_id;
 
+    if (req.user.id !== userId && !['org_admin', 'admin', 'teamer'].includes(req.user.role_name)) {
+      return res.status(403).json({ error: 'Du kannst nur deine eigenen Punkte abrufen' });
+    }
+
     // Hole Konfi-Infos mit aktuellen Punkten.
-    // total_points zaehlt nur AKTIVIERTE Punkt-Kategorien des Jahrgangs
+    // total_points zählt nur AKTIVIERTE Punkt-Kategorien des Jahrgangs
     // (gottesdienst_enabled/gemeinde_enabled) — sonst falsches Level bei
-    // Single-Kategorie-Jahrgaengen. Identisch zur Dashboard-/pushService-Logik.
+    // Single-Kategorie-Jahrgängen. Identisch zur Dashboard-/pushService-Logik.
     const konfiResult = await db.query(`
       SELECT
         u.id,

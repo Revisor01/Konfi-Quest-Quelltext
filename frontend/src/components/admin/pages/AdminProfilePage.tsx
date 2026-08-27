@@ -36,11 +36,12 @@ import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../../services/offlineCache';
 import { setUser as setTokenStoreUser } from '../../../services/tokenStore';
 import { triggerPullHaptic } from '../../../utils/haptics';
-import ChangeEmailModal from '../modals/ChangeEmailModal';
-import ChangePasswordModal from '../modals/ChangePasswordModal';
+import ChangeEmailModal from '../../shared/ChangeEmailModal';
+import ChangePasswordModal from '../../shared/ChangePasswordModal';
 import ChangeRoleTitleModal from '../modals/ChangeRoleTitleModal';
 import DeleteAccountModal from '../../shared/DeleteAccountModal';
 import { useMediaCacheControl } from '../../../hooks/useMediaCacheControl';
+import BiometrieSchalter from '../../shared/BiometrieSchalter';
 
 const AdminProfilePage: React.FC = () => {
   const { pageRef, presentingElement } = useModalPage('admin-profile');
@@ -71,13 +72,15 @@ const AdminProfilePage: React.FC = () => {
       } catch (err) {
         // Profile bereits via refreshProfile aktualisiert
       }
-    }
+    },
+    variante: 'users'
   });
 
   // Password Modal mit useIonModal Hook
   const [presentPasswordModalHook, dismissPasswordModalHook] = useIonModal(ChangePasswordModal, {
     onClose: () => dismissPasswordModalHook(),
-    onSuccess: () => dismissPasswordModalHook()
+    onSuccess: () => dismissPasswordModalHook(),
+    variante: 'users'
   });
 
   // RoleTitle Modal mit useIonModal Hook
@@ -108,7 +111,7 @@ const AdminProfilePage: React.FC = () => {
     });
   };
 
-  // Account-Loeschung
+  // Account-Löschung
   const [presentDeleteAccount, dismissDeleteAccount] = useIonModal(DeleteAccountModal, {
     onClose: () => dismissDeleteAccount()
   });
@@ -124,7 +127,7 @@ const AdminProfilePage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
         <IonButtons slot="start">
-          <IonButton onClick={() => window.history.back()}>
+          <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
             <IonIcon icon={arrowBack} />
           </IonButton>
         </IonButtons>
@@ -317,6 +320,10 @@ const AdminProfilePage: React.FC = () => {
                     </div>
                   </div>
                 </IonItem>
+
+                {/* Biometrische Anmeldung (blendet sich selbst aus, wenn das
+                    Geraet keine eingerichtete Biometrie hat) */}
+                <BiometrieSchalter variante="users" />
 
                 {/* Medien-Cache leeren */}
                 <IonItem

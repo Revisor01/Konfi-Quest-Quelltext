@@ -44,6 +44,7 @@ import {
 import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { openFileNatively } from '../../../utils/nativeFileViewer';
 import { useApp } from '../../../contexts/AppContext';
+import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import { useModalPage } from '../../../contexts/ModalContext';
 import api from '../../../services/api';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
@@ -96,7 +97,7 @@ const TeamerMaterialPage: React.FC = () => {
   const [selectedMaterial, setSelectedMaterial] = useState<MaterialDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
-  // Offline-Query: Jahrgaenge
+  // Offline-Query: Jahrgänge
   const { data: jahrgaengeData, refresh: refreshJahrgaenge } = useOfflineQuery<{ id: number; name: string }[]>(
     'teamer:jahrgaenge:' + user?.organization_id,
     async () => { const res = await api.get('/admin/jahrgaenge'); return res.data; },
@@ -105,11 +106,15 @@ const TeamerMaterialPage: React.FC = () => {
   const jahrgaenge = jahrgaengeData || [];
 
   // Offline-Query: Material (alle Materialien, clientseitig gefiltert)
-  const { data: allMaterials, loading, refresh: refreshMaterial } = useOfflineQuery<Material[]>(
+  const { data: allMaterials, loading, refresh: refreshMaterial, refreshLive: refreshMaterialLive } = useOfflineQuery<Material[]>(
     'teamer:material:' + user?.organization_id,
     async () => { const res = await api.get('/material'); return res.data; },
     { ttl: CACHE_TTL.PROFILE }
   );
+
+  // Material-Liste live halten: neue oder geloeschte Materialien erschienen
+  // vorher erst beim nächsten Oeffnen.
+  useLiveRefresh('materials', refreshMaterialLive);
 
   // Clientseitiges Filtern nach Suche und Jahrgang
   const materials = useMemo(() => {
@@ -210,7 +215,7 @@ const TeamerMaterialPage: React.FC = () => {
   };
 
   // === INLINE DETAIL VIEW ===
-  // Detail-Ansicht als render-Funktion (statt frueher early-return), damit sie
+  // Detail-Ansicht als render-Funktion (statt früher early-return), damit sie
   // im iPad-Split-View NEBEN der Liste gerendert werden kann.
   const renderDetail = (hideBackButton?: boolean) => {
     if (!selectedMaterial) return null;
@@ -220,7 +225,7 @@ const TeamerMaterialPage: React.FC = () => {
           <IonToolbar>
             {!hideBackButton && (
               <IonButtons slot="start">
-                <IonButton onClick={() => setSelectedMaterial(null)}>
+                <IonButton onClick={() => setSelectedMaterial(null)} aria-label="Zurück zur Material-Liste">
                   <IonIcon icon={arrowBack} slot="icon-only" />
                 </IonButton>
               </IonButtons>
@@ -251,7 +256,7 @@ const TeamerMaterialPage: React.FC = () => {
             title={selectedMaterial.title}
             subtitle="Material"
             icon={documentIcon}
-            colors={{ primary: '#d97706', secondary: '#b45309' }}
+            colors={{ primary: 'var(--app-color-material)', secondary: '#b45309' }}
             stats={[{ value: selectedMaterial.files?.length || 0, label: 'Dateien' }]}
           />
 
@@ -345,7 +350,7 @@ const TeamerMaterialPage: React.FC = () => {
                     icon={documentOutline}
                     title="Keine Dateien"
                     message="Dieses Material hat keine angehängten Dateien."
-                    iconColor="#d97706"
+                    iconColor="var(--app-color-material)"
                   />
                 ) : (
                   selectedMaterial.files.map((file, index) => (
@@ -353,7 +358,7 @@ const TeamerMaterialPage: React.FC = () => {
                       key={file.id}
                       className="app-list-item"
                       style={{
-                        borderLeftColor: '#d97706',
+                        borderLeftColor: 'var(--app-color-material)',
                         cursor: 'pointer',
                         marginBottom: index < (selectedMaterial.files?.length || 0) - 1 ? '8px' : '0'
                       }}
@@ -361,7 +366,7 @@ const TeamerMaterialPage: React.FC = () => {
                     >
                       <div className="app-list-item__row">
                         <div className="app-list-item__main">
-                          <div className="app-icon-circle" style={{ backgroundColor: '#d97706' }}>
+                          <div className="app-icon-circle" style={{ backgroundColor: 'var(--app-color-material)' }}>
                             <IonIcon icon={getFileIcon(file.mime_type)} />
                           </div>
                           <div className="app-list-item__content">
@@ -393,7 +398,7 @@ const TeamerMaterialPage: React.FC = () => {
       <IonHeader translucent={true}>
         <IonToolbar>
           <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()}>
+            <IonButton onClick={() => window.history.back()} aria-label="Zurück">
               <IonIcon icon={arrowBack} slot="icon-only" />
             </IonButton>
           </IonButtons>
@@ -423,7 +428,7 @@ const TeamerMaterialPage: React.FC = () => {
               title="Material"
               subtitle="Dokumente und Dateien"
               icon={documentIcon}
-              colors={{ primary: '#d97706', secondary: '#b45309' }}
+              colors={{ primary: 'var(--app-color-material)', secondary: '#b45309' }}
               stats={[
                 { value: materials.length, label: 'Material' },
                 { value: materials.reduce((sum, m) => sum + (m.file_count || 0), 0), label: 'Dateien' }
@@ -440,7 +445,7 @@ const TeamerMaterialPage: React.FC = () => {
               </IonListHeader>
               <IonItemGroup>
                 <IonItem>
-                  <IonIcon icon={searchIcon} slot="start" style={{ color: '#8e8e93', fontSize: '1rem' }} />
+                  <IonIcon icon={searchIcon} slot="start" style={{ color: 'var(--app-text-system)', fontSize: '1rem' }} />
                   <IonInput
                     value={search}
                     onIonInput={(e) => setSearch(e.detail.value || '')}
@@ -450,7 +455,7 @@ const TeamerMaterialPage: React.FC = () => {
                 </IonItem>
                 {jahrgaenge.length > 0 && (
                   <IonItem>
-                    <IonIcon icon={calendarOutline} slot="start" style={{ color: '#8e8e93', fontSize: '1rem' }} />
+                    <IonIcon icon={calendarOutline} slot="start" style={{ color: 'var(--app-text-system)', fontSize: '1rem' }} />
                     <IonSelect
                       value={activeJahrgangId ?? 'alle'}
                       onIonChange={(e) => setActiveJahrgangId(e.detail.value === 'alle' ? undefined : e.detail.value)}
@@ -474,7 +479,7 @@ const TeamerMaterialPage: React.FC = () => {
                 icon={documentOutline}
                 title="Keine Materialien"
                 message="Noch keine Materialien vorhanden."
-                iconColor="#d97706"
+                iconColor="var(--app-color-material)"
               />
             ) : (
               <IonList inset={true} className="app-segment-wrapper">
@@ -508,12 +513,12 @@ const TeamerMaterialPage: React.FC = () => {
                           className="app-list-item"
                           style={{
                             width: '100%',
-                            borderLeftColor: '#d97706'
+                            borderLeftColor: 'var(--app-color-material)'
                           }}
                         >
                           <div className="app-list-item__row">
                             <div className="app-list-item__main">
-                              <div className="app-icon-circle" style={{ backgroundColor: '#d97706' }}>
+                              <div className="app-icon-circle" style={{ backgroundColor: 'var(--app-color-material)' }}>
                                 <IonIcon icon={documentIcon} />
                               </div>
                               <div className="app-list-item__content">
@@ -534,7 +539,7 @@ const TeamerMaterialPage: React.FC = () => {
                                 <div className="app-list-item__meta">
                                   {mat.file_count !== undefined && mat.file_count > 0 && (
                                     <span className="app-list-item__meta-item">
-                                      <IonIcon icon={attachOutline} style={{ color: '#d97706' }} />
+                                      <IonIcon icon={attachOutline} style={{ color: 'var(--app-color-material)' }} />
                                       {mat.file_count} {mat.file_count === 1 ? 'Datei' : 'Dateien'}
                                     </span>
                                   )}
