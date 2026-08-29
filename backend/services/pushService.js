@@ -57,6 +57,14 @@ class PushService {
   static async getTokensForUser(db, userId) {
     // Master-Schalter: Hat der User Push global deaktiviert, gar keine Tokens
     // zurueckgeben -> es wird nichts gesendet (gilt für alle Push-Typen).
+    //
+    // Ebenso fuer gesperrte und geloeschte Konten. Vorher
+    // pruefte das nur ein Teil der Empfaenger-Abfragen selbst — elf von
+    // fuenfzehn nicht, darunter sendToOrgAdmins und die Opt-in/Opt-out-
+    // Meldungen. Wer aus dem Team ausgeschieden und deaktiviert war, wurde
+    // weiter ueber neue Antraege und Termine informiert. Hier greift es fuer
+    // ALLE Wege auf einmal, statt an fuenfzehn Stellen einzeln.
+    //
     // DISTINCT ON (token): derselbe FCM-Token darf nie mehrfach beliefert werden,
     // auch wenn er (noch) unter mehreren device_ids gespeichert ist (Alt-Daten).
     const query = `
@@ -64,6 +72,8 @@ class PushService {
       JOIN users u ON pt.user_id = u.id
       WHERE pt.user_id = $1
         AND u.push_enabled = true
+        AND u.is_active = true
+        AND u.deleted_at IS NULL
         AND pt.id IN (
           SELECT MAX(id)
           FROM push_tokens
@@ -74,6 +84,30 @@ class PushService {
     `;
     const { rows: tokens } = await db.query(query, [userId]);
     return tokens || [];
+  }
+
+  /**
+   * Nach erfolgreicher Zustellung: Fehlerzaehler zuruecksetzen und
+   * `updated_at` auffrischen.
+   *
+   * `updated_at` ist das Feld, an dem die 30-Tage-Bereinigung
+   * (backgroundService.cleanupStaleTokens) haengt. Geschrieben wurde es
+   * vorher ausschliesslich von POST /notifications/device-token, also nur
+   * beim Oeffnen der App. Damit traf die Bereinigung bevorzugt genau die
+   * Konten, die laenger pausierten — obwohl ihre Geraete erreichbar waren.
+   * Eine angekommene Nachricht verlaengert die Frist jetzt selbst.
+   */
+  static async markiereTokenErreichbar(db, token) {
+    try {
+      await db.query(
+        'UPDATE push_tokens SET updated_at = NOW(), error_count = 0, last_error_at = NULL WHERE id = $1',
+        [token.id]
+      );
+    } catch (err) {
+      // Ein fehlgeschlagenes Auffrischen darf den Versand nicht kippen — die
+      // Nachricht ist zu diesem Zeitpunkt bereits zugestellt.
+      console.error('Token-Zeitstempel konnte nicht aufgefrischt werden:', err.message);
+    }
   }
 
   /**
@@ -150,10 +184,47 @@ class PushService {
    * weggelassen — eine Nachricht darf nicht daran scheitern, dass eine Zahl
    * fehlt.
    */
+  // Die Zahl am App-Icon ueber ALLE Organisationen einer Person.
+  //
+  // Die aktive Organisation steht nur im Token des Clients, nicht in der
+  // Datenbank -- der Push kann sie also nicht kennen. Deshalb die Summe ueber
+  // alle: Das Icon beantwortet die Frage "wie viel liegt fuer mich an?",
+  // nicht "wie viel liegt in der gerade geoeffneten Ansicht an?".
+  //
+  // Fuer Konfis aendert sich nichts, sie sind immer Single-Org.
   static async berechneBadge(db, userId) {
     const empfaenger = await this.ladeEmpfaengerFuerBadge(db, userId);
     if (!empfaenger) return null;
-    return appIconSummeOderNull(db, empfaenger);
+
+    const orgIds = await this.ladeOrganisationenFuerBadge(db, userId, empfaenger.organization_id);
+    if (orgIds.length <= 1) {
+      return appIconSummeOderNull(db, empfaenger);
+    }
+
+    let summe = 0;
+    let hatWert = false;
+    for (const orgId of orgIds) {
+      const teil = await appIconSummeOderNull(db, { ...empfaenger, organization_id: orgId });
+      if (teil != null) { summe += teil; hatWert = true; }
+    }
+    return hatWert ? summe : null;
+  }
+
+  // Alle Organisationen, in denen die Person Mitglied ist. Die Primaer-Org ist
+  // immer dabei, auch wenn user_organizations sie (noch) nicht fuehrt.
+  static async ladeOrganisationenFuerBadge(db, userId, primaerOrgId) {
+    try {
+      const { rows } = await db.query(
+        'SELECT organization_id FROM user_organizations WHERE user_id = $1',
+        [userId]
+      );
+      const ids = new Set(rows.map(r => r.organization_id));
+      if (primaerOrgId != null) ids.add(primaerOrgId);
+      return [...ids];
+    } catch (err) {
+      console.error('ladeOrganisationenFuerBadge error:', err.message);
+      return primaerOrgId != null ? [primaerOrgId] : [];
+    }
   }
 
   /**
@@ -201,13 +272,14 @@ class PushService {
         });
 
         if (result.success) {
-          // Error-Count zurücksetzen bei Erfolg (nur wenn vorher > 0)
-          if (token.error_count > 0) {
-            await db.query(
-              'UPDATE push_tokens SET error_count = 0, last_error_at = NULL WHERE id = $1',
-              [token.id]
-            );
-          }
+          // Erfolgreiche Zustellung frischt `updated_at` auf.
+          // Die Bereinigung wirft Tokens weg, die 30 Tage nicht
+          // aktualisiert wurden — und aktualisiert wurden sie bis dahin NUR,
+          // wenn jemand die App oeffnete. Wer ueber die Ferien pausierte,
+          // verlor stillschweigend die Zustellung und merkte es nicht, obwohl
+          // sein Geraet die ganze Zeit erreichbar war. Ein angekommener Push
+          // ist der bessere Beleg dafuer als ein App-Start.
+          await this.markiereTokenErreichbar(db, token);
           return true;
         }
 
@@ -288,6 +360,9 @@ class PushService {
       // Neuestes Token pro Device verwenden
       // UND Sender-Tokens ausschließen (für den Fall dass gleicher Token bei verschiedenen Accounts)
       // UND Master-Schalter prüfen (u.push_enabled): bei false keine Tokens.
+      // UND gesperrte/geloeschte Konten ausschliessen — gleiche Bedingung wie
+      // in getTokensForUser, das diese Abfrage bewusst nicht nutzt (Sender-
+      // Ausschluss). Beide muessen zusammen gepflegt werden.
       // DISTINCT ON (token): nie denselben FCM-Token doppelt beliefern (Alt-Daten
       // mit gleichem Token unter mehreren device_ids).
       let query = `
@@ -295,6 +370,8 @@ class PushService {
         JOIN users u ON pt.user_id = u.id
         WHERE pt.user_id = $1
           AND u.push_enabled = true
+          AND u.is_active = true
+          AND u.deleted_at IS NULL
           AND pt.id IN (
             SELECT MAX(id)
             FROM push_tokens
@@ -348,13 +425,7 @@ class PushService {
 
         if (result.success) {
           successCount++;
-          // Error-Count zurücksetzen bei Erfolg (nur wenn vorher > 0)
-          if (token.error_count > 0) {
-            await db.query(
-              'UPDATE push_tokens SET error_count = 0, last_error_at = NULL WHERE id = $1',
-              [token.id]
-            );
-          }
+          await this.markiereTokenErreichbar(db, token);
         } else {
           // Fatale Errors: Token sofort löschen
           const fatalCodes = [

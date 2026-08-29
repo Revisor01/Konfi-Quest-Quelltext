@@ -41,7 +41,6 @@ import ChangePasswordModal from '../../shared/ChangePasswordModal';
 import ChangeRoleTitleModal from '../modals/ChangeRoleTitleModal';
 import DeleteAccountModal from '../../shared/DeleteAccountModal';
 import { useMediaCacheControl } from '../../../hooks/useMediaCacheControl';
-import BiometrieSchalter from '../../shared/BiometrieSchalter';
 
 const AdminProfilePage: React.FC = () => {
   const { pageRef, presentingElement } = useModalPage('admin-profile');
@@ -323,7 +322,6 @@ const AdminProfilePage: React.FC = () => {
 
                 {/* Biometrische Anmeldung (blendet sich selbst aus, wenn das
                     Geraet keine eingerichtete Biometrie hat) */}
-                <BiometrieSchalter variante="users" />
 
                 {/* Medien-Cache leeren */}
                 <IonItem

@@ -7,7 +7,6 @@ import {
   time,
   location,
   calendar,
-  eyeOff,
   trophy,
   checkmarkCircle,
   people
@@ -98,111 +97,16 @@ export const LevelPopoverContent: React.FC<{
   );
 };
 
-// Badge Popover Content Komponente für Dashboard
+// Der Abzeichen-Popover der Startseite ist derselbe wie an vier weiteren
+// Stellen — er liegt jetzt gemeinsam in shared/BadgePopoverContent.
+// Diese Weiterleitung bleibt, damit die Aufrufstellen unveraendert bleiben.
+//
+// Geaendert dabei: Nicht erreichte Abzeichen zeigten hier
+// schon immer ihren Namen, nur das Icon war ein durchgestrichenes Auge. Das
+// gilt jetzt ueberall — das Teamer-Dashboard maskierte sie bisher als "???".
 export const DashboardBadgePopoverContent: React.FC<{
-  dataRef: React.RefObject<{ badge: Badge | null; isEarned: boolean; getBadgeColor: (badge: Badge) => string }>;
-}> = ({ dataRef }) => {
-  const data = dataRef.current;
-  if (!data || !data.badge) return null;
-  const badge = data.badge;
-  const isEarned = data.isEarned;
-  const badgeColor = data.getBadgeColor(badge);
-
-  return (
-    <div style={{ padding: '12px', background: 'white', width: 'max-content', minWidth: '200px', maxWidth: '320px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <div style={{
-          width: '48px',
-          height: '48px',
-          borderRadius: '50%',
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: isEarned
-            ? `linear-gradient(145deg, ${badgeColor} 0%, ${badgeColor}cc 100%)`
-            : 'linear-gradient(145deg, #d0d0d0 0%, #b8b8b8 100%)',
-          boxShadow: isEarned
-            ? `0 2px 8px ${badgeColor}40`
-            : '0 1px 4px rgba(0,0,0,0.1)'
-        }}>
-          <IonIcon
-            icon={isEarned ? getIconFromString(badge.icon) : eyeOff}
-            style={{
-              fontSize: '1.4rem',
-              color: isEarned ? 'white' : '#999'
-            }}
-          />
-        </div>
-        <div style={{ flex: 1 }}>
-          <h3 style={{ margin: '0 0 4px 0', fontSize: '0.95rem', fontWeight: '700', color: '#333', whiteSpace: 'nowrap' }}>
-            {badge.name}
-          </h3>
-          <p style={{
-            margin: '0',
-            fontSize: '0.8rem',
-            color: '#666',
-            lineHeight: '1.3'
-          }}>
-            {badge.description || 'Keine Beschreibung'}
-          </p>
-        </div>
-      </div>
-      <div style={{
-        marginTop: '10px',
-        paddingTop: '10px',
-        borderTop: '1px solid #eee',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between'
-      }}>
-        {isEarned ? (
-          <>
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              background: '#22c55e',
-              color: 'white',
-              padding: '3px 8px',
-              borderRadius: '8px',
-              fontSize: '0.7rem',
-              fontWeight: '600'
-            }}>
-              <IonIcon icon={checkmarkCircle} style={{ fontSize: '0.75rem' }} />
-              Erreicht
-            </div>
-            {badge.earned_at && (
-              <span style={{ fontSize: '0.7rem', color: '#888' }}>
-                {new Date(badge.earned_at).toLocaleDateString('de-DE', {
-                  day: 'numeric',
-                  month: 'short',
-                  year: 'numeric'
-                })}
-              </span>
-            )}
-          </>
-        ) : (
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '4px',
-            background: '#8e8e93',
-            color: 'white',
-            padding: '3px 8px',
-            borderRadius: '8px',
-            fontSize: '0.7rem',
-            fontWeight: '600'
-          }}>
-            Noch nicht erreicht
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-// --- Utility Helpers ---
+  dataRef: React.RefObject<BadgePopoverData | null>;
+}> = ({ dataRef }) => <BadgePopoverContent dataRef={dataRef} />;
 
 export const getGreeting = (name: string): string => {
   const hour = new Date().getHours();
@@ -377,6 +281,7 @@ export const EventCard = React.memo<EventCardProps>(({ event, onClick }) => {
 // --- RankingSection ---
 import { RankingEntry as RankingEntryType } from '../../../types/dashboard';
 import { getIconFromString } from '../../../utils/badgeIcons';
+import BadgePopoverContent, { BadgePopoverData } from '../../shared/BadgePopoverContent';
 // Re-Export für bestehende Verwender (Wrapped-Slides, KonfiDetailSections).
 export { getIconFromString };
 

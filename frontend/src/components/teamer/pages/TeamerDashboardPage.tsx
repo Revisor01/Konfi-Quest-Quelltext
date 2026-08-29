@@ -46,6 +46,7 @@ import { useOnboardingWithUpdateOnce } from '../../../hooks/useOnboardingOnce';
 import NeuerungenBanner from '../../shared/NeuerungenBanner';
 import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
 import { getIconFromString } from '../../../utils/badgeIcons';
+import BadgePopoverContent, { BadgePopoverData, getBadgeColor } from '../../shared/BadgePopoverContent';
 
 
 
@@ -59,65 +60,19 @@ interface TeamerBadgeFull {
   criteria_value?: number;
   is_hidden?: boolean;
   earned: boolean;
-  awarded_date?: string;
+  earned_at?: string;
 }
 
-const getBadgeColor = (badge: TeamerBadgeFull): string => {
-  if (badge.color) return badge.color;
-  if (badge.criteria_type === 'total_points') {
-    if ((badge.criteria_value || 0) <= 5) return '#cd7f32';
-    if ((badge.criteria_value || 0) <= 15) return '#c0c0c0';
-    return '#ffd700';
-  }
-  return '#f59e0b';
-};
+interface TeamerBadgeResponse {
+  available: TeamerBadgeFull[];
+  earned: TeamerBadgeFull[];
+  stats: { totalVisible: number; totalSecret: number };
+}
 
-// Badge Popover Content für Teamer-Dashboard
-const BadgePopoverContent: React.FC<{
-  dataRef: React.RefObject<{ badge: TeamerBadgeFull | null; isEarned: boolean }>;
-}> = ({ dataRef }) => {
-  const data = dataRef.current;
-  if (!data || !data.badge) return null;
-  const badge = data.badge;
-  const isEarned = data.isEarned;
-  const badgeColor = getBadgeColor(badge);
-
-  return (
-    <div style={{ padding: '12px', background: 'white', minWidth: '200px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '10px' }}>
-        <div style={{
-          width: '44px', height: '44px', borderRadius: '50%',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: isEarned ? `linear-gradient(135deg, ${badgeColor} 0%, ${badgeColor}dd 100%)` : '#e5e7eb',
-          color: 'white'
-        }}>
-          <IonIcon
-            icon={isEarned ? getIconFromString(badge.icon) : helpCircle}
-            style={{ fontSize: '1.4rem', color: isEarned ? 'white' : '#9ca3af' }}
-          />
-        </div>
-        <div>
-          <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: '700', color: '#1f2937' }}>
-            {isEarned ? badge.name : '???'}
-          </h3>
-          <span style={{ fontSize: '0.75rem', color: isEarned ? '#059669' : '#9ca3af', fontWeight: '600' }}>
-            {isEarned ? 'Erhalten' : 'Noch nicht erhalten'}
-          </span>
-        </div>
-      </div>
-      {isEarned && badge.description && (
-        <div style={{ fontSize: '0.82rem', color: '#374151', marginBottom: '6px' }}>
-          {badge.description}
-        </div>
-      )}
-      {isEarned && badge.awarded_date && (
-        <div style={{ fontSize: '0.78rem', color: '#6b7280' }}>
-          Erhalten am {new Date(badge.awarded_date).toLocaleDateString('de-DE')}
-        </div>
-      )}
-    </div>
-  );
-};
+// Geaendert dabei: Nicht erreichte Abzeichen zeigten hier '???'
+// statt Name und Beschreibung. Jetzt sind sie lesbar, wie auf der
+// Konfi-Startseite — man soll sehen, was es zu holen gibt. ECHTE
+// Geheim-Abzeichen bleiben unkenntlich, dafuer sorgt die Komponente selbst.
 
 interface Certificate {
   id: number;
@@ -257,9 +212,7 @@ const TeamerDashboardPage: React.FC = () => {
   });
 
   // Badge Popover
-  const badgePopoverRef = React.useRef<{ badge: TeamerBadgeFull | null; isEarned: boolean }>({
-    badge: null, isEarned: false
-  });
+  const badgePopoverRef = React.useRef<BadgePopoverData | null>({ badge: null, isEarned: false });
   const [presentBadgePopover] = useIonPopover(BadgePopoverContent, {
     dataRef: badgePopoverRef
   });
@@ -271,18 +224,14 @@ const TeamerDashboardPage: React.FC = () => {
     { ttl: CACHE_TTL.DASHBOARD }
   );
 
-  // Offline-Query: Alle Teamer-Badges (für vollstaendige Badge-Sektion)
-  const { data: allTeamerBadges, refresh: refreshBadges, refreshLive: refreshBadgesLive } = useOfflineQuery<TeamerBadgeFull[]>(
-    'teamer:all-badges:' + user?.id,
+  // Offline-Query: Alle Teamer-Badges (für vollstaendige Badge-Sektion).
+  // Schluessel mit v2: Im Zwischenspeicher koennen noch flache Arrays der
+  // alten Antwortform liegen — die sollen nicht als neue Form gelesen werden.
+  const { data: badgeData, refresh: refreshBadges, refreshLive: refreshBadgesLive } = useOfflineQuery<TeamerBadgeResponse>(
+    'teamer:all-badges:v2:' + user?.id,
     async () => {
       const res = await api.get('/teamer/badges');
-      const liste: TeamerBadgeFull[] = res.data || [];
-      // Unverdiente geheime Abzeichen kommen nicht mehr mit; ihre Gesamtzahl
-      // steht in der Kopfzeile und wird an die Liste geheftet, damit sie den
-      // Zwischenspeicher übersteht.
-      const geheim = Number(res.headers?.['x-badges-secret-total']);
-      if (Number.isFinite(geheim)) (liste as any).geheimGesamt = geheim;
-      return liste;
+      return res.data;
     },
     { ttl: CACHE_TTL.BADGES }
   );
@@ -461,25 +410,25 @@ const TeamerDashboardPage: React.FC = () => {
 
   const config = dashboardData?.config;
 
-  // Badge-Berechnungen aus allTeamerBadges
-  const earnedBadges = (allTeamerBadges || []).filter((b) => b.earned);
+  // Badge-Berechnungen aus der Antwort { available, earned, stats }
+  const earnedBadges = badgeData?.earned || [];
   const earnedIds = new Set(earnedBadges.map((b) => b.id));
   const visibleBadges = [
     ...earnedBadges.filter((b) => !b.is_hidden),
-    ...(allTeamerBadges || []).filter((b) => !b.earned && !b.is_hidden)
+    ...(badgeData?.available || []).filter((b) => !b.is_hidden)
   ];
   const secretEarned = earnedBadges.filter((b) => b.is_hidden);
-  // Aus der Kopfzeile: Die Liste enthält nur noch verdiente Geheimnisse.
-  const secretTotal = (allTeamerBadges as any)?.geheimGesamt
-    ?? (allTeamerBadges || []).filter((b) => b.is_hidden).length;
+  // Aus stats, nicht aus der Liste gezaehlt: Der Server kennt auch die
+  // zurueckgehaltenen (unverdienten geheimen) Abzeichen.
+  const secretTotal = badgeData?.stats?.totalSecret ?? 0;
   const secretNotEarnedCount = secretTotal - secretEarned.length;
   const visibleEarned = earnedBadges.filter((b) => !b.is_hidden).length;
-  const visibleTotal = (allTeamerBadges || []).filter((b) => !b.is_hidden).length;
+  const visibleTotal = badgeData?.stats?.totalVisible ?? 0;
 
-  // "Neu"-Erkennung: awarded_date < 7 Tage
+  // "Neu"-Erkennung: earned_at < 7 Tage
   const isRecent = (badge: TeamerBadgeFull) => {
-    if (!badge.awarded_date) return false;
-    const diff = Date.now() - new Date(badge.awarded_date).getTime();
+    if (!badge.earned_at) return false;
+    const diff = Date.now() - new Date(badge.earned_at).getTime();
     return diff < 7 * 24 * 60 * 60 * 1000;
   };
 

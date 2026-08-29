@@ -60,7 +60,6 @@ import type { WrappedHistoryEntry } from '../../../types/wrapped';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { useMediaCacheControl } from '../../../hooks/useMediaCacheControl';
-import BiometrieSchalter from '../../shared/BiometrieSchalter';
 import BibleTranslationModal, { getTranslationName } from '../../shared/BibleTranslationModal';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { writeQueue } from '../../../services/writeQueue';
@@ -466,7 +465,6 @@ const TeamerProfilePage: React.FC = () => {
 
                 {/* Biometrische Anmeldung (blendet sich selbst aus, wenn das
                     Geraet keine eingerichtete Biometrie hat) */}
-                <BiometrieSchalter variante="teamer" />
 
                 {/* Medien-Cache leeren */}
                 <IonItem

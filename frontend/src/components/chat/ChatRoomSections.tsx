@@ -23,9 +23,7 @@ import {
 } from 'ionicons/icons';
 import { Message, ChatUserType } from '../../types/chat';
 import { formatFileSize } from '../../utils/helpers';
-import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 import { Capacitor } from '@capacitor/core';
-import { compressImage } from '../../services/mediaCompression';
 
 // Validiert URLs für img src, erlaubt nur sichere Protokolle (blob: und data:)
 export const getSafePreviewUrl = (url: string | null | undefined): string | null => {
@@ -427,45 +425,6 @@ export const MessageInput = React.memo<MessageInputProps>(({
   );
 });
 
-// --- Camera/Gallery Helpers ---
-
-interface CameraResult {
-  file: File;
-  previewUrl: string;
-}
-
-export const takePicture = async (): Promise<CameraResult | null> => {
-  const photo = await Camera.getPhoto({
-    resultType: CameraResultType.DataUrl,
-    source: CameraSource.Camera,
-    quality: 90
-  });
-  if (!photo.dataUrl) return null;
-  const response = await fetch(photo.dataUrl);
-  const blob = await response.blob();
-  const rawFile = new File([blob], 'camera-photo.jpg', { type: 'image/jpeg' });
-  // Vor Upload auf max. 1920px lange Kante resizen + komprimieren.
-  const { file, previewUrl } = await compressImage(rawFile);
-  if (file.size > 10 * 1024 * 1024) return null;
-  return { file, previewUrl };
-};
-
-export const selectFromGallery = async (): Promise<CameraResult | null> => {
-  const photo = await Camera.getPhoto({
-    resultType: CameraResultType.DataUrl,
-    source: CameraSource.Photos,
-    quality: 90
-  });
-  if (!photo.dataUrl) return null;
-  const response = await fetch(photo.dataUrl);
-  const blob = await response.blob();
-  const rawFile = new File([blob], 'gallery-photo.jpg', { type: 'image/jpeg' });
-  // Vor Upload auf max. 1920px lange Kante resizen + komprimieren.
-  const { file, previewUrl } = await compressImage(rawFile);
-  if (file.size > 10 * 1024 * 1024) return null;
-  return { file, previewUrl };
-};
-
 // Auto-capitalize für das Eingabefeld: schreibt den ersten Buchstaben sowie den
 // ersten Buchstaben nach einem Satzende (. ! ?) oder Zeilenumbruch gross. Greift nur
 // am Ende der Eingabe (= das gerade getippte Zeichen), damit der Cursor nicht springt
@@ -492,11 +451,3 @@ export const autoCapitalize = (value: string): string => {
   return value;
 };
 
-// MIME extension map for file handling
-export const MIME_EXT_MAP: Record<string, string> = {
-  'image/jpeg': 'jpg', 'image/png': 'png', 'image/gif': 'gif', 'image/webp': 'webp',
-  'application/pdf': 'pdf', 'text/plain': 'txt',
-  'application/msword': 'doc', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
-  'application/vnd.ms-excel': 'xls', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
-  'application/vnd.ms-powerpoint': 'ppt', 'application/vnd.openxmlformats-officedocument.presentationml.presentation': 'pptx'
-};

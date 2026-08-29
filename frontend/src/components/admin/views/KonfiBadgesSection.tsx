@@ -11,12 +11,12 @@ import {
 import {
   trophy,
   trophyOutline,
-  checkmarkCircle,
   checkmark
 } from 'ionicons/icons';
 import api from '../../../services/api';
 import { EmptyState } from '../../shared';
 import { getIconFromString } from '../../../utils/badgeIcons';
+import BadgePopoverContent, { BadgePopoverData } from '../../shared/BadgePopoverContent';
 
 
 
@@ -44,77 +44,10 @@ const getBadgeColor = (badge: Badge): string => {
   return '#667eea';
 };
 
-// Popover-Inhalt: Badge-Detail (Name, Beschreibung, Erreicht-Datum).
-const BadgePopoverContent: React.FC<{
-  badgeRef: React.RefObject<Badge | null>;
-}> = ({ badgeRef }) => {
-  const badge = badgeRef.current;
-  if (!badge) return null;
-  const badgeColor = getBadgeColor(badge);
-
-  return (
-    <div style={{ padding: '12px', background: 'white', maxWidth: '100%', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <div style={{
-          width: '48px',
-          height: '48px',
-          borderRadius: '50%',
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: `linear-gradient(145deg, ${badgeColor} 0%, ${badgeColor}cc 100%)`,
-          boxShadow: `0 2px 8px ${badgeColor}40`
-        }}>
-          <IonIcon
-            icon={getIconFromString(badge.icon)}
-            style={{ fontSize: '1.4rem', color: 'white' }}
-          />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h3 style={{ margin: '0 0 4px 0', fontSize: '0.95rem', fontWeight: '700', color: '#333', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {badge.name}
-          </h3>
-          <p style={{ margin: '0', fontSize: '0.8rem', color: '#666', lineHeight: '1.3' }}>
-            {badge.description || 'Keine Beschreibung'}
-          </p>
-        </div>
-      </div>
-      <div style={{
-        marginTop: '10px',
-        paddingTop: '10px',
-        borderTop: '1px solid #eee',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between'
-      }}>
-        <div style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '4px',
-          background: '#22c55e',
-          color: 'white',
-          padding: '3px 8px',
-          borderRadius: '8px',
-          fontSize: '0.7rem',
-          fontWeight: '600'
-        }}>
-          <IonIcon icon={checkmarkCircle} style={{ fontSize: '0.75rem' }} />
-          Erreicht
-        </div>
-        {badge.earned_at && (
-          <span style={{ fontSize: '0.7rem', color: '#888' }}>
-            {new Date(badge.earned_at).toLocaleDateString('de-DE', {
-              day: 'numeric',
-              month: 'short',
-              year: 'numeric'
-            })}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-};
+// Der Abzeichen-Popover liegt jetzt gemeinsam in shared/BadgePopoverContent
+// Diese Ansicht laedt nur ERREICHTE Abzeichen — die
+// gemeinsame Fassung faellt ohne Statusangabe auf 'erreicht' zurueck, das
+// hier vorher hart kodiert war.
 
 interface KonfiBadgesSectionProps {
   konfiId: number;
@@ -133,10 +66,10 @@ interface KonfiBadgesSectionProps {
 const KonfiBadgesSection: React.FC<KonfiBadgesSectionProps> = ({ konfiId, role = 'konfi' }) => {
   const [earnedBadges, setEarnedBadges] = useState<Badge[]>([]);
   const [loading, setLoading] = useState(true);
-  const badgePopoverRef = useRef<Badge | null>(null);
+  const badgePopoverRef = useRef<BadgePopoverData | null>({ badge: null });
 
   const [presentBadgePopover] = useIonPopover(BadgePopoverContent, {
-    badgeRef: badgePopoverRef
+    dataRef: badgePopoverRef
   });
 
   useEffect(() => {
@@ -160,7 +93,7 @@ const KonfiBadgesSection: React.FC<KonfiBadgesSectionProps> = ({ konfiId, role =
   }, [konfiId, role]);
 
   const handleBadgeClick = (badge: Badge, e: React.MouseEvent) => {
-    badgePopoverRef.current = badge;
+    badgePopoverRef.current = { badge };
     presentBadgePopover({
       event: e.nativeEvent,
       side: 'bottom',

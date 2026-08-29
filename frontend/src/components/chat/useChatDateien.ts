@@ -1,0 +1,145 @@
+import { useState, useEffect, useRef } from 'react';
+import { useIonModal } from '@ionic/react';
+import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { useApp } from '../../contexts/AppContext';
+import api from '../../services/api';
+import { compressImage } from '../../services/mediaCompression';
+// Native FileViewer über openFileNatively, FileViewerModal als Web-Fallback
+import { openFileNatively } from '../../utils/nativeFileViewer';
+import FileViewerModal, { FileItem } from '../shared/FileViewerModal';
+import { Message } from '../../types/chat';
+
+/**
+ * Datei-Handling des Chatraums (beim Aufteilen von ChatRoom.tsx hierher
+ * gezogen, Verhalten unveraendert): Datei-/Foto-Auswahl samt Kompression und
+ * 10MB-Grenze, Kamera und Galerie, sowie das Oeffnen empfangener Dateien
+ * (nativ, mit FileViewerModal als Web-Fallback inklusive Swipe-Kontext).
+ */
+
+// MIME-Type aus Dateiname ableiten
+const getMimeFromFileName = (name: string): string => {
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  const map: Record<string, string> = {
+    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp',
+    mp4: 'video/mp4', mov: 'video/quicktime', avi: 'video/x-msvideo', webm: 'video/webm', m4v: 'video/mp4',
+    pdf: 'application/pdf',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  };
+  return map[ext] || 'application/octet-stream';
+};
+
+interface ChatDateienDeps {
+  // Fuer den Swipe-Kontext im Viewer: alle Datei-Nachrichten des Raums.
+  messages: Message[];
+}
+
+export function useChatDateien({ messages }: ChatDateienDeps) {
+  const { setError } = useApp();
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFilePreview, setSelectedFilePreview] = useState<string | null>(null);
+  const viewerRef = useRef<{ files: FileItem[]; initialIndex: number }>({ files: [], initialIndex: 0 });
+
+  // FileViewer Modal mit useIonModal Hook (universeller Datei-Viewer)
+  const [presentFileViewer, dismissFileViewer] = useIonModal(FileViewerModal, {
+    get files() { return viewerRef.current.files; },
+    get initialIndex() { return viewerRef.current.initialIndex; },
+    onClose: () => {
+      dismissFileViewer();
+      viewerRef.current.files.forEach(f => {
+        if (f.url.startsWith('blob:')) URL.revokeObjectURL(f.url);
+      });
+      viewerRef.current = { files: [], initialIndex: 0 };
+    }
+  });
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = event.target.files?.[0];
+    // Input zuruecksetzen, damit dieselbe Datei erneut waehlbar ist.
+    event.target.value = '';
+    if (!picked) return;
+
+    // Bilder vor Upload resizen + komprimieren (max 1920px lange Kante). Andere
+    // Dateien (Videos, PDFs) bleiben unverändert.
+    let file = picked;
+    let previewUrl: string | null = null;
+    if (picked.type.startsWith('image/')) {
+      try {
+        const result = await compressImage(picked);
+        file = result.file;
+        previewUrl = result.previewUrl;
+      } catch {
+        file = picked;
+        previewUrl = URL.createObjectURL(picked);
+      }
+    }
+
+    if (file.size > 10 * 1024 * 1024) { // 10MB limit (nach Kompression)
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setError('Datei ist zu groß (max. 10MB)');
+      return;
+    }
+
+    setSelectedFile(file);
+    setSelectedFilePreview(previewUrl);
+  };
+
+  // Cleanup preview URL on unmount or file change
+  useEffect(() => {
+    return () => {
+      if (selectedFilePreview) {
+        URL.revokeObjectURL(selectedFilePreview);
+      }
+    };
+  }, [selectedFilePreview]);
+
+  const clearSelectedFile = () => {
+    if (selectedFilePreview) {
+      URL.revokeObjectURL(selectedFilePreview);
+    }
+    setSelectedFile(null);
+    setSelectedFilePreview(null);
+  };
+
+  const handleFileClick = async (filePath: string, fileName: string, mimeType: string) => {
+    try {
+      await Haptics.impact({ style: ImpactStyle.Light });
+
+      // Angeklickte Datei als Blob laden
+      const response = await api.get(`/chat/files/${filePath}`, { responseType: 'blob' });
+      const blob = response.data;
+      const contentType = response.headers?.['content-type'];
+      const mime: string = typeof contentType === 'string' ? contentType : mimeType;
+
+      const openedNatively = await openFileNatively(blob, fileName, mime);
+      if (openedNatively) return;
+
+      // Web-Fallback: FileViewerModal mit Swipe-Kontext
+      const blobUrl = URL.createObjectURL(new Blob([blob], { type: mime }));
+      const allFileMessages = messages.filter(m => m.file_path);
+      const files: FileItem[] = allFileMessages.map(m => {
+        if (m.file_path === filePath) {
+          return { url: blobUrl, fileName: m.file_name || fileName, mimeType: mime };
+        }
+        return {
+          url: `/api/chat/files/${m.file_path}`,
+          fileName: m.file_name || 'Datei',
+          mimeType: m.file_name ? getMimeFromFileName(m.file_name) : 'application/octet-stream'
+        };
+      });
+      const clickedIndex = allFileMessages.findIndex(m => m.file_path === filePath);
+      viewerRef.current = { files, initialIndex: Math.max(0, clickedIndex) };
+      presentFileViewer({ cssClass: 'file-viewer-modal' });
+    } catch {
+      setError('Fehler beim Öffnen der Datei');
+    }
+  };
+
+  return {
+    selectedFile,
+    selectedFilePreview,
+    handleFileSelect,
+    clearSelectedFile,
+    handleFileClick,
+  };
+}

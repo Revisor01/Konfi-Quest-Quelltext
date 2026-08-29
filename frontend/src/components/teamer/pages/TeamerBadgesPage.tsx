@@ -37,26 +37,27 @@ interface TeamerBadgeAPI {
   is_active: boolean;
   color?: string;
   earned: boolean;
-  awarded_date?: string;
-  progress_points?: number;
-  progress_percentage?: number;
+  earned_at?: string;
+  progress?: { current: number; target: number; percentage: number };
+}
+
+interface TeamerBadgeResponse {
+  available: TeamerBadgeAPI[];
+  earned: TeamerBadgeAPI[];
+  stats: { totalVisible: number; totalSecret: number };
 }
 
 const TeamerBadgesPage: React.FC = () => {
   const { user } = useApp();
   const [selectedFilter, setSelectedFilter] = useState('alle');
 
-  const { data: badgesData, loading, refresh, refreshLive } = useOfflineQuery<TeamerBadgeAPI[]>(
-    'teamer:badges:' + user?.id,
+  // Schluessel mit v2: Im Zwischenspeicher koennen noch flache Arrays der
+  // alten Antwortform liegen — die sollen nicht als neue Form gelesen werden.
+  const { data: badgesData, loading, refresh, refreshLive } = useOfflineQuery<TeamerBadgeResponse>(
+    'teamer:badges:v2:' + user?.id,
     async () => {
       const res = await api.get('/teamer/badges');
-      const liste: TeamerBadgeAPI[] = res.data || [];
-      // Unverdiente geheime Abzeichen liefert der Server nicht mehr mit; ihre
-      // Gesamtzahl steht in der Kopfzeile. An die Liste geheftet, damit sie den
-      // Zwischenspeicher übersteht (der sichert nur die Daten, keine Header).
-      const geheim = Number(res.headers?.['x-badges-secret-total']);
-      if (Number.isFinite(geheim)) (liste as any).geheimGesamt = geheim;
-      return liste;
+      return res.data;
     },
     { ttl: CACHE_TTL.BADGES }
   );
@@ -96,9 +97,12 @@ const TeamerBadgesPage: React.FC = () => {
       });
   }, [refreshAllCounts]);
 
-  const badges = badgesData || [];
+  // Wie beim Konfi: verdiente und offene Abzeichen kommen getrennt und
+  // werden fuer die Ansicht zusammengefuehrt.
+  const badges = [...(badgesData?.earned || []), ...(badgesData?.available || [])];
 
-  // Normalisierung: Teamer-API-Felder (earned/awarded_date) auf BadgesView-Felder (is_earned/earned_at)
+  // Normalisierung: API-Felder (earned/progress) auf BadgesView-Felder
+  // (is_earned/progress_points) — identisch zum Konfi-Weg (KonfiBadgesPage).
   const processedBadges = badges.map((b) => ({
     id: b.id,
     name: b.name,
@@ -111,18 +115,14 @@ const TeamerBadgesPage: React.FC = () => {
     is_active: b.is_active,
     color: b.color,
     is_earned: b.earned,
-    earned_at: b.awarded_date,
-    progress_points: b.progress_points,
-    progress_percentage: b.progress_percentage
+    earned_at: b.earned_at,
+    progress_points: b.progress?.current ?? 0,
+    progress_percentage: b.progress?.percentage ?? 0
   }));
 
-  const badgeStats = {
-    totalVisible: badges.filter((b) => !b.is_hidden).length,
-    // Aus der Kopfzeile, nicht aus der Liste: Diese enthält nur noch die
-    // bereits verdienten Geheimnisse, sonst staende hier immer die eigene
-    // Trefferzahl statt der Gesamtzahl.
-    totalSecret: (badges as any).geheimGesamt ?? badges.filter((b) => b.is_hidden).length
-  };
+  // Direkt aus der Antwort statt selbst gezaehlt: Der Server kennt auch die
+  // zurueckgehaltenen (unverdienten geheimen) Abzeichen.
+  const badgeStats = badgesData?.stats || { totalVisible: 0, totalSecret: 0 };
 
   if (loading) {
     return <LoadingSpinner message="Badges werden geladen..." />;

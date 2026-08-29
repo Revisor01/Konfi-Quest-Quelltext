@@ -1943,7 +1943,15 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       if (!poll) {
         return res.status(404).json({ error: 'Umfrage nicht gefunden' });
       }
-      
+
+      // Zugriff auf den Raum pruefen, BEVOR ueber Ablauf und Optionen geurteilt
+      // wird. Vorher stand die Pruefung erst danach: Wer
+      // nicht dazugehoerte, erfuhr an der Antwort trotzdem, ob es die Umfrage
+      // gibt und ob sie abgelaufen ist ("Umfrage ist abgelaufen" statt 403).
+      if (!await darfRaumOeffnen(poll.room_id, req.user)) {
+        return res.status(403).json({ error: 'Zugriff auf diesen Raum verweigert' });
+      }
+
       // Check if poll has expired
       if (poll.expires_at && new Date(poll.expires_at) < new Date()) {
         return res.status(400).json({ error: 'Umfrage ist abgelaufen' });
@@ -1960,18 +1968,6 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       
       if (option_index < 0 || option_index >= parsedOptions.length) {
         return res.status(400).json({ error: 'Ungültiger Option-Index' });
-      }
-      
-      // Check if user has access to the room
-      const accessQuery = `
-        SELECT 1 FROM chat_participants cp 
-        JOIN chat_rooms cr ON cp.room_id = cr.id 
-        WHERE cp.room_id = $1 AND cp.user_id = $2 AND cp.user_type = $3 AND cr.organization_id = $4
-      `;
-      const { rows: [access] } = await db.query(accessQuery, [poll.room_id, userId, userType, req.user.organization_id]);
-      
-      if (!access) {
-        return res.status(403).json({ error: 'Zugriff auf diesen Raum verweigert' });
       }
       
       const client = await db.getClient();
@@ -2220,12 +2216,15 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         await client.query("DELETE FROM chat_rooms WHERE id = $1", [roomId]);
 
         // 7. Clean up files from filesystem (best effort, don't fail if files don't exist)
+        // Der Pfad kommt aus dem injizierten uploadsDir, nicht aus __dirname:
+        // sonst raeumt diese Stelle am Standardpfad auf, waehrend die Dateien
+        // woanders liegen, sobald das Upload-Verzeichnis abweicht.
         const fs = require('fs').promises;
         const path = require('path');
 
         for (const fileRecord of filesForDeletion) {
           try {
-            const fullPath = path.join(__dirname, '..', 'uploads', 'chat', fileRecord.file_path);
+            const fullPath = path.join(uploadsDir, 'chat', fileRecord.file_path);
             await fs.unlink(fullPath);
           } catch (fileErr) {
  console.warn(`Could not delete file ${fileRecord.file_path}:`, fileErr.message);

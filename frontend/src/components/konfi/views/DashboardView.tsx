@@ -39,6 +39,7 @@ import {
   LevelIconsRow,
   LevelProgress
 } from './DashboardSections';
+import { BadgePopoverData } from '../../shared/BadgePopoverContent';
 import api from '../../../services/api';
 import { useApp } from '../../../contexts/AppContext';
 import BibleTranslationModal, { getTranslationName } from '../../shared/BibleTranslationModal';
@@ -285,9 +286,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   });
 
   // Badge Popover via useIonPopover
-  const badgePopoverRef = useRef<{ badge: Badge | null; isEarned: boolean; getBadgeColor: (badge: Badge) => string }>({
-    badge: null, isEarned: false, getBadgeColor: () => '#667eea'
-  });
+  const badgePopoverRef = useRef<BadgePopoverData | null>({ badge: null, isEarned: false });
   const [presentBadgePopover, dismissBadgePopover] = useIonPopover(DashboardBadgePopoverContent, {
     dataRef: badgePopoverRef
   });
@@ -753,7 +752,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                           <div
                             key={badge.id}
                             onClick={(e) => {
-                              badgePopoverRef.current = { badge, isEarned, getBadgeColor };
+                              badgePopoverRef.current = { badge, isEarned };
                               presentBadgePopover({ event: e.nativeEvent, side: 'top', alignment: 'center', cssClass: 'badge-detail-popover' });
                             }}
                             style={{
@@ -798,7 +797,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                             return (
                               <div key={badge.id}
                                 onClick={(e) => {
-                                  badgePopoverRef.current = { badge, isEarned: true, getBadgeColor };
+                                  badgePopoverRef.current = { badge, isEarned: true };
                                   presentBadgePopover({ event: e.nativeEvent, side: 'top', alignment: 'center', cssClass: 'badge-detail-popover' });
                                 }}
                                 style={{

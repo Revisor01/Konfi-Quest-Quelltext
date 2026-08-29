@@ -13,7 +13,7 @@ import {
   checkmarkCircle,
   closeCircle,
   hourglass,
-  documentOutline,
+  documentTextOutline,
   calendar,
   home,
   people,
@@ -108,12 +108,12 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
       <SectionHeader
         title="Aktivitäten"
         subtitle="Gemeldete Aktivitäten verwalten"
-        icon={documentOutline}
+        icon={documentTextOutline}
         preset="activities"
         stats={[
           // Die Kacheln entsprechen den drei Filter-Reitern und schalten dorthin.
           { value: getPendingCount(), label: 'Offen', onClick: () => setStatusFilter('pending'), active: statusFilter === 'pending' },
-          { value: getApprovedCount(), label: 'Genehmigt', onClick: () => setStatusFilter('approved'), active: statusFilter === 'approved' },
+          { value: getApprovedCount(), label: 'Verbucht', onClick: () => setStatusFilter('approved'), active: statusFilter === 'approved' },
           { value: getRejectedCount(), label: 'Abgelehnt', onClick: () => setStatusFilter('rejected'), active: statusFilter === 'rejected' }
         ]}
       />
@@ -130,7 +130,7 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
             <IonLabel>Offen</IonLabel>
           </IonSegmentButton>
           <IonSegmentButton value="approved">
-            <IonLabel>Genehmigt</IonLabel>
+            <IonLabel>Verbucht</IonLabel>
           </IonSegmentButton>
           <IonSegmentButton value="rejected">
             <IonLabel>Abgelehnt</IonLabel>
@@ -139,12 +139,12 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
       </div>
       {/* Aktivitäten-Liste */}
       <ListSection
-        icon={documentOutline}
+        icon={documentTextOutline}
         title="Aktivitäten"
         count={filteredAndSortedRequests.length}
         iconColorClass="success"
         isEmpty={filteredAndSortedRequests.length === 0}
-        emptyIcon={documentOutline}
+        emptyIcon={documentTextOutline}
         emptyTitle="Keine Aktivitäten vorhanden"
         emptyMessage="Konfirmand:innen können Aktivitäten beantragen"
         emptyIconColor="#059669"
@@ -156,7 +156,7 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
 
                   // Status-Farbe und Text
                   const statusColor = isPending ? '#ff9500' : isApproved ? '#059669' : '#dc3545';
-                  const statusText = isPending ? 'Offen' : isApproved ? 'Genehmigt' : 'Abgelehnt';
+                  const statusText = isPending ? 'Offen' : isApproved ? 'Verbucht' : 'Abgelehnt';
 
                   return (
                     <IonItemSliding key={request.id} style={{ marginBottom: index < filteredAndSortedRequests.length - 1 ? '8px' : '0' }}>

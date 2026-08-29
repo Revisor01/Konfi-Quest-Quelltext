@@ -144,7 +144,7 @@ function parseAllowedMedia(raw) {
 }
 
 module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) => {
-  const { requireTeamer } = roleHelpers;
+  const { requireTeamer, requireAdmin } = roleHelpers;
   const challengeDir = path.join(uploadsDir, 'challenges');
 
   // ====================================================================
@@ -1361,11 +1361,9 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
     }
   });
 
-  // DELETE /admin/:id — Entwuerfe direkt; gestartete Challenges nur mit
-  // ?force=true (löscht dann Beitraege inkl. Dateien mit).
   router.delete('/admin/:id',
     rbacVerifier,
-    requireTeamer,
+    requireAdmin,
     param('id').isInt({ min: 1 }).withMessage('Ungültige ID'),
     query('force').optional().isIn(['true', 'false']).withMessage('Ungültiger force-Parameter'),
     handleValidationErrors,
@@ -1607,7 +1605,7 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
 
   router.delete('/admin/submissions/:id',
     rbacVerifier,
-    requireTeamer,
+    requireAdmin,
     param('id').isInt({ min: 1 }).withMessage('Ungültige ID'),
     handleValidationErrors,
     async (req, res) => {

@@ -42,19 +42,14 @@ export const getProgressPercentage = (current: number, target: number): number =
   return Math.min((current / target) * 100, 100);
 };
 
-export const generatePassword = (): string => {
-  const books = [
-    'Genesis', 'Exodus', 'Levitikus', 'Numeri', 'Deuteronomium',
-    'Josua', 'Richter', 'Ruth', 'Samuel', 'Koenige', 'Chronik',
-    'Matthaeus', 'Markus', 'Lukas', 'Johannes', 'Roemer', 'Korinther'
-  ];
-  
-  const book = books[Math.floor(Math.random() * books.length)];
-  const chapter = Math.floor(Math.random() * 50) + 1;
-  const verse = Math.floor(Math.random() * 30) + 1;
-  
-  return `${book}${chapter},${verse}`;
-};
+// Sie war toter Code — kein Aufrufer im gesamten Frontend — und hatte
+// dieselben Fehler wie die Backend-Fassung: Kapitel 1-50 und Vers 1-30 blind
+// gewuerfelt, unabhaengig vom Buch ("Ruth47,29" gibt es nicht), dazu eine
+// unvollstaendige Buchliste ohne Ordnungszahlen.
+//
+// Passwoerter werden ausschliesslich im Backend erzeugt
+// (utils/passwordUtils.js, jetzt gegen die echte Verszaehlung). Eine zweite
+// Fassung im Frontend waere eine zweite Wahrheit, die wieder auseinanderlaeuft.
 
 export const calculateBadgeProgress = (konfi: Konfi, badge: Badge) => {
   if (!konfi || !badge) return { current: 0, target: badge?.criteria_value || 0, percentage: 0 };

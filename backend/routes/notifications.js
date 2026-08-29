@@ -261,16 +261,20 @@ module.exports = (db, verifyTokenRBAC) => {
     }
 
     try {
-      // Org-gefiltert: Nur eigene Tokens innerhalb der eigenen Organisation löschen
+      // Ein Geraete-Token gehoert dem Nutzer und dem Geraet, nicht einer
+      // Organisation — `push_tokens` hat gar keine `organization_id`. Die
+      // fruehere Verengung ueber `users.organization_id` verglich die PRIMAER-Org
+      // des Kontos mit der AKTIVEN Org aus dem Token. Bei Mehrfach-Mitgliedschaft
+      // sind das verschiedene Werte: Das DELETE traf 0 Zeilen, meldete aber
+      // Erfolg, und das abgemeldete Geraet bekam weiter Push-Nachrichten.
+      // Die Absicherung ist `pt.user_id = $1` aus dem geprueften Token — mehr
+      // braucht es nicht, und `/auth/logout` loescht bereits genauso.
       const { rowCount } = await db.query(
-        `DELETE FROM push_tokens pt
-         USING users u
-         WHERE pt.user_id = u.id
-           AND pt.user_id = $1
-           AND pt.platform = $2
-           AND pt.device_id = $3
-           AND u.organization_id = $4`,
-        [userId, platform, device_id, req.user.organization_id]
+        `DELETE FROM push_tokens
+         WHERE user_id = $1
+           AND platform = $2
+           AND device_id = $3`,
+        [userId, platform, device_id]
       );
 
       res.json({

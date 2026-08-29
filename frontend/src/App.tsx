@@ -41,6 +41,7 @@ import LoadingSpinner from './components/common/LoadingSpinner';
 import MainTabs from './components/layout/MainTabs';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import GlobalToasts from './components/common/GlobalToasts';
+import WartendeVorgaengeLeiste from './components/common/WartendeVorgaengeLeiste';
 
 /* Core CSS required for Ionic components to work properly */
 import '@ionic/react/css/core.css';
@@ -184,6 +185,7 @@ const AppContent: React.FC = () => {
         </IonRouterOutlet>
       </IonReactRouter>
       <GlobalToasts />
+      <WartendeVorgaengeLeiste />
     </IonApp>
   );
 };

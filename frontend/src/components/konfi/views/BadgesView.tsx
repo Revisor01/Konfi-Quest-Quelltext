@@ -39,6 +39,7 @@ import {
   eyeOff
 } from 'ionicons/icons';
 import { getIconFromString } from '../../../utils/badgeIcons';
+import BadgePopoverContent, { BadgePopoverData } from '../../shared/BadgePopoverContent';
 
 
 
@@ -59,168 +60,6 @@ interface Badge {
   progress_percentage?: number;
 }
 
-// Zeitfenster-Hinweis für zeitbasierte Badges (time_based) und Serien (streak).
-// Erklaert, ab wann / in welchem Zeitraum der Fortschritt zählt, damit der
-// schwankende Fortschritt (Aktivitäten fallen aus dem Fenster) verstaendlich ist.
-const getTimeWindowHint = (badge: Badge): string | null => {
-  const fmt = (d: Date) => d.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' });
-  if (badge.criteria_type === 'time_based') {
-    let days: number | null = null;
-    try {
-      const extra = typeof badge.criteria_extra === 'string'
-        ? JSON.parse(badge.criteria_extra || '{}') : (badge.criteria_extra || {});
-      days = extra.days || (extra.weeks ? extra.weeks * 7 : null);
-    } catch { /* ignore */ }
-    if (!days) return null;
-    const start = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
-    return `Zählt die letzten ${days} Tage (seit ${fmt(start)}). Ältere Aktivitäten fallen wieder heraus.`;
-  }
-  if (badge.criteria_type === 'streak') {
-    return 'Zählt aufeinanderfolgende Wochen mit mindestens einer Aktivität. Eine Woche ohne Aktivität setzt die Serie zurück.';
-  }
-  return null;
-};
-
-// Popover Content Komponente für Badge-Details
-const BadgePopoverContent: React.FC<{
-  badgeRef: React.RefObject<{ badge: Badge | null; getBadgeColor: (badge: Badge) => string }>;
-}> = ({ badgeRef }) => {
-  const data = badgeRef.current;
-  if (!data || !data.badge) return null;
-  const badge = data.badge;
-  const badgeColor = data.getBadgeColor(badge);
-  const timeWindowHint = getTimeWindowHint(badge);
-
-  return (
-    <div style={{ padding: '12px', background: 'white', maxWidth: '100%', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-        <div style={{
-          width: '48px',
-          height: '48px',
-          borderRadius: '50%',
-          flexShrink: 0,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: badge.is_earned
-            ? `linear-gradient(145deg, ${badgeColor} 0%, ${badgeColor}cc 100%)`
-            : 'linear-gradient(145deg, #d0d0d0 0%, #b8b8b8 100%)',
-          boxShadow: badge.is_earned
-            ? `0 2px 8px ${badgeColor}40`
-            : '0 1px 4px rgba(0,0,0,0.1)'
-        }}>
-          <IonIcon
-            icon={getIconFromString(badge.icon)}
-            style={{
-              fontSize: '1.4rem',
-              color: badge.is_earned ? 'white' : '#999'
-            }}
-          />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <h3 style={{ margin: '0 0 4px 0', fontSize: '0.95rem', fontWeight: '700', color: '#333', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {badge.name}
-          </h3>
-          <p style={{
-            margin: '0',
-            fontSize: '0.8rem',
-            color: '#666',
-            lineHeight: '1.3'
-          }}>
-            {badge.description || 'Keine Beschreibung'}
-          </p>
-        </div>
-      </div>
-      <div style={{
-        marginTop: '10px',
-        paddingTop: '10px',
-        borderTop: '1px solid #eee',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between'
-      }}>
-        {badge.is_earned ? (
-          <>
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              background: '#22c55e',
-              color: 'white',
-              padding: '3px 8px',
-              borderRadius: '8px',
-              fontSize: '0.7rem',
-              fontWeight: '600'
-            }}>
-              <IonIcon icon={checkmarkCircle} style={{ fontSize: '0.75rem' }} />
-              Erreicht
-            </div>
-            {badge.earned_at && (
-              <span style={{ fontSize: '0.7rem', color: '#888' }}>
-                {new Date(badge.earned_at).toLocaleDateString('de-DE', {
-                  day: 'numeric',
-                  month: 'short',
-                  year: 'numeric'
-                })}
-              </span>
-            )}
-          </>
-        ) : badge.progress_percentage && badge.progress_percentage > 0 ? (
-          <>
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-              background: '#667eea',
-              color: 'white',
-              padding: '3px 8px',
-              borderRadius: '8px',
-              fontSize: '0.7rem',
-              fontWeight: '600'
-            }}>
-              {Math.round(badge.progress_percentage || 0)}% - In Arbeit
-            </div>
-            <span style={{ fontSize: '0.7rem', color: '#888' }}>
-              {badge.progress_points || 0} / {badge.criteria_value}
-            </span>
-          </>
-        ) : (
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '4px',
-            background: '#8e8e93',
-            color: 'white',
-            padding: '3px 8px',
-            borderRadius: '8px',
-            fontSize: '0.7rem',
-            fontWeight: '600'
-          }}>
-            <IonIcon icon={lockClosed} style={{ fontSize: '0.7rem' }} />
-            Noch nicht erreicht
-          </div>
-        )}
-      </div>
-      {timeWindowHint && (
-        <div style={{
-          marginTop: '8px',
-          paddingTop: '8px',
-          borderTop: '1px solid #eee',
-          display: 'flex',
-          alignItems: 'flex-start',
-          gap: '6px',
-          fontSize: '0.72rem',
-          color: '#888',
-          lineHeight: '1.35'
-        }}>
-          <IonIcon icon={time} style={{ fontSize: '0.85rem', marginTop: '1px', flexShrink: 0 }} />
-          <span>{timeWindowHint}</span>
-        </div>
-      )}
-    </div>
-  );
-};
-
 interface BadgesViewProps {
   badges: Badge[];
   badgeStats: {
@@ -237,7 +76,7 @@ const BadgesView: React.FC<BadgesViewProps> = ({
   selectedFilter,
   onFilterChange
 }) => {
-  const badgePopoverRef = useRef<{ badge: Badge | null; getBadgeColor: (badge: Badge) => string }>({ badge: null, getBadgeColor: () => '#667eea' });
+  const badgePopoverRef = useRef<BadgePopoverData | null>({ badge: null, showProgress: true });
   const [searchText, setSearchText] = useState('');
 
   // Badges nach Kategorien gruppieren
@@ -304,11 +143,13 @@ const BadgesView: React.FC<BadgesViewProps> = ({
   };
 
   const [presentBadgePopover, dismissBadgePopover] = useIonPopover(BadgePopoverContent, {
-    badgeRef: badgePopoverRef
+    dataRef: badgePopoverRef
   });
 
   const handleBadgeClick = (badge: Badge, e: React.MouseEvent) => {
-    badgePopoverRef.current = { badge, getBadgeColor };
+    // showProgress: nur hier liegen progress_points/-percentage und
+    // criteria_extra vor — die uebrigen Ansichten laden sie gar nicht.
+    badgePopoverRef.current = { badge, showProgress: true };
     presentBadgePopover({
       event: e.nativeEvent,
       side: 'bottom',

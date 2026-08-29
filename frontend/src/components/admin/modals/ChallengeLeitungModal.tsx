@@ -542,14 +542,16 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
         run: () => moderate(submission, 'unhide')
       });
     }
-    // Endgültig löschen (immer, als letzte Aktion): Datenbank-Eintrag UND
-    // Datei. Auch für den eigenen Beitrag — anders als beim Ausblenden gibt
-    // es hier nichts zu verheimlichen, es ist schlicht weg.
-    actions.push({
-      key: 'delete', text: 'Endgültig löschen', icon: trashOutline,
-      color: 'var(--app-color-danger)', role: 'destructive',
-      run: () => confirmDelete(submission)
-    });
+    // Endgültig löschen: Datenbank-Eintrag UND Datei. Auch für den eigenen
+    // Beitrag — anders als beim Ausblenden gibt es hier nichts zu
+    // verheimlichen, es ist schlicht weg.
+    if (user?.type === 'admin') {
+      actions.push({
+        key: 'delete', text: 'Endgültig löschen', icon: trashOutline,
+        color: 'var(--app-color-danger)', role: 'destructive',
+        run: () => confirmDelete(submission)
+      });
+    }
     return actions;
   };
 

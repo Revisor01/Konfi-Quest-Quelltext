@@ -100,6 +100,61 @@ function determineBookingStatus(event, confirmedCount, waitlistCount, maxCapacit
 }
 
 /**
+ * Wache gegen den haeufigsten Fehlaufruf: Pool statt Client.
+ *
+ * Ein Pool hat kein `release()`. Der Unterschied ist sonst unsichtbar — beide
+ * haben `query()` — und faellt erst im Betrieb auf, wenn eine Transaktion
+ * nicht greift.
+ */
+function verlangeClient(kandidat, wer) {
+  if (!kandidat || typeof kandidat.release !== 'function') {
+    throw new Error(
+      `${wer} braucht einen Client aus db.getClient(), keinen Pool — `
+      + 'sonst laeuft der Aufruf ausserhalb der Transaktion.'
+    );
+  }
+}
+
+/**
+ * Nimmt die Event-Punkte eines Konfis zurueck, wenn seine Anwesenheit
+ * rueckgaengig gemacht wird.
+ *
+ * Lag vorher viermal als kopierter Block herum — zweimal transaktional,
+ * zweimal nicht. Dieselbe Diagnose wie beim Chat-Eintritt weiter unten: Als
+ * Kopie war die Regel schon einmal auseinandergelaufen.
+ *
+ * Der gefaehrliche Riss sitzt zwischen den beiden Schreibzugriffen: Ist die
+ * `event_points`-Zeile geloescht, der Saldo aber noch nicht verringert,
+ * behaelt der Konfi Punkte, fuer die es keinen Beleg mehr gibt — nicht mehr
+ * rekonstruierbar. Deshalb verlangt diese Funktion einen Client.
+ *
+ * @param {object} client - DB-Client aus db.getClient(), NICHT der Pool
+ * @param {number} userId
+ * @param {number} eventId
+ * @returns {{points: number, point_type: string}|null} was zurueckgenommen wurde
+ */
+async function takeBackEventPoints(client, userId, eventId) {
+  verlangeClient(client, 'takeBackEventPoints');
+
+  const { rows: [pts] } = await client.query(
+    'SELECT id, points, point_type FROM event_points WHERE konfi_id = $1 AND event_id = $2',
+    [userId, eventId]
+  );
+  if (!pts) return null;
+
+  await client.query('DELETE FROM event_points WHERE id = $1', [pts.id]);
+
+  // GREATEST(0, ...) faengt den Unterlauf ab — aber nicht die Doppelbuchung.
+  // Dagegen hilft nur die Sperre auf der Buchungszeile beim Aufrufer.
+  const profilUpdate = pts.point_type === 'gottesdienst'
+    ? 'UPDATE konfi_profiles SET gottesdienst_points = GREATEST(0, gottesdienst_points - $1) WHERE user_id = $2'
+    : 'UPDATE konfi_profiles SET gemeinde_points = GREATEST(0, gemeinde_points - $1) WHERE user_id = $2';
+  await client.query(profilUpdate, [pts.points, userId]);
+
+  return { points: pts.points, point_type: pts.point_type };
+}
+
+/**
  * Rueckt den ersten Wartelisten-Eintrag nach (timeslot-aware, rollen-gefiltert)
  *
  * WICHTIG: roleFilter ist PFLICHT-relevant, seit Events ein eigenes
@@ -108,13 +163,25 @@ function determineBookingStatus(event, confirmedCount, waitlistCount, maxCapacit
  * und umgekehrt. Ohne Filter wuerde die FIFO-Reihenfolge beide Wartelisten
  * vermischen.
  *
- * @param {object} db - DB-Pool oder Client (innerhalb Transaktion)
+ * Der Doc-Kommentar sagte frueher "Pool oder Client" — und genau das ist
+ * zweimal passiert: `events.js` (Teilnehmer entfernen) und `konfi.js`
+ * (Abmelden) uebergaben den Pool. Syntaktisch geht das, semantisch nicht:
+ * Der FOR-UPDATE-Lock unten faellt dann am Ende des Statements statt am Ende
+ * der Transaktion, der vorausgegangene Kapazitaets-Check lief in einer
+ * anderen impliziten Transaktion, und `addToEventChat` landet womoeglich auf
+ * einer anderen Verbindung. Moegliche Folge: elf Bestaetigte auf zehn
+ * Plaetzen, weil zwischen Check und Nachruecken jemand buchen kann.
+ *
+ * Die Wache faengt den Fehlaufruf beim ersten Testlauf statt im Betrieb.
+ *
+ * @param {object} db - DB-Client aus db.getClient(), NICHT der Pool
  * @param {number} eventId - Event ID
  * @param {number|null} timeslotId - Timeslot ID (null für Events ohne Timeslots)
  * @param {'teamer'|'not_teamer'} roleFilter - Welche Warteliste nachruecken soll
  * @returns {number|null} User-ID des nachgerueckten Users oder null
  */
 async function promoteFromWaitlist(db, eventId, timeslotId, roleFilter) {
+  verlangeClient(db, 'promoteFromWaitlist');
   if (roleFilter !== 'teamer' && roleFilter !== 'not_teamer') {
     throw new Error(`promoteFromWaitlist: roleFilter muss 'teamer' oder 'not_teamer' sein (war: ${roleFilter})`);
   }
@@ -187,6 +254,7 @@ function isRegistrationOpenForKonfis(event) {
 }
 
 module.exports = {
+  takeBackEventPoints,
   checkExistingBooking,
   getEventWithCounts,
   determineBookingStatus,

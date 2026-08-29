@@ -392,8 +392,20 @@ const app = createApp(db, {
   },
 });
 
-// HTTP-Requests an Express-App weiterleiten
-server.on('request', app);
+// HTTP-Requests an die Express-App weiterleiten — ABER nur die, die
+// Socket.IO nicht schon selbst beantwortet hat.
+//
+// Gemessen: 20 Abstuerze in 45 Minuten normaler Nutzung, beide Replikas
+// betroffen (RestartCount 9 bzw. 11). Eine einzige URL genuegte, um das
+// Backend reproduzierbar umzuwerfen.
+//
+// Der Fix behaelt die Reihenfolge bei (Socket.IO zuerst, siehe oben) und
+// prueft nur, ob die Antwort schon steht.
+server.on('request', (req, res) => {
+  // Engine.IO hat bereits geantwortet (Handshake abgelehnt) -> nichts tun.
+  if (res.headersSent || res.writableEnded) return;
+  app(req, res);
+});
 
 // ====================================================================
 // CHAT SYSTEM INITIALIZATION

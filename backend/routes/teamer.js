@@ -280,7 +280,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       const badgesQuery = `
         SELECT cb.*,
           CASE WHEN ub.id IS NOT NULL THEN true ELSE false END as earned,
-          ub.awarded_date
+          ub.awarded_date AS earned_at
         FROM custom_badges cb
         LEFT JOIN user_badges ub ON cb.id = ub.badge_id AND ub.user_id = $1
         WHERE cb.organization_id = $2 AND cb.target_role = 'teamer' AND (cb.is_active = true OR ub.id IS NOT NULL)
@@ -404,13 +404,16 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
         teamerStartYear = Math.min(...activeYearValues);
       }
 
-      // Der Kern liefert `percentage` ungerundet; die Antwortform hier ist
-      // bewusst unveraendert geblieben (flaches Array, `progress_points` /
-      // `progress_percentage`, Zaehler in Kopfzeilen), weil zwei Ansichten und
-      // vier Tests daran haengen. Deshalb der Adapter statt einer neuen Huelle.
       const enrichedBadges = badges.map(badge => {
+        // Wie beim Konfi: Verdiente Abzeichen sind nie "unerreichbar" —
+        // sie sind ja erreicht worden.
+        const unreachable = !badge.earned && bedingungFehlt(badge);
         if (badge.earned) {
-          return { ...badge, progress_points: badge.criteria_value, progress_percentage: 100 };
+          return {
+            ...badge,
+            unreachable,
+            progress: { current: badge.criteria_value, target: badge.criteria_value, percentage: 100 }
+          };
         }
 
         const progress = berechneBadgeProgress(badge, {
@@ -440,37 +443,26 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
           alleDaten: allDates
         });
 
-        return {
-          ...badge,
-          progress_points: progress.current,
-          progress_percentage: Math.round(progress.percentage)
-        };
+        return { ...badge, unreachable, progress };
       });
 
-      // Geheime Abzeichen erst zeigen, wenn sie verdient sind. Die Ansicht
-      // verlässt sich darauf, dass sie gar nicht erst geliefert werden — beim
-      // Konfi tut das Backend das (konfiBadgeProgress.js), hier fehlte es, und
-      // Name, Beschreibung und Fortschritt standen offen da.
-      //
-      // Die Punktearten-Haelfte der Konfi-Pruefung (gottesdienst_enabled /
-      // gemeinde_enabled am Jahrgang) gilt hier NICHT: Teamer:innen haben kein
-      // Punktekonto, die Punkte-Kriterien sind fuer sie ohnehin immer 0.
-      const sichtbareBadges = enrichedBadges.filter(
-        b => (!b.is_hidden || b.earned) && (b.earned || !bedingungFehlt(b))
-      );
+      // Die Punktearten-Haelfte der Konfi-Unerreichbarkeit
+      // (gottesdienst_enabled / gemeinde_enabled am Jahrgang) gilt hier
+      // NICHT: Teamer:innen haben kein Punktekonto, die Punkte-Kriterien
+      // sind fuer sie ohnehin immer 0.
+      const earned = enrichedBadges.filter(b => b.earned);
+      const available = enrichedBadges.filter(b => !b.earned && !b.is_hidden && !b.unreachable);
 
-      // Die Gesamtzahl der Geheimnisse gehört MIT in die Antwort: Die Ansicht
-      // zählte sie bisher aus der Liste, und die enthält jetzt nur noch die
-      // verdienten. Ohne diese Zahl hätte der Hinweis "x Geheimnisse zu
-      // entdecken" nach dem Filtern still auf null gestanden.
-      // Bewusst als Kopfzeile und nicht im Rumpf: Die Antwort ist ein Array,
-      // und zwei Ansichten lesen sie so (TeamerBadgesPage, TeamerDashboardPage).
-      // Eine neue Huelle hätte beide gebrochen.
-      const aktiv = enrichedBadges.filter(b => b.is_active);
-      res.set('X-Badges-Secret-Total', String(aktiv.filter(b => b.is_hidden).length));
-      res.set('X-Badges-Visible-Total', String(aktiv.filter(b => !b.is_hidden).length));
+      const zaehlbar = enrichedBadges.filter(b => b.is_active && !b.unreachable);
 
-      res.json(sichtbareBadges);
+      res.json({
+        available,
+        earned,
+        stats: {
+          totalVisible: zaehlbar.filter(b => !b.is_hidden).length,
+          totalSecret: zaehlbar.filter(b => b.is_hidden).length
+        }
+      });
     } catch (err) {
       console.error('Error loading teamer badges:', err);
       res.status(500).json({ error: 'Fehler beim Laden der Teamer-Badges' });

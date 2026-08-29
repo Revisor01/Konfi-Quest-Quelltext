@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   IonPage,
   IonHeader,
@@ -12,11 +12,7 @@ import {
   IonIcon,
   IonSegment,
   IonSegmentButton,
-  IonList,
-  IonListHeader,
   IonLabel,
-  IonCard,
-  IonCardContent,
   useIonModal,
   useIonRouter,
   useIonAlert,
@@ -30,7 +26,6 @@ import {
   add,
   home,
   people,
-  timeOutline,
   closeOutline,
   informationCircleOutline
 } from 'ionicons/icons';
@@ -39,7 +34,8 @@ import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../../services/offlineCache';
-import { writeQueue, QueueItem } from '../../../services/writeQueue';
+import { useWartendeVorgaenge } from '../../../hooks/useWartendeVorgaenge';
+import WartendeVorgaengeKarte from '../../shared/WartendeVorgaengeKarte';
 import { removeDeliveredForEvents } from '../../../services/notifications';
 import api from '../../../services/api';
 import EventsView from '../views/EventsView';
@@ -134,17 +130,10 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
   // --- Aktivitäten-State ---
   const [requestsTab, setRequestsTab] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
   const [selectedRequest, setSelectedRequest] = useState<ActivityRequest | null>(null);
-  const [pendingQueueItems, setPendingQueueItems] = useState<QueueItem[]>([]);
-
-
-  const loadPendingFromQueue = useCallback(async () => {
-    const queueItems = await writeQueue.getByMetadata({ type: 'request' });
-    setPendingQueueItems(queueItems);
-  }, []);
-
-  useEffect(() => {
-    loadPendingFromQueue();
-  }, [requests, loadPendingFromQueue]);
+  // Die Warteschlange meldet ihre Aenderungen jetzt selbst — vorher aktuali-
+  // sierte sich die Anzeige nur, wenn die Antragsliste neu lud. Leerte sich
+  // die Queue im Hintergrund, blieb "Wird gesendet..." stehen.
+  const { wartend, gescheitert, vergessen } = useWartendeVorgaenge();
 
   const [presentRequestModal, dismissRequestModal] = useIonModal(
     ActivityRequestModal,
@@ -402,7 +391,7 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
 
         <IonRefresher slot="fixed" onIonRefresh={async (e) => {
           if (isAntraege) {
-            await Promise.all([refreshRequests(), loadPendingFromQueue()]);
+            await refreshRequests();
           } else {
             await refresh();
           }
@@ -434,49 +423,12 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
                 <>
                   {mainSegmentSlot}
 
-                  {/* Pending Queue-Aktivitäten (Offline-Warteschlange) */}
-                  {pendingQueueItems.length > 0 && (
-                    <IonList inset={true} className="app-segment-wrapper">
-                      <IonListHeader>
-                        <div className="app-section-icon app-section-icon--warning">
-                          <IonIcon icon={timeOutline} />
-                        </div>
-                        <IonLabel>Wird gesendet...</IonLabel>
-                      </IonListHeader>
-                      <IonCard className="app-card">
-                        <IonCardContent>
-                          {pendingQueueItems.map(qi => (
-                            <div key={qi.id} className="app-list-item app-list-item--warning">
-                              <div className="app-corner-badges">
-                                <div
-                                  className="app-corner-badge"
-                                  style={{ background: 'var(--app-color-warning)', padding: '4px 6px' }}
-                                  title="Wartend — wird gesendet, sobald du wieder online bist"
-                                >
-                                  <IonIcon icon={timeOutline} style={{ color: '#fff', fontSize: '0.85rem', display: 'block' }} />
-                                </div>
-                              </div>
-                              <div className="app-list-item__row">
-                                <div className="app-list-item__main">
-                                  <div className="app-icon-circle app-icon-circle--warning">
-                                    <IonIcon icon={timeOutline} />
-                                  </div>
-                                  <div className="app-list-item__content">
-                                    <div className="app-list-item__title" style={{ paddingRight: '60px' }}>
-                                      {qi.metadata.label || 'Aktivität'}
-                                    </div>
-                                    <div className="app-list-item__subtitle">
-                                      {qi.body?.description || 'Wird gesendet sobald du online bist'}
-                                    </div>
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          ))}
-                        </IonCardContent>
-                      </IonCard>
-                    </IonList>
-                  )}
+                  {/* Offline-Warteschlange: was noch aussteht und was scheiterte */}
+                  <WartendeVorgaengeKarte
+                    wartend={wartend}
+                    gescheitert={gescheitert}
+                    onVergessen={vergessen}
+                  />
                 </>
               }
             />

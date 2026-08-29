@@ -148,7 +148,7 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
   // Nur auf nativen Plattformen: im Desktop-Browser existiert navigator.setAppBadge/
   // clearAppBadge nicht (z.B. Firefox) -> der Web-Fallback des Plugins wirft eine
   // unhandled rejection. Promises zusaetzlich mit .catch absichern.
-  useEffect(() => {
+  const setzeGeraeteBadge = useCallback(() => {
     if (!Capacitor.isNativePlatform()) return;
     const p = totalBadgeCount > 0
       ? Badge.set({ count: totalBadgeCount })
@@ -157,6 +157,20 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
       console.warn('BadgeContext: Badge nicht verfügbar:', error);
     });
   }, [totalBadgeCount]);
+
+  useEffect(() => { setzeGeraeteBadge(); }, [setzeGeraeteBadge]);
+
+  // Ausdrueckliches Neusetzen auf Zuruf: Der Effekt oben
+  // haengt am WERT und feuert nicht, wenn sich dieser nicht geaendert hat. Nach
+  // removeAllDeliveredNotifications() ist das Icon aber leer, waehrend
+  // totalBadgeCount unveraendert im Speicher steht -- die Zahl kaeme erst
+  // zurueck, wenn zufaellig eine andere hereinkommt. AppContext schickt dieses
+  // Signal deshalb direkt nach dem Aufraeumen.
+  useEffect(() => {
+    const bei = () => setzeGeraeteBadge();
+    window.addEventListener('badge:resync', bei);
+    return () => window.removeEventListener('badge:resync', bei);
+  }, [setzeGeraeteBadge]);
 
   // WebSocket: Live-Update bei neuen Nachrichten
   useEffect(() => {

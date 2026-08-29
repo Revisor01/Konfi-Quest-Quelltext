@@ -309,9 +309,24 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
   // ====================================================================
 
   // GET all activity requests for an organization
-  // Pfad: GET /api/activities/requests
+  // Pfad: GET /api/admin/activities/requests
   router.get('/requests', rbacVerifier, requireAdmin, async (req, res) => {
     try {
+      const { status } = req.query;
+      const erlaubteStatus = ['pending', 'approved', 'rejected'];
+      if (status !== undefined && !erlaubteStatus.includes(status)) {
+        return res.status(400).json({
+          error: `Unbekannter Status. Erlaubt: ${erlaubteStatus.join(', ')}`
+        });
+      }
+
+      const params = [req.user.organization_id];
+      let statusFilter = '';
+      if (status) {
+        params.push(status);
+        statusFilter = ` AND ar.status = $${params.length}`;
+      }
+
       const query = `
         SELECT ar.*, u_konfi.display_name as konfi_name, a.name as activity_name, a.points as activity_points, a.type as activity_type,
                a.target_role as activity_target_role,
@@ -320,11 +335,11 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
         JOIN users u_konfi ON ar.user_id = u_konfi.id
         JOIN activities a ON ar.activity_id = a.id
         LEFT JOIN users u_approved ON ar.approved_by = u_approved.id
-        WHERE a.organization_id = $1
+        WHERE a.organization_id = $1${statusFilter}
         ORDER BY ar.created_at DESC
       `;
 
-      const { rows: requests } = await db.query(query, [req.user.organization_id]);
+      const { rows: requests } = await db.query(query, params);
       res.json(requests);
 
     } catch (err) {

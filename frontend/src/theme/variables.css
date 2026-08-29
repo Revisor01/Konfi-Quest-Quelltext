@@ -3000,3 +3000,74 @@ ion-toggle.app-toggle--info { --background-checked: var(--app-color-info) !impor
   .app-whatsnew { transition: none; }
   .app-whatsnew:active { transform: none; }
 }
+
+/* ====================================================================
+   Warteschlangen-Leiste
+
+   Schmale Leiste, die in der ganzen App erscheint, sobald etwas offline
+   eingereiht wurde oder endgueltig gescheitert ist. Haengt auf App-Ebene
+   (WartendeVorgaengeLeiste), weil die rund zwanzig Leitungs-Aktionen sich
+   ueber ebenso viele Seiten mit je eigener Kopfzeile verteilen — es gibt
+   keine gemeinsame Huelle, in die sich ein Hinweis pro Ansicht haengen
+   liesse.
+
+   Sitzt ueber der Tab-Leiste statt unter der Kopfzeile: Jede Seite bringt
+   ihre eigene ion-header mit, ein Streifen darunter waere in jede einzeln
+   einzubauen — genau das, was diese Loesung vermeiden soll.
+   ==================================================================== */
+.app-wartende-leiste {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  /* Ueber der Tab-Leiste: 56px Hoehe plus der Sicherheitsabstand unten.
+     Derselbe Wert wie in ion-tab-bar.md weiter oben. */
+  bottom: calc(56px + env(safe-area-inset-bottom, 0px) + 10px);
+  z-index: 20;
+
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: auto;
+  padding: 11px 14px;
+  border: none;
+  border-radius: 14px;
+
+  background: var(--app-color-warning);
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.2);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.app-wartende-leiste[data-variante="danger"] {
+  background: var(--app-color-danger);
+}
+.app-wartende-leiste__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-wartende-leiste__pfeil {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+.app-wartende-leiste ion-icon {
+  font-size: 1.1rem;
+}
+.app-wartende-leiste:active {
+  transform: scale(0.985);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.16);
+}
+.app-wartende-leiste:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-wartende-leiste { transition: none; }
+  .app-wartende-leiste:active { transform: none; }
+}

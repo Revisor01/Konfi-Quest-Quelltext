@@ -45,6 +45,21 @@ const TRANSLATION_LABELS: Record<Translation, string> = {
 
 const TRANSLATION_KEYS: Translation[] = ['luther2017', 'bigs', 'gute_nachricht', 'elberfelder'];
 
+// Quellenangabe je Uebersetzung. Pflicht, kein Schmuck: Die Deutsche
+// Bibelgesellschaft erlaubt Einzelverse in kostenlosen Veroeffentlichungen
+// einer Gemeinde einer ACK-Mitgliedskirche ohne vorherige Anfrage — gegen
+// Quellenangabe an geeigneter Stelle. Genau die steht hier.
+//
+// BIGS und Elberfelder sind noch nicht befuellt (andere Verlage, Anfrage
+// laeuft); ihr Vermerk steht schon bereit, damit er beim Nachtragen der
+// Texte nicht vergessen wird.
+const TRANSLATION_COPYRIGHT: Record<Translation, string> = {
+  luther2017: 'Lutherbibel, revidiert 2017 © 2016 Deutsche Bibelgesellschaft, Stuttgart',
+  bigs: 'Bibel in gerechter Sprache © 2006 Gütersloher Verlagshaus, Gütersloh',
+  gute_nachricht: 'Gute Nachricht Bibel, revidiert 2018 © 2018 Deutsche Bibelgesellschaft, Stuttgart',
+  elberfelder: 'Elberfelder Bibel © 2006 SCM R. Brockhaus, Witten'
+};
+
 interface Konfspruch {
   id: number;
   reference: string;
@@ -303,6 +318,17 @@ const KonfispruchSelectModal: React.FC<KonfispruchSelectModalProps> = ({ onClose
                       })}
                     </div>
                   )}
+
+                  <div style={{
+                    marginTop: '12px',
+                    paddingTop: '12px',
+                    borderTop: '1px solid var(--app-border-color, #e0e0e0)',
+                    fontSize: '0.7rem',
+                    lineHeight: '1.35',
+                    color: 'var(--ion-color-medium)'
+                  }}>
+                    {TRANSLATION_COPYRIGHT[translation]}
+                  </div>
                 </IonCardContent>
               </IonCard>
             </IonList>

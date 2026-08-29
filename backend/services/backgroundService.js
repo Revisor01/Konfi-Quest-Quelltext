@@ -143,14 +143,68 @@ class BackgroundService {
         }
       }
 
-      const empfaenger = users.map(u => ({
-        id: u.user_id,
-        type: u.user_type,
-        role_name: u.role_name,
-        organization_id: u.organization_id,
-        assigned_jahrgaenge: jahrgaengeProTeamer.get(u.user_id) || []
-      }));
-      const summen = await appIconSummenFuerAlle(db, empfaenger);
+      // MULTI-ORG: Hier stand nur
+      // `organization_id: u.organization_id` -- die PRIMAER-Organisation. Wer
+      // mehreren Gemeinden angehoert, bekam damit alle fuenf Minuten die Zahl
+      // EINER Organisation aufs Icon, egal was in den anderen offen war.
+      //
+      // Gemessen an einem echten Konto: Org 1 = 6, Org 2 = 0, Org 4 = 29.
+      // Der Push (berechneBadge) sendete nach seinem Fix korrekt 35 -- der
+      // Hintergrund-Sync ueberschrieb sie kurz darauf wieder mit 6. Genau das
+      // war beobachtbar: Push zeigt 35, App oeffnen zeigt 6, wenig spaeter 0.
+      //
+      // Loesung wie in berechneBadge: je Organisation ein Eintrag, danach
+      // aufaddieren. Fuer Single-Org-Konten (alle Konfis, die meisten
+      // Teamer:innen) aendert sich nichts -- ein Eintrag wie bisher.
+      const orgsProUser = new Map();
+      const mehrfachIds = users.map(u => u.user_id);
+      if (mehrfachIds.length > 0) {
+        const { rows: zuordnungen } = await db.query(
+          'SELECT user_id, organization_id FROM user_organizations WHERE user_id = ANY($1::int[])',
+          [mehrfachIds]
+        );
+        for (const z of zuordnungen) {
+          if (!orgsProUser.has(z.user_id)) orgsProUser.set(z.user_id, new Set());
+          orgsProUser.get(z.user_id).add(z.organization_id);
+        }
+      }
+
+      const empfaenger = [];
+      for (const u of users) {
+        const orgs = orgsProUser.get(u.user_id) || new Set();
+        // Die Primaer-Org gehoert immer dazu, auch wenn user_organizations
+        // sie (noch) nicht fuehrt.
+        if (u.organization_id != null) orgs.add(u.organization_id);
+        // Ohne jede Organisation trotzdem EINEN Eintrag anlegen: Sonst faellt
+        // das Konto stillschweigend aus der Zaehlung, statt eine 0 zu bekommen.
+        if (orgs.size === 0) orgs.add(u.organization_id ?? null);
+        for (const orgId of orgs) {
+          empfaenger.push({
+            id: u.user_id,
+            type: u.user_type,
+            role_name: u.role_name,
+            organization_id: orgId,
+            assigned_jahrgaenge: jahrgaengeProTeamer.get(u.user_id) || []
+          });
+        }
+      }
+
+      // appIconSummenFuerAlle schluesselt nach `id_type` -- bei mehreren
+      // Organisationen desselben Kontos kaeme sonst nur die letzte an.
+      // Deshalb je Organisation einmal rechnen und hier addieren.
+      const summen = new Map();
+      const nachOrg = new Map();
+      for (const e of empfaenger) {
+        if (!nachOrg.has(e.organization_id)) nachOrg.set(e.organization_id, []);
+        nachOrg.get(e.organization_id).push(e);
+      }
+      for (const [, liste] of nachOrg) {
+        const teil = await appIconSummenFuerAlle(db, liste);
+        for (const [schluessel, wert] of teil) {
+          if (wert == null) continue;
+          summen.set(schluessel, (summen.get(schluessel) || 0) + wert);
+        }
+      }
 
       for (const user of users) {
         try {
