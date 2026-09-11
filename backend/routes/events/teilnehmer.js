@@ -1,4 +1,5 @@
 const express = require('express');
+const { formatUhrzeit } = require('../../utils/zeitformat');
 const PushService = require('../../services/pushService');
 const liveUpdate = require('../../utils/liveUpdate');
 const { promoteFromWaitlist, takeBackEventPoints } = require('../../utils/bookingUtils');
@@ -72,24 +73,27 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
            WHERE u.id = $1 AND u.organization_id = $2`,
           [user_id, req.user.organization_id]
         );
-        const addedIsTeamer = addedUser?.role_name === 'teamer';
+        const addedIsKonfi = addedUser?.role_name === 'konfi';
+        const addedIsTeamer = !addedIsKonfi;
 
         if (addedIsTeamer && !event.teamer_needed && !event.teamer_only) {
           await client.query('ROLLBACK');
           client.release();
-          return res.status(400).json({ error: 'Dieses Event ist nicht für Teamer:innen vorgesehen' });
+          return res.status(400).json({ error: 'Dieses Event ist nicht für das Team vorgesehen' });
         }
         if (!addedIsTeamer && event.teamer_only) {
           await client.query('ROLLBACK');
           client.release();
-          return res.status(400).json({ error: 'Dieses Event ist nur für Teamer:innen' });
+          return res.status(400).json({ error: 'Dieses Event ist nur für das Team' });
         }
 
         // Teamer buchen nie in Timeslots (wie im Selbst-Buchungs-Pfad).
         const isTimeslotBooking = !!timeslot && !addedIsTeamer;
+        // Das Team-Kontingent zaehlt alle Nicht-Konfis (Teamer:innen wie
+        // zugeordnete Admins), das Konfi-Kontingent nur Konfis.
         const roleFilterSql = addedIsTeamer
-          ? "AND r.name = 'teamer'"
-          : "AND r.name <> 'teamer'";
+          ? "AND r.name <> 'konfi'"
+          : "AND r.name = 'konfi'";
         const capacityQuery = isTimeslotBooking
         ? `SELECT COUNT(*) as confirmed_count FROM event_bookings eb
              JOIN users u ON eb.user_id = u.id JOIN roles r ON u.role_id = r.id
@@ -151,7 +155,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
       client.release();
 
       const responseMessage = timeslot
-      ? `Teilnehmer:in zum Zeitslot ${new Date(timeslot.start_time).toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'})} - ${new Date(timeslot.end_time).toLocaleTimeString('de-DE', {hour: '2-digit', minute: '2-digit'})} ${finalStatus === 'waitlist' ? 'auf Warteliste gesetzt' : 'hinzugefügt'}`
+      ? `Teilnehmer:in zum Zeitslot ${formatUhrzeit(timeslot.start_time)} - ${formatUhrzeit(timeslot.end_time)} ${finalStatus === 'waitlist' ? 'auf Warteliste gesetzt' : 'hinzugefügt'}`
       : `Teilnehmer:in ${finalStatus === 'waitlist' ? 'auf Warteliste gesetzt' : 'hinzugefügt'}`;
 
       res.status(201).json({
@@ -214,7 +218,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
         // Warteliste nachgerueckt wird (Konfi- und Teamer-Kontingent sind getrennt).
         const { rows: [gefunden] } = await client.query(`
           SELECT eb.*, u.organization_id, e.organization_id as event_org_id,
-                 (r.name = 'teamer') as is_teamer_booking
+                 (r.name <> 'konfi') as is_teamer_booking
           FROM event_bookings eb
           JOIN users u ON eb.user_id = u.id
           JOIN roles r ON u.role_id = r.id
@@ -273,7 +277,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
                JOIN users u ON eb.user_id = u.id
                JOIN roles r ON u.role_id = r.id
                WHERE eb.event_id = $1 AND eb.status = 'confirmed'
-                 AND r.name = 'teamer' AND u.deleted_at IS NULL`,
+                 AND r.name <> 'konfi' AND u.deleted_at IS NULL`,
               [eventId]
             );
             maxCapacity = teamerCapInfo?.teamer_max_participants || 0;
@@ -290,7 +294,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
               `SELECT COUNT(*) as confirmed_count
                FROM event_bookings eb
                LEFT JOIN users u ON eb.user_id = u.id
-               LEFT JOIN roles r ON u.role_id = r.id AND r.name = 'teamer'
+               LEFT JOIN roles r ON u.role_id = r.id AND r.name <> 'konfi'
                WHERE eb.timeslot_id = $1 AND eb.status = 'confirmed' AND r.id IS NULL`,
               [booking.timeslot_id]
             );
@@ -305,7 +309,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
               `SELECT COUNT(*) as confirmed_count
                FROM event_bookings eb
                LEFT JOIN users u ON eb.user_id = u.id
-               LEFT JOIN roles r ON u.role_id = r.id AND r.name = 'teamer'
+               LEFT JOIN roles r ON u.role_id = r.id AND r.name <> 'konfi'
                WHERE eb.event_id = $1 AND eb.status = 'confirmed' AND r.id IS NULL`,
               [eventId]
             );

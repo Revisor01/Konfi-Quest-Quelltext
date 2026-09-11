@@ -1,6 +1,6 @@
 import React from 'react';
 import { IonIcon } from '@ionic/react';
-import { people, flame, shieldCheckmark } from 'ionicons/icons';
+import { ICON_FLAMME_GEFUELLT, ICON_GRUPPE_GEFUELLT, ICON_SCHUTZ_GEFUELLT } from './icons';
 import StatusBadge from './StatusBadge';
 
 // Gemeinsame Corner-Badge-Reihe für Event-Cards (zuvor pro Rolle dupliziert).
@@ -33,10 +33,10 @@ const badgeStyle = (bg: string): React.CSSProperties => ({
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'center',
-  padding: '4px 8px',
+  padding: 'var(--app-abstand-mini) var(--app-abstand-eng)',
 });
 
-const iconStyle: React.CSSProperties = { color: '#fff', fontSize: '0.85rem' };
+const iconStyle: React.CSSProperties = { color: 'white', fontSize: 'var(--app-text-sekundaer)' };
 
 const Separator = () => <div className="app-corner-badges__separator" />;
 
@@ -64,7 +64,7 @@ const EventCornerBadges: React.FC<EventCornerBadgesProps> = ({
             style={badgeStyle('var(--app-color-teamer)')}
             title={event.teamer_only ? 'Nur Team' : 'Team gesucht'}
           >
-            <IonIcon icon={people} style={iconStyle} />
+            <IonIcon icon={ICON_GRUPPE_GEFUELLT} style={iconStyle} />
           </div>
           <Separator />
         </>
@@ -72,21 +72,21 @@ const EventCornerBadges: React.FC<EventCornerBadgesProps> = ({
       {isKonfirmation && (
         <>
           <div className="app-corner-badge" style={badgeStyle('var(--app-color-konfis)')} title="Konfirmation">
-            <IonIcon icon={flame} style={iconStyle} />
+            <IonIcon icon={ICON_FLAMME_GEFUELLT} style={iconStyle} />
           </div>
           <Separator />
         </>
       )}
       {isMandatory && (
         <>
-          <div className="app-corner-badge" style={badgeStyle('#dc2626')} title="Pflichtveranstaltung">
-            <IonIcon icon={shieldCheckmark} style={iconStyle} />
+          <div className="app-corner-badge" style={badgeStyle('var(--app-color-events)')} title="Pflichtveranstaltung">
+            <IonIcon icon={ICON_SCHUTZ_GEFUELLT} style={iconStyle} />
           </div>
           <Separator />
         </>
       )}
       {showStatus && statusText && (
-        <StatusBadge statusText={statusText} statusColor={statusColor ?? 'var(--app-color-medium, #8e8e93)'} />
+        <StatusBadge statusText={statusText} statusColor={statusColor ?? 'var(--app-text-system)'} />
       )}
     </div>
   );

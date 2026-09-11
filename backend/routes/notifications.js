@@ -44,6 +44,7 @@ module.exports = (db, verifyTokenRBAC) => {
                  WHERE m.room_id = r.id
                  AND m.deleted_at IS NULL
                  AND m.created_at > COALESCE(crs.last_read_at, '1970-01-01')
+                 AND m.created_at <= NOW()
                  -- Eigene Nachrichten zählen nicht als ungelesen. Ohne diese
                  -- Zeile stand nach der eigenen letzten Nachricht eine Eins am
                  -- Reiter, die erst beim Oeffnen des Raums verschwand — und wer
@@ -63,15 +64,18 @@ module.exports = (db, verifyTokenRBAC) => {
       const isAdminType = userType === 'admin';
       const zero = Promise.resolve({ rows: [{ c: 0 }] });
 
-      // Offene Challenge-Freigaben: Admin org-weit; Teamer nur für Challenges
-      // ihrer zugewiesenen Jahrgänge (gleiche Grenze wie viewableJahrgangIds
-      // in routes/challenges.js — der Teamer soll nicht auf Freigaben gestupst
-      // werden, deren Challenge er gar nicht oeffnen darf).
-      const teamerJahrgangIds = userType === 'teamer'
+      const istGebundenerAdmin = req.user.role_name === 'admin' && !req.user.is_super_admin;
+
+      // Offene Challenge-Freigaben: org_admin org-weit; Teamer und gebundene
+      // Admins nur für Challenges ihrer zugewiesenen Jahrgänge (gleiche
+      // Grenze wie viewableJahrgangIds in routes/challenges.js — niemand soll
+      // auf Freigaben gestupst werden, deren Challenge er gar nicht oeffnen
+      // darf).
+      const eigeneJahrgangIds = (userType === 'teamer' || istGebundenerAdmin)
         ? (req.user.assigned_jahrgaenge || []).filter(j => j.can_view).map(j => j.id)
         : [];
       let challengesPromise = zero;
-      if (isAdminType) {
+      if (isAdminType && !istGebundenerAdmin) {
         challengesPromise = db.query(
           `SELECT COUNT(*)::int AS c
            FROM challenge_submissions cs
@@ -79,7 +83,7 @@ module.exports = (db, verifyTokenRBAC) => {
            WHERE c.organization_id = $1 AND cs.moderation_status = 'pending'`,
           [organizationId]
         );
-      } else if (userType === 'teamer') {
+      } else if (userType === 'teamer' || istGebundenerAdmin) {
         // 'nur_team'-Challenges laufen org-weit ueber die Rolle (Migration 121):
         // Jede:r Teamer:in der Organisation darf sie sehen und moderieren, auch
         // ohne Jahrgangs-Zuordnung -- die es dort per Definition nicht gibt.
@@ -98,7 +102,7 @@ module.exports = (db, verifyTokenRBAC) => {
                  WHERE cja.challenge_id = c.id AND cja.jahrgang_id = ANY($2::int[])
                )
              )`,
-          [organizationId, teamerJahrgangIds]
+          [organizationId, eigeneJahrgangIds]
         );
       }
 
@@ -119,32 +123,71 @@ module.exports = (db, verifyTokenRBAC) => {
           )
         : zero;
 
+      // pendingRequests: fuer gebundene Admins mit demselben Filter wie die
+      // Antragsliste (GET /admin/activities/requests) — Teamer-Antraege
+      // zaehlen immer (Teamer-Ausnahme), Konfi-Antraege nur aus zugewiesenen
+      // Jahrgaengen. ANY auf leerem Array trifft nichts: Ein Admin ohne
+      // Jahrgang zaehlt nur Teamer-Antraege, wie seine Liste.
+      let requestsPromise = zero;
+      if (isAdminType && !istGebundenerAdmin) {
+        requestsPromise = db.query(
+          `SELECT COUNT(*)::int AS c
+           FROM activity_requests ar
+           JOIN activities a ON ar.activity_id = a.id
+           WHERE a.organization_id = $1 AND ar.status = 'pending'`,
+          [organizationId]
+        );
+      } else if (istGebundenerAdmin) {
+        requestsPromise = db.query(
+          `SELECT COUNT(*)::int AS c
+           FROM activity_requests ar
+           JOIN activities a ON ar.activity_id = a.id
+           LEFT JOIN konfi_profiles kp ON kp.user_id = ar.user_id
+           WHERE a.organization_id = $1 AND ar.status = 'pending'
+             AND (a.target_role = 'teamer' OR kp.jahrgang_id = ANY($2::int[]))`,
+          [organizationId, eigeneJahrgangIds]
+        );
+      }
+
+      // pendingEvents: fuer gebundene Admins mit demselben Sichtbarkeits-
+      // Filter wie die Terminliste (events/lesen.js) — Termine ohne Jahrgang
+      // und Teamer-Termine zaehlen immer, jahrgangsgebundene nur aus
+      // zugewiesenen Jahrgaengen.
+      let eventsPromise = zero;
+      if (isAdminType) {
+        const eventSichtFilter = istGebundenerAdmin
+          ? `AND (
+               e.teamer_only OR e.teamer_needed
+               OR NOT EXISTS (SELECT 1 FROM event_jahrgang_assignments eja
+                              WHERE eja.event_id = e.id)
+               OR EXISTS (SELECT 1 FROM event_jahrgang_assignments eja
+                          WHERE eja.event_id = e.id
+                            AND eja.jahrgang_id = ANY($2::int[]))
+             )`
+          : '';
+        const eventParams = istGebundenerAdmin
+          ? [organizationId, eigeneJahrgangIds]
+          : [organizationId];
+        eventsPromise = db.query(
+          `SELECT COUNT(*)::int AS c
+           FROM events e
+           WHERE e.organization_id = $1
+           AND e.event_date < NOW()
+           AND EXISTS (
+             SELECT 1 FROM event_bookings eb
+             WHERE eb.event_id = e.id
+             AND eb.status = 'confirmed'
+             AND eb.attendance_status IS NULL
+           )
+           ${eventSichtFilter}`,
+          eventParams
+        );
+      }
+
       const [chatRes, requestsRes, eventsRes, challengesRes, badgesRes] = await Promise.all([
         db.query(chatQuery, [userId, userType, organizationId]),
-        isAdminType
-          ? db.query(
-              `SELECT COUNT(*)::int AS c
-               FROM activity_requests ar
-               JOIN activities a ON ar.activity_id = a.id
-               WHERE a.organization_id = $1 AND ar.status = 'pending'`,
-              [organizationId]
-            )
-          : zero,
-        isAdminType
-          ? db.query(
-              `SELECT COUNT(*)::int AS c
-               FROM events e
-               WHERE e.organization_id = $1
-               AND e.event_date < NOW()
-               AND EXISTS (
-                 SELECT 1 FROM event_bookings eb
-                 WHERE eb.event_id = e.id
-                 AND eb.status = 'confirmed'
-                 AND eb.attendance_status IS NULL
-               )`,
-              [organizationId]
-            )
-          : zero,
+        requestsPromise,
+        eventsPromise,
         challengesPromise,
         badgesPromise
       ]);

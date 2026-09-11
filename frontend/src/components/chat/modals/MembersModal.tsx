@@ -25,23 +25,24 @@ import {
   useIonAlert
 } from '@ionic/react';
 import {
-  closeOutline,
-  person,
-  personAddOutline,
-  checkmarkOutline,
-  search,
-  people,
-  peopleOutline,
-  trash,
-  filterOutline,
-  calendar,
-  cloudOfflineOutline
-} from 'ionicons/icons';
+  ICON_FILTER,
+  ICON_GRUPPE,
+  ICON_GRUPPE_GEFUELLT,
+  ICON_HAKEN,
+  ICON_LOESCHEN_GEFUELLT,
+  ICON_OFFLINE,
+  ICON_PERSON_GEFUELLT,
+  ICON_PERSON_HINZUFUEGEN,
+  ICON_SCHLIESSEN,
+  ICON_SUCHE_GEFUELLT,
+  ICON_TERMIN_GEFUELLT,
+} from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
 import api from '../../../services/api';
 import LoadingSpinner from '../../common/LoadingSpinner';
-import { ChatUser } from '../../../types/user';
+import { AdminUser, ChatUser } from '../../../types/user';
+import { EigenerJahrgang, KonfiEintrag } from '../../../types/chat';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 import { istTeamTyp } from '../../../utils/chatRoles';
@@ -115,32 +116,41 @@ const MembersModal: React.FC<MembersModalProps> = ({
     try {
       const [konfisRes, userJahrgangRes, adminsRes] = await Promise.all([
         api.get('/admin/konfis'),
-        api.get('/admin/users/me/jahrgaenge').catch(() => ({ data: [] })),
-        api.get('/admin/users').catch(() => ({ data: [] }))
+        // /users statt /admin/users: createApp.js haengt denselben Router
+        // unter beiden Praefixen ein (:480 und :483). Die Oberflaeche nutzt
+        // durchgaengig /users; der zweite Mount bleibt nur fuer ausgelieferte
+        // Apps stehen.
+        api.get('/users/me/jahrgaenge').catch(() => ({ data: [] })),
+        api.get('/users').catch(() => ({ data: [] }))
       ]);
 
       // Jahrgangs-Filter wie SimpleCreateChatModal
       let allowedJahrgangIds: number[] = [];
-      if (userJahrgangRes.data.length > 0) {
-        allowedJahrgangIds = userJahrgangRes.data.map((j: any) => j.jahrgang_id ?? j.id);
+      const eigeneJahrgaenge = userJahrgangRes.data as EigenerJahrgang[];
+      if (eigeneJahrgaenge.length > 0) {
+        allowedJahrgangIds = eigeneJahrgaenge.map((j) => j.id);
       }
 
-      const konfis: ChatUser[] = konfisRes.data
-        .filter((konfi: any) => {
+      // GET /admin/konfis liefert den Jahrgang nur als jahrgang_name; der
+      // frühere Fallback auf konfi.jahrgang griff nie.
+      const konfis: ChatUser[] = (konfisRes.data as KonfiEintrag[])
+        .filter((konfi) => {
           if (allowedJahrgangIds.length > 0) {
-            return konfi.jahrgang_id && allowedJahrgangIds.includes(konfi.jahrgang_id);
+            return Boolean(konfi.jahrgang_id) && allowedJahrgangIds.includes(konfi.jahrgang_id as number);
           }
           return true;
         })
-        .map((konfi: any) => ({
+        .map((konfi) => ({
           ...konfi,
           type: 'konfi' as const,
-          jahrgang_name: konfi.jahrgang_name || konfi.jahrgang
+          jahrgang_name: konfi.jahrgang_name ?? undefined
         }));
 
-      const adminUsers: ChatUser[] = adminsRes.data
-        .filter((u: any) => u.role_name !== 'konfi')
-        .map((admin: any) => ({
+      // GET /users schliesst Konfis bereits serverseitig aus
+      // (WHERE r.name NOT IN ('konfi', 'super_admin')).
+      const adminUsers: ChatUser[] = (adminsRes.data as AdminUser[])
+        .filter((u) => u.role_name !== 'konfi')
+        .map((admin) => ({
           ...admin,
           type: 'admin' as const,
           role_description: admin.role_title || admin.role_display_name
@@ -326,25 +336,25 @@ const MembersModal: React.FC<MembersModalProps> = ({
         <div className="app-corner-badges">
           <div
             className="app-corner-badge"
-            style={{ backgroundColor: badgeColor, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
+            style={{ backgroundColor: badgeColor, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
             title={roleText}
           >
-            <IonIcon icon={isTeam ? people : person} style={{ color: '#fff', fontSize: '0.85rem' }} />
+            <IonIcon icon={isTeam ? ICON_GRUPPE_GEFUELLT : ICON_PERSON_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
           </div>
         </div>
 
         <div className="app-list-item__row">
           <div className="app-list-item__main">
             <div className={`app-icon-circle app-icon-circle--lg ${isTeam ? 'app-icon-circle--team' : 'app-icon-circle--konfi'}`}>
-              <IonIcon icon={person} />
+              <IonIcon icon={ICON_PERSON_GEFUELLT} />
             </div>
             <div className="app-list-item__content">
-              <div className="app-list-item__title" style={{ paddingRight: '70px' }}>{name}</div>
+              <div className="app-list-item__title" style={{ paddingRight: 'var(--app-freiraum-aktion-l)' }}>{name}</div>
               {/* Meta-Zeile: Jahrgang fuer Konfi, Rolle/Funktion fuer Team (Admin/Teamer) */}
               {isTeam && roleText && (
                 <div className="app-list-item__meta">
                   <span className="app-list-item__meta-item">
-                    <IonIcon icon={peopleOutline} style={{ color: 'var(--app-color-teamer)' }} />
+                    <IonIcon icon={ICON_GRUPPE} style={{ color: 'var(--app-color-teamer)' }} />
                     {roleText}
                   </span>
                 </div>
@@ -352,7 +362,7 @@ const MembersModal: React.FC<MembersModalProps> = ({
               {!isTeam && jahrgang && (
                 <div className="app-list-item__meta">
                   <span className="app-list-item__meta-item">
-                    <IonIcon icon={calendar} style={{ color: 'var(--app-color-jahrgang)' }} />
+                    <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ color: 'var(--app-color-jahrgang)' }} />
                     {jahrgang}
                   </span>
                 </div>
@@ -373,7 +383,7 @@ const MembersModal: React.FC<MembersModalProps> = ({
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton className="app-modal-close-btn" onClick={handleClose} aria-label="Schließen">
-              <IonIcon icon={closeOutline} slot="icon-only" />
+              <IonIcon icon={ICON_SCHLIESSEN} slot="icon-only" />
             </IonButton>
           </IonButtons>
 
@@ -390,11 +400,11 @@ const MembersModal: React.FC<MembersModalProps> = ({
                   disabled={selectedUsers.size === 0 || adding || !isOnline}
                   aria-label="Ausgewählte Mitglieder hinzufügen"
                 >
-                  {!isOnline ? <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</> : adding ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} slot="icon-only" />}
+                  {!isOnline ? <><IonIcon icon={ICON_OFFLINE} /> Du bist offline</> : adding ? <IonSpinner name="crescent" /> : <IonIcon icon={ICON_HAKEN} slot="icon-only" />}
                 </IonButton>
               ) : (
                 <IonButton onClick={() => setShowAddMode(true)} aria-label="Mitglieder hinzufügen">
-                  <IonIcon icon={personAddOutline} slot="icon-only" />
+                  <IonIcon icon={ICON_PERSON_HINZUFUEGEN} slot="icon-only" />
                 </IonButton>
               )}
             </IonButtons>
@@ -417,18 +427,18 @@ const MembersModal: React.FC<MembersModalProps> = ({
               <IonList inset={true} className="app-modal-section">
                 <IonListHeader>
                   <div className="app-section-icon app-section-icon--chat">
-                    <IonIcon icon={filterOutline} />
+                    <IonIcon icon={ICON_FILTER} />
                   </div>
                   <IonLabel>Suche</IonLabel>
                 </IonListHeader>
                 <IonItemGroup>
                   <IonItem>
                     <IonIcon
-                      icon={search}
+                      icon={ICON_SUCHE_GEFUELLT}
                       slot="start"
                       style={{
-                        color: '#8e8e93',
-                        fontSize: '1rem'
+                        color: 'var(--app-text-system)',
+                        fontSize: 'var(--app-text-standard)'
                       }}
                     />
                     <IonInput
@@ -444,20 +454,20 @@ const MembersModal: React.FC<MembersModalProps> = ({
               <IonList inset={true} className="app-modal-section">
                 <IonListHeader>
                   <div className="app-section-icon app-section-icon--chat">
-                    <IonIcon icon={peopleOutline} />
+                    <IonIcon icon={ICON_GRUPPE} />
                   </div>
                   <IonLabel>Verfügbare Personen ({filteredAvailableUsers.length})</IonLabel>
                 </IonListHeader>
                 <IonCard className="app-card">
-                  <IonCardContent style={{ padding: filteredAvailableUsers.length === 0 ? '16px' : '12px' }}>
+                  <IonCardContent style={{ padding: filteredAvailableUsers.length === 0 ? 'var(--app-abstand-basis)' : 'var(--app-abstand-mittel)' }}>
                     {filteredAvailableUsers.length === 0 ? (
                       <div style={{
-                        padding: '40px 20px',
+                        padding: 'var(--app-abstand-riesig) var(--app-abstand-gross)',
                         textAlign: 'center',
-                        color: '#666'
+                        color: 'var(--app-text-secondary)'
                       }}>
-                        <IonIcon icon={search} style={{ fontSize: '3rem', opacity: 0.3, marginBottom: '16px' }} />
-                        <p style={{ margin: '0', fontSize: '1rem' }}>Keine verfügbaren Personen gefunden</p>
+                        <IonIcon icon={ICON_SUCHE_GEFUELLT} style={{ fontSize: 'var(--app-anzeige-riesig)', opacity: 0.3, marginBottom: 'var(--app-abstand-basis)' }} />
+                        <p style={{ margin: '0', fontSize: 'var(--app-text-standard)' }}>Keine verfügbaren Personen gefunden</p>
                       </div>
                     ) : (
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -484,20 +494,20 @@ const MembersModal: React.FC<MembersModalProps> = ({
                 <IonList inset={true} className="app-modal-section">
                   <IonListHeader>
                     <div className="app-section-icon app-section-icon--chat">
-                      <IonIcon icon={peopleOutline} />
+                      <IonIcon icon={ICON_GRUPPE} />
                     </div>
                     <IonLabel>Mitglieder ({sortedParticipants.length})</IonLabel>
                   </IonListHeader>
                   <IonCard className="app-card">
-                    <IonCardContent style={{ padding: sortedParticipants.length === 0 ? '16px' : '12px' }}>
+                    <IonCardContent style={{ padding: sortedParticipants.length === 0 ? 'var(--app-abstand-basis)' : 'var(--app-abstand-mittel)' }}>
                       {sortedParticipants.length === 0 ? (
                         <div style={{
-                          padding: '40px 20px',
+                          padding: 'var(--app-abstand-riesig) var(--app-abstand-gross)',
                           textAlign: 'center',
-                          color: '#666'
+                          color: 'var(--app-text-secondary)'
                         }}>
-                          <IonIcon icon={peopleOutline} style={{ fontSize: '3rem', opacity: 0.3, marginBottom: '16px' }} />
-                          <p style={{ margin: '0', fontSize: '1rem' }}>Keine Mitglieder</p>
+                          <IonIcon icon={ICON_GRUPPE} style={{ fontSize: 'var(--app-anzeige-riesig)', opacity: 0.3, marginBottom: 'var(--app-abstand-basis)' }} />
+                          <p style={{ margin: '0', fontSize: 'var(--app-text-standard)' }}>Keine Mitglieder</p>
                         </div>
                       ) : (
                         <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -526,7 +536,7 @@ const MembersModal: React.FC<MembersModalProps> = ({
                                     className="app-swipe-action"
                                   >
                                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
-                                      <IonIcon icon={trash} />
+                                      <IonIcon icon={ICON_LOESCHEN_GEFUELLT} />
                                     </div>
                                   </IonItemOption>
                                 </IonItemOptions>

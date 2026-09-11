@@ -1,3 +1,4 @@
+import { fehlerText } from '../utils/fehler';
 import { useIonAlert } from '@ionic/react';
 import { useApp } from '../contexts/AppContext';
 import api from '../services/api';
@@ -26,8 +27,8 @@ export function useChallengeDelete({ onDeleted }: UseChallengeDeleteOptions) {
       await api.delete(`/challenges/admin/${challenge.id}${force ? '?force=true' : ''}`);
       await onDeleted();
       setSuccess('Challenge gelöscht');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Fehler beim Löschen der Challenge');
+    } catch (err) {
+      setError(fehlerText(err, 'Fehler beim Löschen der Challenge'));
     }
   };
 

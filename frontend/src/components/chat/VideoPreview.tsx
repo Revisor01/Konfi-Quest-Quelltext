@@ -158,8 +158,8 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
     position: 'relative',
     maxWidth: '280px',
     height: '200px',
-    borderRadius: '12px',
-    backgroundColor: '#1e1e1e',
+    borderRadius: 'var(--app-radius-karte)',
+    backgroundColor: 'var(--app-surface-dark)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center'
@@ -182,7 +182,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
   }
 
   return (
-    <div style={{ position: 'relative', maxWidth: '280px', borderRadius: '12px', overflow: 'hidden' }}>
+    <div style={{ position: 'relative', maxWidth: '280px', borderRadius: 'var(--app-radius-karte)', overflow: 'hidden' }}>
       <video
         ref={videoRef}
         src={videoUrl}
@@ -193,8 +193,8 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
           maxHeight: '200px',
           minHeight: '120px',
           display: 'block',
-          borderRadius: '12px',
-          backgroundColor: '#000',
+          borderRadius: 'var(--app-radius-karte)',
+          backgroundColor: 'black',
           cursor: 'pointer',
           objectFit: 'cover',
           border: '1px solid rgba(255,255,255,0.1)'
@@ -224,7 +224,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
             width: '60px',
             height: '60px',
             backgroundColor: 'rgba(0, 0, 0, 0.6)',
-            borderRadius: '50%',
+            borderRadius: 'var(--app-radius-kreis)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -240,7 +240,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
             borderLeft: '20px solid white',
             borderTop: '12px solid transparent',
             borderBottom: '12px solid transparent',
-            marginLeft: '4px'
+            marginLeft: 'var(--app-abstand-mini)'
           }} />
         </div>
       )}
@@ -250,17 +250,17 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
         bottom: '8px',
         left: '8px',
         display: 'flex',
-        gap: '6px',
+        gap: 'var(--app-abstand-kompakt)',
         zIndex: 5
       }}>
         {duration && (
           <div style={{
             backgroundColor: 'rgba(0, 0, 0, 0.8)',
             color: 'white',
-            padding: '4px 8px',
-            borderRadius: '12px',
-            fontSize: '0.75rem',
-            fontWeight: '500',
+            padding: 'var(--app-abstand-mini) var(--app-abstand-eng)',
+            borderRadius: 'var(--app-radius-karte)',
+            fontSize: 'var(--app-text-klein)',
+            fontWeight: 'var(--app-schrift-mittel)',
             pointerEvents: 'none'
           }}>
             {duration}
@@ -274,10 +274,10 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
         right: '8px',
         backgroundColor: 'rgba(0, 0, 0, 0.8)',
         color: 'white',
-        padding: '4px 8px',
-        borderRadius: '12px',
-        fontSize: '0.75rem',
-        fontWeight: '500',
+        padding: 'var(--app-abstand-mini) var(--app-abstand-eng)',
+        borderRadius: 'var(--app-radius-karte)',
+        fontSize: 'var(--app-text-klein)',
+        fontWeight: 'var(--app-schrift-mittel)',
         pointerEvents: 'none',
         zIndex: 5
       }}>

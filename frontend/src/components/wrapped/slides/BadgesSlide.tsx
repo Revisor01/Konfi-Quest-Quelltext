@@ -1,39 +1,109 @@
 import React from 'react';
 import { IonIcon } from '@ionic/react';
-import { ribbonOutline } from 'ionicons/icons';
 import SlideBase from './SlideBase';
 import { getIconFromString } from '../../../utils/badgeIcons';
+import { useCountUp } from '../../../hooks/useCountUp';
 import type { SlideProps, KonfiBadgesSlide } from '../../../types/wrapped';
 
 interface BadgesSlideProps extends SlideProps {
   badges: KonfiBadgesSlide;
 }
 
+/**
+ * Die Abzeichen-Seite -- auf die Slogan-Gestaltung umgezogen.
+ *
+ * Die Abzeichen selbst bleiben als Reihe: Sie sind Bilder, keine Zahlen,
+ * und tragen die Seite mit. Das Verhaeltnis "x von y" steht klein darunter
+ * statt als Untertitel unter einer Riesenzahl.
+ */
+
+function spruchFuer(verdient: number, gesamt: number): { auge: string; slogan: string[]; nachsatz: string } {
+  // 1) Alle -- die Ausnahme
+  if (gesamt > 0 && verdient >= gesamt) {
+    return {
+      auge: 'Deine Abzeichen',
+      slogan: ['Alle.', 'Wirklich', 'alle.'],
+      nachsatz: 'Da geht nichts mehr — du hast jedes eingesammelt.'
+    };
+  }
+  // 2) Sehr viele
+  if (verdient >= 15) {
+    return {
+      auge: 'Deine Abzeichen',
+      slogan: ['Die Wand', 'wird', 'langsam', 'voll.'],
+      nachsatz: `${verdient} Stück — das sammelt nicht jede.`
+    };
+  }
+  // 3) Viele
+  if (verdient >= 8) {
+    return {
+      auge: 'Deine Abzeichen',
+      slogan: ['Deine', 'Sammlung', 'kann sich', 'sehen lassen.'],
+      nachsatz: `${verdient} Stück hast du dir verdient.`
+    };
+  }
+  // 4) Einige
+  if (verdient >= 3) {
+    return {
+      auge: 'Deine Abzeichen',
+      slogan: ['Gesammelt', 'wird', 'fleißig.'],
+      nachsatz: `${verdient} Abzeichen tragen deinen Namen.`
+    };
+  }
+  // 5) Die ersten
+  if (verdient >= 1) {
+    return {
+      auge: verdient === 1 ? 'Dein Abzeichen' : 'Deine Abzeichen',
+      slogan: ['Das erste', 'ist das', 'schönste.'],
+      nachsatz: verdient === 1 ? 'Eins hast du — und das zählt.' : `${verdient} hast du schon.`
+    };
+  }
+  return {
+    auge: 'Deine Abzeichen',
+    slogan: ['Das erste', 'wartet', 'auf dich.'],
+    nachsatz: 'Es kommt von ganz allein.'
+  };
+}
+
 const BadgesSlide: React.FC<BadgesSlideProps> = ({ isActive, badges }) => {
+  const animiert = useCountUp(badges.total_earned, isActive, 1400);
+  const text = spruchFuer(badges.total_earned, badges.total_available);
+
   return (
-    <SlideBase isActive={isActive} className="badges-slide">
-      <div className="wrapped-anim-fly-left">
-        <p className="wrapped-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <IonIcon icon={ribbonOutline} style={{ fontSize: '1rem' }} />
-          Deine Badges
-        </p>
-      </div>
-      <div className="wrapped-anim-number-pop wrapped-anim-delay-1">
-        <p className="wrapped-big-number">{badges.total_earned}</p>
-      </div>
-      <div className="wrapped-anim-fade wrapped-anim-delay-1">
-        <p className="wrapped-subtitle">von {badges.total_available} verdient</p>
-      </div>
-      <div className="badges-grid wrapped-anim-fade wrapped-anim-delay-2">
-        {badges.badges.slice(0, 6).map((badge, i) => (
-          <div key={i} className="badge-item wrapped-anim-bounce" style={{ animationDelay: `${0.4 + i * 0.12}s` }}>
-            <div className="badge-icon" style={{ background: badge.color || '#7c3aed' }}>
-              <IonIcon icon={getIconFromString(badge.icon)} />
-            </div>
-            <span className="badge-name">{badge.name}</span>
-          </div>
+    <SlideBase isActive={isActive} className="badges-slide" kachel="badges">
+      <div className="kat-auge">{text.auge}</div>
+
+      {badges.total_earned > 0 && (
+        <div className="kat-zahl">
+          {animiert}
+          {badges.total_available > 0 && (
+            <span className="kat-zahl__mal">/{badges.total_available}</span>
+          )}
+        </div>
+      )}
+
+      <div className="kat-slogan">
+        {text.slogan.map((zeile, i) => (
+          <span key={i} style={{ display: 'block' }}>{zeile}</span>
         ))}
       </div>
+
+      <div className="kat-nachsatz">{text.nachsatz}</div>
+
+      {badges.badges.length > 0 && (
+        <div className="w-abzeichenreihe">
+          {badges.badges.slice(0, 6).map((badge, i) => (
+            <div
+              key={i}
+              className="w-abzeichen wrapped-anim-bounce"
+              style={{ background: badge.color || 'var(--app-color-wrapped)', animationDelay: `${0.3 + i * 0.1}s` }}
+              title={badge.name}
+            >
+              <IonIcon icon={getIconFromString(badge.icon)} />
+            </div>
+          ))}
+        </div>
+      )}
     </SlideBase>
   );
 };

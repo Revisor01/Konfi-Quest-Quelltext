@@ -8,5 +8,6 @@ export { default as AudioPlayer } from './AudioPlayer';
 export { default as EventLegendModal } from './EventLegendModal';
 export { default as ChallengeLegendModal } from './ChallengeLegendModal';
 export { default as TrialBanner } from './TrialBanner';
-export { formatEventDate, formatEventTime, formatEventDateLong, eventEnde, istVergangen } from './eventFormatting';
+export { default as StoreUpdateBanner } from './StoreUpdateBanner';
+export { formatEventDate, formatEventTime, formatEventDateLong, eventEnde, istVergangen, kategorienText, zeigtPunkteart, punkteartText } from './eventFormatting';
 export { default as EventCornerBadges } from './EventCornerBadges';

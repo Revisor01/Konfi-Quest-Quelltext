@@ -47,7 +47,13 @@ export interface Event {
   registration_opens_at?: string;
   registration_closes_at?: string;
   registered_count: number;
-  registration_status: 'upcoming' | 'open' | 'closed' | 'cancelled';
+  // Optional und um 'mandatory' erweitert: Der Wert fehlte in
+  // GET /events/:id ganz -- die Leitungs-Detailansicht las ihn dort als
+  // undefined und zeigte deshalb "Geschlossen" an einem offenen Termin
+  // (Prod-Event 130). Das Backend liefert ihn jetzt auch im Detail; der Typ
+  // sagt trotzdem "kann fehlen", denn aeltere Antworten und Cache-Staende
+  // haben ihn nicht. Wer ihn liest, muss den Fall behandeln.
+  registration_status?: 'upcoming' | 'open' | 'closed' | 'cancelled' | 'mandatory';
   teamer_registration_status?: 'none' | 'upcoming' | 'open' | 'waitlist' | 'closed' | 'cancelled';
   created_at?: string;
   is_registered?: boolean;
@@ -98,4 +104,53 @@ export interface Event {
   material_count?: number;
   // Dashboard
   max_participants_display?: number;
+}
+
+/**
+ * Ein Eintrag aus der Teilnehmerliste eines Termins
+ * (GET /events/:id -> participants, backend/routes/events/lesen.js).
+ *
+ * Die Abfrage liefert `eb.*` aus event_bookings, angereichert um Name,
+ * Jahrgang, Rolle und die Zeiten des gebuchten Zeitfensters. Deshalb sind
+ * hier ALLE Buchungsstatus moeglich — auch 'waitlist' und 'opted_out'.
+ */
+export interface Participant {
+  id: number;
+  user_id?: number;
+  participant_name: string;
+  jahrgang_name?: string;
+  role_name?: string;
+  created_at: string;
+  status?: 'confirmed' | 'waitlist' | 'pending' | 'opted_out';
+  attendance_status?: 'present' | 'absent' | null;
+  timeslot_id?: number;
+  timeslot_start_time?: string;
+  timeslot_end_time?: string;
+  opt_out_reason?: string;
+  opt_out_date?: string;
+  absage_nach_zusage?: boolean;
+}
+
+/**
+ * Material, das an einem Termin haengt (GET /material/by-event/:eventId,
+ * backend/routes/material.js). Die Abfrage liefert genau diese Felder;
+ * file_count wird serverseitig zur Zahl gemacht.
+ */
+export interface EventMaterial {
+  id: number;
+  title: string;
+  description?: string;
+  created_at: string;
+  created_by_name?: string;
+  file_count?: number;
+  link_url?: string | null;
+}
+
+/** Eine Abmeldung von einem Termin (GET /events/:id -> unregistrations). */
+export interface Unregistration {
+  id: number;
+  user_id: number;
+  konfi_name: string;
+  reason?: string;
+  unregistered_at: string;
 }

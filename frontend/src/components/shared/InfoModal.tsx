@@ -3,7 +3,7 @@ import {
   IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButton,
   IonButtons, IonIcon,
 } from '@ionic/react';
-import { closeOutline } from 'ionicons/icons';
+import { ICON_SCHLIESSEN } from './icons';
 
 export interface InfoModalProps {
   onClose: () => void;
@@ -23,29 +23,29 @@ const InfoModal: React.FC<InfoModalProps> = ({ onClose, title, icon, color = 'va
       <IonToolbar>
         <IonButtons slot="start">
           <IonButton className="app-modal-close-btn" onClick={onClose} aria-label="Schließen">
-            <IonIcon icon={closeOutline} slot="icon-only" />
+            <IonIcon icon={ICON_SCHLIESSEN} slot="icon-only" />
           </IonButton>
         </IonButtons>
         <IonTitle>{title}</IonTitle>
       </IonToolbar>
     </IonHeader>
     <IonContent className="app-gradient-background">
-      <div style={{ padding: '24px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+      <div style={{ padding: 'var(--app-abstand-weit) var(--app-abstand-gross)', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
         <div
           style={{
-            width: '88px', height: '88px', borderRadius: '24px',
+            width: '88px', height: '88px', borderRadius: 'var(--app-radius-modal)',
             background: color, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            marginBottom: '20px', boxShadow: '0 8px 24px rgba(0,0,0,0.12)'
+            marginBottom: 'var(--app-abstand-gross)', boxShadow: 'var(--app-schatten-hoch)'
           }}
         >
-          <IonIcon icon={icon} style={{ fontSize: '2.6rem', color: '#fff' }} />
+          <IonIcon icon={icon} style={{ fontSize: 'var(--app-anzeige-gross)', color: 'white' }} />
         </div>
-        <h1 style={{ fontSize: '1.4rem', fontWeight: 800, margin: '0 0 16px', textAlign: 'center', color: '#1a1a1a' }}>
+        <h1 style={{ fontSize: 'var(--app-text-titel-gross)', fontWeight: 'var(--app-schrift-extrafett)', margin: '0 0 var(--app-abstand-basis)', textAlign: 'center', color: 'var(--app-text-emphasis)' }}>
           {title}
         </h1>
         <div style={{ maxWidth: '520px', width: '100%' }}>
           {paragraphs.map((p, i) => (
-            <p key={i} style={{ fontSize: '1rem', lineHeight: 1.6, color: '#3a3a3a', margin: '0 0 14px' }}>
+            <p key={i} style={{ fontSize: 'var(--app-text-standard)', lineHeight: 1.6, color: 'var(--app-text-primary)', margin: '0 0 var(--app-abstand-mittelweit)' }}>
               {p}
             </p>
           ))}

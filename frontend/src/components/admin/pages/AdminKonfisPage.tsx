@@ -1,3 +1,4 @@
+import { fehlerDaten, fehlerStatus, fehlerText } from '../../../utils/fehler';
 import React, { useState, useCallback } from 'react';
 import {
   IonPage,
@@ -15,7 +16,7 @@ import {
   useIonRouter
 } from '@ionic/react';
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
-import { add, checkboxOutline } from 'ionicons/icons';
+import { ICON_CHECKBOX, ICON_HINZUFUEGEN_GEFUELLT } from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
@@ -31,10 +32,14 @@ import AttendanceMatrixModal from '../modals/AttendanceMatrixModal';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { OrgSwitcherButton } from '../../shared';
 import AdminOnboardingModal from '../modals/AdminOnboardingModal';
-import AdminUpdateWalkthroughModal from '../modals/AdminUpdateWalkthroughModal';
+import AdminUpdate211WalkthroughModal from '../modals/AdminUpdate211WalkthroughModal';
 import { useOnboardingWithUpdateOnce } from '../../../hooks/useOnboardingOnce';
 import NeuerungenBanner from '../../shared/NeuerungenBanner';
 import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
+import type { ApiFehlerAntwort } from '../../../utils/fehler';
+import type { KonfiFormDaten, KonfiAngelegtAntwort } from '../../../types/user';
+import type { AxiosResponse } from 'axios';
+import type { TeamerListenEintrag } from '../../../types/user';
 
 interface Konfi {
   id: number;
@@ -77,7 +82,7 @@ interface AdminKonfisPageProps {
 const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, selectedKonfiId }) => {
   const { setSuccess, setError, user, isOnline } = useApp();
   const router = useIonRouter();
-  const { pageRef, presentingElement, cleanupModals } = useModalPage('admin-konfis');
+  const { pageRef, presentingElement } = useModalPage('admin-konfis');
   // Onboarding-Tour einmal pro Admin-Account (beim ersten Betreten der Konfis-Seite,
   // der Landing-Page für Admins/Org-Admins) — bzw. für Bestandsnutzer die
   // Neuigkeiten-Karte "Was ist neu in Version 2.0". Der Walkthrough öffnet
@@ -104,14 +109,14 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
   );
 
   // Offline-Query: Jahrgänge
-  const { data: jahrgaenge, refresh: refreshJahrgaenge, refreshLive: refreshJahrgaengeLive } = useOfflineQuery<Jahrgang[]>(
+  const { data: jahrgaenge, refreshLive: refreshJahrgaengeLive } = useOfflineQuery<Jahrgang[]>(
     'admin:jahrgaenge:' + user?.organization_id,
     async () => { const res = await api.get('/admin/jahrgaenge'); return res.data; },
     { ttl: CACHE_TTL.STAMMDATEN }
   );
 
   // Offline-Query: Settings
-  const { data: settings, refresh: refreshSettings, refreshLive: refreshSettingsLive } = useOfflineQuery<Settings>(
+  const { refreshLive: refreshSettingsLive } = useOfflineQuery<Settings>(
     'admin:settings:' + user?.organization_id,
     async () => { const res = await api.get('/settings'); return res.data; },
     { ttl: CACHE_TTL.SETTINGS }
@@ -126,7 +131,7 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
   const [presentKonfiModalHook, dismissKonfiModalHook] = useIonModal(KonfiModal, {
     jahrgaenge: jahrgaenge || [],
     onClose: () => dismissKonfiModalHook(),
-    onSave: (konfiData: any) => {
+    onSave: (konfiData: KonfiFormDaten) => {
       handleAddKonfi(konfiData);
       dismissKonfiModalHook();
     },
@@ -175,7 +180,7 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
             try {
               await api.delete(`/admin/konfis/${konfi.id}`);
               await refreshKonfis();
-            } catch (err) {
+            } catch {
               setError('Fehler beim Löschen');
             }
           }
@@ -186,7 +191,7 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
 
   // Gibt ein Promise zurück, das erst nach abgeschlossenem Delete (oder Abbruch)
   // resolved — so kann KonfisView danach die lokale Teamer-Liste neu laden.
-  const handleDeleteTeamer = (teamer: any): Promise<void> => {
+  const handleDeleteTeamer = (teamer: TeamerListenEintrag): Promise<void> => {
     if (offlineBlockiert(isOnline, setError)) return Promise.resolve();
     return new Promise<void>((resolve) => {
       presentAlert({
@@ -202,8 +207,8 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
                 await api.delete(`/users/${teamer.id}`);
                 await refreshKonfis();
                 setSuccess(`Teamer:in "${teamer.display_name || teamer.name}" gelöscht`);
-              } catch (err: any) {
-                setError(err.response?.data?.error || 'Fehler beim Löschen');
+              } catch (err) {
+                setError(fehlerText(err, 'Fehler beim Löschen'));
               } finally {
                 resolve();
               }
@@ -231,10 +236,10 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
   };
 
   // Erfolgsbehandlung nach erfolgreichem Anlegen (auch nach Grace-Bestätigung wiederverwendet)
-  const handleKonfiCreated = async (response: any, konfiData: any) => {
+  const handleKonfiCreated = async (response: AxiosResponse<KonfiAngelegtAntwort>, konfiData: KonfiFormDaten) => {
     // Automatisch Jahrgangschat erstellen/zuweisen
     if (konfiData.jahrgang_id) {
-      await createOrJoinJahrgangChat(konfiData.jahrgang_id, response.data.id);
+      await createOrJoinJahrgangChat(konfiData.jahrgang_id);
     }
 
     const tempPassword = response.data.temporaryPassword;
@@ -242,7 +247,7 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
       presentAlert({
         header: 'Einmalpasswort',
         subHeader: tempPassword,
-        message: `Konfi "${konfiData.display_name}" erstellt. Kopiere das Passwort und gib es dem Konfi weiter.`,
+        message: `Konfi "${konfiData.name}" erstellt. Kopiere das Passwort und gib es dem Konfi weiter.`,
         buttons: [
           {
             text: 'Kopieren',
@@ -262,7 +267,7 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
   };
 
   // Grace-Bestätigungsdialog: legt den Konfi nach "Trotzdem anlegen" mit confirm-Flag erneut an
-  const presentGraceDialog = (konfiData: any, data: any) => {
+  const presentGraceDialog = (konfiData: KonfiFormDaten, data: ApiFehlerAntwort | undefined) => {
     const count = data?.count;
     const limit = data?.limit;
     const nextTier = data?.next_tier;
@@ -283,8 +288,8 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
             try {
               const response = await api.post('/admin/konfis', { ...konfiData, confirm: true });
               await handleKonfiCreated(response, konfiData);
-            } catch (err: any) {
-              setError(err.response?.data?.error || 'Fehler beim Hinzufügen des Konfis');
+            } catch (err) {
+              setError(fehlerText(err, 'Fehler beim Hinzufügen des Konfis'));
             }
           }
         }
@@ -292,19 +297,20 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
     });
   };
 
-  const handleAddKonfi = async (konfiData: any) => {
+  const handleAddKonfi = async (konfiData: KonfiFormDaten) => {
     try {
       const response = await api.post('/admin/konfis', konfiData);
       await handleKonfiCreated(response, konfiData);
-    } catch (err: any) {
-      const errorCode = err.response?.data?.error_code;
+    } catch (err) {
+      const daten = fehlerDaten(err);
+      const errorCode = daten?.error_code;
 
       if (errorCode === 'limit_grace') {
         // 409 Grace: Bestätigungsdialog mit Tarif-Hinweis und "Trotzdem anlegen"
-        presentGraceDialog(konfiData, err.response?.data);
+        presentGraceDialog(konfiData, daten);
       } else if (errorCode === 'limit_exceeded') {
         // 403 Hard-Block: nur Hinweis, kein Override
-        const nextTier = err.response?.data?.next_tier;
+        const nextTier = daten?.next_tier;
         const tarifHinweis = nextTier
           ? `Der nächste Tarif gibt dir Platz für bis zu ${nextTier} Konfis.`
           : 'Bitte wende dich an den Support für ein passendes Angebot.';
@@ -313,28 +319,30 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
           message: `Das Konfi-Limit ist ausgeschöpft. Um weitere Konfis anzulegen, ist ein Tarif-Upgrade nötig. ${tarifHinweis}`,
           buttons: [{ text: 'Verstanden', role: 'cancel' }]
         });
-      } else if (err.response?.status === 409) {
+      } else if (fehlerStatus(err) === 409) {
         // Username-Kollision (unverändert)
         setError('Ein Konfi mit diesem Namen existiert bereits.');
       } else {
-        setError(err.response?.data?.error || 'Fehler beim Hinzufügen des Konfis');
+        setError(fehlerText(err, 'Fehler beim Hinzufügen des Konfis'));
       }
     }
   };
 
-  const createOrJoinJahrgangChat = async (jahrgangId: number, konfiId: number) => {
+  const createOrJoinJahrgangChat = async (jahrgangId: number) => {
     try {
       // Finde den Jahrgang-Namen
       const jahrgangResponse = await api.get(`/admin/jahrgaenge/${jahrgangId}`);
       const jahrgangName = jahrgangResponse.data.name;
-      
-      // Erstelle oder finde existierenden Jahrgangschat
+
+      // Legt den Jahrgangschat an, falls es ihn noch nicht gibt, und traegt
+      // in beiden Faellen alle Konfis des Jahrgangs ein - auch die, die
+      // spaeter dazugekommen sind.
       await api.post('/chat/rooms', {
         type: 'jahrgang',
         name: `Jahrgang ${jahrgangName}`,
         jahrgang_id: jahrgangId
       });
-      
+
     } catch (err) {
  console.error('Fehler beim Jahrgangschat:', err);
       // Nicht als kritischer Fehler behandeln, da der Konfi bereits erstellt wurde
@@ -351,7 +359,7 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
             {['org_admin', 'admin'].includes(user?.role_name || '') && (
               <>
                 <IonButton aria-label="Anwesenheit und Konfisprüche anzeigen" onClick={() => presentMatrixModal({ presentingElement: presentingElement })}>
-                  <IonIcon icon={checkboxOutline} />
+                  <IonIcon icon={ICON_CHECKBOX} />
                 </IonButton>
                 <IonButton
                   aria-label={viewMode === 'teamer' ? 'Neue Teamer:in anlegen' : 'Neuen Konfi anlegen'}
@@ -359,7 +367,7 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
                     ? presentTeamerModalHook({ presentingElement: presentingElement })
                     : presentKonfiModal()}
                 >
-                  <IonIcon icon={add} />
+                  <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
                 </IonButton>
               </>
             )}
@@ -384,7 +392,7 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
             aus. Die Leitung hatte hier bislang nur die "Was ist neu"-Karte --
             die Mitmachen-Karte gab es fuer sie nur unter "Mehr". */}
         <NeuerungenBanner
-          style={{ margin: '8px 16px 12px' }}
+          style={{ margin: 'var(--app-abstand-eng) var(--app-abstand-basis) var(--app-abstand-mittel)' }}
           updateSichtbar={showUpdateHinweis}
           mitmachenSichtbar={showMitmachenHinweis}
           onUpdateOeffnen={() => { markUpdateHinweisGesehen(); setShowUpdateWalkthrough(true); }}
@@ -399,9 +407,6 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
           <KonfisView 
             konfis={konfis || []}
             jahrgaenge={jahrgaenge || []}
-            settings={settings || {}}
-            onUpdate={refreshAll}
-            onAddKonfiClick={presentKonfiModal}
             onViewModeChange={setViewMode}
             onSelectKonfi={handleSelectKonfi}
             onDeleteKonfi={handleDeleteKonfi}
@@ -421,7 +426,7 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
 
       {/* "Was ist neu"-Walkthrough — geöffnet über die Neuigkeiten-Karte */}
       {showUpdateWalkthrough && (
-        <AdminUpdateWalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
+        <AdminUpdate211WalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
       )}
 
       {showMitmachenErklaerung && (

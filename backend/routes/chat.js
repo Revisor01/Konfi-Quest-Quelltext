@@ -3,12 +3,15 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const { formatUhrzeit, formatDatum } = require('../utils/zeitformat');
 const jwt = require('jsonwebtoken');
 const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const PushService = require('../services/pushService');
+const { chatPushText } = require('../utils/pushText');
 const { encryptBuffer, decryptBuffer } = require('../utils/photoCrypto');
 const { syncJahrgangChat, roleToParticipantType } = require('../utils/jahrgangChat');
+const { darfJahrgang, darfKonfi } = require('../utils/jahrgangsZugriff');
 const { syncTeamChat } = require('../utils/teamChat');
 const chatSyncCache = require('../utils/chatSyncCache');
 
@@ -158,7 +161,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
   router.get('/team-contacts', verifyTokenRBAC, async (req, res) => {
     try {
       if (!['admin', 'org_admin', 'teamer'].includes(req.user.role_name)) {
-        return res.status(403).json({ error: 'Nur für Teamer:innen und Admins' });
+        return res.status(403).json({ error: 'Nur für Team und Admins' });
       }
 
       const query = `
@@ -195,17 +198,11 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       }
       
       const organizationId = req.user.organization_id;
-      // Teamer:innen nur mit gemeinsamem Jahrgang (KONFI_SIEHT_TEAMMITGLIED),
-      // Leitung und Admins immer. is_active/deleted_at filtern wie in
-      // /team-contacts — die Route tat das bisher als einzige nicht.
-      // username wird nicht mehr ausgeliefert: für einen Chat unnötig, und
-      // es ist der Login-Name.
       const query = `
         SELECT u.id, u.display_name
           FROM users u
-          JOIN roles r ON u.role_id = r.id
+          ${TEAM_MITGLIED_ROLLE}
          WHERE r.name IN ('admin', 'org_admin', 'teamer')
-           AND u.organization_id = $2
            AND u.is_active = true
            AND u.deleted_at IS NULL
            AND u.id <> $1
@@ -223,28 +220,27 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
   // Create or get direct chat room
   // Darf der Anfragende diesen Konfi anschreiben?
   //
-  // Gibt null zurück, wenn erlaubt, sonst eine Fehlermeldung.
+  // Gibt null zurueck, wenn erlaubt, sonst eine Fehlermeldung.
   const konfiAnschreibenVerboten = async (anfragender, zielUserId) => {
-    if (anfragender.role_name !== 'teamer') return null;
+    const pseudoReq = { user: anfragender };
 
-    const { rows: [ziel] } = await db.query(
-      'SELECT jahrgang_id FROM konfi_profiles WHERE user_id = $1',
-      [zielUserId]
-    );
+    // Vollzugriff zuerst, ueber dieselbe Quelle: darfJahrgang laesst
+    // org_admin und super_admin (Rolle oder Flag) vor jeder Jahrgangs-
+    // pruefung durch. So bleibt fuer die Leitung auch ein Konfi-Konto ohne
+    // konfi_profiles-Datensatz erreichbar (Reparaturfall).
+    if (darfJahrgang(pseudoReq, null)) return null;
 
-    // Konfi ohne Jahrgang: nur Leitung und Admins erreichen ihn.
-    if (!ziel || !ziel.jahrgang_id) {
+    // darfKonfi ist die EINE Semantik-Quelle fuer die gebundenen Rollen
+    // (admin, teamer): Zuweisung mit can_view noetig, Konfi ohne Jahrgang
+    // ergibt erlaubt=false. Keine vierte Kopie der Regel hier.
+    const { gefunden, erlaubt, jahrgangId } = await darfKonfi(db, pseudoReq, zielUserId);
+    if (erlaubt) return null;
+
+    // Konfi ohne Jahrgang (oder ohne Profil-Datensatz).
+    if (!gefunden || !jahrgangId) {
       return 'Diese Konfirmand:in ist keinem deiner Jahrgänge zugeordnet';
     }
-
-    const zugewiesen = (anfragender.assigned_jahrgaenge || [])
-      .filter(j => j.can_view)
-      .map(j => j.id);
-
-    if (!zugewiesen.includes(ziel.jahrgang_id)) {
-      return 'Du kannst nur Konfirmand:innen aus deinen Jahrgängen anschreiben';
-    }
-    return null;
+    return 'Du kannst nur Konfirmand:innen aus deinen Jahrgängen anschreiben';
   };
 
   // Darf dieser Nutzer den Raum oeffnen (lesen, schreiben, Teilnehmer sehen)?
@@ -276,44 +272,58 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
 
   // Gegenrichtung: Darf dieser Konfi dieses Team-Mitglied anschreiben?
   //
-  // Symmetrisch zu konfiAnschreibenVerboten: Teamer:innen und Konfis erreichen
-  // einander nur über einen gemeinsamen Jahrgang. Leitung (org_admin), Admins
-  // und Super-Admins sind für jeden Konfi der Gemeinde erreichbar — sie
-  // verantworten die Gemeinde als Ganzes und haben im uebrigen System ohnehin
-  // Zugriff auf alle Jahrgänge (rbac.js:331).
+  // zielRolle muss die EFFEKTIVE Rolle in der aktiven Organisation sein —
+  // bei Multi-Org-Konten also die aus user_organizations, nicht die
+  // Primaerrolle (TEAM_MITGLIED_ROLLE loest das auf, rbac.js macht es beim
+  // Org-Wechsel genauso).
   //
-  // Eine Teamer:in OHNE Jahrgangszuweisung ist für Konfis unsichtbar. Das ist
-  // die konsequente Gegenseite: sie erreicht ihrerseits keinen einzigen Konfi.
+  // Bestehende Raeume sperrt die Regel NICHT nachtraeglich: darfRaumOeffnen
+  // prueft Teilnehmerschaft, nicht Jahrgaenge. Gebunden ist nur das ANLEGEN.
   //
   // Gibt null zurück, wenn erlaubt, sonst eine Fehlermeldung.
   const teamAnschreibenVerboten = async (konfiUserId, zielRolle, zielUserId) => {
-    if (zielRolle !== 'teamer') return null;
+    if (zielRolle === 'org_admin' || zielRolle === 'super_admin') return null;
 
+    // is_super_admin-Flag zaehlt wie die Rolle (gleiche Quelle wie
+    // darfJahrgang); sonst entscheidet der gemeinsame Jahrgang.
     const { rows: [ziel] } = await db.query(
       `SELECT 1
-         FROM konfi_profiles kp
-         JOIN user_jahrgang_assignments uja
-           ON uja.jahrgang_id = kp.jahrgang_id AND uja.can_view
-        WHERE kp.user_id = $1 AND uja.user_id = $2
+         FROM users u
+        WHERE u.id = $2
+          AND (u.is_super_admin OR EXISTS (
+            SELECT 1
+              FROM konfi_profiles kp
+              JOIN user_jahrgang_assignments uja
+                ON uja.jahrgang_id = kp.jahrgang_id AND uja.can_view
+             WHERE kp.user_id = $1 AND uja.user_id = u.id
+          ))
         LIMIT 1`,
       [konfiUserId, zielUserId]
     );
 
     if (!ziel) {
-      return 'Diese Teamer:in ist nicht für deinen Jahrgang zuständig';
+      // Gleiche Tonlage fuer beide Rollen: sagt WARUM es nicht geht, ohne
+      // die Gemeindestruktur (Zuweisungen, andere Jahrgaenge) auszubreiten.
+      return zielRolle === 'admin'
+        ? 'Dieser Admin ist nicht für deinen Jahrgang zuständig'
+        : 'Diese Teamer:in ist nicht für deinen Jahrgang zuständig';
     }
     return null;
   };
 
-  // SQL-Bedingung für Kontaktlisten von Konfis: Team-Mitglied ist erreichbar,
-  // wenn es NICHT teamer ist (Leitung/Admin -> immer) ODER einen gemeinsamen
-  // Jahrgang mit dem Konfi hat. $1 muss die User-ID des Konfis sein.
-  //
-  // Bewusst als geteilter Baustein: Die Regel gilt an drei Stellen (/admins,
-  // /available-users, POST /direct). Stand sie mehrfach im Code, blieb bisher
+  const TEAM_MITGLIED_ROLLE = `
+    LEFT JOIN user_organizations uo
+      ON uo.user_id = u.id AND uo.organization_id = $2
+    JOIN roles r
+      ON r.id = CASE WHEN u.organization_id = $2 THEN u.role_id ELSE uo.role_id END`;
+
+  // Bewusst als geteilter Baustein fuer beide Listen (/admins,
+  // /available-users); POST /direct zieht dieselbe Regel ueber
+  // teamAnschreibenVerboten. Stand die Regel mehrfach im Code, blieb bisher
   // regelmäßig eine Stelle zurück.
   const KONFI_SIEHT_TEAMMITGLIED = `(
-    r.name <> 'teamer'
+    r.name = 'org_admin'
+    OR u.is_super_admin
     OR EXISTS (
       SELECT 1
         FROM konfi_profiles kp
@@ -339,8 +349,9 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       // 'teamer') unsichtbar. Gleiche Fehlerklasse wie Migration 098.
       const { rows: [validUser] } = await db.query(
         `SELECT u.id, u.display_name, r.name AS role_name
-           FROM users u JOIN roles r ON u.role_id = r.id
-          WHERE u.id = $1 AND u.organization_id = $2 AND u.deleted_at IS NULL`,
+           FROM users u
+           ${TEAM_MITGLIED_ROLLE}
+          WHERE u.id = $1 AND u.deleted_at IS NULL`,
         [target_user_id, organizationId]
       );
       if (!validUser) {
@@ -352,8 +363,6 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         return res.status(403).json({ error: 'Konfis können keine anderen Konfis anschreiben' });
       }
 
-      // Konfis erreichen Teamer:innen nur über einen gemeinsamen Jahrgang.
-      // Leitung, Admins und Super-Admins erreichen sie immer.
       if (req.user.type === 'konfi') {
         const verboten = await teamAnschreibenVerboten(req.user.id, validUser.role_name, target_user_id);
         if (verboten) {
@@ -361,7 +370,6 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         }
       }
 
-      // Teamer:innen erreichen nur Konfis ihrer zugewiesenen Jahrgänge.
       if (validUser.role_name === 'konfi') {
         const verboten = await konfiAnschreibenVerboten(req.user, target_user_id);
         if (verboten) {
@@ -446,7 +454,36 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         }
         const { rows: [existing] } = await db.query("SELECT id FROM chat_rooms WHERE type = 'jahrgang' AND jahrgang_id = $1 AND organization_id = $2", [jahrgang_id, organizationId]);
         if (existing) {
-          return res.status(409).json({ error: 'Jahrgangs-Chat existiert bereits' });
+          // Der Raum steht schon: dann ist das hier ein Beitritt, kein Fehler.
+          // Frueher kam an dieser Stelle 409 zurueck, ohne irgendwen einzutragen.
+          // Konfis, die nach dem Anlegen des Jahrgangs dazukamen, landeten
+          // deshalb nie in chat_participants und sahen den Chat nie.
+          const { rows: konfis } = await db.query(
+            `SELECT u.id FROM users u
+               JOIN roles r ON u.role_id = r.id
+               JOIN konfi_profiles kp ON u.id = kp.user_id
+              WHERE r.name = 'konfi' AND kp.jahrgang_id = $1
+                AND u.organization_id = $2 AND u.deleted_at IS NULL`,
+            [jahrgang_id, organizationId]
+          );
+          for (const konfi of konfis) {
+            await db.query(
+              "INSERT INTO chat_participants (room_id, user_id, user_type) VALUES ($1, $2, 'konfi') ON CONFLICT DO NOTHING",
+              [existing.id, konfi.id]
+            );
+          }
+          res.json({ room_id: existing.id, created: false });
+
+          try {
+            const { rows: currentParticipants } = await db.query(
+              'SELECT user_id, user_type FROM chat_participants WHERE room_id = $1',
+              [existing.id]
+            );
+            emitRoomsChanged(currentParticipants);
+          } catch (notifyErr) {
+            console.error('Failed to emit roomsChanged (join jahrgang chat):', notifyErr);
+          }
+          return;
         }
       }
       
@@ -484,9 +521,6 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
             });
           }
 
-          // Gegenrichtung: Ein Konfi darf hier keine fremdjahrgaengige
-          // Teamer:in eintragen — sonst wäre die Regel in POST /direct auf
-          // demselben Weg zu umgehen wie beim Konfi-zu-Konfi-Fall oben.
           if (req.user.type === 'konfi') {
             for (const pu of partUsers) {
               const verboten = await teamAnschreibenVerboten(req.user.id, pu.role_name, pu.id);
@@ -497,11 +531,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
             }
           }
 
-          // Jahrgangsgrenze für Teamer:innen — wie in POST /direct. Ohne diese
-          // Prüfung wäre die Regel dort wertlos: ein Raum mit demselben Konfi
-          // liesse sich hier einfach anlegen (gleiche Umgehung wie beim
-          // Konfi-zu-Konfi-Fall oben).
-          if (req.user.role_name === 'teamer') {
+          if (req.user.type !== 'konfi') {
             for (const pu of partUsers.filter(x => x.role_name === 'konfi')) {
               const verboten = await konfiAnschreibenVerboten(req.user, pu.id);
               if (verboten) {
@@ -654,6 +684,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
               WHERE m.room_id = r.id
               AND m.deleted_at IS NULL
               AND m.created_at > COALESCE(crs.last_read_at, '1970-01-01')
+            AND m.created_at <= NOW()
           ) as unread_count,
           (
               SELECT json_build_object(
@@ -666,7 +697,11 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
               FROM chat_messages m
               JOIN users u ON m.user_id = u.id
               WHERE m.room_id = r.id AND m.deleted_at IS NULL
-              ORDER BY m.created_at DESC
+              -- Die id als zweites Kriterium: Bei gleichem
+              -- Zeitstempel ist die Reihenfolge nach SQL undefiniert, und
+              -- die Vorschau zeigte dann mal die eine, mal die andere der
+              -- beiden letzten Nachrichten.
+              ORDER BY m.created_at DESC, m.id DESC
               LIMIT 1
           ) as last_message,
           lm.last_message_at
@@ -686,7 +721,8 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
           SELECT created_at as last_message_at
           FROM chat_messages
           WHERE room_id = r.id AND deleted_at IS NULL
-          ORDER BY created_at DESC
+          -- Eindeutig sortieren, siehe oben.
+          ORDER BY created_at DESC, id DESC
           LIMIT 1
       ) lm ON true
       WHERE r.organization_id = $3
@@ -821,7 +857,10 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       } else {
         messagesQuery = `${selectColumns}
         WHERE m.room_id = $1
-        ORDER BY m.created_at DESC
+        -- Eindeutig sortieren -- hier wiegt es am schwersten: Beim
+        -- Blaettern mit LIMIT/OFFSET kann eine mehrdeutige Reihenfolge
+        -- dieselbe Nachricht zweimal liefern oder eine ganz auslassen.
+        ORDER BY m.created_at DESC, m.id DESC
         LIMIT $2 OFFSET $3`;
         queryParams = [roomId, limit, offset];
       }
@@ -1067,9 +1106,15 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
           const roomName = room?.name || 'Chat';
           const isDirectChat = room?.type === 'direct';
           const pushTitle = isDirectChat ? message.sender_name : roomName;
-          const pushBody = isDirectChat
-          ? (content || '[Anhang]')
-          : `${message.sender_name}: ${content || '[Anhang]'}`;
+          // Text der Mitteilung: siehe utils/pushText.js — dort steht auch,
+          // warum es KEINE echte Bildvorschau gibt.
+          const pushBody = chatPushText({
+            content,
+            messageType: message.message_type,
+            fileName: message.file_name,
+            senderName: message.sender_name,
+            isDirectChat,
+          });
           
           for (const p of participants) {
             const badgeQuery = `
@@ -1080,6 +1125,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
             WHERE cp.user_id = $1
             AND cp.user_type = $2
             AND cm.created_at > COALESCE(crs.last_read_at, '1970-01-01')
+            AND cm.created_at <= NOW()
             AND cm.deleted_at IS NULL
             AND NOT (cm.user_id = $1 AND cm.user_type = $2)
           `;
@@ -1251,20 +1297,21 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       }
 
       // Textformat: für Menschen zum Lesen und Weiterverarbeiten.
-      const zeit = (d) => new Date(d).toLocaleString('de-DE', {
-        day: '2-digit', month: '2-digit', year: 'numeric',
-        hour: '2-digit', minute: '2-digit'
-      });
-
+      // Ueber die Helfer aus utils/zeitformat, nicht ueber ein eigenes
+      // toLocaleString ohne Zone: Der Container laeuft in UTC, der Kopf des
+      // Exports nannte die Uhrzeit sonst zwei Stunden zu frueh -- waehrend
+      // die Nachrichten darunter (formatDatum/formatUhrzeit) korrekt in
+      // Berliner Zeit standen. Zwei Zeitrechnungen in einer Datei.
       const zeilen = [];
       zeilen.push(`Chat-Verlauf: ${raumName}`);
-      zeilen.push(`Exportiert am ${zeit(new Date())} — ${messages.length} Nachrichten`);
+      const jetzt = new Date();
+      zeilen.push(`Exportiert am ${formatDatum(jetzt)} ${formatUhrzeit(jetzt)} — ${messages.length} Nachrichten`);
       zeilen.push('='.repeat(60));
       zeilen.push('');
 
       let letzterTag = '';
       for (const m of messages) {
-        const tag = new Date(m.created_at).toLocaleDateString('de-DE', {
+        const tag = formatDatum(m.created_at, {
           weekday: 'long', day: '2-digit', month: '2-digit', year: 'numeric'
         });
         if (tag !== letzterTag) {
@@ -1273,9 +1320,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
           letzterTag = tag;
         }
 
-        const uhrzeit = new Date(m.created_at).toLocaleTimeString('de-DE', {
-          hour: '2-digit', minute: '2-digit'
-        });
+        const uhrzeit = formatUhrzeit(m.created_at);
         const absender = m.absender || 'Unbekannt';
         const rolle = m.rolle ? ` (${m.rolle})` : '';
         let text;
@@ -1396,6 +1441,18 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         return res.status(404).json({ error: 'Benutzer nicht in deiner Organisation gefunden' });
       }
       const user_type = roleToParticipantType(targetUser.role_name);
+
+      // Jahrgangsgrenze auch beim NACHTRAEGLICHEN Hinzufuegen:
+      // Sonst liesse sich die Bindung aus POST /rooms trivial umgehen —
+      // Gruppe leer anlegen, fremden Konfi danach eintragen.
+      // konfiAnschreibenVerboten laesst Leitung und Super-Admins durch;
+      // Teamer:innen erreichen diese Route gar nicht (requesterType-Check).
+      if (targetUser.role_name === 'konfi') {
+        const verboten = await konfiAnschreibenVerboten(req.user, targetUser.id);
+        if (verboten) {
+          return res.status(403).json({ error: verboten });
+        }
+      }
 
       const { rows: [existing] } = await db.query("SELECT 1 FROM chat_participants WHERE room_id = $1 AND user_id = $2", [roomId, user_id]);
       if (existing) {
@@ -1871,6 +1928,7 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
               WHERE cp.user_id = $1
               AND cp.user_type = $2
               AND cm.created_at > COALESCE(crs.last_read_at, '1970-01-01')
+            AND cm.created_at <= NOW()
               AND cm.deleted_at IS NULL
               AND NOT (cm.user_id = $1 AND cm.user_type = $2)
             `;
@@ -2488,13 +2546,6 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         return res.status(400).json({ error: 'Konfi ist keinem Jahrgang zugewiesen' });
       }
 
-      // DATENSCHUTZ: Konfis dürfen NUR Admins anschreiben (keine Konfi-zu-Konfi Chats)
-      // Alle Admins, Org-Admins und Teamer der Organisation
-      // role_title ist die selbst gewählte Rollenbezeichnung (z.B. "Pastorin", "Teamerin")
-      // Teamer:innen nur mit gemeinsamem Jahrgang, Leitung/Admins immer
-      // (KONFI_SIEHT_TEAMMITGLIED). type kam bisher hart als 'admin' zurück —
-      // damit landeten Teamer:innen im Konfi-Modal als Admin, obwohl
-      // chat_participants sie als 'teamer' fuehrt.
       const adminQuery = `
         SELECT DISTINCT u.id, u.display_name as name,
           CASE WHEN r.name = 'teamer' THEN 'teamer' ELSE 'admin' END as type,
@@ -2507,9 +2558,8 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
           ) as role_description,
           null as jahrgang_name
         FROM users u
-        JOIN roles r ON u.role_id = r.id
+        ${TEAM_MITGLIED_ROLLE}
         WHERE r.name IN ('admin', 'org_admin', 'teamer')
-        AND u.organization_id = $2
         AND u.id <> $1
         AND u.is_active = true
         AND u.deleted_at IS NULL

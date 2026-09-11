@@ -1,3 +1,4 @@
+import { ICON_AUFKLAPPEN_GEFUELLT, ICON_ZURUECK } from '../shared/icons';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   IonHeader,
@@ -13,10 +14,6 @@ import {
   useIonAlert,
   useIonActionSheet
 } from '@ionic/react';
-import {
-  arrowBack,
-  chevronDown
-} from 'ionicons/icons';
 import { useApp } from '../../contexts/AppContext';
 import { offlineBlockiert } from '../../utils/offlineAktion';
 import { useBadge } from '../../contexts/BadgeContext';
@@ -79,7 +76,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
       setMessages(prev => mergeMitLokalen(initialMessages, prev));
       // Ist die Server-Kopie da, ist der "endgueltig fehlgeschlagen"-Merker
       // fuer diese client_ids hinfaellig (best-effort).
-      writeQueue.forgetFailedChatMany(initialMessages.map(m => (m as any).client_id));
+      writeQueue.forgetFailedChatMany(initialMessages.map(m => m.client_id));
     }
   }, [initialMessages]);
 
@@ -129,9 +126,19 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     handleFileSelect,
     clearSelectedFile,
     handleFileClick,
+    ladendeDatei,
   } = useChatDateien({ messages });
 
   const [uploading, setUploading] = useState(false);
+  // Die gerade hochgeladene Nachricht und ihr Fortschritt. Ohne sichtbare
+  // Rueckmeldung tippen Leute bei grossen PDFs mehrfach auf Senden, weil
+  // nichts zu passieren scheint.
+  //
+  // Die Anzeige haengt an der optimistischen Nachricht, NICHT an der
+  // Datei-Vorschau: Die wird beim Senden sofort geleert (clearSelectedFile),
+  // damit das Eingabefeld wieder frei ist — ein Balken dort waere nie zu
+  // sehen. `localId` ordnet den Fortschritt der richtigen Blase zu.
+  const [uploadFortschritt, setUploadFortschritt] = useState<{ localId: string; prozent: number } | null>(null);
   const [selectedMessage, setSelectedMessage] = useState<Message | null>(null);
   const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
   // Scroll-Verhalten (Initial-Scroll, Auto-Scroll, Tages-Chip, "Nach unten"-
@@ -203,13 +210,6 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
         }
       ]
     });
-  };
-
-  const handleDeleteQueuedMessage = async (message: Message) => {
-    // Aus UI entfernen
-    setMessages(prev => prev.filter(m => m.localId !== message.localId));
-    // Queue-Item, Fehl-Merker und lokale Dateikopien aufraeumen
-    await wartendeNachrichtAufraeumen(room?.id, message.localId);
   };
 
   // Poll Modal mit useIonModal Hook (iOS Card Design)
@@ -310,10 +310,10 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   const markRoomAsRead = async () => {
     if (!room) return;
     try {
-      // BadgeContext macht optimistisches Update + API Call
-      badgeMarkRoomAsRead(room.id);
+      // ERST das Lesen beim Server verbuchen lassen, DANN die Zaehler holen.
+      await badgeMarkRoomAsRead(room.id);
 
-      // Badge Context neu laden für genaue Counts
+      // Jetzt stimmen die Zahlen auf dem Server, das Nachladen bestaetigt sie.
       await refreshAllCounts();
 
     } catch (err) {
@@ -328,7 +328,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   // beim Verlassen des Raums zurueck.
   useChatSocket({
     roomId: room?.id,
-    roomUnreadCount: (room as any)?.unread_count,
+    roomUnreadCount: room?.unread_count,
     userId: user?.id,
     chatUnreadByRoom,
     messages,
@@ -407,6 +407,9 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     if (networkMonitor.isOnline) {
       // Online: Normal senden
       setUploading(true);
+      // Nur bei einer Datei: Reiner Text ist sofort durch, ein Balken wuerde
+      // dabei nur aufblitzen.
+      setUploadFortschritt(file ? { localId, prozent: 0 } : null);
       pendingSendsRef.current.add(clientId);
       try {
         const formData = new FormData();
@@ -418,7 +421,17 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
         await api.post(`/chat/rooms/${room.id}/messages`, formData, {
           headers: { 'Content-Type': 'multipart/form-data' },
           // Mit Datei kann der Upload auf Mobilfunk laenger als die globalen 20s dauern
-          timeout: file ? 60000 : 20000
+          timeout: file ? 60000 : 20000,
+          onUploadProgress: file ? (ereignis) => {
+            // `total` fehlt, wenn der Server die Groesse nicht meldet — dann
+            // bleibt der Balken unbestimmt statt auf einer geratenen Zahl zu
+            // stehen.
+            if (!ereignis.total) return;
+            const prozent = Math.round((ereignis.loaded / ereignis.total) * 100);
+            // Bei 100 bleibt der Balken stehen, bis die Antwort da ist: Der
+            // Server verarbeitet danach noch (Bild umrechnen, verschluesseln).
+            setUploadFortschritt({ localId, prozent: Math.min(prozent, 100) });
+          } : undefined
         });
 
         // Die Server-Kopie kommt per newMessage-Socket-Event und ersetzt die
@@ -435,7 +448,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
 
         if (room) markRoomAsRead();
         setShouldAutoScroll(true);
-      } catch (err) {
+      } catch {
         pendingSendsRef.current.delete(clientId);
         // Fehlgeschlagener Online-Versand: Die Nachricht lebte bisher NUR im
         // React-State — Raum verlassen oder App neu gestartet, und sie war
@@ -454,6 +467,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
         }
       } finally {
         setUploading(false);
+        setUploadFortschritt(null);
       }
     } else {
       // Offline: In Queue schreiben (Datei wird dabei lokal gesichert)
@@ -563,14 +577,14 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
           <IonToolbar>
             <IonButtons slot="start">
               <IonButton aria-label="Zurück" onClick={onBack}>
-                <IonIcon icon={arrowBack} />
+                <IonIcon icon={ICON_ZURUECK} />
               </IonButton>
             </IonButtons>
             <IonTitle>Chat wird geladen...</IonTitle>
           </IonToolbar>
         </IonHeader>
         <IonContent className="app-gradient-background" fullscreen>
-          <div style={{ textAlign: 'center', padding: '40px' }}>
+          <div style={{ textAlign: 'center', padding: 'var(--app-abstand-riesig)' }}>
             <p>Chat wird geladen...</p>
           </div>
         </IonContent>
@@ -632,9 +646,9 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
             display: 'flex', justifyContent: 'center', zIndex: 10, pointerEvents: 'none'
           }}>
             <span style={{
-              fontSize: '0.72rem', fontWeight: 600, color: '#555',
+              fontSize: 'var(--app-text-meta)', fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-body)',
               background: 'rgba(245,245,247,0.95)', backdropFilter: 'blur(4px)',
-              padding: '4px 14px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.12)'
+              padding: 'var(--app-abstand-mini) var(--app-abstand-mittelweit)', borderRadius: 'var(--app-radius-karte)', boxShadow: 'var(--app-schatten-flach)'
             }}>
               {floatingDay}
             </span>
@@ -665,7 +679,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
             style={{
               width: '40px',
               height: '40px',
-              borderRadius: '50%',
+              borderRadius: 'var(--app-radius-kreis)',
               border: 'none',
               padding: 0,
               display: 'flex',
@@ -674,21 +688,21 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
               cursor: 'pointer',
               backgroundColor: 'rgba(255,255,255,0.95)',
               backdropFilter: 'blur(10px)',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.18)'
+              boxShadow: 'var(--app-schatten-karte-stark)'
             }}
           >
-            <IonIcon icon={chevronDown} style={{ fontSize: '1.35rem', color: '#06b6d4' }} />
+            <IonIcon icon={ICON_AUFKLAPPEN_GEFUELLT} style={{ fontSize: 'var(--app-text-titel)', color: 'var(--app-color-chat)' }} />
           </button>
         </div>
 
         {user?.type === 'admin' && room && (room.type === 'group' || room.type === 'admin') && (
           <div style={{
-            margin: '8px 16px 0',
-            padding: '8px 12px',
+            margin: 'var(--app-abstand-eng) var(--app-abstand-basis) 0',
+            padding: 'var(--app-abstand-eng) var(--app-abstand-mittel)',
             backgroundColor: 'rgba(0,0,0,0.05)',
-            borderRadius: '8px',
-            fontSize: '0.8rem',
-            color: '#666',
+            borderRadius: 'var(--app-radius-klein)',
+            fontSize: 'var(--app-text-hinweis)',
+            color: 'var(--app-text-secondary)',
             textAlign: 'center'
           }}>
             Admins können Chats nicht verlassen. Chats können nur gelöscht werden.
@@ -713,11 +727,12 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
           onOpenReactionPicker={openReactionPicker}
           onVoteInPoll={voteInPoll}
           onFileClick={handleFileClick}
+          ladendeDatei={ladendeDatei}
+          uploadFortschritt={uploadFortschritt}
           onError={setError}
           onDeselectMessage={() => setSelectedMessage(null)}
           textareaRef={textareaRef}
           onRetry={handleRetryMessage}
-          onDeleteQueued={handleDeleteQueuedMessage}
         />
       </IonContent>
 

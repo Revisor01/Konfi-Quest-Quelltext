@@ -1,3 +1,4 @@
+import { fehlerText, fehlerTextOderMessage } from '../../../utils/fehler';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   IonPage,
@@ -24,24 +25,24 @@ import {
   useIonAlert
 } from '@ionic/react';
 import {
-  closeOutline,
-  checkmarkOutline,
-  person,
-  personOutline,
-  search,
-  chatbubbles,
-  people,
-  peopleOutline,
-  filterOutline,
-  calendar,
-  cloudOfflineOutline
-} from 'ionicons/icons';
+  ICON_FILTER,
+  ICON_GRUPPE,
+  ICON_GRUPPE_GEFUELLT,
+  ICON_HAKEN,
+  ICON_OFFLINE,
+  ICON_PERSON,
+  ICON_PERSON_GEFUELLT,
+  ICON_SCHLIESSEN,
+  ICON_SUCHE_GEFUELLT,
+  ICON_TERMIN_GEFUELLT,
+} from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useBadge } from '../../../contexts/BadgeContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import api from '../../../services/api';
 import { ChatUser } from '../../../types/user';
+import { EigenerJahrgang, KonfiEintrag, TeamKontakt, VerfuegbarerPartner } from '../../../types/chat';
 import { istTeamTyp } from '../../../utils/chatRoles';
 
 interface SimpleCreateChatModalProps {
@@ -55,7 +56,6 @@ interface SimpleCreateChatModalProps {
 const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, onSuccess, dismiss }) => {
   const { user, setError, isOnline } = useApp();
   const { refreshFromAPI } = useBadge();
-  const [presentDuplicateAlert] = useIonAlert();
   const [presentUnsavedAlert] = useIonAlert();
   const pageRef = useRef<HTMLElement>(null);
   const [isDirty, setIsDirty] = useState(false);
@@ -86,7 +86,6 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
     }
   };
   const [users, setUsers] = useState<ChatUser[]>([]);
-  const [existingChats, setExistingChats] = useState<any[]>([]);
   const [searchText, setSearchText] = useState('');
   const [loading, setLoading] = useState(false);
   const { isSubmitting: creating, guard } = useActionGuard();
@@ -108,10 +107,6 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
   }, [groupName, selectedParticipants]);
 
   useEffect(() => {
-    loadExistingChats();
-  }, []);
-
-  useEffect(() => {
     loadUsers();
   }, [chatType]);
 
@@ -122,30 +117,21 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
     }
   }, [user]);
 
-  const loadExistingChats = async () => {
-    try {
-      const response = await api.get('/chat/rooms');
-      setExistingChats(response.data);
-    } catch (err) {
- console.error('Error loading existing chats:', err);
-    }
-  };
-
   const loadUsers = async () => {
     setLoading(true);
     try {
       if (user?.type === 'konfi') {
         // Konfi: Verwende neue sichere API
         const response = await api.get('/chat/available-users');
-        const availableUsers = response.data.users.map((u: any) => ({
+        const availableUsers: ChatUser[] = (response.data.users as VerfuegbarerPartner[]).map((u) => ({
           id: u.id,
           name: u.name,
           display_name: u.name,
           // Das Backend liefert 'teamer' als eigenen Wert — vorher war der Typ
           // hier auf admin|konfi verengt und Teamer:innen wurden in der Liste
           // wie Konfis dargestellt.
-          type: u.type as ChatUser['type'],
-          jahrgang_name: u.jahrgang_name,
+          type: u.type,
+          jahrgang_name: u.jahrgang_name ?? undefined,
           // Funktionsbeschreibung vom Backend (bereits mit Fallback)
           role_description: u.role_description
         }));
@@ -153,9 +139,9 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
 
         // Verfügbare Jahrgänge ermitteln
         const jahrgaenge = [...new Set(availableUsers
-          .filter((u: any) => u.jahrgang_name)
-          .map((u: any) => u.jahrgang_name!))]
-          .sort() as string[];
+          .map((u) => u.jahrgang_name)
+          .filter((name): name is string => Boolean(name)))]
+          .sort();
         setAvailableJahrgaenge(jahrgaenge);
 
         setUsers(availableUsers);
@@ -164,40 +150,45 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
         // Admin/Teamer: Verwende bestehende Admin-APIs
         const [konfisRes, userJahrgangRes] = await Promise.all([
           api.get('/admin/konfis'),
-          api.get('/admin/users/me/jahrgaenge').catch(() => ({ data: [] }))
+          // /users statt /admin/users -- gleicher Router, ein Praefix in der
+          // Oberflaeche.
+          api.get('/users/me/jahrgaenge').catch(() => ({ data: [] }))
         ]);
 
         // Filtere Konfis basierend auf Jahrgangs-Zuweisungen
         // Backend liefert {id, name, ...} -- nicht jahrgang_id (Bug-Quelle)
         let allowedJahrgangIds: number[] = [];
-        if (userJahrgangRes.data.length > 0) {
-          allowedJahrgangIds = userJahrgangRes.data.map((j: any) => j.jahrgang_id ?? j.id);
+        const eigeneJahrgaenge = userJahrgangRes.data as EigenerJahrgang[];
+        if (eigeneJahrgaenge.length > 0) {
+          allowedJahrgangIds = eigeneJahrgaenge.map((j) => j.id);
         }
 
         const istTeamer = user?.type === 'teamer';
 
-        let konfis: ChatUser[] = konfisRes.data
-          .filter((konfi: any) => {
+        const konfis: ChatUser[] = (konfisRes.data as KonfiEintrag[])
+          .filter((konfi) => {
             if (!istTeamer) return true;
-            return konfi.jahrgang_id && allowedJahrgangIds.includes(konfi.jahrgang_id);
+            return Boolean(konfi.jahrgang_id) && allowedJahrgangIds.includes(konfi.jahrgang_id as number);
           })
-          .map((konfi: any) => ({
+          // GET /admin/konfis liefert display_name als `name` und den Jahrgang
+          // ausschliesslich als `jahrgang_name`. Die frueheren Fallbacks
+          // (konfi.display_name, konfi.jahrgang) griffen nie.
+          .map((konfi) => ({
             id: konfi.id,
-            name: konfi.name || konfi.display_name,
-            display_name: konfi.name || konfi.display_name,
+            name: konfi.name,
+            display_name: konfi.name,
             type: 'konfi' as const,
-            jahrgang: konfi.jahrgang,
-            jahrgang_name: konfi.jahrgang_name
+            jahrgang_name: konfi.jahrgang_name ?? undefined
           }));
 
         // Auch die anderen Team-Mitglieder (Admins, Org-Admins, Teamer:innen) laden.
-        // Bewusst über /chat/team-contacts statt /admin/users: Letztere ist mit
+        // Bewusst über /chat/team-contacts statt /users: Letztere ist mit
         // requireOrgAdmin geschuetzt, Teamer:innen liefen dort in einen 403 und
         // bekamen deshalb gar keine Team-Kontakte angezeigt.
         let adminUsers: ChatUser[] = [];
         try {
           const usersRes = await api.get('/chat/team-contacts');
-          adminUsers = usersRes.data.map((member: any) => ({
+          adminUsers = (usersRes.data as TeamKontakt[]).map((member) => ({
             id: member.id,
             name: member.display_name,
             display_name: member.display_name,
@@ -237,16 +228,6 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
     }
   };
 
-  const checkDirectChatExists = (targetUser: ChatUser) => {
-    return existingChats.some(chat =>
-      chat.type === 'direct' &&
-      chat.participants &&
-      chat.participants.some((p: any) =>
-        p.id === targetUser.id && p.type === targetUser.type
-      )
-    );
-  };
-
   const handleParticipantToggle = (id: string) => {
     const newSelected = new Set(selectedParticipants);
     if (newSelected.has(id)) {
@@ -259,16 +240,12 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
 
   const createDirectMessage = async (targetUser: ChatUser) => {
     if (offlineBlockiert(isOnline, setError)) return;
-    // Check if chat already exists
-    if (checkDirectChatExists(targetUser)) {
-      presentDuplicateAlert({
-        header: 'Chat existiert bereits',
-        message: `Ein Chat mit ${targetUser.name || targetUser.display_name} existiert bereits.`,
-        buttons: ['OK']
-      });
-      return;
-    }
-
+    // Frueher stand hier eine Doppel-Pruefung ("Chat existiert bereits") gegen
+    // chat.participants. GET /chat/rooms liefert dieses Feld gar nicht — die
+    // Pruefung war immer false und der Hinweis erschien nie. Sie wird auch
+    // nicht gebraucht: POST /chat/direct gibt einen bestehenden Raum zurueck
+    // (created: false), und /chat/available-users blendet Partner mit
+    // bestehendem Direktchat ohnehin aus.
     await guard(async () => {
       try {
         const directRes = await api.post('/chat/direct', {
@@ -280,7 +257,7 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
         handleModalClose();
         onSuccess(directRes.data?.room_id);
       } catch (err) {
-        setError('Fehler beim Erstellen der Direktnachricht');
+        setError(fehlerText(err, 'Fehler beim Erstellen der Direktnachricht'));
         console.error('Error creating direct message:', err);
       }
     });
@@ -319,9 +296,9 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
         await refreshFromAPI(); // Update badge context
         handleModalClose();
         onSuccess(groupRes.data?.room_id);
-      } catch (err: any) {
+      } catch (err) {
         console.error('Error creating group chat:', err);
-        setError(`Fehler beim Erstellen des Gruppenchats: ${err.response?.data?.error || err.message}`);
+        setError(`Fehler beim Erstellen des Gruppenchats: ${fehlerTextOderMessage(err, 'Unbekannter Fehler')}`);
       }
     });
   };
@@ -365,27 +342,6 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
     return user.name || user.display_name || 'Unbekannt';
   };
 
-  const canCreate = () => {
-    if (chatType === 'group') {
-      return groupName.trim() && selectedParticipants.size > 0;
-    }
-    return chatType === 'direct';
-  };
-
-  const getAvailableChatTypes = () => {
-    if (user?.type === 'admin' || user?.type === 'teamer') {
-      return [
-        { value: 'direct', label: 'Direktnachricht' },
-        { value: 'group', label: 'Gruppenchat' }
-      ];
-    }
-
-    // DATENSCHUTZ: Konfis dürfen NUR Direktnachrichten an Admins senden
-    return [
-      { value: 'direct', label: 'Direktnachricht' }
-    ];
-  };
-
   const isFormValid = chatType === 'direct' || (chatType === 'group' && groupName.trim() && selectedParticipants.size > 0);
   const isAdmin = user?.type === 'admin';
   const isTeamer = user?.type === 'teamer';
@@ -397,14 +353,14 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton className="app-modal-close-btn" onClick={handleClose} disabled={creating} aria-label="Schließen">
-              <IonIcon icon={closeOutline} slot="icon-only" />
+              <IonIcon icon={ICON_SCHLIESSEN} slot="icon-only" />
             </IonButton>
           </IonButtons>
           <IonTitle>{chatType === 'direct' ? 'Neue Direktnachricht' : 'Neuer Gruppenchat'}</IonTitle>
           {chatType === 'group' && (
             <IonButtons slot="end">
               <IonButton className="app-modal-submit-btn app-modal-submit-btn--chat" onClick={createGroupChat} disabled={!isFormValid || creating || !isOnline} aria-label="Gruppenchat erstellen">
-                {!isOnline ? <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</> : creating ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} slot="icon-only" />}
+                {!isOnline ? <><IonIcon icon={ICON_OFFLINE} /> Du bist offline</> : creating ? <IonSpinner name="crescent" /> : <IonIcon icon={ICON_HAKEN} slot="icon-only" />}
               </IonButton>
             </IonButtons>
           )}
@@ -434,7 +390,7 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
             <IonList inset={true} className="app-modal-section">
               <IonListHeader>
                 <div className="app-section-icon app-section-icon--chat">
-                  <IonIcon icon={peopleOutline} />
+                  <IonIcon icon={ICON_GRUPPE} />
                 </div>
                 <IonLabel>Gruppenname</IonLabel>
               </IonListHeader>
@@ -456,7 +412,7 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
           <IonList inset={true} className="app-modal-section">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--chat">
-                <IonIcon icon={filterOutline} />
+                <IonIcon icon={ICON_FILTER} />
               </div>
               <IonLabel>Suche & Filter</IonLabel>
             </IonListHeader>
@@ -464,11 +420,11 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
               {/* Suchfeld */}
               <IonItem>
                 <IonIcon
-                  icon={search}
+                  icon={ICON_SUCHE_GEFUELLT}
                   slot="start"
                   style={{
-                    color: '#8e8e93',
-                    fontSize: '1rem'
+                    color: 'var(--app-text-system)',
+                    fontSize: 'var(--app-text-standard)'
                   }}
                 />
                 <IonInput
@@ -481,9 +437,9 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
               {(isAdmin || isTeamer) && (
                 <IonItem>
                   <IonIcon
-                    icon={personOutline}
+                    icon={ICON_PERSON}
                     slot="start"
-                    style={{ color: '#8e8e93', fontSize: '1rem' }}
+                    style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }}
                   />
                   <IonSelect
                     value={selectedRole}
@@ -502,9 +458,9 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
               {(isAdmin || isTeamer) && availableJahrgaenge.length > 0 && (
                 <IonItem>
                   <IonIcon
-                    icon={calendar}
+                    icon={ICON_TERMIN_GEFUELLT}
                     slot="start"
-                    style={{ color: '#8e8e93', fontSize: '1rem' }}
+                    style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }}
                   />
                   <IonSelect
                     value={selectedJahrgang}
@@ -527,24 +483,24 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
           <IonList inset={true} className="app-modal-section">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--chat">
-                <IonIcon icon={peopleOutline} />
+                <IonIcon icon={ICON_GRUPPE} />
               </div>
               <IonLabel>Personen ({filteredUsers.length})</IonLabel>
             </IonListHeader>
             <IonCard className="app-card">
-              <IonCardContent style={{ padding: filteredUsers.length === 0 ? '16px' : '12px' }}>
+              <IonCardContent style={{ padding: filteredUsers.length === 0 ? 'var(--app-abstand-basis)' : 'var(--app-abstand-mittel)' }}>
                 {loading ? (
-                  <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+                  <div style={{ padding: 'var(--app-abstand-riesig) var(--app-abstand-gross)', textAlign: 'center' }}>
                     <IonSpinner name="crescent" />
                   </div>
                 ) : filteredUsers.length === 0 ? (
                   <div style={{
-                    padding: '40px 20px',
+                    padding: 'var(--app-abstand-riesig) var(--app-abstand-gross)',
                     textAlign: 'center',
-                    color: '#666'
+                    color: 'var(--app-text-secondary)'
                   }}>
-                    <IonIcon icon={search} style={{ fontSize: '3rem', opacity: 0.3, marginBottom: '16px' }} />
-                    <p style={{ margin: '0', fontSize: '1rem' }}>Keine Personen gefunden</p>
+                    <IonIcon icon={ICON_SUCHE_GEFUELLT} style={{ fontSize: 'var(--app-anzeige-riesig)', opacity: 0.3, marginBottom: 'var(--app-abstand-basis)' }} />
+                    <p style={{ margin: '0', fontSize: 'var(--app-text-standard)' }}>Keine Personen gefunden</p>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -580,26 +536,26 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
                           <div className="app-corner-badges">
                             <div
                               className="app-corner-badge"
-                              style={{ backgroundColor: isAdmin ? 'var(--app-color-teamer)' : 'var(--app-color-konfis)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
+                              style={{ backgroundColor: isAdmin ? 'var(--app-color-teamer)' : 'var(--app-color-konfis)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
                               title={isAdmin ? (targetUser.role_description || 'Admin') : 'Konfi'}
                             >
-                              <IonIcon icon={isAdmin ? people : person} style={{ color: '#fff', fontSize: '0.85rem' }} />
+                              <IonIcon icon={isAdmin ? ICON_GRUPPE_GEFUELLT : ICON_PERSON_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                             </div>
                           </div>
 
-                          <div className="app-list-item__row" style={chatType === 'group' ? { paddingRight: '8px' } : undefined}>
+                          <div className="app-list-item__row" style={chatType === 'group' ? { paddingRight: 'var(--app-abstand-eng)' } : undefined}>
                             <div className="app-list-item__main">
                               <div className={`app-icon-circle app-icon-circle--lg ${isAdmin ? 'app-icon-circle--team' : 'app-icon-circle--konfi'}`}>
-                                <IonIcon icon={person} />
+                                <IonIcon icon={ICON_PERSON_GEFUELLT} />
                               </div>
                               <div className="app-list-item__content">
-                                <div className="app-list-item__title" style={{ paddingRight: '70px' }}>
+                                <div className="app-list-item__title" style={{ paddingRight: 'var(--app-freiraum-aktion-l)' }}>
                                   {getUserDisplayName(targetUser)}
                                 </div>
                                 {isAdmin && targetUser.role_description && (
                                   <div className="app-list-item__meta">
                                     <span className="app-list-item__meta-item">
-                                      <IonIcon icon={peopleOutline} style={{ color: 'var(--app-color-teamer)' }} />
+                                      <IonIcon icon={ICON_GRUPPE} style={{ color: 'var(--app-color-teamer)' }} />
                                       {targetUser.role_description}
                                     </span>
                                   </div>
@@ -607,7 +563,7 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
                                 {!isAdmin && (targetUser.jahrgang_name || targetUser.jahrgang) && (
                                   <div className="app-list-item__meta">
                                     <span className="app-list-item__meta-item">
-                                      <IonIcon icon={calendar} style={{ color: 'var(--app-color-jahrgang)' }} />
+                                      <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ color: 'var(--app-color-jahrgang)' }} />
                                       {targetUser.jahrgang_name || targetUser.jahrgang}
                                     </span>
                                   </div>

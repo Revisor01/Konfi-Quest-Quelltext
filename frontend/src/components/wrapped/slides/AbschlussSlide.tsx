@@ -1,81 +1,64 @@
 import React from 'react';
 import { IonIcon } from '@ionic/react';
-import { heartOutline, peopleOutline, trophyOutline, calendarOutline, ribbonOutline } from 'ionicons/icons';
+import { ICON_ABZEICHEN, ICON_POKAL, ICON_TERMIN } from '../../shared/icons';
 import type { SlideProps, KonfiWrappedData } from '../../../types/wrapped';
 import SlideBase from './SlideBase';
+import { konfiUeberschrift } from '../ueberschrift';
 
 interface AbschlussSlideProps extends SlideProps {
   data: KonfiWrappedData;
   year: number;
+  konfirmation?: string | null;
 }
 
-const AbschlussSlide: React.FC<AbschlussSlideProps> = ({ isActive, data, year }) => {
-  const zeitraumEnde = data.slides.zeitraum?.ende;
+/**
+ * Die Abschluss-Seite -- auf die Slogan-Gestaltung umgezogen.
+ *
+ * Die drei Zahlen bleiben als Zeile darunter -- hier gehoert die Uebersicht
+ * hin, das ist der Sinn der Seite.
+ */
+const AbschlussSlide: React.FC<AbschlussSlideProps> = ({ isActive, data, year: _year, konfirmation }) => {
+  // Siehe WrappedModal: `konfirmation` ist das echte Datum, `ende` nur der
+  // Rueckfall fuer Alt-Snapshots ohne das Feld.
+  const z = data.slides.zeitraum;
+  const zeitraumEnde = z ? (('konfirmation' in z) ? (z.konfirmation || null) : (z.ende || null)) : null;
+  const gemeinde = data.slides.gemeinde?.trim() || null;
+
+  const zahlen = [
+    { icon: ICON_POKAL, wert: data.slides.punkte.total, label: 'Punkte' },
+    { icon: ICON_TERMIN, wert: data.slides.events.total_attended, label: 'Termine' },
+    { icon: ICON_ABZEICHEN, wert: data.slides.badges.total_earned, label: 'Abzeichen' },
+  ];
 
   return (
-    <SlideBase isActive={isActive} className="abschluss-slide">
-      <div className="wrapped-anim-fly-left">
-        <p className="wrapped-label">Dein Konfi-Jahr {year}</p>
-        <p className="wrapped-hero-text" style={{ fontSize: 'clamp(1.8rem, 7vw, 3rem)' }}>
-          Auf einen<br />Blick
-        </p>
+    <SlideBase isActive={isActive} className="abschluss-slide" kachel="abschluss">
+      <div className="kat-auge">{konfiUeberschrift(konfirmation, zeitraumEnde).join(' ')}</div>
+
+      {/* Die Kirchengemeinde -- wo diese Konfi-Zeit stattgefunden hat.
+          Fehlt bei Alt-Snapshots, dann bleibt die Zeile weg. */}
+      {gemeinde && <div className="kat-gemeinde">{gemeinde}</div>}
+
+      <div className="kat-slogan">
+        <span style={{ display: 'block' }}>Dein Weg.</span>
+        <span style={{ display: 'block' }}>Deine Zeit.</span>
+        <span style={{ display: 'block' }}>Dein Glaube.</span>
       </div>
 
-      {/* Konfirmations-Countdown */}
-      {zeitraumEnde && (
-        <div className="wrapped-anim-fade wrapped-anim-delay-1" style={{ marginTop: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'rgba(255,255,255,0.7)', fontSize: '0.9rem' }}>
-            <IonIcon icon={calendarOutline} style={{ fontSize: '1.1rem' }} />
-            <span>
-              Konfirmation am {new Date(zeitraumEnde).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' })}
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Summary Stats - linksbuendig gestapelt */}
-      <div className="wrapped-anim-fly-left wrapped-anim-delay-2" style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '16px',
-        marginTop: '24px',
-        width: '100%',
-      }}>
-        {[
-          { icon: trophyOutline, value: data.slides.punkte.total, label: 'Punkte' },
-          { icon: calendarOutline, value: data.slides.events.total_attended, label: 'Events' },
-          { icon: ribbonOutline, value: data.slides.badges.total_earned, label: 'Badges' },
-        ].map((stat, i) => (
-          <div key={i} style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '16px',
-          }}>
-            <IonIcon icon={stat.icon} style={{ fontSize: '1.2rem', color: '#a78bfa', flexShrink: 0 }} />
-            <span style={{ fontSize: '1.8rem', fontWeight: 800, color: '#fff', minWidth: '48px' }}>{stat.value}</span>
-            <span style={{ fontSize: '1rem', color: 'rgba(255,255,255,0.6)' }}>{stat.label}</span>
+      <div className="w-bilanz">
+        {zahlen.map((s, i) => (
+          <div key={i} className="w-bilanz__zeile">
+            <IonIcon icon={s.icon} />
+            <b>{s.wert}</b>
+            <span>{s.label}</span>
           </div>
         ))}
       </div>
 
-      {/* CTA */}
-      <div className="wrapped-anim-bounce wrapped-anim-delay-3" style={{ marginTop: '32px' }}>
-        <p style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <IonIcon icon={heartOutline} style={{ fontSize: '1.3rem', color: '#f472b6' }} />
-          <span className="wrapped-subtitle" style={{ fontSize: 'clamp(1.1rem, 4vw, 1.5rem)' }}>Werde Teamer:in</span>
-        </p>
-        <p style={{
-          color: 'rgba(255,255,255,0.6)',
-          fontSize: '0.85rem',
-          marginTop: '4px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '6px',
-        }}>
-          <IonIcon icon={peopleOutline} style={{ fontSize: '1rem' }} />
-          gestalte die nächste Generation mit
-        </p>
-      </div>
+      {zeitraumEnde && (
+        <div className="kat-fussnote">
+          Konfirmation am {new Date(zeitraumEnde).toLocaleDateString('de-DE', { day: 'numeric', month: 'long', year: 'numeric' })}
+        </div>
+      )}
     </SlideBase>
   );
 };

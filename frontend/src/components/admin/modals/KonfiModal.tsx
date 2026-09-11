@@ -18,8 +18,18 @@ import {
   IonCardContent,
   IonSpinner
 } from '@ionic/react';
-import { closeOutline, checkmarkOutline, personOutline, informationCircleOutline, cloudOfflineOutline, schoolOutline, checkmark, warningOutline } from 'ionicons/icons';
+import {
+  ICON_HAKEN,
+  ICON_HAKEN_GEFUELLT,
+  ICON_INFO,
+  ICON_JAHRGANG,
+  ICON_OFFLINE,
+  ICON_PERSON,
+  ICON_SCHLIESSEN,
+  ICON_WARNUNG,
+} from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
+import type { KonfiFormDaten } from '../../../types/user';
 
 interface Jahrgang {
   id: number;
@@ -33,7 +43,7 @@ interface Jahrgang {
 interface KonfiModalProps {
   jahrgaenge: Jahrgang[];
   onClose: () => void;
-  onSave: (konfiData: any) => void;
+  onSave: (konfiData: KonfiFormDaten) => void;
   dismiss?: () => void;
   /**
    * Gesetzt = BEARBEITEN, nicht gesetzt = ANLEGEN.
@@ -119,12 +129,12 @@ const KonfiModal: React.FC<KonfiModalProps> = ({ jahrgaenge, onClose, onSave, di
           <IonTitle>{bearbeiten ? 'Konfi bearbeiten' : 'Konfi erstellen'}</IonTitle>
           <IonButtons slot="start">
             <IonButton aria-label="Schließen" onClick={handleClose} disabled={isSubmitting} className="app-modal-close-btn">
-              <IonIcon icon={closeOutline} />
+              <IonIcon icon={ICON_SCHLIESSEN} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
             <IonButton aria-label={bearbeiten ? "Aenderungen speichern" : "Konfi speichern"} onClick={handleSave} disabled={!isValid || isSubmitting || !isOnline} className="app-modal-submit-btn app-modal-submit-btn--konfi">
-              {!isOnline ? <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</> : isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} />}
+              {!isOnline ? <><IonIcon icon={ICON_OFFLINE} /> Du bist offline</> : isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={ICON_HAKEN} />}
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -135,12 +145,12 @@ const KonfiModal: React.FC<KonfiModalProps> = ({ jahrgaenge, onClose, onSave, di
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--purple">
-              <IonIcon icon={personOutline} />
+              <IonIcon icon={ICON_PERSON} />
             </div>
             <IonLabel>Konfi Daten</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: '16px' }}>
+            <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
               <IonList style={{ background: 'transparent' }}>
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Name *</IonLabel>
@@ -163,16 +173,16 @@ const KonfiModal: React.FC<KonfiModalProps> = ({ jahrgaenge, onClose, onSave, di
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--purple">
-              <IonIcon icon={schoolOutline} />
+              <IonIcon icon={ICON_JAHRGANG} />
             </div>
             <IonLabel>Jahrgang *</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: '16px' }}>
+            <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
               {jahrgaenge.length === 0 ? (
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonLabel style={{ textAlign: 'center' }}>
-                    <p style={{ color: '#999', margin: 0 }}>Keine Jahrgänge verfügbar</p>
+                    <p style={{ color: 'var(--app-text-muted)', margin: 0 }}>Keine Jahrgänge verfügbar</p>
                   </IonLabel>
                 </IonItem>
               ) : (
@@ -190,24 +200,24 @@ const KonfiModal: React.FC<KonfiModalProps> = ({ jahrgaenge, onClose, onSave, di
                           opacity: isSubmitting ? 0.6 : 1,
                           position: 'relative',
                           overflow: 'hidden',
-                          marginBottom: index < jahrgaenge.length - 1 ? '8px' : '0'
+                          marginBottom: index < jahrgaenge.length - 1 ? 'var(--app-abstand-eng)' : '0'
                         }}
                       >
                         {isSelected && (
                           <div className="app-corner-badges">
                             <div
                               className="app-corner-badge"
-                              style={{ backgroundColor: 'var(--app-color-konfis)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
+                              style={{ backgroundColor: 'var(--app-color-konfis)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
                               title="Ausgewählt"
                             >
-                              <IonIcon icon={checkmark} style={{ color: '#fff', fontSize: '0.85rem' }} />
+                              <IonIcon icon={ICON_HAKEN_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                             </div>
                           </div>
                         )}
                         <div className="app-list-item__row">
                           <div className="app-list-item__main">
                             <div className="app-list-item__content">
-                              <div className="app-list-item__title" style={{ paddingRight: isSelected ? '40px' : '0' }}>{jg.name}</div>
+                              <div className="app-list-item__title" style={{ paddingRight: isSelected ? 'var(--app-abstand-riesig)' : '0' }}>{jg.name}</div>
                             </div>
                           </div>
                         </div>
@@ -226,36 +236,36 @@ const KonfiModal: React.FC<KonfiModalProps> = ({ jahrgaenge, onClose, onSave, di
           <IonList inset={true} className="app-modal-section">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--purple">
-                <IonIcon icon={warningOutline} />
+                <IonIcon icon={ICON_WARNUNG} />
               </div>
               <IonLabel>Was der Wechsel bewirkt</IonLabel>
             </IonListHeader>
-            <IonCard className="app-card" style={{ background: 'rgba(190, 24, 93, 0.08)', border: '1px solid rgba(190, 24, 93, 0.2)' }}>
-              <IonCardContent style={{ padding: '16px' }}>
-                <p style={{ margin: '0 0 10px', fontSize: '0.9rem', lineHeight: '1.5' }}>
+            <IonCard className="app-card" style={{ background: 'rgba(var(--app-color-teamer-rgb), 0.08)', border: '1px solid rgba(var(--app-color-teamer-rgb), 0.2)' }}>
+              <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
+                <p style={{ margin: '0 0 var(--app-abstand-schmal)', fontSize: 'var(--app-text-basis)', lineHeight: '1.5' }}>
                   Es gelten die Regeln des neuen Jahrgangs:
                 </p>
-                <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '0.9rem', lineHeight: '1.6' }}>
+                <ul style={{ margin: 0, paddingLeft: 'var(--app-abstand-gross)', fontSize: 'var(--app-text-basis)', lineHeight: '1.6' }}>
                   <li>Anmeldungen zu künftigen Terminen des alten Jahrgangs fallen weg.</li>
                   <li>Pflichttermine des neuen Jahrgangs kommen dazu.</li>
                   <li>Der Jahrgangs-Chat wechselt mit.</li>
                   <li>Der Jahresrückblick erscheint erst wieder, wenn der neue
                       Jahrgang freigegeben ist.</li>
                 </ul>
-                <p style={{ margin: '10px 0 0', fontSize: '0.85rem', lineHeight: '1.5', opacity: 0.85 }}>
+                <p style={{ margin: 'var(--app-abstand-schmal) 0 0', fontSize: 'var(--app-text-sekundaer)', lineHeight: '1.5', opacity: 0.85 }}>
                   Bereits erfasste Anwesenheiten und vergangene Termine bleiben
                   unberührt.
                 </p>
 
                 {verlorenePunkte.length > 0 && (
-                  <p style={{ margin: '12px 0 0', fontSize: '0.9rem', lineHeight: '1.5', fontWeight: 600 }}>
+                  <p style={{ margin: 'var(--app-abstand-mittel) 0 0', fontSize: 'var(--app-text-basis)', lineHeight: '1.5', fontWeight: 'var(--app-schrift-halbfett)'}}>
                     Achtung: In {ziel?.name} {verlorenePunkte.length === 1 ? 'ist diese Punkteart' : 'sind diese Punktearten'} abgeschaltet
                     — {verlorenePunkte.join(' und ')} werden dort nicht mehr angezeigt.
                   </p>
                 )}
 
                 {verliertSicht && (
-                  <p style={{ margin: '12px 0 0', fontSize: '0.9rem', lineHeight: '1.5', fontWeight: 600 }}>
+                  <p style={{ margin: 'var(--app-abstand-mittel) 0 0', fontSize: 'var(--app-text-basis)', lineHeight: '1.5', fontWeight: 'var(--app-schrift-halbfett)'}}>
                     Achtung: Du bist {ziel?.name} nicht zugewiesen — nach dem
                     Speichern siehst du {name.trim() || 'diese Konfi'} nicht mehr
                     in deiner Liste.
@@ -271,13 +281,13 @@ const KonfiModal: React.FC<KonfiModalProps> = ({ jahrgaenge, onClose, onSave, di
           <IonList inset={true} className="app-modal-section">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--purple">
-                <IonIcon icon={informationCircleOutline} />
+                <IonIcon icon={ICON_INFO} />
               </div>
               <IonLabel>Hinweis</IonLabel>
             </IonListHeader>
-            <IonCard className="app-card" style={{ background: 'rgba(91, 33, 182, 0.08)', border: '1px solid rgba(91, 33, 182, 0.2)' }}>
-              <IonCardContent style={{ padding: '16px' }}>
-                <p style={{ margin: 0, fontSize: '0.9rem', lineHeight: '1.5', color: 'var(--app-color-konfis)' }}>
+            <IonCard className="app-card" style={{ background: 'rgba(var(--app-color-konfis-rgb), 0.08)', border: '1px solid rgba(var(--app-color-konfis-rgb), 0.2)' }}>
+              <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
+                <p style={{ margin: 0, fontSize: 'var(--app-text-basis)', lineHeight: '1.5', color: 'var(--app-color-konfis)' }}>
                   Benutzername und Passwort werden automatisch generiert. Du kannst das Passwort später in der Detailansicht einsehen oder zurücksetzen.
                 </p>
               </IonCardContent>
@@ -292,13 +302,13 @@ const KonfiModal: React.FC<KonfiModalProps> = ({ jahrgaenge, onClose, onSave, di
           <IonList inset={true} className="app-modal-section">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--purple">
-                <IonIcon icon={informationCircleOutline} />
+                <IonIcon icon={ICON_INFO} />
               </div>
               <IonLabel>Hinweis</IonLabel>
             </IonListHeader>
-            <IonCard className="app-card" style={{ background: 'rgba(91, 33, 182, 0.08)', border: '1px solid rgba(91, 33, 182, 0.2)' }}>
-              <IonCardContent style={{ padding: '16px' }}>
-                <p style={{ margin: 0, fontSize: '0.9rem', lineHeight: '1.5', color: 'var(--app-color-konfis)' }}>
+            <IonCard className="app-card" style={{ background: 'rgba(var(--app-color-konfis-rgb), 0.08)', border: '1px solid rgba(var(--app-color-konfis-rgb), 0.2)' }}>
+              <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
+                <p style={{ margin: 0, fontSize: 'var(--app-text-basis)', lineHeight: '1.5', color: 'var(--app-color-konfis)' }}>
                   Der Benutzername zum Anmelden ändert sich nicht — auch dann
                   nicht, wenn du den Namen korrigierst.
                 </p>

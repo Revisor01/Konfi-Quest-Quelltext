@@ -16,19 +16,19 @@ import {
   useIonModal
 } from '@ionic/react';
 import {
-  flag,
-  createOutline,
-  trashOutline,
-  albumsOutline,
-  calendarOutline,
-  timeOutline,
-  peopleOutline,
-  eyeOutline,
-  eyeOffOutline,
-  archiveOutline,
-  ribbonOutline,
-  paperPlaneOutline
-} from 'ionicons/icons';
+  ICON_ABZEICHEN,
+  ICON_ALBEN,
+  ICON_ARCHIV,
+  ICON_BEARBEITEN,
+  ICON_CHALLENGE_GEFUELLT,
+  ICON_GRUPPE,
+  ICON_LOESCHEN,
+  ICON_SENDEN,
+  ICON_SICHTBAR,
+  ICON_TERMIN,
+  ICON_UHRZEIT,
+  ICON_VERBORGEN,
+} from '../../shared/icons';
 import { SectionHeader, ListSection, ChallengeLegendModal, EmptyState } from '../../shared';
 import { getChallengeBadgeIcon } from '../../konfi/views/ChallengesView';
 import type { AdminChallenge, ChallengeStatus, ChallengeMark } from '../../../types/challenges';
@@ -57,6 +57,7 @@ interface ChallengesManageViewProps {
    * Teilnahme — Leitung und Team machen selbst mit.
    */
   marks?: ChallengeMark[];
+  ohneJahrgang?: boolean;
 }
 
 // Status wird NICHT gespeichert, sondern aus is_draft/starts_at/ends_at abgeleitet
@@ -117,19 +118,19 @@ const STATUS_LABEL: Record<ChallengeStatus, string> = {
 };
 
 const STATUS_COLOR: Record<ChallengeStatus, string> = {
-  draft: '#8e8e93',
-  scheduled: '#007aff',
+  draft: 'var(--app-text-system)',
+  scheduled: 'var(--app-color-info)',
   active: 'var(--app-color-success-strong)',
-  ended: '#6b7280'
+  ended: 'var(--app-color-neutral)'
 };
 
 // Jeder Status hat sein EIGENES Icon (User-Feedback 07.08.: vier Mal Flagge
 // hilft niemandem). Muss mit ChallengeLegendModal uebereinstimmen.
 const STATUS_ICON: Record<ChallengeStatus, string> = {
-  draft: createOutline,
-  scheduled: calendarOutline,
-  active: flag,
-  ended: archiveOutline
+  draft: ICON_BEARBEITEN,
+  scheduled: ICON_TERMIN,
+  active: ICON_CHALLENGE_GEFUELLT,
+  ended: ICON_ARCHIV
 };
 
 const VISIBILITY_LABEL: Record<string, string> = {
@@ -162,8 +163,15 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
   onDeleteChallenge,
   presentingElement,
   headerSlot,
-  marks: marksRaw = []
+  marks: marksRaw = [],
+  ohneJahrgang = false
 }) => {
+  // Fehlt die Jahrgangs-Zuweisung, ist JEDER Reiter aus demselben Grund
+  // leer — deshalb bekommen alle drei denselben erklaerenden Text.
+  const ohneJahrgangLeerText = {
+    emptyTitle: 'Kein Jahrgang zugewiesen',
+    emptyMessage: 'Dir ist noch kein Jahrgang zugewiesen, deshalb siehst du hier keine Challenges. Die Leitung deiner Gemeinde kann das in den Einstellungen ändern.'
+  };
   const { user } = useApp();
   const darfLoeschen = user?.type === 'admin';
 
@@ -176,14 +184,6 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
   });
 
   const [reiter, setReiter] = useState<'aktuell' | 'geplant' | 'archiv'>('aktuell');
-
-  const counts = useMemo(() => {
-    const byStatus: Record<ChallengeStatus, number> = { draft: 0, scheduled: 0, active: 0, ended: 0 };
-    challenges.forEach((c) => {
-      byStatus[getChallengeStatus(c)] += 1;
-    });
-    return byStatus;
-  }, [challenges]);
 
   // Drei Reiter: Aktuell = was läuft, Geplant = was kommt (eingeplant UND
   // Entwurf), Archiv = was vorbei ist. Die Zuordnung selbst liegt in
@@ -201,7 +201,7 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
           return (
             <IonItemSliding
               key={challenge.id}
-              style={{ marginBottom: index < total - 1 ? '8px' : '0' }}
+              style={{ marginBottom: index < total - 1 ? 'var(--app-abstand-eng)' : '0' }}
             >
               <IonItem
                 button
@@ -233,13 +233,13 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
                       <>
                         <div
                           className="app-corner-badge"
-                          style={{ backgroundColor: '#ff9500', display: 'flex', alignItems: 'center', gap: '3px' }}
+                          style={{ backgroundColor: 'var(--app-color-warning)', display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mini)' }}
                           title={wartenAufFreigabe(pending)}
                           role="img"
                           aria-label={wartenAufFreigabe(pending)}
                         >
                           {pending}
-                          <IonIcon icon={timeOutline} aria-hidden="true" style={{ color: '#fff', fontSize: '0.85rem', display: 'block' }} />
+                          <IonIcon icon={ICON_UHRZEIT} aria-hidden="true" style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)', display: 'block' }} />
                         </div>
                         <div className="app-corner-badges__separator" />
                       </>
@@ -251,7 +251,7 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
                           style={{ backgroundColor: 'var(--app-color-challenges)' }}
                           title="Du hast bereits eingereicht"
                         >
-                          <IonIcon icon={paperPlaneOutline} />
+                          <IonIcon icon={ICON_SENDEN} />
                         </div>
                         <div className="app-corner-badges__separator" />
                       </>
@@ -259,10 +259,10 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
                     {/* Status als Symbol-Badge (wie in der Moderation), Legende erklaert */}
                     <div
                       className="app-corner-badge"
-                      style={{ backgroundColor: statusColor, padding: '4px 6px' }}
+                      style={{ backgroundColor: statusColor, padding: 'var(--app-abstand-mini) var(--app-abstand-kompakt)' }}
                       title={STATUS_LABEL[status]}
                     >
-                      <IonIcon icon={STATUS_ICON[status]} style={{ color: '#fff', fontSize: '0.85rem', display: 'block' }} />
+                      <IonIcon icon={STATUS_ICON[status]} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)', display: 'block' }} />
                     </div>
                   </div>
 
@@ -279,10 +279,10 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
                         <div
                           className="app-list-item__title"
                           style={{
-                            color: isArchived ? '#999' : undefined,
+                            color: isArchived ? 'var(--app-text-muted)' : undefined,
                             // Das Zähler-Badge ist seit dem Umbau auf Zahl+Uhr
                             // schmaler als das alte "{n} offen".
-                            paddingRight: pending > 0 ? '110px' : '80px'
+                            paddingRight: pending > 0 ? 'var(--app-freiraum-aktion-xxl-plus)' : 'var(--app-freiraum-aktion-xl)'
                           }}
                         >
                           {challenge.title}
@@ -291,7 +291,7 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
                         <div
                           className="app-list-item__subtitle"
                           style={{
-                            color: isArchived ? '#999' : '#666',
+                            color: isArchived ? 'var(--app-text-muted)' : 'var(--app-text-secondary)',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap'
@@ -303,35 +303,35 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
                         <div className="app-list-item__meta">
                           {status === 'draft' ? (
                             <span className="app-list-item__meta-item">
-                              <IonIcon icon={calendarOutline} className="app-icon-color--muted" />
+                              <IonIcon icon={ICON_TERMIN} className="app-icon-color--muted" />
                               Zeitraum noch offen
                             </span>
                           ) : (
                             <>
                               <span className="app-list-item__meta-item">
-                                <IonIcon icon={calendarOutline} className="app-icon-color--challenges" />
+                                <IonIcon icon={ICON_TERMIN} className="app-icon-color--challenges" />
                                 {formatDate(challenge.starts_at)}
                               </span>
                               <span className="app-list-item__meta-item">
-                                <IonIcon icon={timeOutline} className="app-icon-color--muted" />
+                                <IonIcon icon={ICON_UHRZEIT} className="app-icon-color--muted" />
                                 bis {formatDate(challenge.ends_at)}
                               </span>
                             </>
                           )}
                           <span className="app-list-item__meta-item">
-                            <IonIcon icon={albumsOutline} className="app-icon-color--challenges" />
+                            <IonIcon icon={ICON_ALBEN} className="app-icon-color--challenges" />
                             {anzahlBeitraege(challenge.submission_count || 0)}
                           </span>
                           <span className="app-list-item__meta-item">
                             <IonIcon
-                              icon={challenge.visibility === 'private' ? eyeOffOutline : eyeOutline}
+                              icon={challenge.visibility === 'private' ? ICON_VERBORGEN : ICON_SICHTBAR}
                               className="app-icon-color--muted"
                             />
                             {VISIBILITY_LABEL[challenge.visibility] || challenge.visibility}
                           </span>
                           {challenge.audience && AUDIENCE_LABEL[challenge.audience] && (
                             <span className="app-list-item__meta-item">
-                              <IonIcon icon={peopleOutline} className="app-icon-color--teamer" />
+                              <IonIcon icon={ICON_GRUPPE} className="app-icon-color--teamer" />
                               {AUDIENCE_LABEL[challenge.audience]}
                             </span>
                           )}
@@ -341,7 +341,7 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
                               style={{ maxWidth: '100%' }}
                               title={challenge.jahrgaenge.map((j) => j.name).join(', ')}
                             >
-                              <IonIcon icon={peopleOutline} className="app-icon-color--jahrgang" />
+                              <IonIcon icon={ICON_GRUPPE} className="app-icon-color--jahrgang" />
                               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 {challenge.jahrgaenge.length > 2
                                   ? `${challenge.jahrgaenge.length} Jahrgänge`
@@ -368,7 +368,7 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
                   className="app-swipe-action"
                 >
                   <div className="app-icon-circle app-icon-circle--lg app-icon-circle--challenges">
-                    <IonIcon icon={createOutline} />
+                    <IonIcon icon={ICON_BEARBEITEN} />
                   </div>
                 </IonItemOption>
                 {darfLoeschen && (
@@ -378,7 +378,7 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
                     className="app-swipe-action"
                   >
                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
-                      <IonIcon icon={trashOutline} />
+                      <IonIcon icon={ICON_LOESCHEN} />
                     </div>
                   </IonItemOption>
                 )}
@@ -392,7 +392,7 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
       <SectionHeader
         title="Challenges"
         subtitle="Anlegen, begleiten, mitmachen"
-        icon={flag}
+        icon={ICON_CHALLENGE_GEFUELLT}
         preset="challenges"
         stats={[
           { value: current.length, label: 'Aktuell', onClick: () => setReiter('aktuell'), active: reiter === 'aktuell' },
@@ -424,15 +424,15 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
       {reiter === 'aktuell' && (
       <>
       <ListSection
-        icon={flag}
+        icon={ICON_CHALLENGE_GEFUELLT}
         title="Aktuelle Challenges"
         count={current.length}
         iconColorClass="challenges"
         isEmpty={current.length === 0}
-        emptyIcon={flag}
-        emptyTitle="Gerade läuft keine Challenge"
-        emptyMessage="Lege eine Challenge an, damit deine Konfis eigene Beiträge einreichen können"
-        emptyIconColor="#be185d"
+        emptyIcon={ICON_CHALLENGE_GEFUELLT}
+        emptyTitle={ohneJahrgang ? ohneJahrgangLeerText.emptyTitle : 'Gerade läuft keine Challenge'}
+        emptyMessage={ohneJahrgang ? ohneJahrgangLeerText.emptyMessage : 'Lege eine Challenge an, damit deine Konfis eigene Beiträge einreichen können'}
+        emptyIconColor="var(--app-color-challenges)"
       >
         {current.map((challenge, index) => renderChallenge(challenge, index, current.length))}
       </ListSection>
@@ -441,15 +441,15 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
 
       {reiter === 'geplant' && (
       <ListSection
-        icon={timeOutline}
+        icon={ICON_UHRZEIT}
         title="Geplant und Entwürfe"
         count={planned.length}
         iconColorClass="challenges"
         isEmpty={planned.length === 0}
-        emptyIcon={timeOutline}
-        emptyTitle="Nichts in Planung"
-        emptyMessage="Entwürfe und Challenges mit einem Startdatum in der Zukunft erscheinen hier"
-        emptyIconColor="#be185d"
+        emptyIcon={ICON_UHRZEIT}
+        emptyTitle={ohneJahrgang ? ohneJahrgangLeerText.emptyTitle : 'Nichts in Planung'}
+        emptyMessage={ohneJahrgang ? ohneJahrgangLeerText.emptyMessage : 'Entwürfe und Challenges mit einem Startdatum in der Zukunft erscheinen hier'}
+        emptyIconColor="var(--app-color-challenges)"
       >
         {planned.map((challenge, index) => renderChallenge(challenge, index, planned.length))}
       </ListSection>
@@ -457,15 +457,15 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
 
       {reiter === 'archiv' && (
       <ListSection
-        icon={archiveOutline}
+        icon={ICON_ARCHIV}
         title="Archiv"
         count={archived.length}
         iconColorClass="challenges"
         isEmpty={archived.length === 0}
-        emptyIcon={archiveOutline}
-        emptyTitle="Noch nichts im Archiv"
-        emptyMessage="Beendete Challenges sammeln sich hier — mit allen Beiträgen zum Nachlesen"
-        emptyIconColor="#be185d"
+        emptyIcon={ICON_ARCHIV}
+        emptyTitle={ohneJahrgang ? ohneJahrgangLeerText.emptyTitle : 'Noch nichts im Archiv'}
+        emptyMessage={ohneJahrgang ? ohneJahrgangLeerText.emptyMessage : 'Beendete Challenges sammeln sich hier — mit allen Beiträgen zum Nachlesen'}
+        emptyIconColor="var(--app-color-challenges)"
       >
         {archived.map((challenge, index) => renderChallenge(challenge, index, archived.length))}
       </ListSection>
@@ -477,18 +477,18 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
           IMMER anzeigen, auch leer: war der Abschnitt bei 0 Stempeln
           ausgeblendet, sah man nie, dass es ihn ueberhaupt gibt — und damit
           auch nicht, dass Mitmachen vorgesehen ist (User-Hinweis 11.08.). */}
-      <IonList inset={true} style={{ margin: '16px' }}>
+      <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
           <IonListHeader>
             <div className="app-section-icon app-section-icon--challenges">
-              <IonIcon icon={ribbonOutline} />
+              <IonIcon icon={ICON_ABZEICHEN} />
             </div>
             <IonLabel>Deine Stempel</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: marks.length === 0 ? '16px' : '16px 12px' }}>
+            <IonCardContent style={{ padding: marks.length === 0 ? 'var(--app-abstand-basis)' : 'var(--app-abstand-basis) var(--app-abstand-mittel)' }}>
               {marks.length === 0 ? (
                 <EmptyState
-                  icon={ribbonOutline}
+                  icon={ICON_ABZEICHEN}
                   title="Noch keine Stempel"
                   message="Mach selbst bei einer Challenge mit — tippe sie an und reiche oben über das Plus deinen Beitrag ein."
                   iconColor="var(--app-color-challenges)"
@@ -496,8 +496,8 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
               ) : (
               <div
                 style={{
-                  display: 'flex', gap: '14px', overflowX: 'auto',
-                  paddingBottom: '4px', WebkitOverflowScrolling: 'touch'
+                  display: 'flex', gap: 'var(--app-abstand-mittelweit)', overflowX: 'auto',
+                  paddingBottom: 'var(--app-abstand-mini)', WebkitOverflowScrolling: 'touch'
                 }}
               >
                 {marks.map((mark) => (
@@ -505,25 +505,25 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
                     key={mark.challenge_id}
                     style={{
                       display: 'flex', flexDirection: 'column', alignItems: 'center',
-                      gap: '6px', minWidth: '74px', maxWidth: '92px', flexShrink: 0
+                      gap: 'var(--app-abstand-kompakt)', minWidth: '74px', maxWidth: '92px', flexShrink: 0
                     }}
                   >
                     <div
                       style={{
-                        width: '52px', height: '52px', borderRadius: '50%',
-                        background: 'linear-gradient(135deg, var(--app-color-challenges) 0%, #be123c 100%)',
+                        width: '52px', height: '52px', borderRadius: 'var(--app-radius-kreis)',
+                        background: 'linear-gradient(135deg, var(--app-color-challenges) 0%, var(--app-color-challenges-dunkel) 100%)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        boxShadow: '0 4px 12px rgba(var(--app-color-challenges-rgb), 0.35)'
+                        boxShadow: 'var(--app-schatten-glow-challenges)'
                       }}
                     >
                       <IonIcon
                         icon={getChallengeBadgeIcon(mark.badge_icon)}
-                        style={{ fontSize: '1.5rem', color: 'white' }}
+                        style={{ fontSize: 'var(--app-text-ueberschrift)', color: 'white' }}
                       />
                     </div>
                     <div
                       style={{
-                        fontSize: '0.72rem', fontWeight: 600, color: '#3c3c43',
+                        fontSize: 'var(--app-text-meta)', fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-ios)',
                         textAlign: 'center', lineHeight: 1.2
                       }}
                     >

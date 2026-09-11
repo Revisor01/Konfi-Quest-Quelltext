@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { Keyboard } from '@capacitor/keyboard';
+import type { PluginListenerHandle } from '@capacitor/core';
 import { Message } from '../../types/chat';
 
 /**
@@ -157,7 +158,7 @@ export function useChatScroll({ messages, initialUnreadRef, newDividerRef }: Cha
   // Ende (hinter der Tastatur). Darum: mehrfach über rAF + kurze Timeouts ans
   // Ende scrollen, sodass nach dem Layout-Reflow nachgezogen wird.
   useEffect(() => {
-    const handles: any[] = [];
+    const handles: PluginListenerHandle[] = [];
 
     const scrollToEndRepeated = () => {
       parkedAtDividerRef.current = false;

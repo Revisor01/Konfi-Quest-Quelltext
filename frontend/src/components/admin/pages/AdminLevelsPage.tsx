@@ -1,4 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { ICON_HINZUFUEGEN_GEFUELLT, ICON_LOESCHEN_GEFUELLT, ICON_POKAL_GEFUELLT, ICON_ZURUECK } from '../../shared/icons';
+import { fehlerText } from '../../../utils/fehler';
+import React, { useState, useRef } from 'react';
 import {
   IonPage,
   IonHeader,
@@ -17,12 +19,6 @@ import {
   IonRefresher,
   IonRefresherContent
 } from '@ionic/react';
-import {
-  add,
-  trophy,
-  trash,
-  arrowBack
-} from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
@@ -36,6 +32,10 @@ import { SectionHeader, ListSection } from '../../shared';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 import { getIconFromString } from '../../../utils/badgeIcons';
+
+// Ionic 9 gibt bei ref an IonItemSliding die React-Komponente zurueck, nicht
+// mehr das DOM-Element. Gebraucht wird hier nur close() — das haben beide.
+type SlidingRef = { close: () => Promise<void> };
 
 
 
@@ -58,7 +58,7 @@ const AdminLevelsPage: React.FC = () => {
   const { pageRef, presentingElement } = useModalPage('admin-levels');
   const { user, setError, isOnline } = useApp();
   const [presentAlert] = useIonAlert();
-  const slidingRefs = useRef<Map<number, HTMLIonItemSlidingElement>>(new Map());
+  const slidingRefs = useRef<Map<number, SlidingRef>>(new Map());
   const [editLevel, setEditLevel] = useState<Level | undefined>(undefined);
 
   // Offline-Query: Levels
@@ -107,11 +107,11 @@ const AdminLevelsPage: React.FC = () => {
             try {
               await api.delete(`/levels/${level.id}`);
               await refreshLevels();
-            } catch (error: any) {
+            } catch (error) {
               if (slidingElement) {
                 await slidingElement.close();
               }
-              setError(error.response?.data?.error || 'Fehler beim Löschen des Levels');
+              setError(fehlerText(error, 'Fehler beim Löschen des Levels'));
             }
           }
         }
@@ -130,13 +130,13 @@ const AdminLevelsPage: React.FC = () => {
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-              <IonIcon icon={arrowBack} />
+              <IonIcon icon={ICON_ZURUECK} />
             </IonButton>
           </IonButtons>
           <IonTitle>Level</IonTitle>
           <IonButtons slot="end">
             <IonButton aria-label="Neues Level anlegen" onClick={handleAdd}>
-              <IonIcon icon={add} />
+              <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -160,7 +160,7 @@ const AdminLevelsPage: React.FC = () => {
             <SectionHeader
               title="Level-System"
               subtitle="Punkte-Level und Belohnungen"
-              icon={trophy}
+              icon={ICON_POKAL_GEFUELLT}
               preset="level"
               stats={[
                 { value: (levels || []).length, label: 'GESAMT' }
@@ -169,14 +169,14 @@ const AdminLevelsPage: React.FC = () => {
 
             {/* Level List */}
             <ListSection
-              icon={trophy}
+              icon={ICON_POKAL_GEFUELLT}
               title="Level"
               count={(levels || []).length}
               iconColorClass="level"
-              emptyIcon={trophy}
+              emptyIcon={ICON_POKAL_GEFUELLT}
               emptyTitle="Keine Level gefunden"
               emptyMessage="Noch keine Level angelegt"
-              emptyIconColor="#5b21b6"
+              emptyIconColor="var(--app-color-konfis)"
             >
                       {(levels || []).map((level, index) => (
                         <IonItemSliding
@@ -188,7 +188,7 @@ const AdminLevelsPage: React.FC = () => {
                               slidingRefs.current.delete(level.id);
                             }
                           }}
-                          style={{ marginBottom: index < (levels || []).length - 1 ? '8px' : '0' }}
+                          style={{ marginBottom: index < (levels || []).length - 1 ? 'var(--app-abstand-eng)' : '0' }}
                         >
                           <IonItem
                             button
@@ -199,13 +199,13 @@ const AdminLevelsPage: React.FC = () => {
                           >
                             <div
                               className="app-list-item app-list-item--level"
-                              style={{ borderLeftColor: level.color || '#ec4899' }}
+                              style={{ borderLeftColor: level.color || 'var(--app-color-level)' }}
                             >
                               {/* Corner Badge für Punkte */}
                               <div className="app-corner-badges">
                                 <div
                                   className="app-corner-badge"
-                                  style={{ backgroundColor: level.color || '#ec4899' }}
+                                  style={{ backgroundColor: level.color || 'var(--app-color-level)' }}
                                 >
                                   {level.points_required}P
                                 </div>
@@ -214,7 +214,7 @@ const AdminLevelsPage: React.FC = () => {
                                 <div className="app-list-item__main">
                                   <div
                                     className="app-icon-circle app-icon-circle--lg"
-                                    style={{ backgroundColor: level.color || '#ec4899' }}
+                                    style={{ backgroundColor: level.color || 'var(--app-color-level)' }}
                                   >
                                     <IonIcon icon={getIconFromString(level.icon || 'trophy')} />
                                   </div>
@@ -242,7 +242,7 @@ const AdminLevelsPage: React.FC = () => {
                               className="app-swipe-action"
                             >
                               <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
-                                <IonIcon icon={trash} />
+                                <IonIcon icon={ICON_LOESCHEN_GEFUELLT} />
                               </div>
                             </IonItemOption>
                           </IonItemOptions>

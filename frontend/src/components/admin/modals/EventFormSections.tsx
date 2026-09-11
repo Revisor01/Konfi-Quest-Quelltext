@@ -17,8 +17,12 @@ import {
   IonAccordionGroup
 } from '@ionic/react';
 import {
-  create, people, scanOutline, copy, chevronDownOutline
-} from 'ionicons/icons';
+  ICON_AUFKLAPPEN,
+  ICON_BEARBEITEN_GEFUELLT,
+  ICON_GRUPPE_GEFUELLT,
+  ICON_KOPIEREN_GEFUELLT,
+  ICON_SCANNEN,
+} from '../../shared/icons';
 import { Category, Jahrgang } from '../../../types/event';
 import { istPunkteartAktiv, PUNKTEART_NAME, type Punkteart } from '../../../utils/punktearten';
 
@@ -74,7 +78,7 @@ export const BasicInfoSection = React.memo<BasicInfoSectionProps>(({
   <IonList inset={true} className="app-modal-section">
     <IonListHeader>
       <div className="app-section-icon app-section-icon--events">
-        <IonIcon icon={create} />
+        <IonIcon icon={ICON_BEARBEITEN_GEFUELLT} />
       </div>
       <IonLabel>Event Grunddaten</IonLabel>
     </IonListHeader>
@@ -142,8 +146,8 @@ export const BasicInfoSection = React.memo<BasicInfoSectionProps>(({
             interfaceOptions={{ cssClass: 'app-select-popover--wide' }}
           >
             <IonSelectOption value="normal">Nur Konfis</IonSelectOption>
-            <IonSelectOption value="teamer_needed">Konfis, Teamer:innen gesucht</IonSelectOption>
-            <IonSelectOption value="teamer_only">Nur Teamer:innen</IonSelectOption>
+            <IonSelectOption value="teamer_needed">Konfis, Team gesucht</IonSelectOption>
+            <IonSelectOption value="teamer_only">Nur Team</IonSelectOption>
           </IonSelect>
         </IonItem>
         {/* Pflicht-Event und Konfirmation nur, wenn Konfis teilnehmen */}
@@ -197,7 +201,7 @@ export const CheckinSection = React.memo<CheckinSectionProps>(({
   <IonList inset={true} className="app-modal-section">
     <IonListHeader>
       <div className="app-section-icon app-section-icon--events">
-        <IonIcon icon={scanOutline} />
+        <IonIcon icon={ICON_SCANNEN} />
       </div>
       <IonLabel>QR Check-in</IonLabel>
     </IonListHeader>
@@ -205,7 +209,7 @@ export const CheckinSection = React.memo<CheckinSectionProps>(({
     <IonCardContent>
       <IonList>
         <IonItem lines="none">
-          <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Check-in-Fenster (Minuten)</IonLabel>
+          <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Check-in-Fenster (Minuten)</IonLabel>
           <div className="app-range-row">
             <span className="app-range-row__min">5</span>
             <IonRange
@@ -219,8 +223,8 @@ export const CheckinSection = React.memo<CheckinSectionProps>(({
             <span className="app-range-row__value">{formData.checkin_window} min</span>
           </div>
         </IonItem>
-        <p style={{ fontSize: '0.8rem', color: '#888', margin: '4px 16px 8px 16px', lineHeight: '1.4' }}>
-          QR-Code Check-in ist {formData.checkin_window} Min. vor bis {formData.checkin_window} Min. nach Event-Start möglich
+        <p style={{ fontSize: 'var(--app-text-hinweis)', color: 'var(--app-text-tertiary)', margin: 'var(--app-abstand-mini) var(--app-abstand-basis) var(--app-abstand-eng) var(--app-abstand-basis)', lineHeight: '1.4' }}>
+          QR-Code Check-in: {formData.checkin_window} Min. vor und nach dem Start
         </p>
       </IonList>
     </IonCardContent>
@@ -262,7 +266,7 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
   <IonList inset={true} className="app-modal-section">
     <IonListHeader>
       <div className="app-section-icon app-section-icon--events">
-        <IonIcon icon={people} />
+        <IonIcon icon={ICON_GRUPPE_GEFUELLT} />
       </div>
       <IonLabel>Konfis</IonLabel>
     </IonListHeader>
@@ -284,7 +288,7 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
             </IonItem>
             {formData.max_participants !== 0 && (
               <IonItem lines="none">
-                <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Max. Teilnehmer:innen</IonLabel>
+                <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Max. Teilnehmer:innen</IonLabel>
                 <div className="app-range-row">
                   <span className="app-range-row__min">1</span>
                   <IonRange
@@ -304,7 +308,7 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
                 niemand warten, dann waere der Schalter irrefuehrend. */}
             {formData.max_participants !== 0 && (
               <>
-                <IonItem lines="none" style={{ '--background': 'transparent', marginBottom: formData.waitlist_enabled ? '12px' : '0', paddingTop: '8px' }}>
+                <IonItem lines="none" style={{ '--background': 'transparent', marginBottom: formData.waitlist_enabled ? 'var(--app-abstand-mittel)' : '0', paddingTop: 'var(--app-abstand-eng)' }}>
                   <IonLabel>Warteliste aktivieren</IonLabel>
                   <IonToggle
                     slot="end"
@@ -316,7 +320,7 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
                 </IonItem>
                 {formData.waitlist_enabled && (
                   <IonItem lines="none">
-                    <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Max. Wartelisten-Plätze</IonLabel>
+                    <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Max. Wartelisten-Plätze</IonLabel>
                     <div className="app-range-row">
                       <span className="app-range-row__min">1</span>
                       <IonRange
@@ -340,7 +344,7 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
         {!formData.is_konfirmation && (
           <>
             <IonItem lines="none">
-              <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Punkte</IonLabel>
+              <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Punkte</IonLabel>
               <div className="app-range-row">
                 <span className="app-range-row__min">1</span>
                 <IonRange
@@ -355,10 +359,10 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
               </div>
             </IonItem>
 
-            <IonItem lines="none" style={{ '--background': 'transparent', paddingBottom: '8px', paddingTop: '16px' }}>
-              <IonLabel style={{ fontSize: '0.9rem', fontWeight: '500', color: '#666' }}>Typ *</IonLabel>
+            <IonItem lines="none" style={{ '--background': 'transparent', paddingBottom: 'var(--app-abstand-eng)', paddingTop: 'var(--app-abstand-basis)' }}>
+              <IonLabel style={{ fontSize: 'var(--app-text-basis)', fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-secondary)' }}>Typ *</IonLabel>
             </IonItem>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-eng)' }}>
               {verfuegbareArten.map((art) => (
                 <div
                   key={art}
@@ -368,7 +372,7 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
                     cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.6 : 1,
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0'
                   }}>
-                  <span style={{ fontWeight: '500', color: '#333' }}>{PUNKTEART_NAME[art]}</span>
+                  <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-primary)' }}>{PUNKTEART_NAME[art]}</span>
                 </div>
               ))}
             </div>
@@ -398,7 +402,7 @@ export const CategoriesTargetSection = React.memo<CategoriesTargetSectionProps>(
   <IonList inset={true} className="app-modal-section">
     <IonListHeader>
       <div className="app-section-icon app-section-icon--events">
-        <IonIcon icon={people} />
+        <IonIcon icon={ICON_GRUPPE_GEFUELLT} />
       </div>
       <IonLabel>Kategorien & Zielgruppe</IonLabel>
     </IonListHeader>
@@ -409,13 +413,13 @@ export const CategoriesTargetSection = React.memo<CategoriesTargetSectionProps>(
           // Akkordeon mit Multi-Auswahl (Muster: Icon-Picker im Challenge-Modal) —
           // die Kategorien-Liste ist sonst der laengste Block im Formular.
           <IonAccordionGroup>
-            <IonAccordion value="kategorien" toggleIcon={chevronDownOutline} toggleIconSlot="end">
+            <IonAccordion value="kategorien" toggleIcon={ICON_AUFKLAPPEN} toggleIconSlot="end">
               <IonItem slot="header" lines="none">
                 <IonLabel>
-                  <h3 style={{ fontSize: '0.9rem', fontWeight: '500', color: '#666', margin: '0 0 4px 0' }}>
+                  <h3 style={{ fontSize: 'var(--app-text-basis)', fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-secondary)', margin: '0 0 var(--app-abstand-mini) 0' }}>
                     Kategorien (mehrere möglich)
                   </h3>
-                  <p style={{ fontSize: '0.85rem', color: '#333', margin: '0', fontWeight: '500' }}>
+                  <p style={{ fontSize: 'var(--app-text-sekundaer)', color: 'var(--app-text-primary)', margin: '0', fontWeight: 'var(--app-schrift-mittel)' }}>
                     {formData.category_ids.length === 0
                       ? 'Keine Auswahl'
                       : categories
@@ -425,8 +429,8 @@ export const CategoriesTargetSection = React.memo<CategoriesTargetSectionProps>(
                   </p>
                 </IonLabel>
               </IonItem>
-              <div slot="content" style={{ padding: '8px 0' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div slot="content" style={{ padding: 'var(--app-abstand-eng) 0' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-eng)' }}>
                   {categories.map((category) => {
                     const isSelected = formData.category_ids.includes(category.id);
                     return (
@@ -447,7 +451,7 @@ export const CategoriesTargetSection = React.memo<CategoriesTargetSectionProps>(
                           cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.6 : 1,
                           display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0'
                         }}>
-                        <span style={{ fontWeight: '500', color: '#333' }}>{category.name}</span>
+                        <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-primary)' }}>{category.name}</span>
                       </div>
                     );
                   })}
@@ -462,17 +466,17 @@ export const CategoriesTargetSection = React.memo<CategoriesTargetSectionProps>(
         )}
 
         {teamerAccess !== 'teamer_only' && (<>
-        <IonItem lines="none" style={{ '--background': 'transparent', paddingBottom: '8px', paddingTop: '16px' }}>
-          <IonLabel style={{ fontSize: '0.9rem', fontWeight: '500', color: formData.mandatory && formData.jahrgang_ids.length === 0 ? '#dc3545' : '#666' }}>
+        <IonItem lines="none" style={{ '--background': 'transparent', paddingBottom: 'var(--app-abstand-eng)', paddingTop: 'var(--app-abstand-basis)' }}>
+          <IonLabel style={{ fontSize: 'var(--app-text-basis)', fontWeight: 'var(--app-schrift-mittel)', color: formData.mandatory && formData.jahrgang_ids.length === 0 ? 'var(--app-color-danger)' : 'var(--app-text-secondary)' }}>
             Jahrgänge (mehrere möglich) *{formData.mandatory && formData.jahrgang_ids.length === 0 ? ' (Pflicht bei Pflicht-Events)' : ''}
             {formData.jahrgang_ids.length > 0 && (
-              <span style={{ marginLeft: '8px', fontSize: '0.8rem', color: 'var(--app-color-jahrgang)', fontWeight: 'normal' }}>
+              <span style={{ marginLeft: 'var(--app-abstand-eng)', fontSize: 'var(--app-text-hinweis)', color: 'var(--app-color-jahrgang)', fontWeight: 'var(--app-schrift-normal)' }}>
                 ({formData.jahrgang_ids.length} ausgewählt)
               </span>
             )}
           </IonLabel>
         </IonItem>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-eng)' }}>
           {jahrgaenge.map((jahrgang) => {
             const isSelected = formData.jahrgang_ids.includes(jahrgang.id);
             return (
@@ -493,7 +497,7 @@ export const CategoriesTargetSection = React.memo<CategoriesTargetSectionProps>(
                   cursor: loading ? 'default' : 'pointer', opacity: loading ? 0.6 : 1,
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0'
                 }}>
-                <span style={{ fontWeight: '500', color: '#333' }}>{jahrgang.name}</span>
+                <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-primary)' }}>{jahrgang.name}</span>
               </div>
             );
           })}
@@ -523,15 +527,15 @@ export const TeamerSection = React.memo<TeamerSectionProps>(({
   <IonList inset={true} className="app-modal-section">
     <IonListHeader>
       <div className="app-section-icon app-section-icon--events">
-        <IonIcon icon={people} />
+        <IonIcon icon={ICON_GRUPPE_GEFUELLT} />
       </div>
-      <IonLabel>Teamer:innen</IonLabel>
+      <IonLabel>Team</IonLabel>
     </IonListHeader>
     <IonCard className="app-card">
     <IonCardContent>
       <IonList>
         <IonItem lines="none">
-          <IonLabel>Unbegrenzte Teamer:innen</IonLabel>
+          <IonLabel>Team unbegrenzt</IonLabel>
           <IonToggle
             slot="end"
             className="app-toggle--events"
@@ -542,7 +546,7 @@ export const TeamerSection = React.memo<TeamerSectionProps>(({
         </IonItem>
         {formData.teamer_max_participants !== 0 && (
           <IonItem lines="none">
-            <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Wie viele Teamer:innen werden gesucht?</IonLabel>
+            <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Wie viele Personen werden fürs Team gesucht?</IonLabel>
             <div className="app-range-row">
               <span className="app-range-row__min">1</span>
               <IonRange
@@ -560,7 +564,7 @@ export const TeamerSection = React.memo<TeamerSectionProps>(({
 
         {/* Warteliste NUR bei begrenzten Teamer-Plaetzen (wie bei den Konfis) */}
         {formData.teamer_max_participants !== 0 && (<>
-          <IonItem lines="none" style={{ '--background': 'transparent', marginBottom: formData.teamer_waitlist_enabled ? '12px' : '0', paddingTop: '8px' }}>
+          <IonItem lines="none" style={{ '--background': 'transparent', marginBottom: formData.teamer_waitlist_enabled ? 'var(--app-abstand-mittel)' : '0', paddingTop: 'var(--app-abstand-eng)' }}>
             <IonLabel>Warteliste aktivieren</IonLabel>
             <IonToggle
               slot="end"
@@ -572,7 +576,7 @@ export const TeamerSection = React.memo<TeamerSectionProps>(({
           </IonItem>
           {formData.teamer_waitlist_enabled && (
             <IonItem lines="none">
-              <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Max. Wartelisten-Plätze</IonLabel>
+              <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Max. Wartelisten-Plätze</IonLabel>
               <div className="app-range-row">
                 <span className="app-range-row__min">1</span>
                 <IonRange
@@ -626,7 +630,7 @@ export const SeriesSection = React.memo<SeriesSectionProps>(({
   <IonList inset={true} className="app-modal-section">
     <IonListHeader>
       <div className="app-section-icon app-section-icon--events">
-        <IonIcon icon={copy} />
+        <IonIcon icon={ICON_KOPIEREN_GEFUELLT} />
       </div>
       <IonLabel>Event-Serie (optional)</IonLabel>
     </IonListHeader>
@@ -646,7 +650,7 @@ export const SeriesSection = React.memo<SeriesSectionProps>(({
           {formData.is_series && (
             <>
               <IonItem lines="none">
-                <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Anzahl Events</IonLabel>
+                <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Anzahl Events</IonLabel>
                 <div className="app-range-row">
                   <span className="app-range-row__min">2</span>
                   <IonRange

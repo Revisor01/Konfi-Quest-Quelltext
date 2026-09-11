@@ -1,3 +1,4 @@
+import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   IonPage,
@@ -13,40 +14,45 @@ import {
   useIonRouter
 } from '@ionic/react';
 import {
-  calendar,
-  sparkles,
-  time,
-  timeOutline,
-  flagOutline,
-  eyeOutline,
-  megaphoneOutline,
-  constructOutline,
-  helpCircle,
-  location,
-  chevronForward,
-  bagHandle,
-  eyeOff
-} from 'ionicons/icons';
+  ICON_ANKUENDIGUNG,
+  ICON_CHALLENGE,
+  ICON_FUNKELN_GEFUELLT,
+  ICON_HILFE_GEFUELLT,
+  ICON_MATERIAL,
+  ICON_ORT_GEFUELLT,
+  ICON_SCHLIESSEN,
+  ICON_SICHTBAR,
+  ICON_TERMIN_GEFUELLT,
+  ICON_UHRZEIT,
+  ICON_UHRZEIT_GEFUELLT,
+  ICON_VERBORGEN_GEFUELLT,
+  ICON_WEITER_GEFUELLT,
+  ICON_WERKZEUG,
+} from '../../shared/icons';
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
+import { Preferences } from '@capacitor/preferences';
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
+import type { KonfiChallenge } from '../../../types/challenges';
 import BibleTranslationModal, { getTranslationName } from '../../shared/BibleTranslationModal';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
+import { normalisiereTeamerBadges } from '../teamerBadges';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import { CACHE_TTL } from '../../../services/offlineCache';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import WrappedModal from '../../wrapped/WrappedModal';
-import { ProfileHeaderButton, TrialBanner } from '../../shared';
+import { ProfileHeaderButton, TrialBanner, StoreUpdateBanner } from '../../shared';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { mergeSectionOrder, DEFAULT_TEAMER_SECTION_ORDER } from '../../../utils/sectionOrder';
 import KonfispruchSelectModal from '../../konfi/modals/KonfispruchSelectModal';
 import TeamerOnboardingModal from '../modals/TeamerOnboardingModal';
-import TeamerUpdateWalkthroughModal from '../modals/TeamerUpdateWalkthroughModal';
+import TeamerUpdate211WalkthroughModal from '../modals/TeamerUpdate211WalkthroughModal';
 import { useOnboardingWithUpdateOnce } from '../../../hooks/useOnboardingOnce';
 import NeuerungenBanner from '../../shared/NeuerungenBanner';
 import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
 import { getIconFromString } from '../../../utils/badgeIcons';
 import BadgePopoverContent, { BadgePopoverData, getBadgeColor } from '../../shared/BadgePopoverContent';
+import { formatTimeUntil, kalendertag } from '../../shared/eventFormatting';
 
 
 
@@ -122,13 +128,13 @@ interface ChallengeTeaser {
 
 // Icon je Challenge-Typ — gleiches Mapping wie im Konfi-Dashboard.
 const CHALLENGE_TYPE_ICON: Record<string, string> = {
-  wahrnehmung: eyeOutline,
-  beitrag: megaphoneOutline,
-  praxis: constructOutline,
-  frei: flagOutline
+  wahrnehmung: ICON_SICHTBAR,
+  beitrag: ICON_ANKUENDIGUNG,
+  praxis: ICON_WERKZEUG,
+  frei: ICON_CHALLENGE
 };
 const getChallengeTypeIcon = (type?: string): string =>
-  CHALLENGE_TYPE_ICON[type || ''] || flagOutline;
+  CHALLENGE_TYPE_ICON[type || ''] || ICON_CHALLENGE;
 
 const DEFAULT_TEAMER_ORDER = DEFAULT_TEAMER_SECTION_ORDER;
 
@@ -139,6 +145,9 @@ interface DashboardData {
   badges: { recent: Badge[]; earned_count: number; total_count: number };
   config: DashboardConfig;
   has_wrapped?: boolean;
+  // Wie im Konfi-Dashboard: Id der Ausgabe, damit sich der Hinweis PRO
+  // Ausgabe wegklicken laesst. Aeltere Antworten liefern sie nicht.
+  wrapped_ausgabe_id?: number | null;
   konfspruch?: Konfspruch | null;
 }
 
@@ -158,30 +167,30 @@ const CertPopoverContent: React.FC<{
   if (!cert) return null;
 
   const statusLabel = cert.status === 'valid' ? 'Gültig' : cert.status === 'expired' ? 'Abgelaufen' : 'Nicht erhalten';
-  const statusColor = cert.status === 'valid' ? '#059669' : cert.status === 'expired' ? '#ef4444' : '#9ca3af';
+  const statusColor = cert.status === 'valid' ? 'var(--app-color-success-strong)' : cert.status === 'expired' ? 'var(--app-color-danger)' : 'var(--app-color-neutral-hell)';
 
   return (
-    <div style={{ padding: '12px', background: 'white', minWidth: '200px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+    <div style={{ padding: 'var(--app-abstand-mittel)', background: 'white', minWidth: '200px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-schmal)', marginBottom: 'var(--app-abstand-schmal)' }}>
         <div style={{
-          width: '40px', height: '40px', borderRadius: '50%',
+          width: '40px', height: '40px', borderRadius: 'var(--app-radius-kreis)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: statusColor, color: 'white'
         }}>
-          <IonIcon icon={getIconFromString(cert.icon)} style={{ fontSize: '1.2rem' }} />
+          <IonIcon icon={getIconFromString(cert.icon)} style={{ fontSize: 'var(--app-text-untertitel)' }} />
         </div>
         <div>
-          <h3 style={{ margin: 0, fontSize: '0.95rem', fontWeight: '700' }}>{cert.name}</h3>
-          <span style={{ fontSize: '0.75rem', color: statusColor, fontWeight: '600' }}>{statusLabel}</span>
+          <h3 style={{ margin: 0, fontSize: 'var(--app-text-betont)', fontWeight: 'var(--app-schrift-fett)' }}>{cert.name}</h3>
+          <span style={{ fontSize: 'var(--app-text-klein)', color: statusColor, fontWeight: 'var(--app-schrift-halbfett)' }}>{statusLabel}</span>
         </div>
       </div>
       {cert.issued_date && (
-        <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: '4px' }}>
+        <div style={{ fontSize: 'var(--app-text-hinweis)', color: 'var(--app-text-secondary)', marginBottom: 'var(--app-abstand-mini)' }}>
           Ausgestellt: {new Date(cert.issued_date).toLocaleDateString('de-DE')}
         </div>
       )}
       {cert.expiry_date && (
-        <div style={{ fontSize: '0.8rem', color: '#666' }}>
+        <div style={{ fontSize: 'var(--app-text-hinweis)', color: 'var(--app-text-secondary)' }}>
           Ablauf: {new Date(cert.expiry_date).toLocaleDateString('de-DE')}
         </div>
       )}
@@ -228,10 +237,11 @@ const TeamerDashboardPage: React.FC = () => {
   // Schluessel mit v2: Im Zwischenspeicher koennen noch flache Arrays der
   // alten Antwortform liegen — die sollen nicht als neue Form gelesen werden.
   const { data: badgeData, refresh: refreshBadges, refreshLive: refreshBadgesLive } = useOfflineQuery<TeamerBadgeResponse>(
-    'teamer:all-badges:v2:' + user?.id,
+    'teamer:all-badges:v3:' + user?.id,
     async () => {
-      const res = await api.get('/teamer/badges');
-      return res.data;
+      // Abzeichen-Generation v2 — gleiche Huelle wie beim Konfi.
+      const res = await api.get('/teamer/badges/v2');
+      return normalisiereTeamerBadges<TeamerBadgeFull>(res.data, res.headers);
     },
     { ttl: CACHE_TTL.BADGES }
   );
@@ -248,7 +258,7 @@ const TeamerDashboardPage: React.FC = () => {
   const losungAktiv = dashboardData?.config?.show_losung !== false;
 
   const { data: dailyVerse, loading: loadingVerse, refresh: refreshVerse } = useOfflineQuery<DailyVerse | null>(
-    'teamer:tageslosung:' + new Date().toISOString().split('T')[0],
+    'teamer:tageslosung:' + kalendertag(),
     async () => {
       const response = await api.get('/teamer/tageslosung');
       if (response.data && response.data.success) {
@@ -281,8 +291,8 @@ const TeamerDashboardPage: React.FC = () => {
         const liste = Array.isArray(res.data?.active) ? res.data.active : [];
         setActiveChallenges(
           liste
-            .filter((c: any) => c.ends_at)
-            .map((c: any) => ({
+            .filter((c: KonfiChallenge) => c.ends_at)
+            .map((c: KonfiChallenge) => ({
               id: c.id,
               title: c.title,
               ends_at: c.ends_at,
@@ -310,16 +320,16 @@ const TeamerDashboardPage: React.FC = () => {
       await api.put('/teamer/bible-translation', { translation: code });
       setSelectedTranslation(code);
       await refreshVerse();
-    } catch (err: any) {
+    } catch (err) {
       // Siehe DashboardView (Konfi): stiller Fehlschlag bei bewusster Auswahl.
       console.error('Bibeluebersetzung speichern fehlgeschlagen:', err);
-      setError(err.response?.data?.error || 'Übersetzung konnte nicht gespeichert werden');
+      setError(fehlerText(err, 'Übersetzung konnte nicht gespeichert werden'));
     }
   };
 
   const [presentBibleModal, dismissBibleModal] = useIonModal(BibleTranslationModal, {
     currentTranslation: selectedTranslation,
-    accentColor: '#be185d',
+    accentColor: 'var(--app-color-teamer)',
     itemVariant: 'teamer',
     sectionIconVariant: 'teamer',
     onClose: () => dismissBibleModal(),
@@ -332,6 +342,24 @@ const TeamerDashboardPage: React.FC = () => {
     displayName: dashboardData?.greeting?.display_name || '',
     wrappedType: 'teamer' as const
   });
+
+  // Weggeklickter Rueckblick-Hinweis, gemerkt PRO AUSGABE -- wie im
+  // Konfi-Dashboard: Der naechste Rueckblick meldet sich wieder.
+  const [wrappedHinweisWeg, setWrappedHinweisWeg] = useState(false);
+  const wrappedHinweisKey = `wrapped_hinweis_t_${user?.id ?? 'x'}_${dashboardData?.wrapped_ausgabe_id ?? 'alt'}`;
+
+  useEffect(() => {
+    if (!dashboardData?.has_wrapped) return;
+    Preferences.get({ key: wrappedHinweisKey })
+      .then(({ value }) => setWrappedHinweisWeg(value === '1'))
+      .catch(() => { /* Preferences nicht verfuegbar -> Hinweis zeigen */ });
+  }, [wrappedHinweisKey, dashboardData?.has_wrapped]);
+
+  const wrappedHinweisAusblenden = () => {
+    setWrappedHinweisWeg(true);
+    Preferences.set({ key: wrappedHinweisKey, value: '1' })
+      .catch(() => { /* beim naechsten Start erneut */ });
+  };
 
   const openWrapped = () => {
     presentWrappedModal({ cssClass: 'wrapped-modal-fullscreen' });
@@ -370,24 +398,6 @@ const TeamerDashboardPage: React.FC = () => {
     return `Gute Nacht, ${firstName}!`;
   };
 
-  // 1:1 aus DashboardView.tsx
-  const formatTimeUntil = (dateString: string | undefined) => {
-    if (!dateString) return '';
-    const targetDate = new Date(dateString);
-    const now = new Date();
-    const diffTime = targetDate.getTime() - now.getTime();
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    if (diffDays === 0) return 'Heute';
-    if (diffDays === 1) return 'Morgen';
-    if (diffDays < 0) return 'Vorbei';
-    if (diffDays < 7) return `${diffDays} Tage`;
-    if (diffDays < 14) return '1 Woche';
-    if (diffDays < 21) return '2 Wochen';
-    if (diffDays < 30) return `${Math.floor(diffDays / 7)} Wochen`;
-    if (diffDays < 365) return `${diffDays} Tage`;
-    return `${Math.floor(diffDays / 365)} Jahr${Math.floor(diffDays / 365) > 1 ? 'e' : ''}`;
-  };
 
   const formatEventTime = (dateString: string | undefined) => {
     if (!dateString) return '';
@@ -466,10 +476,14 @@ const TeamerDashboardPage: React.FC = () => {
           <IonRefresherContent />
         </IonRefresher>
 
-        <TrialBanner style={{ marginTop: '8px' }} />
+        <TrialBanner style={{ marginTop: 'var(--app-abstand-eng)' }} />
+
+        {/* Dezenter Hinweis, wenn im Store eine neuere Version liegt.
+            Prueft selbst und rendert sonst nichts (StoreUpdateBanner). */}
+        <StoreUpdateBanner style={{ margin: 'var(--app-abstand-eng) var(--app-abstand-basis) 0' }} />
 
         <NeuerungenBanner
-          style={{ margin: '8px 16px 0' }}
+          style={{ margin: 'var(--app-abstand-eng) var(--app-abstand-basis) 0' }}
           updateSichtbar={showUpdateHinweis}
           mitmachenSichtbar={showMitmachenHinweis}
           onUpdateOeffnen={() => { markUpdateHinweisGesehen(); setShowUpdateWalkthrough(true); }}
@@ -478,11 +492,15 @@ const TeamerDashboardPage: React.FC = () => {
           onMitmachenAusblenden={markMitmachenHinweisGesehen}
         />
 
-        <div style={{ padding: '16px' }}>
+        <div style={{ padding: 'var(--app-abstand-basis)' }}>
           {/* Begruessung */}
           {dashboardData && (
+            // Der gemeinsame Teamer-Verlauf statt eines eigenen: Auch dieser
+            // Kopf startete auf einem helleren Rot (#e11d48) und stach heraus
+            // Damit ziehen Kopf, Profil und
+            // Wrapped-Kachel aus derselben Variablen.
             <div className="app-dashboard-header" style={{
-              background: 'linear-gradient(135deg, #e11d48 0%, #be185d 50%, #9f1239 100%)'
+              background: 'var(--app-gradient-teamer)'
             }}>
               <div className="app-dashboard-header__circle" style={{
                 top: '-40px', right: '-40px', width: '140px', height: '140px',
@@ -508,24 +526,47 @@ const TeamerDashboardPage: React.FC = () => {
           )}
 
           {/* Wrapped Card */}
-          {dashboardData?.has_wrapped && (
+          {dashboardData?.has_wrapped && !wrappedHinweisWeg && (
             <div onClick={openWrapped} style={{
-              marginBottom: '16px',
-              padding: '20px',
-              borderRadius: '16px',
-              background: 'linear-gradient(135deg, #db2777 0%, #ec4899 50%, #f472b6 100%)',
+              marginBottom: 'var(--app-abstand-basis)',
+              padding: 'var(--app-abstand-gross)',
+              borderRadius: 'var(--app-radius-gross)',
+              background: 'var(--app-gradient-teamer)',
               color: 'white',
               cursor: 'pointer',
               position: 'relative',
               overflow: 'hidden'
             }}>
-              <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <IonIcon icon={sparkles} style={{ fontSize: '2rem' }} />
+              <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)' }}>
+                <IonIcon icon={ICON_FUNKELN_GEFUELLT} style={{ fontSize: 'var(--app-anzeige-zahl)' }} />
                 <div>
-                  <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: '700' }}>Dein Teamer-Jahr ist da!</h3>
-                  <p style={{ margin: '4px 0 0', fontSize: '0.85rem', opacity: 0.9 }}>Schau dir deinen Jahresrückblick an</p>
+                  <h3 style={{ margin: 0, fontSize: 'var(--app-text-gross)', fontWeight: 'var(--app-schrift-fett)' }}>Dein Team-Jahr Wrapped ist da!</h3>
+                  <p style={{ margin: 'var(--app-abstand-mini) 0 0', fontSize: 'var(--app-text-sekundaer)', opacity: 0.9 }}>Schau dir deinen Jahresrückblick an</p>
                 </div>
-                <IonIcon icon={chevronForward} style={{ fontSize: '1.2rem', marginLeft: 'auto' }} />
+                {/* X statt Chevron: Das Chevron verdeckte
+                    den Ausblenden-Knopf. Jetzt wie die uebrigen Info-Karten --
+                    nur in der Farbe dieser Karte. */}
+                <button
+                  type="button"
+                  aria-label="Hinweis ausblenden"
+                  onClick={(e) => { e.stopPropagation(); wrappedHinweisAusblenden(); }}
+                  style={{
+                    marginLeft: 'auto',
+                    background: 'rgba(255,255,255,0.18)',
+                    border: 'none',
+                    borderRadius: 'var(--app-radius-kreis)',
+                    width: '32px',
+                    height: '32px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'white',
+                    cursor: 'pointer',
+                    flexShrink: 0
+                  }}
+                >
+                  <IonIcon icon={ICON_SCHLIESSEN} style={{ fontSize: 'var(--app-text-gross)' }} aria-hidden="true" />
+                </button>
               </div>
             </div>
           )}
@@ -534,7 +575,22 @@ const TeamerDashboardPage: React.FC = () => {
           {mergeSectionOrder(config?.section_order, DEFAULT_TEAMER_ORDER).map(sectionKey => {
             // Zertifikate
             if (sectionKey === 'zertifikate') {
-              if (!(config?.show_zertifikate !== false && dashboardData && dashboardData.certificates.length > 0)) return null;
+              // Nur die WIRKLICH erhaltenen zeigen.
+              //
+              // Die Route liefert per LEFT JOIN alle aktiven Zertifikatstypen
+              // der Gemeinde, auch die nicht erworbenen ('not_earned'). Damit
+              // war certificates.length nie 0, sobald die Gemeinde ueberhaupt
+              // Typen angelegt hat -- der Block stand mit lauter leeren
+              // Platzhaltern da. Auf Produktion nachgemessen: 15 von 17
+              // Teamer:innen haben null Zertifikate, sehen aber vier
+              // Platzhalter, weil ihre Gemeinde vier Typen fuehrt.
+              //
+              // Hier gefiltert, NICHT in der Route: Die Antwortform bleibt so
+              // unveraendert, und ausgelieferte App-Versionen zeigen ihre
+              // gewohnte Ansicht weiter.
+              const erhalteneZertifikate = (dashboardData?.certificates ?? [])
+                .filter(c => c.status !== 'not_earned');
+              if (!(config?.show_zertifikate !== false && erhalteneZertifikate.length > 0)) return null;
               return (
             <div key="zertifikate" className="app-dashboard-section app-dashboard-section--zertifikate">
               <div className="app-dashboard-section__bg-text">
@@ -546,20 +602,28 @@ const TeamerDashboardPage: React.FC = () => {
                 position: 'absolute',
                 top: '20px',
                 right: '20px',
-                fontSize: '0.7rem',
-                fontWeight: '700',
+                fontSize: 'var(--app-text-meta)',
+                fontWeight: 'var(--app-schrift-fett)',
                 zIndex: 3
               }}>
-                {dashboardData.certificates.filter(c => c.status === 'valid').length}/{dashboardData.certificates.length} ERHALTEN
+                {/* Ohne die nicht erworbenen ergibt "1/1 ERHALTEN" keinen
+                    Sinn mehr. Der Bruch bleibt nur, wenn etwas abgelaufen ist
+                    -- dann sagt er etwas aus. */}
+                {erhalteneZertifikate.some(c => c.status === 'expired')
+                  ? `${erhalteneZertifikate.filter(c => c.status === 'valid').length}/${erhalteneZertifikate.length} GÜLTIG`
+                  : `${erhalteneZertifikate.length} ERHALTEN`}
               </div>
 
-              <div className="app-dashboard-section__content" style={{ padding: '60px 16px 20px 16px' }}>
+              <div className="app-dashboard-section__content" style={{ padding: 'var(--app-freiraum-kopf-m) var(--app-abstand-basis) var(--app-abstand-gross) var(--app-abstand-basis)' }}>
+                {/* Bei genau einem Zertifikat eine Spalte statt zwei: Sonst
+                    stand die Karte auf halber Breite neben einer leeren
+                    Haelfte. */}
                 <div style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(2, 1fr)',
-                  gap: '10px'
+                  gridTemplateColumns: erhalteneZertifikate.length === 1 ? '1fr' : 'repeat(2, 1fr)',
+                  gap: 'var(--app-abstand-schmal)'
                 }}>
-                  {dashboardData.certificates.map((cert) => {
+                  {erhalteneZertifikate.map((cert) => {
                     const isValid = cert.status === 'valid';
                     const isExpired = cert.status === 'expired';
                     const isNotEarned = cert.status === 'not_earned';
@@ -570,49 +634,49 @@ const TeamerDashboardPage: React.FC = () => {
                         className="app-cert-card"
                         onClick={(e) => {
                           certPopoverRef.current = cert;
-                          presentCertPopover({ event: e as any });
+                          presentCertPopover({ event: e.nativeEvent });
                         }}
                         style={{
-                          borderRadius: '12px',
-                          padding: '12px 10px',
+                          borderRadius: 'var(--app-radius-karte)',
+                          padding: 'var(--app-abstand-mittel) var(--app-abstand-schmal)',
                           background: isNotEarned
                             ? 'rgba(255, 255, 255, 0.1)'
                             : isValid
                               ? 'rgba(255, 255, 255, 0.22)'
-                              : 'rgba(239, 68, 68, 0.3)',
+                              : 'rgba(var(--app-color-danger-rgb), 0.3)',
                           border: isNotEarned
                             ? '2px dashed rgba(255, 255, 255, 0.2)'
                             : isValid
                               ? '2px solid rgba(255, 255, 255, 0.55)'
-                              : '2px solid rgba(239, 68, 68, 0.5)',
+                              : '2px solid rgba(var(--app-color-danger-rgb), 0.5)',
                           boxShadow: isValid ? '0 4px 16px rgba(255, 255, 255, 0.15)' : 'none',
                           opacity: isNotEarned ? 0.5 : 1,
                           cursor: 'pointer',
                           display: 'flex',
                           flexDirection: 'column',
                           alignItems: 'center',
-                          gap: '6px',
+                          gap: 'var(--app-abstand-kompakt)',
                           transition: 'transform 0.2s ease'
                         }}
                       >
                         <div style={{
-                          width: '36px', height: '36px', borderRadius: '50%',
+                          width: '36px', height: '36px', borderRadius: 'var(--app-radius-kreis)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           background: isNotEarned
                             ? 'rgba(255, 255, 255, 0.15)'
                             : isValid
                               ? 'rgba(255, 255, 255, 0.4)'
-                              : 'rgba(239, 68, 68, 0.5)',
+                              : 'rgba(var(--app-color-danger-rgb), 0.5)',
                           color: 'white'
                         }}>
                           <IonIcon
                             icon={getIconFromString(cert.icon)}
-                            style={{ fontSize: '1.1rem', opacity: isNotEarned ? 0.5 : 1 }}
+                            style={{ fontSize: 'var(--app-text-gross)', opacity: isNotEarned ? 0.5 : 1 }}
                           />
                         </div>
                         <span style={{
-                          fontSize: '0.72rem',
-                          fontWeight: '600',
+                          fontSize: 'var(--app-text-meta)',
+                          fontWeight: 'var(--app-schrift-halbfett)',
                           color: 'white',
                           textAlign: 'center',
                           lineHeight: '1.15',
@@ -621,17 +685,17 @@ const TeamerDashboardPage: React.FC = () => {
                           textOverflow: 'ellipsis',
                           display: '-webkit-box',
                           WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical' as any
+                          WebkitBoxOrient: 'vertical' as const
                         }}>
                           {cert.name}
                         </span>
                         {isValid && cert.issued_date && (
-                          <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.7)' }}>
+                          <span style={{ fontSize: 'var(--app-text-mini)', color: 'rgba(255,255,255,0.7)' }}>
                             Seit {new Date(cert.issued_date).toLocaleDateString('de-DE', { month: 'short', year: 'numeric' })}
                           </span>
                         )}
                         {isExpired && (
-                          <span style={{ fontSize: '0.65rem', color: 'rgba(255,255,255,0.7)', fontWeight: '600' }}>
+                          <span style={{ fontSize: 'var(--app-text-mini)', color: 'rgba(255,255,255,0.7)', fontWeight: 'var(--app-schrift-halbfett)' }}>
                             Abgelaufen
                           </span>
                         )}
@@ -664,31 +728,31 @@ const TeamerDashboardPage: React.FC = () => {
                 <h2 className="app-dashboard-section__bg-label">CHALLENGE</h2>
               </div>
               <div className="app-dashboard-section__content app-dashboard-section__content--compact">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-mittel)' }}>
                   {visibleChallenges.map((challenge) => (
                     <div
                       key={challenge.id}
                       className="app-dashboard-glass-card"
                       onClick={() => router.push('/teamer/challenges')}
-                      style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px' }}
+                      style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)' }}
                     >
                       <div style={{
-                        width: '40px', height: '40px', borderRadius: '50%',
+                        width: '40px', height: '40px', borderRadius: 'var(--app-radius-kreis)',
                         background: 'rgba(255, 255, 255, 0.2)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         flexShrink: 0
                       }}>
-                        <IonIcon icon={getChallengeTypeIcon(challenge.challenge_type)} style={{ fontSize: '1.2rem', color: 'white' }} />
+                        <IonIcon icon={getChallengeTypeIcon(challenge.challenge_type)} style={{ fontSize: 'var(--app-text-untertitel)', color: 'white' }} />
                       </div>
                       <div style={{ minWidth: 0 }}>
                         <div className="app-headline" style={{
-                          fontSize: '1rem', fontWeight: '700', color: 'white',
-                          marginBottom: '4px', lineHeight: 1.25
+                          fontSize: 'var(--app-text-standard)', fontWeight: 'var(--app-schrift-fett)', color: 'white',
+                          marginBottom: 'var(--app-abstand-mini)', lineHeight: 1.25
                         }}>
                           {challenge.title}
                         </div>
                         <div className="app-dashboard-meta">
-                          <IonIcon icon={timeOutline} style={{ fontSize: '0.9rem' }} />
+                          <IonIcon icon={ICON_UHRZEIT} style={{ fontSize: 'var(--app-text-basis)' }} />
                           <span>{remainingFor(challenge.ends_at)}</span>
                         </div>
                       </div>
@@ -698,20 +762,20 @@ const TeamerDashboardPage: React.FC = () => {
                     <div
                       className="app-dashboard-glass-card"
                       onClick={() => router.push('/teamer/challenges')}
-                      style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px' }}
+                      style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)' }}
                     >
                       <div style={{
-                        width: '40px', height: '40px', borderRadius: '50%',
+                        width: '40px', height: '40px', borderRadius: 'var(--app-radius-kreis)',
                         background: 'rgba(255, 255, 255, 0.2)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         flexShrink: 0
                       }}>
-                        <IonIcon icon={flagOutline} style={{ fontSize: '1.2rem', color: 'white' }} />
+                        <IonIcon icon={ICON_CHALLENGE} style={{ fontSize: 'var(--app-text-untertitel)', color: 'white' }} />
                       </div>
                       <div style={{ minWidth: 0 }}>
                         <div className="app-headline" style={{
-                          fontSize: '1rem', fontWeight: '700', color: 'white',
-                          marginBottom: '4px', lineHeight: 1.25
+                          fontSize: 'var(--app-text-standard)', fontWeight: 'var(--app-schrift-fett)', color: 'white',
+                          marginBottom: 'var(--app-abstand-mini)', lineHeight: 1.25
                         }}>
                           Gerade läuft keine Challenge
                         </div>
@@ -729,10 +793,10 @@ const TeamerDashboardPage: React.FC = () => {
                       cursor: 'pointer',
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '4px'
+                      gap: 'var(--app-abstand-mini)'
                     }}
                   >
-                    Alle Challenges anzeigen <IonIcon icon={chevronForward} />
+                    Alle Challenges anzeigen <IonIcon icon={ICON_WEITER_GEFUELLT} />
                   </div>
                 </div>
               </div>
@@ -770,10 +834,10 @@ const TeamerDashboardPage: React.FC = () => {
                   </>
                 ) : (
                   <div style={{ color: 'rgba(255, 255, 255, 0.9)' }}>
-                    <div className="app-headline" style={{ fontSize: '1.3rem', fontWeight: '800', color: 'white', marginBottom: '8px' }}>
+                    <div className="app-headline" style={{ fontSize: 'var(--app-text-titel)', fontWeight: 'var(--app-schrift-extrafett)', color: 'white', marginBottom: 'var(--app-abstand-eng)' }}>
                       Dein Konfispruch
                     </div>
-                    <div style={{ fontSize: '0.95rem' }}>
+                    <div style={{ fontSize: 'var(--app-text-betont)' }}>
                       Tippe, um deinen Konfirmationsspruch einzutragen
                     </div>
                   </div>
@@ -796,8 +860,8 @@ const TeamerDashboardPage: React.FC = () => {
                 position: 'absolute',
                 top: '20px',
                 right: '20px',
-                fontSize: '0.7rem',
-                fontWeight: '700',
+                fontSize: 'var(--app-text-meta)',
+                fontWeight: 'var(--app-schrift-fett)',
                 zIndex: 3
               }}>
                 {dashboardData.events.length === 1 ? 'DEIN EVENT' : `DEINE ${dashboardData.events.length} EVENTS`}
@@ -805,29 +869,29 @@ const TeamerDashboardPage: React.FC = () => {
 
               <div className="app-dashboard-section__content app-dashboard-section__content--compact">
                 {dashboardData.events.length === 0 ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-mittel)' }}>
                     <div
                       className="app-dashboard-glass-card"
                       onClick={() => router.push('/teamer/events')}
-                      style={{ cursor: 'pointer', textAlign: 'center', padding: '20px 16px' }}
+                      style={{ cursor: 'pointer', textAlign: 'center', padding: 'var(--app-abstand-gross) var(--app-abstand-basis)' }}
                     >
-                      <div style={{ fontSize: '1rem', fontWeight: '600', color: 'white', marginBottom: '4px' }}>
+                      <div style={{ fontSize: 'var(--app-text-standard)', fontWeight: 'var(--app-schrift-halbfett)', color: 'white', marginBottom: 'var(--app-abstand-mini)' }}>
                         Noch kein Event gebucht
                       </div>
-                      <div style={{ fontSize: '0.85rem', color: 'rgba(255, 255, 255, 0.7)' }}>
+                      <div style={{ fontSize: 'var(--app-text-sekundaer)', color: 'rgba(255, 255, 255, 0.7)' }}>
                         Tippe hier um verfügbare Events zu sehen
                       </div>
                     </div>
                     <div
                       className="app-dashboard-glass-chip"
                       onClick={() => router.push('/teamer/events')}
-                      style={{ alignSelf: 'center', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                      style={{ alignSelf: 'center', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mini)' }}
                     >
-                      Alle Events anzeigen <IonIcon icon={chevronForward} />
+                      Alle Events anzeigen <IonIcon icon={ICON_WEITER_GEFUELLT} />
                     </div>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-mittel)' }}>
                     {dashboardData.events.map((event) => {
                       const isWaitlist = event.booking_status === 'waitlist' || event.booking_status === 'pending';
                       return (
@@ -837,14 +901,14 @@ const TeamerDashboardPage: React.FC = () => {
                           onClick={() => router.push(`/teamer/events?eventId=${event.id}`)}
                           style={{
                             background: isWaitlist
-                              ? 'rgba(251, 191, 36, 0.25)'
+                              ? 'rgba(var(--app-wrapped-gold-rgb), 0.25)'
                               : undefined,
                             position: 'relative',
                             overflow: 'hidden',
                             border: event.cancelled
                               ? '2px dashed rgba(255,255,255,0.3)'
                               : isWaitlist
-                                ? '2px solid rgba(251, 191, 36, 0.5)'
+                                ? '2px solid rgba(var(--app-wrapped-gold-rgb), 0.5)'
                                 : 'none',
                             cursor: 'pointer',
                             transition: 'transform 0.2s ease, background 0.2s ease'
@@ -858,12 +922,12 @@ const TeamerDashboardPage: React.FC = () => {
                             background: event.cancelled
                               ? 'rgba(255,255,255,0.3)'
                               : isWaitlist
-                                ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                                ? 'var(--app-gradient-badges)'
                                 : 'rgba(255,255,255,0.25)',
-                            borderRadius: '0 10px 0 10px',
-                            padding: '4px 10px',
-                            fontSize: '0.65rem',
-                            fontWeight: '600',
+                            borderRadius: 'var(--app-radius-band)',
+                            padding: 'var(--app-abstand-mini) var(--app-abstand-schmal)',
+                            fontSize: 'var(--app-text-mini)',
+                            fontWeight: 'var(--app-schrift-halbfett)',
                             color: 'white',
                             whiteSpace: 'nowrap',
                             textTransform: 'uppercase',
@@ -876,33 +940,33 @@ const TeamerDashboardPage: React.FC = () => {
                           </div>
                           <div>
                             <div style={{
-                              fontSize: '1rem',
-                              fontWeight: '700',
+                              fontSize: 'var(--app-text-standard)',
+                              fontWeight: 'var(--app-schrift-fett)',
                               color: 'white',
-                              marginBottom: '4px',
-                              paddingRight: '80px',
+                              marginBottom: 'var(--app-abstand-mini)',
+                              paddingRight: 'var(--app-freiraum-aktion-xl)',
                               textDecoration: event.cancelled ? 'line-through' : 'none'
                             }}>
                               {event.title}
                             </div>
                             <div className="app-dashboard-meta" style={{ flexWrap: 'wrap' }}>
-                              <IonIcon icon={calendar} style={{ fontSize: '0.9rem' }} />
+                              <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ fontSize: 'var(--app-text-basis)' }} />
                               <span>{formatEventDate(event.event_date)}</span>
                               <span className="app-dashboard-dot" />
-                              <IonIcon icon={time} style={{ fontSize: '0.9rem' }} />
+                              <IonIcon icon={ICON_UHRZEIT_GEFUELLT} style={{ fontSize: 'var(--app-text-basis)' }} />
                               <span>{formatEventTime(event.event_date)}</span>
                               {event.location && (
                                 <>
                                   <span className="app-dashboard-dot" />
-                                  <IonIcon icon={location} style={{ fontSize: '0.9rem' }} />
+                                  <IonIcon icon={ICON_ORT_GEFUELLT} style={{ fontSize: 'var(--app-text-basis)' }} />
                                   <span>{event.location}</span>
                                 </>
                               )}
                             </div>
                             {event.bring_items && (
-                              <div className="app-dashboard-meta" style={{ marginTop: '4px', color: 'rgba(255,255,255,0.9)' }}>
-                                <IonIcon icon={bagHandle} style={{ fontSize: '0.9rem', color: '#c4b5fd' }} />
-                                <span style={{ fontWeight: '600' }}>Mitbringen: {event.bring_items}</span>
+                              <div className="app-dashboard-meta" style={{ marginTop: 'var(--app-abstand-mini)', color: 'rgba(255,255,255,0.9)' }}>
+                                <IonIcon icon={ICON_MATERIAL} style={{ fontSize: 'var(--app-text-basis)', color: 'var(--app-color-wrapped-hell)' }} />
+                                <span style={{ fontWeight: 'var(--app-schrift-halbfett)' }}>Mitbringen: {event.bring_items}</span>
                               </div>
                             )}
                           </div>
@@ -917,10 +981,10 @@ const TeamerDashboardPage: React.FC = () => {
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '4px'
+                        gap: 'var(--app-abstand-mini)'
                       }}
                     >
-                      Alle Events anzeigen <IonIcon icon={chevronForward} />
+                      Alle Events anzeigen <IonIcon icon={ICON_WEITER_GEFUELLT} />
                     </div>
                   </div>
                 )}
@@ -979,16 +1043,16 @@ const TeamerDashboardPage: React.FC = () => {
                 <h2 className="app-dashboard-section__bg-label">BADGES</h2>
               </div>
 
-              <div className="app-dashboard-section__content" style={{ padding: '60px 20px 24px 20px' }}>
+              <div className="app-dashboard-section__content" style={{ padding: 'var(--app-freiraum-kopf-m) var(--app-abstand-gross) var(--app-abstand-weit) var(--app-abstand-gross)' }}>
                 {/* Sichtbare Badges Stats */}
-                <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
-                  <div className="app-dashboard-glass-chip" style={{ display: 'flex', alignItems: 'center', fontSize: '0.9rem' }}>
-                    <span style={{ fontWeight: '800' }}>{visibleEarned}/{visibleTotal}</span>
-                    <span style={{ opacity: 0.8, marginLeft: '4px' }}>sichtbar</span>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--app-abstand-schmal)', marginBottom: 'var(--app-abstand-gross)', flexWrap: 'wrap' }}>
+                  <div className="app-dashboard-glass-chip" style={{ display: 'flex', alignItems: 'center', fontSize: 'var(--app-text-basis)' }}>
+                    <span style={{ fontWeight: 'var(--app-schrift-extrafett)' }}>{visibleEarned}/{visibleTotal}</span>
+                    <span style={{ opacity: 0.8, marginLeft: 'var(--app-abstand-mini)' }}>sichtbar</span>
                     {recentVisibleCount > 0 && (
                       <>
                         <span className="app-dashboard-dot" />
-                        <span style={{ fontWeight: '800' }}>{recentVisibleCount} {recentVisibleCount === 1 ? 'neuer' : 'neue'}</span>
+                        <span style={{ fontWeight: 'var(--app-schrift-extrafett)' }}>{recentVisibleCount} {recentVisibleCount === 1 ? 'neuer' : 'neue'}</span>
                       </>
                     )}
                   </div>
@@ -996,8 +1060,8 @@ const TeamerDashboardPage: React.FC = () => {
 
                 {/* Sichtbare Badges Grid */}
                 <div style={{
-                  display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center',
-                  marginBottom: secretEarned.length > 0 || secretNotEarnedCount > 0 ? '16px' : '0'
+                  display: 'flex', flexWrap: 'wrap', gap: 'var(--app-abstand-schmal)', justifyContent: 'center',
+                  marginBottom: secretEarned.length > 0 || secretNotEarnedCount > 0 ? 'var(--app-abstand-basis)' : '0'
                 }}>
                   {visibleBadges.map((badge) => {
                     const isEarned = earnedIds.has(badge.id);
@@ -1011,22 +1075,22 @@ const TeamerDashboardPage: React.FC = () => {
                           presentBadgePopover({ event: e.nativeEvent, side: 'top', alignment: 'center' });
                         }}
                         style={{
-                          width: '44px', height: '44px', borderRadius: '50%',
+                          width: '44px', height: '44px', borderRadius: 'var(--app-radius-kreis)',
                           background: isEarned ? `linear-gradient(135deg, ${badgeClr} 0%, ${badgeClr}dd 100%)` : 'rgba(255, 255, 255, 0.15)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
-                          boxShadow: isEarned ? (recent ? `0 0 0 3px #10b981, 0 0 20px rgba(16, 185, 129, 0.6)` : `0 4px 12px ${badgeClr}50`) : 'none',
-                          border: recent ? '3px solid #10b981' : isEarned ? '2px solid rgba(255, 255, 255, 0.3)' : '2px dashed rgba(255, 255, 255, 0.25)',
+                          boxShadow: isEarned ? (recent ? `0 0 0 3px var(--app-color-success-fresh), 0 0 20px rgba(var(--app-color-success-fresh-rgb), 0.6)` : `0 4px 12px ${badgeClr}50`) : 'none',
+                          border: recent ? '3px solid var(--app-color-success-fresh)' : isEarned ? '2px solid rgba(255, 255, 255, 0.3)' : '2px dashed rgba(255, 255, 255, 0.25)',
                           transition: 'all 0.3s ease', opacity: isEarned ? 1 : 0.5, cursor: 'pointer',
                           position: 'relative', animation: recent ? 'badgePulse 2s ease-in-out infinite' : 'none'
                         }}
                       >
                         <IonIcon
-                          icon={isEarned ? getIconFromString(badge.icon) : eyeOff}
-                          style={{ fontSize: isEarned ? '1.4rem' : '1rem', color: isEarned ? 'white' : 'rgba(255, 255, 255, 0.4)', filter: isEarned ? 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' : 'none' }}
+                          icon={isEarned ? getIconFromString(badge.icon) : ICON_VERBORGEN_GEFUELLT}
+                          style={{ fontSize: isEarned ? 'var(--app-text-titel-gross)' : 'var(--app-text-standard)', color: isEarned ? 'white' : 'rgba(255, 255, 255, 0.4)', filter: isEarned ? 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' : 'none' }}
                         />
                         {recent && (
-                          <div style={{ position: 'absolute', top: '-6px', right: '-6px', width: '18px', height: '18px', borderRadius: '50%', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', border: '2px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(16, 185, 129, 0.5)' }}>
-                            <span style={{ fontSize: '10px', fontWeight: '800', color: 'white' }}>!</span>
+                          <div style={{ position: 'absolute', top: '-6px', right: '-6px', width: '18px', height: '18px', borderRadius: 'var(--app-radius-kreis)', background: 'var(--app-gradient-success)', border: '2px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--app-schatten-punkt-erfolg)' }}>
+                            <span style={{ fontSize: 'var(--app-text-hinweispunkt)', fontWeight: 'var(--app-schrift-extrafett)', color: 'white' }}>!</span>
                           </div>
                         )}
                       </div>
@@ -1037,19 +1101,19 @@ const TeamerDashboardPage: React.FC = () => {
                 {/* Geheime Badges */}
                 {(secretEarned.length > 0 || secretNotEarnedCount > 0) && (
                   <>
-                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}>
-                      <div className="app-dashboard-glass-chip" style={{ fontSize: '0.9rem', display: 'flex', alignItems: 'center' }}>
-                        <span style={{ fontWeight: '800' }}>{secretEarned.length}/{secretTotal}</span>
-                        <span style={{ opacity: 0.8, marginLeft: '4px' }}>geheim</span>
+                    <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 'var(--app-abstand-mittel)' }}>
+                      <div className="app-dashboard-glass-chip" style={{ fontSize: 'var(--app-text-basis)', display: 'flex', alignItems: 'center' }}>
+                        <span style={{ fontWeight: 'var(--app-schrift-extrafett)' }}>{secretEarned.length}/{secretTotal}</span>
+                        <span style={{ opacity: 0.8, marginLeft: 'var(--app-abstand-mini)' }}>geheim</span>
                         {recentSecretCount > 0 && (
                           <>
                             <span className="app-dashboard-dot" />
-                            <span style={{ fontWeight: '800' }}>{recentSecretCount} {recentSecretCount === 1 ? 'neuer' : 'neue'}</span>
+                            <span style={{ fontWeight: 'var(--app-schrift-extrafett)' }}>{recentSecretCount} {recentSecretCount === 1 ? 'neuer' : 'neue'}</span>
                           </>
                         )}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--app-abstand-schmal)', justifyContent: 'center', marginBottom: 'var(--app-abstand-basis)' }}>
                       {secretEarned.map((badge) => {
                         const recent = isRecent(badge);
                         const badgeClr = getBadgeColor(badge);
@@ -1060,27 +1124,27 @@ const TeamerDashboardPage: React.FC = () => {
                               presentBadgePopover({ event: e.nativeEvent, side: 'top', alignment: 'center' });
                             }}
                             style={{
-                              width: '44px', height: '44px', borderRadius: '50%',
+                              width: '44px', height: '44px', borderRadius: 'var(--app-radius-kreis)',
                               background: `linear-gradient(135deg, ${badgeClr} 0%, ${badgeClr}dd 100%)`,
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              boxShadow: recent ? `0 0 0 3px #10b981, 0 0 20px rgba(16, 185, 129, 0.6)` : `0 4px 12px ${badgeClr}50`,
-                              border: recent ? '3px solid #10b981' : '2px solid rgba(255, 255, 255, 0.3)',
+                              boxShadow: recent ? `0 0 0 3px var(--app-color-success-fresh), 0 0 20px rgba(var(--app-color-success-fresh-rgb), 0.6)` : `0 4px 12px ${badgeClr}50`,
+                              border: recent ? '3px solid var(--app-color-success-fresh)' : '2px solid rgba(255, 255, 255, 0.3)',
                               cursor: 'pointer', position: 'relative',
                               animation: recent ? 'badgePulse 2s ease-in-out infinite' : 'none'
                             }}
                           >
-                            <IonIcon icon={getIconFromString(badge.icon)} style={{ fontSize: '1.4rem', color: 'white', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' }} />
+                            <IonIcon icon={getIconFromString(badge.icon)} style={{ fontSize: 'var(--app-text-titel-gross)', color: 'white', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' }} />
                             {recent && (
-                              <div style={{ position: 'absolute', top: '-6px', right: '-6px', width: '18px', height: '18px', borderRadius: '50%', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', border: '2px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(16, 185, 129, 0.5)' }}>
-                                <span style={{ fontSize: '10px', fontWeight: '800', color: 'white' }}>!</span>
+                              <div style={{ position: 'absolute', top: '-6px', right: '-6px', width: '18px', height: '18px', borderRadius: 'var(--app-radius-kreis)', background: 'var(--app-gradient-success)', border: '2px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--app-schatten-punkt-erfolg)' }}>
+                                <span style={{ fontSize: 'var(--app-text-hinweispunkt)', fontWeight: 'var(--app-schrift-extrafett)', color: 'white' }}>!</span>
                               </div>
                             )}
                           </div>
                         );
                       })}
                       {Array.from({ length: secretNotEarnedCount }).map((_, index) => (
-                        <div key={`secret-placeholder-${index}`} style={{ width: '44px', height: '44px', borderRadius: '50%', background: 'rgba(255, 255, 255, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px dashed rgba(255, 255, 255, 0.35)', opacity: 0.6 }}>
-                          <IonIcon icon={helpCircle} style={{ fontSize: '1.2rem', color: 'rgba(255, 255, 255, 0.5)' }} />
+                        <div key={`secret-placeholder-${index}`} style={{ width: '44px', height: '44px', borderRadius: 'var(--app-radius-kreis)', background: 'rgba(255, 255, 255, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px dashed rgba(255, 255, 255, 0.35)', opacity: 0.6 }}>
+                          <IonIcon icon={ICON_HILFE_GEFUELLT} style={{ fontSize: 'var(--app-text-untertitel)', color: 'rgba(255, 255, 255, 0.5)' }} />
                         </div>
                       ))}
                     </div>
@@ -1088,13 +1152,13 @@ const TeamerDashboardPage: React.FC = () => {
                 )}
 
                 {/* Alle Badges Link */}
-                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 'var(--app-abstand-basis)' }}>
                   <div
                     className="app-dashboard-glass-chip"
                     onClick={() => router.push('/teamer/profile/badges')}
-                    style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                    style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mini)' }}
                   >
-                    Alle Badges anzeigen <IonIcon icon={chevronForward} />
+                    Alle Badges anzeigen <IonIcon icon={ICON_WEITER_GEFUELLT} />
                   </div>
                 </div>
               </div>
@@ -1124,7 +1188,7 @@ const TeamerDashboardPage: React.FC = () => {
 
       {/* "Was ist neu"-Walkthrough — geöffnet über die Neuigkeiten-Karte */}
       {showUpdateWalkthrough && (
-        <TeamerUpdateWalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
+        <TeamerUpdate211WalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
       )}
 
       {showMitmachenErklaerung && (

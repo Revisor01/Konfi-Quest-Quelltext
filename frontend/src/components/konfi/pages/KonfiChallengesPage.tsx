@@ -60,7 +60,6 @@ const KonfiChallengesPage: React.FC = () => {
   const [presentDetailModal, dismissDetailModal] = useIonModal(ChallengeDetailModal, {
     challenge: selectedChallenge,
     onClose: () => dismissDetailModal(),
-    onChanged: () => refresh(),
     onSubmit: (challenge: KonfiChallenge) => {
       // Aus dem Detail heraus einreichen: Detail schliessen, dann das
       // Einreich-Modal auf der Seite praesentieren (kein Modal-im-Modal).
@@ -80,12 +79,6 @@ const KonfiChallengesPage: React.FC = () => {
     // presentDetailModal ist stabil; pageRef/presentingElement werden lazy gelesen.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [presentDetailModal]);
-
-  const handleSubmitChallenge = useCallback((challenge: KonfiChallenge) => {
-    setSelectedChallenge(challenge);
-    presentSubmitModal({ presentingElement: modalPresenting() });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [presentSubmitModal]);
 
   return (
     <IonPage ref={pageRef}>
@@ -121,7 +114,6 @@ const KonfiChallengesPage: React.FC = () => {
             archive={archive}
             marks={marks}
             onSelectChallenge={handleSelectChallenge}
-            onSubmit={handleSubmitChallenge}
           />
         )}
       </IonContent>

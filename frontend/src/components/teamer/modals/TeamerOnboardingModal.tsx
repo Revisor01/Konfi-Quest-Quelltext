@@ -1,8 +1,14 @@
 import React from 'react';
 import {
-  sparklesOutline, homeOutline, chatbubblesOutline, calendarOutline,
-  ribbonOutline, folderOpenOutline, flagOutline, documentTextOutline,
-} from 'ionicons/icons';
+  ICON_ABZEICHEN,
+  ICON_CHALLENGE,
+  ICON_CHATS,
+  ICON_FUNKELN,
+  ICON_ORDNER,
+  ICON_STARTSEITE,
+  ICON_TERMIN,
+  ICON_TEXTDOKUMENT,
+} from '../../shared/icons';
 import OnboardingTour, { OnboardingSlide } from '../../shared/OnboardingTour';
 
 interface TeamerOnboardingModalProps {
@@ -22,56 +28,56 @@ interface TeamerOnboardingModalProps {
 // SLIDES exportiert für den Textbaustein-Test (onboardingSlides.test.ts).
 export const SLIDES: OnboardingSlide[] = [
   {
-    icon: sparklesOutline,
+    icon: ICON_FUNKELN,
     color: 'var(--app-color-teamer)',
     rgb: '--app-color-teamer-rgb',
     title: 'Willkommen im Team',
     text: 'Schön, dass du als Teamer:in dabei bist! Hier begleitest du deine Gruppe, behältst Termine im Blick und sammelst selbst Badges für dein Engagement. Wir zeigen dir kurz, wie alles funktioniert.',
   },
   {
-    icon: homeOutline,
+    icon: ICON_STARTSEITE,
     color: 'var(--app-color-teamer)',
     rgb: '--app-color-teamer-rgb',
     title: 'Dein Start',
     text: 'Auf der Startseite siehst du deine wichtigsten Infos auf einen Blick: anstehende Termine, deine Badges, deine Zertifikate und alles, was für dich gerade ansteht.',
   },
   {
-    icon: chatbubblesOutline,
+    icon: ICON_CHATS,
     color: 'var(--app-color-chat)',
     rgb: '--app-color-chat-rgb',
     title: 'Dein Chat',
     text: 'Bleib mit deinem Jahrgang und dem Team in Kontakt — dafür gibt es automatische Chats. Du kannst auch Direktchats und Gruppenchats nutzen, und zu Events gibt es eigene Chats. Bilder teilen geht ebenfalls. An Umfragen nimmst du teil; anlegen kann sie die Leitung.',
   },
   {
-    icon: calendarOutline,
+    icon: ICON_TERMIN,
     color: 'var(--app-color-events)',
     rgb: '--app-color-events-rgb',
     title: 'Mitmachen: Events',
-    text: 'Der Tab "Mitmachen" bündelt Events und Aktivitäten in zwei Reitern. Bei den Events findest du alle Termine und meldest dich vorher dort an, wo Teamer:innen gebraucht werden. Manche Termine sind nur fürs Team. Angelegt werden Termine von der Leitung.',
+    text: 'Der Tab "Mitmachen" bündelt Events und Aktivitäten in zwei Reitern. Bei den Events findest du alle Termine und meldest dich vorher dort an, wo das Team gebraucht wird. Manche Termine sind nur fürs Team. Angelegt werden Termine von der Leitung.',
   },
   {
-    icon: documentTextOutline,
+    icon: ICON_TEXTDOKUMENT,
     color: 'var(--app-color-activities)',
     rgb: '--app-color-activities-rgb',
     title: 'Mitmachen: Aktivitäten',
     text: 'Der zweite Reiter im Mitmachen-Tab. Anmelden musst du dich hier nicht: Hast du einen Gottesdienst mitgestaltet, eine Andacht gehalten oder warst bei einer Teamer-Schulung? Dann reichst du das hinterher dort ein, die Leitung bestätigt — so bleibt dein Einsatz dokumentiert und fließt in deine Badges ein.',
   },
   {
-    icon: flagOutline,
+    icon: ICON_CHALLENGE,
     color: 'var(--app-color-challenges)',
     rgb: '--app-color-challenges-rgb',
     title: 'Challenges',
-    text: 'Challenges begleiten die Konfis über einen Zeitraum, den du festlegst: Sie antworten mit Foto, Text, Aufnahme oder Link. Ohne Punkte, ohne Zähler, ohne Rangliste — nur ein Stempel fürs Mitmachen. Und das Wichtigste: Du machst mit. Teamer:innen und Leitung sind bei Challenges keine Zuschauer, sondern antworten selbst — es gibt sogar Runden nur fürs Team.',
+    text: 'Challenges begleiten die Konfis über einen Zeitraum, den du festlegst: Sie antworten mit Foto, Text, Aufnahme oder Link. Ohne Punkte, ohne Zähler, ohne Rangliste — nur ein Stempel fürs Mitmachen. Und das Wichtigste: Du machst mit. Team und Leitung sind bei Challenges keine Zuschauer, sondern antworten selbst — es gibt sogar Runden nur fürs Team.',
   },
   {
-    icon: ribbonOutline,
+    icon: ICON_ABZEICHEN,
     color: 'var(--app-color-badges)',
     rgb: '--app-color-badges-rgb',
     title: 'Deine Badges',
     text: 'Auch du sammelst Abzeichen — für dein Engagement im Team. Schau hier, welche Badges du schon hast und welche du als Nächstes erreichen kannst.',
   },
   {
-    icon: folderOpenOutline,
+    icon: ICON_ORDNER,
     color: 'var(--app-color-material)',
     rgb: '--app-color-material-rgb',
     title: 'Material',

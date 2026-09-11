@@ -2,7 +2,7 @@ import axios from 'axios';
 import api, { API_URL } from './api';
 import { Device } from '@capacitor/device';
 import { Capacitor } from '@capacitor/core';
-import { getUser, setToken, setUser, setRefreshToken, getRefreshToken, clearAuth, getDeviceId, setDeviceId, setLoggingOut } from './tokenStore';
+import { setToken, setUser, setRefreshToken, getRefreshToken, clearAuth, getDeviceId, setLoggingOut } from './tokenStore';
 import {
   mitBiometrieEntsperren,
   gespeichertenTokenAuffrischen,
@@ -41,7 +41,7 @@ export const loginWithAutoDetection = async (username: string, password: string)
       code: err.code,
       fullError: error
     });
-    throw new Error('Login fehlgeschlagen: ' + (err?.response?.data?.error || err.message));
+    throw new Error('Login fehlgeschlagen: ' + (err?.response?.data?.error || err.message), { cause: error });
   }
 };
 
@@ -60,125 +60,131 @@ export const logout = async (): Promise<void> => {
   }
   
   logoutInProgress = true;
-  // 401-Interceptor (api.ts) soll während des bewussten Logouts NICHT
-  // "Sitzung abgelaufen" melden — der Push-Cleanup-Call nach clearAuth() läuft
-  // ohne Token und liefert sonst einen 401.
-  setLoggingOut(true);
-
-  // WICHTIG: Der LOKALE Logout (clearAuth) darf NIEMALS an haengenden
-  // Netzwerk-Calls scheitern (früher blieb der User offline nach Reload
-  // eingeloggt). Alle Server-Calls laufen mit hartem Timeout.
-  //
-  // REIHENFOLGE: Push-Token-DELETE MUSS VOR clearAuth laufen — der Endpoint
-  // verlangt Auth (verifyTokenRBAC). Frueher lief er danach, bekam 401, der
-  // Token blieb registriert und der alte Account erhielt nach Account-Wechsel
-  // weiter Pushes auf diesem Geraet. Best-effort: schlägt der DELETE fehl
-  // (offline/Timeout), hängt POST /device-token den Token beim nächsten
-  // Login serverseitig an den neuen User um.
-
-  // Helper: Request mit hartem Timeout, damit ein falsch-positives isOnline
-  // (Network-Plugin meldet sporadisch connected trotz keiner Verbindung) nicht hängt.
-  const withTimeout = <T>(p: Promise<T>, ms = 4000): Promise<T | undefined> =>
-    Promise.race([p, new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ms))]);
-
-  // Ungesendete Queue-Items (z.B. Chat-Nachrichten) JETZT noch zustellen,
-  // solange das Token gilt. Items, die den Logout ueberleben wuerden, gingen
-  // beim naechsten Login unter dem DANN angemeldeten Konto raus — also unter
-  // falscher Identitaet, wenn sich jemand anderes anmeldet. Deshalb unten
-  // nach clearAuth auch writeQueue.clear().
   try {
-    if (networkMonitor.isOnline) {
-      await withTimeout(writeQueue.flush(), 8000);
+    // 401-Interceptor (api.ts) soll während des bewussten Logouts NICHT
+    // "Sitzung abgelaufen" melden — der Push-Cleanup-Call nach clearAuth() läuft
+    // ohne Token und liefert sonst einen 401.
+    setLoggingOut(true);
+
+    // WICHTIG: Der LOKALE Logout (clearAuth) darf NIEMALS an haengenden
+    // Netzwerk-Calls scheitern (früher blieb der User offline nach Reload
+    // eingeloggt). Alle Server-Calls laufen mit hartem Timeout.
+    //
+    // REIHENFOLGE: Push-Token-DELETE MUSS VOR clearAuth laufen — der Endpoint
+    // verlangt Auth (verifyTokenRBAC). Frueher lief er danach, bekam 401, der
+    // Token blieb registriert und der alte Account erhielt nach Account-Wechsel
+    // weiter Pushes auf diesem Geraet. Best-effort: schlägt der DELETE fehl
+    // (offline/Timeout), hängt POST /device-token den Token beim nächsten
+    // Login serverseitig an den neuen User um.
+
+    // Helper: Request mit hartem Timeout, damit ein falsch-positives isOnline
+    // (Network-Plugin meldet sporadisch connected trotz keiner Verbindung) nicht hängt.
+    const withTimeout = <T>(p: Promise<T>, ms = 4000): Promise<T | undefined> =>
+      Promise.race([p, new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), ms))]);
+
+    // Ungesendete Queue-Items (z.B. Chat-Nachrichten) JETZT noch zustellen,
+    // solange das Token gilt. Items, die den Logout ueberleben wuerden, gingen
+    // beim naechsten Login unter dem DANN angemeldeten Konto raus — also unter
+    // falscher Identitaet, wenn sich jemand anderes anmeldet. Deshalb unten
+    // nach clearAuth auch writeQueue.clear().
+    try {
+      if (networkMonitor.isOnline) {
+        await withTimeout(writeQueue.flush(), 8000);
+      }
+    } catch (error) {
+      console.warn('Queue-Flush beim Logout fehlgeschlagen (unkritisch):', error);
     }
-  } catch (error) {
-    console.warn('Queue-Flush beim Logout fehlgeschlagen (unkritisch):', error);
-  }
 
-  // Push-Token serverseitig löschen (best-effort, mit Timeout, NOCH authentifiziert)
-  let deviceId: string | undefined;
-  try {
-    if (Capacitor.isNativePlatform()) {
-      try {
-        const deviceInfo = await Device.getId();
-        deviceId = deviceInfo.identifier;
-      } catch (err) {
-        console.warn('Could not get device ID via Capacitor, using TokenStore fallback:', err);
+    // Push-Token serverseitig löschen (best-effort, mit Timeout, NOCH authentifiziert)
+    let deviceId: string | undefined;
+    try {
+      if (Capacitor.isNativePlatform()) {
+        try {
+          const deviceInfo = await Device.getId();
+          deviceId = deviceInfo.identifier;
+        } catch (err) {
+          console.warn('Could not get device ID via Capacitor, using TokenStore fallback:', err);
+          deviceId = getDeviceId() || undefined;
+        }
+      } else {
         deviceId = getDeviceId() || undefined;
       }
-    } else {
-      deviceId = getDeviceId() || undefined;
+
+      if (deviceId && networkMonitor.isOnline) {
+        await withTimeout(api.delete('/notifications/device-token', {
+          data: { device_id: deviceId, platform: Capacitor.getPlatform() }
+        }));
+      }
+    } catch (error) {
+      console.warn('Push-Token-Cleanup beim Logout fehlgeschlagen (unkritisch):', error);
     }
 
-    if (deviceId && networkMonitor.isOnline) {
-      await withTimeout(api.delete('/notifications/device-token', {
-        data: { device_id: deviceId, platform: Capacitor.getPlatform() }
-      }));
+    // SEC-02: Refresh Token serverseitig revokieren (best-effort, mit Timeout)
+    try {
+      const refreshToken = getRefreshToken();
+      if (refreshToken && networkMonitor.isOnline) {
+        await withTimeout(api.post('/auth/logout', {
+          refresh_token: refreshToken,
+          device_id: deviceId,
+          platform: Capacitor.getPlatform()
+        }));
+      }
+    } catch (error) {
+      console.warn('Serverseitiges Token-Revoke fehlgeschlagen (wird lokal geloescht):', error);
     }
-  } catch (error) {
-    console.warn('Push-Token-Cleanup beim Logout fehlgeschlagen (unkritisch):', error);
-  }
 
-  // SEC-02: Refresh Token serverseitig revokieren (best-effort, mit Timeout)
-  try {
-    const refreshToken = getRefreshToken();
-    if (refreshToken && networkMonitor.isOnline) {
-      await withTimeout(api.post('/auth/logout', {
-        refresh_token: refreshToken,
-        device_id: deviceId,
-        platform: Capacitor.getPlatform()
-      }));
+    // GARANTIERT: lokale Auth-Daten löschen. Ab hier ist der User ausgeloggt.
+    // Absichern: Wirft dieser Aufruf -- Preferences
+    // koennen das im WebView --, brach die Funktion hier ab. logoutInProgress
+    // blieb dann fuer immer true, und JEDER weitere Logout kehrte in Zeile 1
+    // wirkungslos zurueck: Token blieb liegen, nach dem Neustart war man wieder
+    // im alten Konto, und ein neuer Login schrieb ueber einen halb geraeumten
+    // Zustand (Tab-Leiste der alten Rolle, Inhalt der neuen).
+    try {
+      await clearAuth();
+    } catch (error) {
+      console.error('clearAuth beim Logout fehlgeschlagen:', error);
     }
-  } catch (error) {
-    console.warn('Serverseitiges Token-Revoke fehlgeschlagen (wird lokal geloescht):', error);
+
+    // Ausdrueckliches Abmelden loescht IMMER auch die biometrisch gesicherte
+    // Sitzung. Bliebe sie liegen, koennte man sich nach dem Abmelden per Face ID
+    // wieder in genau das Konto entsperren, aus dem man gerade herausgegangen ist.
+    try {
+      await biometrieVergessen();
+    } catch (error) {
+      console.warn('Biometrie-Aufraeumen beim Logout fehlgeschlagen:', error);
+    }
+
+    // Queue leeren: was jetzt noch drin ist, darf nach dem naechsten Login
+    // nicht unter fremdem Konto gesendet werden (siehe Flush oben).
+    try {
+      await writeQueue.clear();
+    } catch (error) {
+      console.warn('Queue-Clear beim Logout fehlgeschlagen:', error);
+    }
+
+    // Socket trennen: ohne das ueberlebt die Verbindung den Logout und der
+    // nächste angemeldete Nutzer sitzt weiter in den Räumen des vorherigen
+    // Der Aufbau erfolgt beim nächsten Login neu.
+    try {
+      disconnectWebSocket();
+    } catch (error) {
+      console.warn('Socket-Trennung beim Logout fehlgeschlagen:', error);
+    }
+    try {
+      await offlineCache.clearAll();
+    } catch (error) {
+      console.warn('Cache-Clear beim Logout fehlgeschlagen:', error);
+    }
+
+    // Device ID NICHT löschen - bleibt für das Geraet persistent
+    // (wird im finally zurueckgesetzt -- siehe unten)
+  } finally {
+    logoutInProgress = false;
+    // Kurz verzoegert zuruecksetzen, damit auch ein knapp nachlaufender 401
+    // vom Push-Cleanup noch unterdrueckt wird, dann wieder normales Verhalten.
+    setTimeout(() => setLoggingOut(false), 2000);
   }
-
-  // GARANTIERT: lokale Auth-Daten löschen. Ab hier ist der User ausgeloggt.
-  await clearAuth();
-
-  // Ausdrueckliches Abmelden loescht IMMER auch die biometrisch gesicherte
-  // Sitzung. Bliebe sie liegen, koennte man sich nach dem Abmelden per Face ID
-  // wieder in genau das Konto entsperren, aus dem man gerade herausgegangen ist.
-  try {
-    await biometrieVergessen();
-  } catch (error) {
-    console.warn('Biometrie-Aufraeumen beim Logout fehlgeschlagen:', error);
-  }
-
-  // Queue leeren: was jetzt noch drin ist, darf nach dem naechsten Login
-  // nicht unter fremdem Konto gesendet werden (siehe Flush oben).
-  try {
-    await writeQueue.clear();
-  } catch (error) {
-    console.warn('Queue-Clear beim Logout fehlgeschlagen:', error);
-  }
-
-  // Socket trennen: ohne das ueberlebt die Verbindung den Logout und der
-  // nächste angemeldete Nutzer sitzt weiter in den Räumen des vorherigen
-  // Der Aufbau erfolgt beim nächsten Login neu.
-  try {
-    disconnectWebSocket();
-  } catch (error) {
-    console.warn('Socket-Trennung beim Logout fehlgeschlagen:', error);
-  }
-  try {
-    await offlineCache.clearAll();
-  } catch (error) {
-    console.warn('Cache-Clear beim Logout fehlgeschlagen:', error);
-  }
-
-  // Device ID NICHT löschen - bleibt für das Geraet persistent
-  logoutInProgress = false;
-  // Kurz verzoegert zuruecksetzen, damit auch ein knapp nachlaufender 401 vom
-  // Push-Cleanup noch unterdrueckt wird, dann wieder normales Verhalten.
-  setTimeout(() => setLoggingOut(false), 2000);
-};
-
-export const checkAuth = (): BaseUser | null => {
-  return getUser();
-};
-
-export const checkAuthAsync = async (): Promise<BaseUser | null> => {
-  return getUser();
 };
 
 

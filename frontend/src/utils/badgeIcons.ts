@@ -9,61 +9,67 @@
 //   ICON_CHOICES — mit Name und Kategorie, für die Auswahl-Dialoge
 //   ICON_MAP     — flach (Name -> Icon), zum Rendern
 // ICON_MAP wird aus ICON_CHOICES abgeleitet, damit sie nicht auseinanderlaufen.
+import * as alleIonicons from 'ionicons/icons';
+// NUR-KONTUR-MODUS: Die Auswahlliste bildet in der
+// DATENBANK gespeicherte Namen ab (badge.icon, certificate.icon,
+// challenge.icon). Die SCHLUESSEL bleiben unveraendert -- das ist der
+// Datenvertrag mit den Store-Apps. Nur das gezeigte Glyph ist jetzt die
+// Kontur-Variante, passend zum Rest der App.
 import {
-  airplane,
-  alertCircle,
-  balloon,
-  bicycle,
-  boat,
-  book,
-  brush,
-  business,
-  calendar,
-  camera,
-  car,
-  chatbubbles,
-  checkmarkCircle,
-  colorPalette,
-  compass,
-  construct,
-  diamond,
-  fitness,
-  flag,
-  flame,
-  flash,
-  gift,
-  hammer,
-  medkit,
+  airplaneOutline as airplane,
+  alertCircleOutline as alertCircle,
+  balloonOutline as balloon,
+  bicycleOutline as bicycle,
+  boatOutline as boat,
+  bookOutline as book,
+  brushOutline as brush,
+  businessOutline as business,
+  calendarOutline as calendar,
+  cameraOutline as camera,
+  carOutline as car,
+  chatbubblesOutline as chatbubbles,
+  checkmarkCircleOutline as checkmarkCircle,
+  colorPaletteOutline as colorPalette,
+  compassOutline as compass,
+  constructOutline as construct,
+  diamondOutline as diamond,
+  fitnessOutline as fitness,
+  flagOutline as flag,
+  flameOutline as flame,
+  flashOutline as flash,
+  giftOutline as gift,
+  hammerOutline as hammer,
+  medkitOutline as medkit,
   documentOutline,
-  heart,
-  helpCircle,
-  home,
-  image,
-  informationCircle,
-  leaf,
-  location,
-  medal,
-  moon,
-  musicalNote,
-  navigate,
-  people,
-  personAdd,
-  pin,
-  restaurant,
-  ribbon,
-  rocket,
-  rose,
-  school,
-  shield,
-  sparkles,
-  star,
-  stopwatch,
-  sunny,
-  thumbsUp,
-  time,
-  timer,
-  today,
-  trophy} from 'ionicons/icons';
+  heartOutline as heart,
+  helpCircleOutline as helpCircle,
+  homeOutline as home,
+  imageOutline as image,
+  informationCircleOutline as informationCircle,
+  leafOutline as leaf,
+  locationOutline as location,
+  medalOutline as medal,
+  moonOutline as moon,
+  musicalNoteOutline as musicalNote,
+  navigateOutline as navigate,
+  peopleOutline as people,
+  personAddOutline as personAdd,
+  pinOutline as pin,
+  restaurantOutline as restaurant,
+  ribbonOutline as ribbon,
+  rocketOutline as rocket,
+  roseOutline as rose,
+  schoolOutline as school,
+  shieldOutline as shield,
+  sparklesOutline as sparkles,
+  starOutline as star,
+  stopwatchOutline as stopwatch,
+  sunnyOutline as sunny,
+  thumbsUpOutline as thumbsUp,
+  timeOutline as time,
+  timerOutline as timer,
+  todayOutline as today,
+  trophyOutline as trophy} from 'ionicons/icons';
 
 export interface IconChoice { icon: string; name: string; category: string; }
 
@@ -140,11 +146,37 @@ export const ICON_MAP: Record<string, string> = Object.fromEntries(
 );
 
 /**
- * Loest einen gespeicherten Icon-Namen auf. Fallback ist die Trophaee —
- * eine der neun alten Kopien fiel auf `ribbon` zurück (admin/BadgesView),
- * das war die einzige Abweichung und ist bewusst vereinheitlicht.
+ * Loest einen gespeicherten Icon-Namen auf. Standard-Rueckfall ist die
+ * Trophaee — eine der neun alten Kopien fiel auf `ribbon` zurück
+ * (admin/BadgesView), das war die einzige Abweichung und ist bewusst
+ * vereinheitlicht.
+ *
+ * Zertifikate und Challenges brauchen einen anderen Rueckfall (Band bzw.
+ * Flagge), sonst waere der Zusammenzug ihrer Icon-Listen eine sichtbare
+ * Aenderung. Deshalb `fallback` — sie geben ihr bisheriges Symbol mit.
  */
-export const getIconFromString = (iconName?: string | null): string => {
-  if (!iconName) return trophy;
-  return ICON_MAP[iconName] || trophy;
+export const getIconFromString = (iconName?: string | null, fallback: string = trophy): string => {
+  if (!iconName) return fallback;
+  const treffer = ICON_MAP[iconName];
+  if (treffer) return treffer;
+  // "-outline" abschneiden und erneut suchen.
+  //
+  // Hier statt in den Daten korrigiert: Die Namen stehen in custom_badges
+  // ueber alle Gemeinden verteilt, und aeltere App-Versionen lesen dieselben
+  // Werte. Ein Umbenennen in der Datenbank wuerde die brechen.
+  if (iconName.endsWith('-outline')) {
+    const kurz = ICON_MAP[iconName.slice(0, -'-outline'.length)];
+    if (kurz) return kurz;
+  }
+  return fallback;
+};
+
+/**
+ * Ionicon-Namen aus der Datenbank gegen den VOLLEN Ionicons-Namensraum
+ * aufloesen ('ribbon-outline' -> ribbonOutline), nicht nur gegen ICON_MAP.
+ */
+export const getIconFromIoniconsName = (name?: string | null, fallback: string = trophy): string => {
+  const sauber = (name || '').trim();
+  const alsCamel = sauber.replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+  return (alleIonicons as Record<string, string>)[alsCamel] || fallback;
 };

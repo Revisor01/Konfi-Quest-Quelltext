@@ -1,3 +1,4 @@
+import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect } from 'react';
 import {
   IonHeader,
@@ -21,14 +22,7 @@ import {
   IonAccordionGroup,
   IonRange
 } from '@ionic/react';
-import {
-  checkmarkOutline,
-  closeOutline,
-  create,
-  trophy,
-  pin,
-  chevronDownOutline
-} from 'ionicons/icons';
+import { ICON_AUFKLAPPEN, ICON_BEARBEITEN_GEFUELLT, ICON_HAKEN, ICON_SCHLIESSEN } from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import api from '../../../services/api';
@@ -67,14 +61,14 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
       onClose();
     }
   };
-  const { setSuccess, setError, isOnline } = useApp();
+  const { setSuccess, setError } = useApp();
   const [formData, setFormData] = useState<Level>({
     name: '',
     title: '',
     description: '',
     points_required: 0,
     icon: 'trophy',
-    color: '#ec4899',
+    color: 'var(--app-color-level)',
     is_active: true
   });
   const { isSubmitting, guard } = useActionGuard();
@@ -111,7 +105,7 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
         description: formData.description?.trim() || '',
         points_required: formData.points_required,
         icon: formData.icon || 'trophy',
-        color: formData.color || '#ec4899',
+        color: formData.color || 'var(--app-color-level)',
         reward_type: formData.reward_type || null,
         reward_value: formData.reward_value || null,
         is_active: formData.is_active !== false
@@ -150,8 +144,8 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
       }
       onSuccess();
       handleClose();
-    } catch (error: any) {
-      setError(error.response?.data?.error || 'Fehler beim Speichern');
+    } catch (error) {
+      setError(fehlerText(error, 'Fehler beim Speichern'));
     } finally {
       setLoading(false);
     }
@@ -169,7 +163,7 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
               disabled={loading}
               className="app-modal-close-btn"
             >
-              <IonIcon icon={closeOutline} />
+              <IonIcon icon={ICON_SCHLIESSEN} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
@@ -181,7 +175,7 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
               {loading ? (
                 <IonSpinner name="crescent" />
               ) : (
-                <IonIcon icon={checkmarkOutline} />
+                <IonIcon icon={ICON_HAKEN} />
               )}
             </IonButton>
           </IonButtons>
@@ -193,7 +187,7 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--level">
-              <IonIcon icon={create} />
+              <IonIcon icon={ICON_BEARBEITEN_GEFUELLT} />
             </div>
             <IonLabel>Level Details</IonLabel>
           </IonListHeader>
@@ -212,9 +206,9 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
                 </IonItem>
 
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
-                  <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Benötigte Punkte * <span style={{ fontWeight: 700, color: 'var(--ion-color-primary)' }}>{formData.points_required}</span></IonLabel>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
-                    <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>1</span>
+                  <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Benötigte Punkte * <span style={{ fontWeight: 'var(--app-schrift-fett)', color: 'var(--ion-color-primary)' }}>{formData.points_required}</span></IonLabel>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-eng)', width: '100%' }}>
+                    <span style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)', minWidth: '24px', textAlign: 'center' }}>1</span>
                     <IonRange
                       min={1} max={40} step={1}
                       pin={true} pinFormatter={(value: number) => `${value}`}
@@ -223,7 +217,7 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
                       disabled={loading}
                       style={{ flex: 1 }}
                     />
-                    <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>40</span>
+                    <span style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)', minWidth: '24px', textAlign: 'center' }}>40</span>
                   </div>
                 </IonItem>
 
@@ -239,25 +233,25 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
                 </IonItem>
 
               {/* Icon Picker */}
-              <div style={{ marginTop: '16px' }}>
+              <div style={{ marginTop: 'var(--app-abstand-basis)' }}>
                 <IonAccordionGroup>
-                  <IonAccordion value="icon-picker" toggleIcon={chevronDownOutline} toggleIconSlot="end">
+                  <IonAccordion value="icon-picker" toggleIcon={ICON_AUFKLAPPEN} toggleIconSlot="end">
                     <IonItem slot="header" lines="none" style={{ '--background': 'transparent' }}>
                       <div className="app-icon-circle app-icon-circle--lg" style={{
                         backgroundColor: formData.color,
-                        borderRadius: '12px',
+                        borderRadius: 'var(--app-radius-karte)',
                         width: '50px',
                         height: '50px',
-                        boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                        marginRight: '12px'
+                        boxShadow: 'var(--app-schatten-karte-stark)',
+                        marginRight: 'var(--app-abstand-mittel)'
                       }}>
                         <IonIcon
                           icon={getIconFromString(formData.icon || 'trophy')}
-                          style={{ fontSize: '1.8rem', color: 'white' }}
+                          style={{ fontSize: 'var(--app-anzeige-basis)', color: 'white' }}
                         />
                       </div>
                       <IonLabel>
-                        <h3 className="app-settings-item__subtitle" style={{ margin: '0 0 4px 0' }}>
+                        <h3 className="app-settings-item__subtitle" style={{ margin: '0 0 var(--app-abstand-mini) 0' }}>
                           Icon *
                         </h3>
                         {formData.icon && LEVEL_ICONS[formData.icon as keyof typeof LEVEL_ICONS] && (
@@ -267,7 +261,7 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
                         )}
                       </IonLabel>
                     </IonItem>
-                    <div slot="content" style={{ padding: '16px' }}>
+                    <div slot="content" style={{ padding: 'var(--app-abstand-basis)' }}>
                       {Object.entries(LEVEL_ICONS).reduce<{ category: string; icons: { key: string; data: typeof LEVEL_ICONS[keyof typeof LEVEL_ICONS] }[] }[]>((acc, [key, data]) => {
                         const categoryIndex = acc.findIndex((group) => group.category === data.category);
                         if (categoryIndex === -1) {
@@ -277,11 +271,11 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
                         }
                         return acc;
                       }, []).map((group) => (
-                        <div key={group.category} style={{ marginBottom: '16px' }}>
-                          <span className="app-settings-item__subtitle" style={{ fontWeight: '600', marginBottom: '8px', display: 'block' }}>
+                        <div key={group.category} style={{ marginBottom: 'var(--app-abstand-basis)' }}>
+                          <span className="app-settings-item__subtitle" style={{ fontWeight: 'var(--app-schrift-halbfett)', marginBottom: 'var(--app-abstand-eng)', display: 'block' }}>
                             {group.category}
                           </span>
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(60px, 1fr))', gap: '8px' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(60px, 1fr))', gap: 'var(--app-abstand-eng)' }}>
                             {group.icons.map(({ key, data }) => (
                               <div
                                 key={key}
@@ -289,23 +283,23 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
                                 style={{
                                   width: '100%',
                                   aspectRatio: '1',
-                                  backgroundColor: formData.icon === key ? formData.color : '#f8f9fa',
-                                  borderRadius: '12px',
+                                  backgroundColor: formData.icon === key ? formData.color : 'var(--app-surface-soft)',
+                                  borderRadius: 'var(--app-radius-karte)',
                                   display: 'flex',
                                   flexDirection: 'column',
                                   alignItems: 'center',
                                   justifyContent: 'center',
                                   cursor: 'pointer',
-                                  border: formData.icon === key ? '2px solid ' + formData.color : '1px solid #e0e0e0',
-                                  boxShadow: formData.icon === key ? '0 2px 8px rgba(0,0,0,0.15)' : '0 1px 3px rgba(0,0,0,0.1)',
+                                  border: formData.icon === key ? '2px solid ' + formData.color : '1px solid var(--app-border)',
+                                  boxShadow: formData.icon === key ? 'var(--app-schatten-karte-stark)' : 'var(--app-schatten-flach)',
                                   transition: 'all 0.2s'
                                 }}
                               >
                                 <IonIcon
                                   icon={data.icon}
                                   style={{
-                                    fontSize: '1.5rem',
-                                    color: formData.icon === key ? 'white' : '#666'
+                                    fontSize: 'var(--app-text-ueberschrift)',
+                                    color: formData.icon === key ? 'white' : 'var(--app-text-secondary)'
                                   }}
                                 />
                               </div>
@@ -319,9 +313,9 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
               </div>
 
               {/* Color Picker */}
-              <IonItem lines="none" style={{ '--background': 'transparent', marginTop: '16px' }}>
+              <IonItem lines="none" style={{ '--background': 'transparent', marginTop: 'var(--app-abstand-basis)' }}>
                 <IonLabel position="stacked">Level-Farbe</IonLabel>
-                <div style={{ marginTop: '8px', width: '100%' }}>
+                <div style={{ marginTop: 'var(--app-abstand-eng)', width: '100%' }}>
                   <input
                     type="color"
                     value={formData.color}
@@ -330,8 +324,8 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
                     style={{
                       width: '100%',
                       height: '60px',
-                      border: '2px solid #e0e0e0',
-                      borderRadius: '12px',
+                      border: '2px solid var(--app-border)',
+                      borderRadius: 'var(--app-radius-karte)',
                       cursor: 'pointer'
                     }}
                   />

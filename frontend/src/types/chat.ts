@@ -24,6 +24,73 @@ export interface Reaction {
   user_name: string;
 }
 
+/**
+ * Ein Eintrag aus GET /chat/available-users (Konfi-Sicht).
+ *
+ * `jahrgang_name` liefert das Backend derzeit immer als null (chat.js,
+ * `null as jahrgang_name`) — das Feld steht nur der Vollstaendigkeit halber.
+ */
+export interface VerfuegbarerPartner {
+  id: number;
+  name: string;
+  type: ChatUserType;
+  role_name?: string;
+  role_description?: string;
+  jahrgang_name?: string | null;
+}
+
+/** Ein Eintrag aus GET /chat/team-contacts. */
+export interface TeamKontakt {
+  id: number;
+  display_name: string;
+  role_name: string;
+  role_description?: string;
+}
+
+/**
+ * Ein Eintrag aus GET /admin/konfis (konfi-management.js).
+ *
+ * Der Anzeigename kommt als `name`, der Jahrgang ausschliesslich als
+ * `jahrgang_name` — weder `display_name` noch `jahrgang` gibt es.
+ */
+export interface KonfiEintrag {
+  id: number;
+  name: string;
+  username?: string;
+  jahrgang_id?: number | null;
+  jahrgang_name?: string | null;
+  gottesdienst_points?: number;
+  gemeinde_points?: number;
+  badgeCount?: number;
+}
+
+/** Ein Eintrag aus GET /users/me/jahrgaenge (users.js). */
+export interface EigenerJahrgang {
+  id: number;
+  name: string;
+  can_view?: boolean;
+  can_edit?: boolean;
+  assigned_at?: string;
+  assigned_by_name?: string | null;
+}
+
+/**
+ * Kompletter Umfrage-Stand, wie ihn das Socket-Ereignis `pollUpdated`
+ * mitliefert (chat.js, pollPayload). Der Server gewinnt immer: der Client
+ * ersetzt damit nur den Umfrage-Teil der betroffenen Nachricht.
+ */
+export interface PollStand {
+  poll_id: number;
+  message_id: number;
+  question: string;
+  options: string[];
+  multiple_choice: boolean;
+  anonymous: boolean;
+  exclusive_options: boolean;
+  expires_at: string | null;
+  votes: PollVote[];
+}
+
 export interface Message {
   id: number;
   content: string;
@@ -82,6 +149,9 @@ export interface ChatRoomBase {
   // Automatischer Team-Chat der Organisation (Migration 104) — nur er
   // laesst sich über den Mülleimer im Header leeren.
   is_team_chat?: boolean;
+  // Ungelesen-Stand aus der Chat-Uebersicht: vorhanden, wenn der Raum von
+  // dort geoeffnet wurde (ChatRoomOverview verlangt ihn dann verpflichtend).
+  unread_count?: number;
 }
 
 export interface ChatRoomOverview extends ChatRoomBase {

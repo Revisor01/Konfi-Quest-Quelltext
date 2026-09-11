@@ -1,4 +1,6 @@
+import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect } from 'react';
+import { useAppLocation } from '../../../navigation/useAppLocation';
 import {
   IonPage,
   IonHeader,
@@ -19,16 +21,9 @@ import {
   useIonViewWillEnter
 } from '@ionic/react';
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
-import { useLocation } from 'react-router-dom';
+
 // useLocation für die Auswertung von ?segment=... (React Router v5 API)
-import {
-  qrCodeOutline,
-  add,
-  home,
-  people,
-  closeOutline,
-  informationCircleOutline
-} from 'ionicons/icons';
+import { ICON_HINZUFUEGEN_GEFUELLT, ICON_QRCODE } from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
@@ -46,24 +41,15 @@ import RequestDetailModal from '../modals/RequestDetailModal';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { Event } from '../../../types/event';
 import { triggerPullHaptic } from '../../../utils/haptics';
+// Kein eigener ActivityRequest mehr: Die Seite reicht die Antraege an
+// RequestDetailModal weiter, und zwei gleichnamige Typen mit
+// unterschiedlicher Nullbarkeit haben genau dort gebissen. Der Modal-Typ ist
+// der genauere — er kennt Teamer-Antraege ohne Punkte und ohne Typ.
+import type { ActivityRequest } from '../modals/RequestDetailModal';
 
 // Einmaliger Hinweis nach dem Tab-Umbau: die Aktivitäten sind aus ihrem eigenen
 // Tab in dieses Segment gewandert.
 
-interface ActivityRequest {
-  id: number;
-  activity_id: number;
-  activity_name: string;
-  activity_points: number;
-  activity_type: 'gottesdienst' | 'gemeinde';
-  requested_date: string;
-  comment?: string;
-  photo_filename?: string;
-  status: 'pending' | 'approved' | 'rejected';
-  admin_comment?: string;
-  created_at: string;
-  updated_at: string;
-}
 
 interface KonfiEventsPageProps {
   // Im iPad-Split-View setzt der Master die Auswahl als State statt zu
@@ -77,7 +63,7 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
   const { user, setSuccess, setError, isOnline } = useApp();
   const { pageRef, presentingElement } = useModalPage('konfi-events');
   const router = useIonRouter();
-  const routerLocation = useLocation();
+  const routerLocation = useAppLocation();
   const [presentAlert] = useIonAlert();
 
   // Oberste Segment-Ebene: Events oder Aktivitäten.
@@ -125,7 +111,6 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
 
   // State
   const [activeTab, setActiveTab] = useState<'meine' | 'alle' | 'konfirmation'>('meine');
-  const [searchText, setSearchText] = useState('');
 
   // --- Aktivitäten-State ---
   const [requestsTab, setRequestsTab] = useState<'all' | 'pending' | 'approved' | 'rejected'>('pending');
@@ -187,32 +172,6 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
     });
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'pending': return 'warning';
-      case 'approved': return 'success';
-      case 'rejected': return 'danger';
-      default: return 'medium';
-    }
-  };
-
-  const getStatusText = (status: string) => {
-    switch (status) {
-      case 'pending': return 'Offen';
-      case 'approved': return 'Verbucht';
-      case 'rejected': return 'Abgelehnt';
-      default: return 'Unbekannt';
-    }
-  };
-
-  const getTypeIcon = (type: string) => {
-    return type === 'gottesdienst' ? home : people;
-  };
-
-  const getTypeText = (type: string) => {
-    return type === 'gottesdienst' ? 'Gottesdienst' : 'Gemeinde';
-  };
-
   const getFilteredRequests = () => {
     const allRequests = requests || [];
     switch (requestsTab) {
@@ -252,8 +211,8 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
             try {
               await api.delete(`/konfi/requests/${request.id}`);
               refreshRequests();
-            } catch (error: any) {
-              setError(error.response?.data?.error || 'Fehler beim Löschen der Aktivität');
+            } catch (error) {
+              setError(fehlerText(error, 'Fehler beim Löschen der Aktivität'));
             }
           }
         }
@@ -288,16 +247,6 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
         break;
       default:
         filteredEvents = allEvents;
-    }
-
-    // Suchfilter
-    if (searchText) {
-      const lower = searchText.toLowerCase();
-      filteredEvents = filteredEvents.filter(e =>
-        e.name?.toLowerCase().includes(lower) ||
-        e.title?.toLowerCase().includes(lower) ||
-        e.location?.toLowerCase().includes(lower)
-      );
     }
 
     // Sort events: nächstes Event immer oben
@@ -370,11 +319,11 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
           <IonButtons slot="end">
             {isAntraege ? (
               <IonButton onClick={handleAddRequest} aria-label="Neue Aktivität melden">
-                <IonIcon icon={add} />
+                <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
               </IonButton>
             ) : (
               <IonButton onClick={() => presentScannerModal()} aria-label="QR-Code scannen">
-                <IonIcon icon={qrCodeOutline} />
+                <IonIcon icon={ICON_QRCODE} />
               </IonButton>
             )}
           </IonButtons>
@@ -415,10 +364,6 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
               activeTab={requestsTab}
               onTabChange={setRequestsTab}
               formatDate={formatDate}
-              getStatusColor={getStatusColor}
-              getStatusText={getStatusText}
-              getTypeIcon={getTypeIcon}
-              getTypeText={getTypeText}
               headerSlot={
                 <>
                   {mainSegmentSlot}
@@ -442,7 +387,6 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
             onTabChange={setActiveTab}
             onSelectEvent={handleSelectEvent}
             selectedEventId={selectedEventId}
-            onUpdate={refresh}
             presentingElement={presentingElement}
             headerSlot={mainSegmentSlot}
           />

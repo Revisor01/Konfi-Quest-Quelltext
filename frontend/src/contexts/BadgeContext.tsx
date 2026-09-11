@@ -4,9 +4,10 @@ import { Capacitor } from '@capacitor/core';
 import api from '../services/api';
 import { writeQueue } from '../services/writeQueue';
 import { networkMonitor } from '../services/networkMonitor';
-import { initializeWebSocket, getSocket } from '../services/websocket';
+import { initializeWebSocket } from '../services/websocket';
 import { getToken } from '../services/tokenStore';
 import { removeDeliveredForChatRoom } from '../services/notifications';
+import { offlineCache } from '../services/offlineCache';
 import { useApp } from './AppContext';
 import { useLiveRefresh, useLiveUpdate, LiveUpdateType } from './LiveUpdateContext';
 
@@ -29,7 +30,12 @@ interface BadgeContextType {
   totalBadgeCount: number;
   // Actions
   refreshAllCounts: () => Promise<void>;
-  markRoomAsRead: (roomId: number) => void;
+  /**
+   * Meldet einen Raum als gelesen. Das Promise wird erfuellt, wenn der
+   * Server den Lesevorgang verbucht hat -- WER DANACH ZAEHLER NEU LAEDT,
+   * MUSS DARAUF WARTEN. Sonst liest er den Stand von vor dem Lesen.
+   */
+  markRoomAsRead: (roomId: number) => Promise<void>;
   // Legacy Alias (Abwaertskompatibilitaet)
   badgeCount: number;
   refreshFromAPI: () => Promise<void>;
@@ -113,20 +119,23 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
   }, [user, isAdmin, isLeadership]);
 
   // markRoomAsRead: Optimistisch + API Call
-  const markRoomAsRead = useCallback((roomId: number) => {
+  const markRoomAsRead = useCallback(async (roomId: number): Promise<void> => {
     // Zugestellte Chat-Notifications dieses Raums aus dem Mitteilungszentrum
     // entfernen (Bereich wurde geoeffnet/gelesen). Fire-and-forget.
     removeDeliveredForChatRoom(roomId);
 
+    // Beide Zaehler aus DERSELBEN Quelle bedienen.
+    //
+    // Jetzt merkt sich der erste Setter den tatsaechlich abgezogenen Wert und
+    // der zweite rechnet damit. React fuehrt beide Updater nacheinander mit
+    // dem jeweils aktuellen Zustand aus, deshalb stimmt die Reihenfolge.
+    let abgezogen = 0;
     setChatUnreadByRoom(prev => {
-      const currentUnread = prev[roomId] || 0;
-      if (currentUnread === 0) return prev;
+      abgezogen = prev[roomId] || 0;
+      if (abgezogen === 0) return prev;
       return { ...prev, [roomId]: 0 };
     });
-    setChatUnreadTotal(prev => {
-      const currentUnread = chatUnreadByRoom[roomId] || 0;
-      return Math.max(0, prev - currentUnread);
-    });
+    setChatUnreadTotal(prev => Math.max(0, prev - abgezogen));
 
     // API Call im Hintergrund — offline: Queue-Fallback
     if (!networkMonitor.isOnline) {
@@ -139,10 +148,20 @@ export const BadgeProvider = ({ children }: { children: ReactNode }) => {
       });
       return;
     }
-    api.post(`/chat/rooms/${roomId}/mark-read`).catch(err => {
-      console.error('BadgeContext: markRoomAsRead API fehlgeschlagen:', err);
-    });
-  }, [chatUnreadByRoom]);
+    // AWAIT, NICHT FIRE-AND-FORGET.
+    await api.post(`/chat/rooms/${roomId}/mark-read`)
+      .then(() => {
+        // Den zwischengespeicherten Raum-Stand verwerfen.
+        //
+        // remove() statt set(): Der naechste Aufruf der Uebersicht holt die
+        // Raeume frisch vom Server, statt dass wir hier eine zweite Wahrheit
+        // pflegen, die wieder auseinanderlaufen kann.
+        if (user?.id) offlineCache.remove(`chat:rooms:${user.id}`);
+      })
+      .catch(err => {
+        console.error('BadgeContext: markRoomAsRead API fehlgeschlagen:', err);
+      });
+  }, [chatUnreadByRoom, user?.id]);
 
   // Sync Device Badge bei Änderung von totalBadgeCount.
   // Nur auf nativen Plattformen: im Desktop-Browser existiert navigator.setAppBadge/

@@ -1,4 +1,6 @@
+import { fehlerText } from '../../utils/fehler';
 import React, { useState, useEffect, useRef } from 'react';
+import { QR_FARBEN } from '../../theme/colors';
 import {
   IonPage,
   IonHeader,
@@ -10,7 +12,7 @@ import {
   IonIcon,
   IonSpinner
 } from '@ionic/react';
-import { closeOutline, printOutline, cloudOfflineOutline } from 'ionicons/icons';
+import { ICON_DRUCKEN, ICON_OFFLINE, ICON_SCHLIESSEN } from './icons';
 import QRCode from 'qrcode';
 import api from '../../services/api';
 import { useApp } from '../../contexts/AppContext';
@@ -66,15 +68,15 @@ const QRDisplayModal: React.FC<QRDisplayModalProps> = ({ eventId, eventName, eve
         width: 512,
         margin: 2,
         errorCorrectionLevel: 'H',
-        color: { dark: '#000000', light: '#ffffff' }
+        color: { dark: QR_FARBEN.dunkel, light: QR_FARBEN.hell }
       });
       setQrDataUrl(dataUrl);
 
       // Start polling
       fetchAttendance();
       pollRef.current = setInterval(fetchAttendance, 10000);
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'QR-Code konnte nicht generiert werden');
+    } catch (err) {
+      setError(fehlerText(err, 'QR-Code konnte nicht generiert werden'));
     } finally {
       setLoading(false);
     }
@@ -85,7 +87,7 @@ const QRDisplayModal: React.FC<QRDisplayModalProps> = ({ eventId, eventName, eve
       const response = await api.get(`/events/${eventId}/attendance-count`);
       setCheckedIn(response.data.checked_in);
       setTotal(response.data.total);
-    } catch (err) {
+    } catch {
       // Polling-Fehler still ignorieren
     }
   };
@@ -100,53 +102,53 @@ const QRDisplayModal: React.FC<QRDisplayModalProps> = ({ eventId, eventName, eve
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton onClick={onClose} aria-label="Schließen">
-              <IonIcon icon={closeOutline} slot="icon-only" />
+              <IonIcon icon={ICON_SCHLIESSEN} slot="icon-only" />
             </IonButton>
           </IonButtons>
           <IonTitle>QR-Code</IonTitle>
           <IonButtons slot="end">
             <IonButton onClick={handlePrint} disabled={!qrDataUrl} aria-label="QR-Code drucken">
-              <IonIcon icon={printOutline} slot="icon-only" />
+              <IonIcon icon={ICON_DRUCKEN} slot="icon-only" />
             </IonButton>
           </IonButtons>
         </IonToolbar>
       </IonHeader>
 
-      <IonContent style={{ '--background': '#ffffff' }}>
+      <IonContent style={{ '--background': 'white' }}>
         <div className="qr-display-container" style={{
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
           minHeight: '100%',
-          padding: '24px'
+          padding: 'var(--app-abstand-weit)'
         }}>
           {loading ? (
             <IonSpinner name="crescent" />
           ) : error ? (
             <div style={{ textAlign: 'center', color: 'var(--ion-color-danger)' }}>
               <p>{error}</p>
-              <IonButton fill="outline" disabled={!isOnline} onClick={loadQR}>{!isOnline ? <><IonIcon icon={cloudOfflineOutline} style={{ marginRight: 4 }} /> Du bist offline</> : 'Erneut versuchen'}</IonButton>
+              <IonButton fill="outline" disabled={!isOnline} onClick={loadQR}>{!isOnline ? <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Du bist offline</> : 'Erneut versuchen'}</IonButton>
             </div>
           ) : (
             <>
               {/* Event Name */}
               <div className="qr-display-event-name" style={{
-                fontSize: '1.4rem',
-                fontWeight: '700',
+                fontSize: 'var(--app-text-titel-gross)',
+                fontWeight: 'var(--app-schrift-fett)',
                 textAlign: 'center',
-                marginBottom: '8px',
-                color: '#1a1a1a'
+                marginBottom: 'var(--app-abstand-eng)',
+                color: 'var(--app-text-emphasis)'
               }}>
                 {eventName}
               </div>
 
               {/* Event Datum/Uhrzeit */}
               <div className="qr-display-event-date" style={{
-                fontSize: '1rem',
-                color: '#666',
+                fontSize: 'var(--app-text-standard)',
+                color: 'var(--app-text-secondary)',
                 textAlign: 'center',
-                marginBottom: '24px'
+                marginBottom: 'var(--app-abstand-weit)'
               }}>
                 {formatDate(eventDate)} - {formatTime(eventDate)}
               </div>
@@ -160,29 +162,29 @@ const QRDisplayModal: React.FC<QRDisplayModalProps> = ({ eventId, eventName, eve
                   style={{
                     maxWidth: '300px',
                     width: '100%',
-                    border: '2px solid var(--border-color, #e0e0e0)',
-                    borderRadius: '12px',
-                    padding: '16px',
-                    backgroundColor: '#ffffff'
+                    border: '2px solid var(--app-border)',
+                    borderRadius: 'var(--app-radius-karte)',
+                    padding: 'var(--app-abstand-basis)',
+                    backgroundColor: 'white'
                   }}
                 />
               )}
 
               {/* Live-Zaehler */}
               <div className="qr-display-counter" style={{
-                fontSize: '1.8rem',
-                fontWeight: '700',
-                marginTop: '24px',
-                color: '#1a1a1a'
+                fontSize: 'var(--app-anzeige-basis)',
+                fontWeight: 'var(--app-schrift-fett)',
+                marginTop: 'var(--app-abstand-weit)',
+                color: 'var(--app-text-emphasis)'
               }}>
                 {checkedIn} / {total} eingecheckt
               </div>
 
               {/* Hinweistext */}
               <div className="qr-display-hint" style={{
-                color: 'var(--text-secondary, #999)',
-                fontSize: '0.9rem',
-                marginTop: '16px',
+                color: 'var(--app-text-muted)',
+                fontSize: 'var(--app-text-basis)',
+                marginTop: 'var(--app-abstand-basis)',
                 textAlign: 'center'
               }}>
                 Konfis scannen diesen QR-Code mit der App zum Einchecken

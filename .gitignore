@@ -108,6 +108,8 @@ ios/App/Podfile.lock
 
 backend/push/firebase-service-account.json
 
+frontend/stats.html
+
 # Persistent data (bind mounts)
 postgres/
 uploads/
@@ -137,3 +139,10 @@ frontend/ios/App/build_export*/
 # Produktions-Secrets
 .env.production
 
+
+
+# Playwright: Screenshots, Traces und Berichte fehlgeschlagener Laeufe.
+# Reine Laufzeit-Artefakte, gehoeren nicht ins Repo.
+test-results/
+playwright-report/
+AppStore/

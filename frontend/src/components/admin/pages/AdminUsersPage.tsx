@@ -1,4 +1,6 @@
-import React, { useState, useCallback } from 'react';
+import { ICON_HINZUFUEGEN_GEFUELLT, ICON_ZURUECK } from '../../shared/icons';
+import { fehlerText } from '../../../utils/fehler';
+import React, { useState } from 'react';
 import {
   IonPage,
   IonHeader,
@@ -13,7 +15,6 @@ import {
   useIonModal,
   useIonAlert
 } from '@ionic/react';
-import { add, arrowBack } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
@@ -39,7 +40,6 @@ const AdminUsersPage: React.FC = () => {
   );
   
   // Modal state
-  const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
   const [modalUserId, setModalUserId] = useState<number | null>(null);
 
   // Alert Hook für Bestätigungsdialoge
@@ -50,12 +50,10 @@ const AdminUsersPage: React.FC = () => {
     userId: modalUserId,
     onClose: () => {
       dismissUserModalHook();
-      setSelectedUser(null);
       setModalUserId(null);
     },
     onSuccess: () => {
       dismissUserModalHook();
-      setSelectedUser(null);
       setModalUserId(null);
       refreshUsers();
     }
@@ -78,12 +76,8 @@ const AdminUsersPage: React.FC = () => {
             try {
               await api.delete(`/users/${userToDelete.id}`);
               await refreshUsers();
-            } catch (err: any) {
-              if (err.response?.data?.error) {
-                setError(err.response.data.error);
-              } else {
-                setError('Fehler beim Löschen des Benutzers');
-              }
+            } catch (err) {
+              setError(fehlerText(err, 'Fehler beim Löschen des Benutzers'));
             }
           }
         }
@@ -92,7 +86,6 @@ const AdminUsersPage: React.FC = () => {
   };
 
   const handleSelectUser = (user: AdminUser) => {
-    setSelectedUser(user);
     setModalUserId(user.id);
     presentUserModalHook({
       presentingElement: presentingElement
@@ -100,7 +93,6 @@ const AdminUsersPage: React.FC = () => {
   };
 
   const presentUserModal = () => {
-    setSelectedUser(null);
     setModalUserId(null);
     presentUserModalHook({
       presentingElement: presentingElement
@@ -113,14 +105,14 @@ const AdminUsersPage: React.FC = () => {
         <IonToolbar>
         <IonButtons slot="start">
           <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-            <IonIcon icon={arrowBack} />
+            <IonIcon icon={ICON_ZURUECK} />
           </IonButton>
         </IonButtons>
           <IonTitle>Benutzer:innen</IonTitle>
           <IonButtons slot="end">
             {user?.role_name === 'org_admin' && (
               <IonButton aria-label="Neue Benutzer:in anlegen" onClick={presentUserModal}>
-                <IonIcon icon={add} />
+                <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
               </IonButton>
             )}
           </IonButtons>
@@ -146,7 +138,6 @@ const AdminUsersPage: React.FC = () => {
           <UsersView 
             users={users || []}
             onUpdate={refreshUsers}
-            onAddUserClick={presentUserModal}
             onSelectUser={handleSelectUser}
             onDeleteUser={handleDeleteUser}
             darfVerwalten={user?.role_name === 'org_admin'}

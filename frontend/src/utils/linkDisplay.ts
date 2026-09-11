@@ -26,6 +26,25 @@ export const istWebLink = (url?: string | null): boolean =>
   !!url && /^https?:\/\//i.test(url);
 
 /**
+ * Neue Antworten tragen das Array `links` (Tabelle material_links); ein
+ * gecachter Eintrag von vorher hat nur das Alt-Feld `link_url`, das der
+ * Server als Spiegel des ersten Links weiter befuellt -- dann faellt die
+ * Anzeige auf diesen einen Link zurueck. Gefiltert wird ueber istWebLink,
+ * damit nie etwas anderes als http/https in ein href geraet.
+ */
+export const materialLinks = (material: {
+  links?: { url: string }[];
+  link_url?: string | null;
+}): string[] => {
+  const roh = material.links && material.links.length > 0
+    ? material.links.map((l) => l.url)
+    : material.link_url
+      ? [material.link_url]
+      : [];
+  return roh.filter((url) => istWebLink(url));
+};
+
+/**
  * Beschriftung fuer einen Link-Beitrag: mit gespeicherten Metadaten
  * "Titel · Interpret · Dienst", ohne (Alt-Beitraege, fehlgeschlagener
  * Abruf) wie bisher die Domain. Cover werden bewusst nie geladen.

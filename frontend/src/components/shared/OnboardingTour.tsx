@@ -4,7 +4,7 @@ import { IonButton, IonIcon } from '@ionic/react';
 import { Swiper, SwiperSlide } from 'swiper/react';
 import { Pagination } from 'swiper/modules';
 import type { Swiper as SwiperType } from 'swiper';
-import { arrowForward, checkmarkCircle } from 'ionicons/icons';
+import { ICON_PFEIL_WEITER_GEFUELLT, ICON_ZUSAGE_GEFUELLT } from './icons';
 import 'swiper/css';
 import 'swiper/css/pagination';
 
@@ -123,9 +123,9 @@ const OnboardingTour: React.FC<OnboardingTourProps> = ({ slides, onClose, displa
         paddingTop: 'env(safe-area-inset-top, 0px)',
         paddingBottom: 'env(safe-area-inset-bottom, 0px)'
       }}>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '12px 16px 0' }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: 'var(--app-abstand-mittel) var(--app-abstand-basis) 0' }}>
           {!isLast && (
-            <IonButton fill="clear" size="small" onClick={onClose} style={{ '--color': '#8e8e93' }}>
+            <IonButton fill="clear" size="small" onClick={onClose} style={{ '--color': 'var(--app-text-system)' }}>
               Überspringen
             </IonButton>
           )}
@@ -147,22 +147,22 @@ const OnboardingTour: React.FC<OnboardingTourProps> = ({ slides, onClose, displa
               <div style={{
                 position: 'relative', overflow: 'hidden', flex: 1, width: '100%',
                 display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                textAlign: 'center', height: '100%', minHeight: '100%', padding: '24px 32px 56px', boxSizing: 'border-box'
+                textAlign: 'center', height: '100%', minHeight: '100%', padding: 'var(--app-abstand-weit) var(--app-abstand-extraweit) var(--app-freiraum-fuss)', boxSizing: 'border-box'
               }}>
                 <div style={{
                   position: 'relative', zIndex: 1,
-                  width: '110px', height: '110px', borderRadius: '28px',
+                  width: '110px', height: '110px', borderRadius: 'var(--app-radius-modal)',
                   background: 'rgba(255,255,255,0.22)', backdropFilter: 'blur(6px)',
                   border: '1px solid rgba(255,255,255,0.35)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  marginBottom: '28px', boxShadow: '0 10px 28px rgba(0,0,0,0.18)'
+                  marginBottom: 'var(--app-abstand-sehrweit)', boxShadow: 'var(--app-schatten-modal)'
                 }}>
-                  <IonIcon icon={slide.icon} style={{ fontSize: '3.2rem', color: '#fff' }} />
+                  <IonIcon icon={slide.icon} style={{ fontSize: 'var(--app-anzeige-riesig)', color: 'white' }} />
                 </div>
-                <h1 style={{ position: 'relative', zIndex: 1, fontSize: '1.6rem', fontWeight: 800, color: '#fff', margin: '0 0 12px', textShadow: '0 1px 6px rgba(0,0,0,0.18)' }}>
+                <h1 style={{ position: 'relative', zIndex: 1, fontSize: 'var(--app-text-ueberschrift-gross)', fontWeight: 'var(--app-schrift-extrafett)', color: 'white', margin: '0 0 var(--app-abstand-mittel)', textShadow: '0 1px 6px rgba(0,0,0,0.18)' }}>
                   {slide.title}
                 </h1>
-                <p style={{ position: 'relative', zIndex: 1, fontSize: '1.02rem', lineHeight: 1.5, color: 'rgba(255,255,255,0.95)', margin: 0, maxWidth: '340px', textShadow: '0 1px 4px rgba(0,0,0,0.15)' }}>
+                <p style={{ position: 'relative', zIndex: 1, fontSize: 'var(--app-text-standard)', lineHeight: 1.5, color: 'rgba(255,255,255,0.95)', margin: 0, maxWidth: '340px', textShadow: '0 1px 4px rgba(0,0,0,0.15)' }}>
                   {i === 0 && displayName ? `Hallo ${displayName}! ${slide.text}` : slide.text}
                 </p>
               </div>
@@ -170,24 +170,24 @@ const OnboardingTour: React.FC<OnboardingTourProps> = ({ slides, onClose, displa
           ))}
         </Swiper>
 
-        <div style={{ padding: '8px 24px 28px' }}>
+        <div style={{ padding: 'var(--app-abstand-eng) var(--app-abstand-weit) var(--app-abstand-sehrweit)' }}>
           <IonButton
             expand="block"
             onClick={next}
             style={{
-              '--background': '#ffffff',
+              '--background': 'white',
               '--background-activated': 'rgba(255,255,255,0.85)',
               '--background-focused': 'rgba(255,255,255,0.9)',
-              '--background-hover': '#ffffff',
+              '--background-hover': 'white',
               '--color': slides[index].color,
               '--ripple-color': slides[index].color,
               '--box-shadow': '0 6px 18px rgba(0,0,0,0.18)',
               '--border-radius': '14px',
-              height: '52px', fontWeight: 700
+              height: '52px', fontWeight: 'var(--app-schrift-fett)'
             }}
           >
             {isLast ? 'Los geht’s!' : 'Weiter'}
-            <IonIcon slot="end" icon={isLast ? checkmarkCircle : arrowForward} />
+            <IonIcon slot="end" icon={isLast ? ICON_ZUSAGE_GEFUELLT : ICON_PFEIL_WEITER_GEFUELLT} />
           </IonButton>
         </div>
       </div>

@@ -2,6 +2,7 @@ const express = require('express');
 const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
 const liveUpdate = require('../utils/liveUpdate');
+const { berechneLevelFortschritt } = require('../utils/levelFortschritt');
 
 // Levels: Verwendet bereits direkte Rollen-Checks
 module.exports = (db, verifyTokenRBAC, roleHelpers) => {
@@ -273,33 +274,8 @@ router.get('/konfi/:userId', verifyTokenRBAC, async (req, res) => {
 
     const levels = levelsResult.rows;
 
-    // Bestimme aktuelles und nächstes Level
-    let currentLevel = null;
-    let nextLevel = null;
-    let progress = 0;
-
-    for (let i = 0; i < levels.length; i++) {
-      if (totalPoints >= levels[i].points_required) {
-        currentLevel = levels[i];
-        nextLevel = levels[i + 1] || null;
-      } else {
-        if (!currentLevel) {
-          // Noch kein Level erreicht
-          nextLevel = levels[i];
-        }
-        break;
-      }
-    }
-
-    // Berechne Progress zum nächsten Level
-    if (nextLevel) {
-      const currentLevelPoints = currentLevel ? currentLevel.points_required : 0;
-      const pointsNeeded = nextLevel.points_required - currentLevelPoints;
-      const pointsAchieved = totalPoints - currentLevelPoints;
-      progress = Math.max(0, Math.min(100, (pointsAchieved / pointsNeeded) * 100));
-    } else {
-      progress = 100; // Alle Level erreicht
-    }
+    const { currentLevel, nextLevel, levelProgress: progress, pointsToNextLevel } =
+      berechneLevelFortschritt(totalPoints, levels);
 
     res.json({
       konfi_id: konfi.id,
@@ -308,7 +284,7 @@ router.get('/konfi/:userId', verifyTokenRBAC, async (req, res) => {
       current_level: currentLevel,
       next_level: nextLevel,
       progress_percentage: Math.round(progress),
-      points_to_next_level: nextLevel ? (nextLevel.points_required - totalPoints) : 0,
+      points_to_next_level: pointsToNextLevel,
       all_levels: levels
     });
   } catch (error) {

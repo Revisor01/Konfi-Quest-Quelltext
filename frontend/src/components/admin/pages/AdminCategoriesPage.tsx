@@ -1,4 +1,14 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import {
+  ICON_HAKEN,
+  ICON_HINZUFUEGEN_GEFUELLT,
+  ICON_KATEGORIE,
+  ICON_KATEGORIE_GEFUELLT,
+  ICON_LOESCHEN_GEFUELLT,
+  ICON_SCHLIESSEN,
+  ICON_ZURUECK,
+} from '../../shared/icons';
+import { fehlerText } from '../../../utils/fehler';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   IonPage,
   IonHeader,
@@ -25,16 +35,6 @@ import {
   IonTextarea,
   IonSpinner
 } from '@ionic/react';
-import {
-  add,
-  pricetag,
-  checkmarkOutline,
-  closeOutline,
-  arrowBack,
-  trash,
-  informationCircleOutline,
-  pricetagOutline
-} from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
@@ -49,6 +49,10 @@ import { SectionHeader, ListSection } from '../../shared';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { safeUUID } from '../../../utils/uuid';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
+
+// Ionic 9 gibt bei ref an IonItemSliding die React-Komponente zurueck, nicht
+// mehr das DOM-Element. Gebraucht wird hier nur close() — das haben beide.
+type SlidingRef = { close: () => Promise<void> };
 
 interface Category {
   id: number;
@@ -121,12 +125,8 @@ const CategoryModal: React.FC<CategoryModalProps> = ({
 
         onSuccess();
         handleClose();
-      } catch (error: any) {
-        if (error.response?.data?.error) {
-          setError(error.response.data.error);
-        } else {
-          setError('Fehler beim Speichern der Kategorie');
-        }
+      } catch (error) {
+        setError(fehlerText(error, 'Fehler beim Speichern der Kategorie'));
       } finally {
         setLoading(false);
       }
@@ -158,7 +158,7 @@ const CategoryModal: React.FC<CategoryModalProps> = ({
           </IonTitle>
           <IonButtons slot="start">
             <IonButton aria-label="Schließen" onClick={handleClose} disabled={loading}>
-              <IonIcon icon={closeOutline} />
+              <IonIcon icon={ICON_SCHLIESSEN} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
@@ -169,7 +169,7 @@ const CategoryModal: React.FC<CategoryModalProps> = ({
               {loading ? (
                 <IonSpinner name="crescent" />
               ) : (
-                <IonIcon icon={checkmarkOutline} />
+                <IonIcon icon={ICON_HAKEN} />
               )}
             </IonButton>
           </IonButtons>
@@ -178,10 +178,10 @@ const CategoryModal: React.FC<CategoryModalProps> = ({
 
       <IonContent className="app-gradient-background">
         {/* Kategorie Details - iOS26 Pattern */}
-        <IonList inset={true} style={{ margin: '16px' }}>
+        <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
           <IonListHeader>
             <div className="app-section-icon app-section-icon--categories">
-              <IonIcon icon={pricetag} />
+              <IonIcon icon={ICON_KATEGORIE_GEFUELLT} />
             </div>
             <IonLabel>Kategorie Details</IonLabel>
           </IonListHeader>
@@ -218,8 +218,8 @@ const CategoryModal: React.FC<CategoryModalProps> = ({
 };
 
 const AdminCategoriesPage: React.FC = () => {
-  const { pageRef, presentingElement, cleanupModals } = useModalPage('admin-categories');
-  const { user, setSuccess, setError, isOnline } = useApp();
+  const { pageRef, presentingElement } = useModalPage('admin-categories');
+  const { user, setError, isOnline } = useApp();
 
   // Offline-Query: Categories
   const { data: categories, loading, refresh: refreshCategories, refreshLive: refreshCategoriesLive } = useOfflineQuery<Category[]>(
@@ -229,7 +229,7 @@ const AdminCategoriesPage: React.FC = () => {
   );
 
   const [editCategory, setEditCategory] = useState<Category | null>(null);
-  const slidingRefs = useRef<Map<number, HTMLIonItemSlidingElement>>(new Map());
+  const slidingRefs = useRef<Map<number, SlidingRef>>(new Map());
 
   // Alert Hook für Bestätigungsdialoge
   const [presentAlert] = useIonAlert();
@@ -267,11 +267,11 @@ const AdminCategoriesPage: React.FC = () => {
             try {
               await api.delete(`/admin/categories/${category.id}`);
               refreshCategories();
-            } catch (error: any) {
+            } catch (error) {
               if (slidingElement) {
                 await slidingElement.close();
               }
-              const errorMessage = error.response?.data?.error || 'Fehler beim Löschen der Kategorie';
+              const errorMessage = fehlerText(error, 'Fehler beim Löschen der Kategorie');
               setError(errorMessage);
             }
           }
@@ -317,14 +317,14 @@ const AdminCategoriesPage: React.FC = () => {
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-              <IonIcon icon={arrowBack} />
+              <IonIcon icon={ICON_ZURUECK} />
             </IonButton>
           </IonButtons>
           <IonTitle>Kategorien</IonTitle>
           {canCreate && (
             <IonButtons slot="end">
               <IonButton aria-label="Neue Kategorie anlegen" onClick={openCreateModal}>
-                <IonIcon icon={add} />
+                <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
               </IonButton>
             </IonButtons>
           )}
@@ -345,7 +345,7 @@ const AdminCategoriesPage: React.FC = () => {
         <SectionHeader
           title="Kategorien"
           subtitle="Aktivitäten und Events"
-          icon={pricetag}
+          icon={ICON_KATEGORIE_GEFUELLT}
           preset="categories"
           stats={[
             { value: (categories || []).length, label: 'GESAMT' }
@@ -354,14 +354,14 @@ const AdminCategoriesPage: React.FC = () => {
 
         {/* Categories List */}
         <ListSection
-          icon={pricetagOutline}
+          icon={ICON_KATEGORIE}
           title="Kategorien"
           count={(categories || []).length}
           iconColorClass="categories"
-          emptyIcon={pricetag}
+          emptyIcon={ICON_KATEGORIE_GEFUELLT}
           emptyTitle="Keine Kategorien gefunden"
           emptyMessage="Noch keine Kategorien angelegt"
-          emptyIconColor="#0ea5e9"
+          emptyIconColor="var(--app-color-categories)"
         >
                   {(categories || []).map((category, index) => (
                     <IonItemSliding
@@ -373,7 +373,7 @@ const AdminCategoriesPage: React.FC = () => {
                           slidingRefs.current.delete(category.id);
                         }
                       }}
-                      style={{ marginBottom: index < (categories || []).length - 1 ? '8px' : '0' }}
+                      style={{ marginBottom: index < (categories || []).length - 1 ? 'var(--app-abstand-eng)' : '0' }}
                     >
                       <IonItem
                         button={canEdit}
@@ -397,7 +397,7 @@ const AdminCategoriesPage: React.FC = () => {
                           <div className="app-list-item__row">
                             <div className="app-list-item__main">
                               <div className="app-icon-circle app-icon-circle--lg app-icon-circle--categories">
-                                <IonIcon icon={pricetag} />
+                                <IonIcon icon={ICON_KATEGORIE_GEFUELLT} />
                               </div>
                               <div className="app-list-item__content">
                                 <div className="app-list-item__title">
@@ -424,7 +424,7 @@ const AdminCategoriesPage: React.FC = () => {
                             className="app-swipe-action"
                           >
                             <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
-                              <IonIcon icon={trash} />
+                              <IonIcon icon={ICON_LOESCHEN_GEFUELLT} />
                             </div>
                           </IonItemOption>
                         </IonItemOptions>

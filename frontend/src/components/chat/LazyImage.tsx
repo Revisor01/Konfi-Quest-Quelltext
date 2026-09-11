@@ -89,11 +89,11 @@ const LazyImage: React.FC<LazyImageProps> = ({ filePath, fileName, onError, onCl
       style={{
         maxWidth: '100%',
         maxHeight: '300px',
-        borderRadius: '8px',
+        borderRadius: 'var(--app-radius-klein)',
         // Hintergrund/feste minHeight NUR im Lade-/Fehlerzustand. Sobald das Bild
         // da ist, bestimmt es selbst die Hoehe -> KEIN Sprung von der 100px-
         // Platzhalter-Box auf die echte Bildhoehe (das war das Ruckeln).
-        backgroundColor: imageSrc ? 'transparent' : '#f0f0f0',
+        backgroundColor: imageSrc ? 'transparent' : 'var(--app-surface-dim)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -112,17 +112,17 @@ const LazyImage: React.FC<LazyImageProps> = ({ filePath, fileName, onError, onCl
           style={{
             maxWidth: '100%',
             maxHeight: '300px',
-            borderRadius: '8px',
+            borderRadius: 'var(--app-radius-klein)',
             objectFit: 'cover',
             display: 'block'
           }}
         />
       ) : isLoading ? (
-        <div style={{ color: '#666', fontSize: '0.9rem' }}>
+        <div style={{ color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-basis)' }}>
           Bild wird geladen...
         </div>
       ) : (
-        <div style={{ color: '#999', fontSize: '0.8rem' }}>
+        <div style={{ color: 'var(--app-text-muted)', fontSize: 'var(--app-text-hinweis)' }}>
           Bild konnte nicht geladen werden
         </div>
       )}

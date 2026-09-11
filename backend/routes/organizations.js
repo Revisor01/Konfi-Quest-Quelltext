@@ -390,21 +390,53 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin, requireTeamer }) => {
         { name: "Durchstarter", icon: "flash-outline", description: "6 Wochen am Stück aktiv - was für eine Serie!", criteria_type: "streak", criteria_value: 6 }
       ];
 
+      // TEAMER-ABZEICHEN. Sie brauchen einen eigenen Satz: custom_badges.
+      // target_role steht per DEFAULT auf 'konfi' (Migration 076), und die
+      // Teamer-Ansicht fragt ausschliesslich target_role = 'teamer' ab. Ohne
+      // diese Zeilen startet eine neue Gemeinde mit einer leeren Abzeichen-
+      // Seite fuer ihr Team, waehrend die bestehenden Gemeinden welche haben.
+      //
+      // Nur Kriterien, die OHNE weitere Einrichtung rechnen: Der Teamer-Zweig
+      // (routes/badges.js) kennt zehn Typen, aber specific_activity,
+      // category_activities, category_combination und activity_combination
+      // verlangen konkrete Aktivitaeten oder Kategorien -- die es in einer
+      // frischen Gemeinde noch nicht gibt. Uebrig bleiben activity_count
+      // (Aktivitaeten UND Termine), event_count, unique_activities,
+      // teamer_year und streak.
+      const defaultTeamerBadges = [
+        { name: "Willkommen im Team", icon: "hand-right-outline", description: "Dein erster Einsatz als Teamer:in ist eingetragen.", criteria_type: "activity_count", criteria_value: 1 },
+        { name: "Mit dabei", icon: "people-circle-outline", description: "5 Einsätze als Teamer:in.", criteria_type: "activity_count", criteria_value: 5 },
+        { name: "Feste Größe", icon: "shield-checkmark-outline", description: "15 Einsätze als Teamer:in.", criteria_type: "activity_count", criteria_value: 15 },
+        { name: "Erste Begleitung", icon: "calendar-outline", description: "Du warst bei deinem ersten Termin dabei.", criteria_type: "event_count", criteria_value: 1 },
+        { name: "Verlässlich dabei", icon: "calendar-number-outline", description: "Bei 10 Terminen dabei gewesen.", criteria_type: "event_count", criteria_value: 10 },
+        { name: "Vielseitig im Einsatz", icon: "color-palette-outline", description: "5 verschiedene Aktivitäten begleitet.", criteria_type: "unique_activities", criteria_value: 5 },
+        { name: "Ein Jahr im Team", icon: "ribbon-outline", description: "Ein Jahr als Teamer:in aktiv gewesen.", criteria_type: "teamer_year", criteria_value: 1 },
+        { name: "Drei Jahre im Team", icon: "trophy-outline", description: "Drei Jahre als Teamer:in aktiv gewesen.", criteria_type: "teamer_year", criteria_value: 3 },
+        { name: "Am Ball geblieben", icon: "flame-outline", description: "3 Wochen in Folge im Einsatz.", criteria_type: "streak", criteria_value: 3 }
+      ];
+
       const badgeQuery = `INSERT INTO custom_badges (
         organization_id, name, icon, description, criteria_type, criteria_value, 
-        is_active, is_hidden, created_by
-      ) VALUES ($1, $2, $3, $4, $5, $6, true, false, $7)`;
+        is_active, is_hidden, created_by, target_role
+      ) VALUES ($1, $2, $3, $4, $5, $6, true, false, $7, $8)`;
 
       for (const badge of defaultBadges) {
         await db.query(badgeQuery, [
           organizationId, badge.name, badge.icon, badge.description,
-          badge.criteria_type, badge.criteria_value, newAdmin.id
+          badge.criteria_type, badge.criteria_value, newAdmin.id, 'konfi'
+        ]);
+      }
+
+      for (const badge of defaultTeamerBadges) {
+        await db.query(badgeQuery, [
+          organizationId, badge.name, badge.icon, badge.description,
+          badge.criteria_type, badge.criteria_value, newAdmin.id, 'teamer'
         ]);
       }
 
       // 5. Create default certificate types for the organization
       const defaultCertificates = [
-        { name: 'Teamer:innen Card', icon: 'card' },
+        { name: 'Teamer-Card', icon: 'card' },
         { name: 'JuLeiCa', icon: 'ribbon' },
         { name: 'Rettungsschwimmer', icon: 'water' },
         { name: 'Erste Hilfe', icon: 'medkit' }
@@ -436,12 +468,48 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin, requireTeamer }) => {
 
       // 7. Create default categories (Startpunkt zum Anpassen). type:
       // 'activity' | 'event' | 'both'. key dient nur der Verknuepfung unten.
+      //
+      // 1. "Unterricht" ist RAUS. Woertlich: "Es heisst bewusst Konfi Zeit!"
+      //    Konfi-Arbeit ist keine Schule. Der Begriff wird auch nicht ersetzt,
+      //    er faellt ersatzlos weg.
+      //
+      // 2. "Gottesdienst" und "Gemeinde" sind RAUS als Kategorie. Sie sind der
+      //    TYP einer Aktivitaet (activities.type -- die Punkte-Achse
+      //    gottesdienst/gemeinde), nicht die Art des Anlasses. Als Kategorie
+      //    waren sie eine Doppelung: Jede Aktivitaet ist ohnehin das eine oder
+      //    das andere, das steht schon auf der Punkte-Seite des Rueckblicks.
+      //    Kategorien beantworten eine andere Frage -- WAS FUER EIN ANLASS war
+      //    das (Fest, Konzert, Freizeit) -- und nur die traegt eigene Seiten.
+      //
+      // BESTAND BLEIBT UNANGETASTET: Diese Liste gilt nur beim ANLEGEN einer
+      // neuen Gemeinde. Bestehende Organisationen behalten jede Kategorie, die
+      // sie haben, inklusive "Gottesdienst", "Gemeinde" und "Unterricht".
+      // Niemandes Daten aendern sich durch diese Zeilen.
       const defaultCategories = [
-        { key: 'gottesdienst', name: 'Gottesdienst', description: '', type: 'both' },
-        { key: 'gemeinde', name: 'Gemeinde', description: '', type: 'both' },
-        { key: 'unterricht', name: 'Unterricht', description: '', type: 'both' },
+        { key: 'fest', name: 'Fest', description: 'Gemeindefest, Feiern', type: 'both' },
+        { key: 'senioren', name: 'Senior:innen', description: 'Besuche, Seniorenkreis', type: 'both' },
+        { key: 'jugend', name: 'Jugend', description: 'Jugendgruppe, Jugendtreff', type: 'both' },
+        { key: 'oeffentlichkeit', name: 'Öffentlichkeitsarbeit', description: 'Gemeindebrief, Aushang, Social Media', type: 'both' },
+        { key: 'freizeit', name: 'Freizeit', description: 'Fahrten und Freizeiten', type: 'both' },
+        { key: 'weihnachten', name: 'Weihnachten', description: 'Adventszeit, Christvesper, Krippenspiel', type: 'both' },
+        // Fuer die Teamer:innen -- taucht im Teamer-Rueckblick auf, nicht im
+        // Konfi-Rueckblick.
+        { key: 'teamtreff', name: 'Teamtreff', description: 'Treffen des Teams', type: 'both' },
+        { key: 'konzert', name: 'Konzert', description: 'Konzerte und Musik', type: 'both' },
+        { key: 'kinder', name: 'Kinder', description: 'Kindergottesdienst, Kindergruppe', type: 'both' },
+        { key: 'kreativ', name: 'Kreativ', description: 'Basteln, Gestalten, Werkstatt', type: 'both' },
+        { key: 'seelsorge', name: 'Seelsorge', description: 'Besuche, Gespraeche, Begleitung', type: 'both' },
+        // Kasualien bleibt: Die Standard-Aktivitaeten Taufe, Hochzeit und
+        // Beerdigung haengen daran (defaultActivities unten). Ohne diese
+        // Kategorie liefe das Anlegen einer Gemeinde auf einen leeren
+        // Kategorie-Verweis.
         { key: 'kasualien', name: 'Kasualien', description: 'Taufe, Hochzeit, Beerdigung', type: 'activity' },
-        { key: 'freizeit', name: 'Freizeit', description: '', type: 'both' }
+        // Gottesdienst und Gemeinde bleiben als Kategorie erhalten -- sie
+        // schaden hier nicht und viele Gemeinden erwarten sie. Sie tragen nur
+        // KEINE eigene Wrapped-Seite, weil sie die Punkte-Achse doppeln
+        // (activities.type). Siehe utils/wrappedKategorien.js.
+        { key: 'gottesdienst', name: 'Gottesdienst', description: '', type: 'both' },
+        { key: 'gemeinde', name: 'Gemeinde', description: '', type: 'both' }
       ];
 
       const categoryIdByKey = {};
@@ -462,12 +530,29 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin, requireTeamer }) => {
         { name: 'Küsterdienst', points: 1, type: 'gemeinde', categoryKey: 'gemeinde' }
       ];
 
+      const defaultTeamerActivities = [
+        { name: 'Andacht halten', categoryKey: 'gottesdienst' },
+        { name: 'Gottesdienst mitgestalten', categoryKey: 'gottesdienst' },
+        { name: 'Team-Schulung', categoryKey: 'teamtreff' },
+        { name: 'Team-Sitzung', categoryKey: 'teamtreff' }
+      ];
+
       const activityQuery = `INSERT INTO activities (name, points, type, organization_id)
                              VALUES ($1, $2, $3, $4) RETURNING id`;
       const activityCategoryQuery = `INSERT INTO activity_categories (activity_id, category_id)
                                      VALUES ($1, $2)`;
       for (const act of defaultActivities) {
         const { rows: [newAct] } = await db.query(activityQuery, [act.name, act.points, act.type, organizationId]);
+        const catId = categoryIdByKey[act.categoryKey];
+        if (catId) {
+          await db.query(activityCategoryQuery, [newAct.id, catId]);
+        }
+      }
+
+      const teamerActivityQuery = `INSERT INTO activities (name, points, type, target_role, organization_id)
+                                   VALUES ($1, 0, NULL, 'teamer', $2) RETURNING id`;
+      for (const act of defaultTeamerActivities) {
+        const { rows: [newAct] } = await db.query(teamerActivityQuery, [act.name, organizationId]);
         const catId = categoryIdByKey[act.categoryKey];
         if (catId) {
           await db.query(activityCategoryQuery, [newAct.id, catId]);
@@ -524,13 +609,14 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin, requireTeamer }) => {
       res.status(201).json({
         id: organizationId,
         admin_user_id: newAdmin.id,
-        default_badges_created: defaultBadges.length,
+        // Wie bei den Aktivitaeten: Konfi- und Teamer-Vorlagen zusammen.
+        default_badges_created: defaultBadges.length + defaultTeamerBadges.length,
         default_certificates_created: defaultCertificates.length,
         default_levels_created: defaultLevels.length,
         default_categories_created: defaultCategories.length,
-        default_activities_created: defaultActivities.length,
+        default_activities_created: defaultActivities.length + defaultTeamerActivities.length,
         default_challenges_created: defaultChallenges.length,
-        message: `Organisation erfolgreich erstellt (Standard-Rollen, Admin, ${defaultBadges.length} Badges, ${defaultCertificates.length} Zertifikate, ${defaultLevels.length} Levels, ${defaultCategories.length} Kategorien, ${defaultActivities.length} Aktivitäten, ${defaultChallenges.length} Beispiel-Challenges)`
+        message: `Organisation erfolgreich erstellt (Standard-Rollen, Admin, ${defaultBadges.length + defaultTeamerBadges.length} Badges, ${defaultCertificates.length} Zertifikate, ${defaultLevels.length} Levels, ${defaultCategories.length} Kategorien, ${defaultActivities.length} Aktivitäten, ${defaultChallenges.length} Beispiel-Challenges)`
       });
 
       // Live-Update NACH der Response: nur an den ausfuehrenden Super-Admin selbst
@@ -1223,7 +1309,7 @@ module.exports = (db, rbacVerifier, { requireSuperAdmin, requireTeamer }) => {
       );
       if (orgs.length === 0) return;
       const defaultCerts = [
-        { name: 'Teamer:innen Card', icon: 'card' },
+        { name: 'Teamer-Card', icon: 'card' },
         { name: 'JuLeiCa', icon: 'ribbon' },
         { name: 'Rettungsschwimmer', icon: 'water' },
         { name: 'Erste Hilfe', icon: 'medkit' }

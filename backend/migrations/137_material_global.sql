@@ -1,0 +1,22 @@
+-- 137_material_global.sql
+--
+-- Anlass: "Ohne Jahrgang sehen es alle" war bisher ein unbenannter
+-- Nebeneffekt. In der Liste liess sich nicht unterscheiden, ob ein Material
+-- BEWUSST fuer alle gedacht war oder ob nur jemand vergessen hatte, einen
+-- Jahrgang zu setzen. Mit der Spalte ist die Absicht sichtbar und die
+-- Oberflaeche kann sie benennen.
+--
+-- ADDITIV: Die Spalte kommt dazu, Bestand bekommt false. Damit aendert sich
+-- fuer KEIN vorhandenes Material die Sichtbarkeit -- die alte Regel
+-- ("kein Jahrgang zugeordnet -> alle Teamer:innen") bleibt in
+-- routes/material.js als eigener Zweig bestehen und wird nur um
+-- `ist_global = true` ERWEITERT, nicht ersetzt.
+--
+-- Setzen und Entziehen des Flags darf nur die Rolle org_admin
+-- (Feld-Pruefung in routes/material.js). Die Routen selbst bleiben auf
+-- requireAdmin, damit ein 'admin' weiterhin normales Material anlegen kann.
+--
+-- "Fuer alle" heisst hier: alle TEAMER:INNEN der Gemeinde. Konfis haben auf
+-- keine Material-Route Zugriff (requireTeamer).
+ALTER TABLE materials
+  ADD COLUMN IF NOT EXISTS ist_global BOOLEAN NOT NULL DEFAULT false;

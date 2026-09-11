@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useCallback, useRef, ReactNode } from 'react';
-import { initializeWebSocket, getSocket, reconnectWithToken } from '../services/websocket';
+import { initializeWebSocket, reconnectWithToken } from '../services/websocket';
 import { getToken } from '../services/tokenStore';
 import api from '../services/api';
 import { useApp } from './AppContext';
@@ -30,7 +30,9 @@ export interface LiveUpdateEvent {
   action: 'refresh' | 'update' | 'delete' | 'create' | 'earned' | 'submission_update' | 'challenge_update';
   targetUserId?: number;      // Fuer welchen User
   targetUserType?: string;    // 'konfi' | 'admin'
-  data?: any;                 // Optionale Daten
+  // Optionale Nutzdaten des Ereignisses. Der Inhalt haengt am type; die
+  // Empfaenger lesen ihn gezielt und muessen ihn selbst eingrenzen.
+  data?: unknown;
 }
 
 interface LiveUpdateContextType {
@@ -128,7 +130,6 @@ export const LiveUpdateProvider = ({ children }: { children: ReactNode }) => {
     };
     // socketEpoch in den Deps: nach Reconnect-mit-neuem-Token werden die
     // Listener am frischen Socket neu gebunden.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socketEpoch, user?.id]);
 
   // Subscribe function

@@ -1,6 +1,6 @@
 import React from 'react';
 import { IonIcon } from '@ionic/react';
-import { compassOutline } from 'ionicons/icons';
+import { ICON_KOMPASS } from '../../shared/icons';
 import type { SlideProps, KonfiKategorieSlide } from '../../../types/wrapped';
 import SlideBase from './SlideBase';
 
@@ -26,8 +26,8 @@ const KategorieSlide: React.FC<KategorieSlideProps> = ({ isActive, kategorie, ti
   return (
     <SlideBase isActive={isActive} className="kategorie-slide">
       <div className="wrapped-anim-fly-left">
-        <p className="wrapped-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <IonIcon icon={compassOutline} style={{ fontSize: '1rem' }} />
+        <p className="wrapped-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-kompakt)' }}>
+          <IonIcon icon={ICON_KOMPASS} style={{ fontSize: 'var(--app-text-standard)' }} />
           {titel || 'Dein Schwerpunkt'}
         </p>
       </div>
@@ -57,7 +57,7 @@ const KategorieSlide: React.FC<KategorieSlideProps> = ({ isActive, kategorie, ti
         </>
       ) : (
         <div className="wrapped-anim-fade wrapped-anim-delay-1">
-          <p className="wrapped-subtitle">Noch keine Aktivitaeten</p>
+          <p className="wrapped-subtitle">Noch keine Aktivitäten</p>
         </div>
       )}
     </SlideBase>

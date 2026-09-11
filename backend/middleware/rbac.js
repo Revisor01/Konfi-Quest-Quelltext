@@ -277,103 +277,6 @@ const requireTeamer = requireRole('org_admin', 'admin', 'teamer'); // Events, Pu
 // JAHRGANG-ZUGRIFF
 // ============================================
 
-const checkJahrgangAccess = (jahrgangIdParam = 'jahrgangId', requireEdit = false) => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ error: 'Nicht angemeldet' });
-    }
-
-    // super_admin hat KEINEN Zugriff auf Jahrgangs-Daten
-    if (req.user.role_name === 'super_admin') {
-      return res.status(403).json({ error: 'Super-Admin hat keinen Zugriff auf Jahrgangs-Daten' });
-    }
-
-    // Org-Admin und Admin haben Zugriff auf alle Jahrgänge ihrer Organisation
-    if (['org_admin', 'admin'].includes(req.user.role_name)) {
-      return next();
-    }
-
-    const jahrgangId = parseInt(req.params[jahrgangIdParam] || req.body[jahrgangIdParam] || req.query[jahrgangIdParam]);
-
-    if (!jahrgangId) {
-      return res.status(400).json({ error: 'Jahrgang ID erforderlich' });
-    }
-
-    const assignedJahrgang = req.user.assigned_jahrgaenge.find(j => j.id === jahrgangId);
-
-    if (!assignedJahrgang) {
-      return res.status(403).json({ error: 'Kein Zugriff auf diesen Jahrgang' });
-    }
-
-    if (requireEdit && !assignedJahrgang.can_edit) {
-      return res.status(403).json({ error: 'Keine Bearbeitungsrechte für diesen Jahrgang' });
-    }
-
-    if (!assignedJahrgang.can_view) {
-      return res.status(403).json({ error: 'Keine Leserechte für diesen Jahrgang' });
-    }
-
-    next();
-  };
-};
-
-// Filter für Jahrgang-basierte Queries
-const filterByJahrgangAccess = (req) => {
-  if (!req.user) {
-    return { where: 'WHERE 1=0', params: [] };
-  }
-
-  // super_admin hat KEINEN Zugriff auf Jahrgangs-Daten
-  if (req.user.role_name === 'super_admin') {
-    return { where: 'WHERE 1=0', params: [] };
-  }
-
-  // Org-Admin und Admin sehen alles in ihrer Organisation
-  if (['org_admin', 'admin'].includes(req.user.role_name)) {
-    return {
-      where: 'WHERE organization_id = $1',
-      params: [req.user.organization_id]
-    };
-  }
-
-  // Teamer sehen nur zugewiesene Jahrgänge
-  const viewableJahrgaenge = req.user.assigned_jahrgaenge
-    .filter(j => j.can_view)
-    .map(j => j.id);
-
-  if (viewableJahrgaenge.length === 0) {
-    return { where: 'WHERE 1=0', params: [] };
-  }
-
-  const placeholders = viewableJahrgaenge.map((_, i) => `$${i + 2}`).join(',');
-  return {
-    where: `WHERE organization_id = $1 AND jahrgang_id IN (${placeholders})`,
-    params: [req.user.organization_id, ...viewableJahrgaenge]
-  };
-};
-
-// ============================================
-// ORGANISATIONS-ISOLATION
-// ============================================
-
-const requireSameOrganization = (req, res, next) => {
-  if (!req.user) {
-    return res.status(401).json({ error: 'Nicht angemeldet' });
-  }
-
-  // Super-Admin kann auf alle Organisationen zugreifen
-  if (req.user.role_name === 'super_admin') {
-    return next();
-  }
-
-  const requestedOrgId = parseInt(req.params.organizationId || req.body.organization_id);
-
-  if (requestedOrgId && requestedOrgId !== req.user.organization_id) {
-    return res.status(403).json({ error: 'Kein Zugriff auf andere Organisationen' });
-  }
-
-  next();
-};
 
 module.exports = {
   verifyTokenRBAC,
@@ -383,10 +286,6 @@ module.exports = {
   requireSuperAdmin,
   requireOrgAdmin,
   requireAdmin,
-  requireTeamer,
-  // Jahrgang-Zugriff
-  checkJahrgangAccess,
-  filterByJahrgangAccess,
-  // Organisation
-  requireSameOrganization
+  requireTeamer
+  // Jahrgang-Zugriff: siehe utils/jahrgangsZugriff.js (darfJahrgang/darfKonfi)
 };

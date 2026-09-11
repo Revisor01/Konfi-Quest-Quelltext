@@ -18,11 +18,19 @@ import {
   IonSelect,
   IonSelectOption
 } from '@ionic/react';
-import { person, closeOutline, checkmarkOutline, personAdd, search, filterOutline, time, calendarOutline, cloudOfflineOutline } from 'ionicons/icons';
+import {
+  ICON_FILTER,
+  ICON_HAKEN,
+  ICON_OFFLINE,
+  ICON_PERSON_GEFUELLT,
+  ICON_PERSON_HINZUFUEGEN_GEFUELLT,
+  ICON_SCHLIESSEN,
+  ICON_SUCHE_GEFUELLT,
+} from '../../shared/icons';
 import api from '../../../services/api';
 import { useApp } from '../../../contexts/AppContext';
-import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useActionGuard } from '../../../hooks/useActionGuard';
+import type { Participant } from '../../../types/event';
 
 interface Konfi {
   id: number;
@@ -32,14 +40,9 @@ interface Konfi {
   role_name?: string;
 }
 
-interface Participant {
-  id: number;
-  user_id?: number;
-  participant_name: string;
-  jahrgang_name?: string;
-  created_at: string;
-  status?: 'confirmed' | 'pending';
-}
+// Participant kommt zentral aus types/event. Die fruehere Fassung hier kannte
+// nur 'confirmed' | 'pending' — dieselbe Antwort liefert aber auch 'waitlist'
+// und 'opted_out' (backend/routes/events/lesen.js).
 
 interface Timeslot {
   id: number;
@@ -67,7 +70,9 @@ interface ParticipantManagementModalProps {
   onClose: () => void;
   onSuccess: () => void;
   dismiss?: () => void;
-  filterRole?: 'teamer' | 'konfi' | null;
+  // 'leitung' = Admins/Org-Admins zuordnen. Bewusst pro Termin;
+  // niemand rutscht automatisch in einen Event-Chat.
+  filterRole?: 'teamer' | 'konfi' | 'leitung' | null;
 }
 
 const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
@@ -111,7 +116,7 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
 
       // Dann verfügbare Konfis laden (braucht Participants für Filterung)
       await loadAvailableKonfis(loadedParticipants);
-    } catch (error) {
+    } catch {
       setError('Fehler beim Laden der Daten');
     }
   };
@@ -123,13 +128,19 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
 
   const loadAvailableKonfis = async (participantsList?: Participant[]) => {
     try {
-      const [konfisRes, teamerRes] = await Promise.all([
+      // Die Leitungsliste nur laden, wenn sie auch gebraucht wird — sonst
+      // holt jedes Oeffnen des Konfi-Modals eine Liste, die es nie zeigt.
+      const [konfisRes, teamerRes, leitungRes] = await Promise.all([
         api.get('/admin/konfis'),
-        api.get('/admin/konfis/teamer')
+        api.get('/admin/konfis/teamer'),
+        filterRole === 'leitung' ? api.get('/admin/konfis/leitung') : Promise.resolve({ data: [] })
       ]);
-      const allKonfis = konfisRes.data.map((k: any) => ({ ...k, role_name: 'konfi' }));
-      const teamerUsers = teamerRes.data.map((u: any) => ({ ...u, role_name: 'teamer' }));
-      const allPersons = [...allKonfis, ...teamerUsers];
+      const allKonfis = konfisRes.data.map((k: Konfi) => ({ ...k, role_name: 'konfi' }));
+      const teamerUsers = teamerRes.data.map((u: Konfi) => ({ ...u, role_name: 'teamer' }));
+      // role_name kommt hier ECHT aus dem Backend ('admin' oder 'org_admin')
+      // und wird nicht ueberschrieben — die Unterscheidung wird unten gebraucht.
+      const leitungUsers = leitungRes.data as Konfi[];
+      const allPersons = [...allKonfis, ...teamerUsers, ...leitungUsers];
 
       // Aktuelle Participants nutzen (Parameter oder State)
       const activeParticipants = participantsList || currentParticipants;
@@ -142,8 +153,12 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
       let roleFiltered = available;
       if (filterRole === 'teamer') {
         roleFiltered = available.filter((p: Konfi) => p.role_name === 'teamer');
+      } else if (filterRole === 'leitung') {
+        roleFiltered = available.filter((p: Konfi) => p.role_name === 'admin' || p.role_name === 'org_admin');
       } else if (filterRole === 'konfi') {
-        roleFiltered = available.filter((p: Konfi) => p.role_name !== 'teamer');
+        // Positiv auf 'konfi' pruefen: Ein '!== teamer' liesse seit der
+        // Leitungs-Zuordnung auch Admins in die Konfi-Auswahl.
+        roleFiltered = available.filter((p: Konfi) => p.role_name === 'konfi');
       }
 
       // Extract available Jahrgänge (wird nur für Dropdown gebraucht wenn Event keine Jahrgänge hat)
@@ -155,7 +170,7 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
       setAvailableJahrgaenge(jahrgaenge);
 
       setAvailableKonfis(roleFiltered);
-    } catch (error) {
+    } catch {
       setError('Fehler beim Laden der Personen');
     }
   };
@@ -164,12 +179,14 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
     // Search filter
     const matchesSearch = konfi.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (konfi.jahrgang_name && konfi.jahrgang_name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (konfi.role_name === 'teamer' && 'teamer'.includes(searchTerm.toLowerCase()));
+      (konfi.role_name === 'teamer' && 'teamer'.includes(searchTerm.toLowerCase())) ||
+      ((konfi.role_name === 'admin' || konfi.role_name === 'org_admin') &&
+        'leitung'.includes(searchTerm.toLowerCase()));
 
     if (!matchesSearch) return false;
 
-    // Teamer sind immer sichtbar (kein Jahrgang-Filter)
-    if (konfi.role_name === 'teamer') return true;
+    // Teamer:innen und Leitung sind immer sichtbar (kein Jahrgang-Filter)
+    if (konfi.role_name !== 'konfi') return true;
 
     // Wenn Event Jahrgänge hat, nur diese Konfis zeigen (außer "alle" gewählt)
     if (hasEventJahrgaenge && selectedJahrgang === 'alle') {
@@ -219,7 +236,8 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
       try {
         // Add each selected konfi as participant
         for (const konfiId of selectedKonfis) {
-          const requestData: any = {
+          // timeslot_id kommt nur dazu, wenn der Termin Zeitfenster hat.
+          const requestData: { user_id: number; status: 'confirmed'; timeslot_id?: number } = {
             user_id: konfiId,
             status: 'confirmed' // Admin fügt direkt als bestätigt hinzu (übersteuert Kapazität)
           };
@@ -239,7 +257,7 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
         setCurrentParticipants(updatedParticipants);
         await loadAvailableKonfis(updatedParticipants);
         onSuccess();
-      } catch (error) {
+      } catch {
         setError('Fehler beim Hinzufügen der Teilnehmer:innen');
       } finally {
         setLoading(false);
@@ -251,39 +269,24 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
     }
   };
 
-  const handleRemoveParticipant = async (participantId: number) => {
-    if (offlineBlockiert(isOnline, setError)) return;
-    try {
-      await api.delete(`/events/${eventId}/bookings/${participantId}`);
-      // Participants und verfügbare Konfis neu laden
-      const eventResponse = await api.get(`/events/${eventId}`);
-      const updatedParticipants: Participant[] = eventResponse.data.participants || [];
-      setCurrentParticipants(updatedParticipants);
-      await loadAvailableKonfis(updatedParticipants);
-      onSuccess();
-    } catch (error) {
-      setError('Fehler beim Entfernen der Teilnehmer:in');
-    }
-  };
-
   return (
     <IonPage>
       <IonHeader>
         <IonToolbar>
-          <IonTitle>{filterRole === 'teamer' ? 'Teamer:in hinzufügen' : filterRole === 'konfi' ? 'Kind hinzufügen' : 'Teilnehmer:innen verwalten'}</IonTitle>
+          <IonTitle>{filterRole === 'teamer' ? 'Teamer:in hinzufügen' : filterRole === 'leitung' ? 'Leitung hinzufügen' : filterRole === 'konfi' ? 'Kind hinzufügen' : 'Teilnehmer:innen verwalten'}</IonTitle>
           <IonButtons slot="start">
             {/* NICHT an loading haengen: Bleibt der Ladezustand haengen,
                 waere das Modal sonst nur noch per Swipe zu verlassen.
                 Die Rueckfrage bei ungespeicherten Aenderungen laeuft
                 ueber canDismiss der Seite. */}
             <IonButton onClick={handleClose} className="app-modal-close-btn" aria-label="Schließen">
-              <IonIcon icon={closeOutline} slot="icon-only" />
+              <IonIcon icon={ICON_SCHLIESSEN} slot="icon-only" />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
             {selectedKonfis.length > 0 && (
               <IonButton onClick={handleAddParticipants} disabled={loading || isSubmitting || !isOnline} className="app-modal-submit-btn app-modal-submit-btn--events" aria-label="Teilnehmer:innen hinzufügen">
-                {!isOnline ? <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</> : <IonIcon icon={checkmarkOutline} slot="icon-only" />}
+                {!isOnline ? <><IonIcon icon={ICON_OFFLINE} /> Du bist offline</> : <IonIcon icon={ICON_HAKEN} slot="icon-only" />}
               </IonButton>
             )}
           </IonButtons>
@@ -296,7 +299,7 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
           <IonList inset={true} className="app-modal-section">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--events">
-                <IonIcon icon={filterOutline} />
+                <IonIcon icon={ICON_FILTER} />
               </div>
               <IonLabel>Suche & Filter</IonLabel>
             </IonListHeader>
@@ -379,7 +382,7 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
           <IonList inset={true} className="app-modal-section">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--events">
-                <IonIcon icon={personAdd} />
+                <IonIcon icon={ICON_PERSON_HINZUFUEGEN_GEFUELLT} />
               </div>
               <IonLabel>Personen ({filteredKonfis.length})</IonLabel>
               {filteredKonfis.length > 0 && (
@@ -401,15 +404,15 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
               <IonCardContent>
                 {filteredKonfis.length === 0 ? (
                   <div style={{
-                    padding: '40px 20px',
+                    padding: 'var(--app-abstand-riesig) var(--app-abstand-gross)',
                     textAlign: 'center',
-                    color: '#666'
+                    color: 'var(--app-text-secondary)'
                   }}>
-                    <IonIcon icon={search} style={{ fontSize: '3rem', opacity: 0.3, marginBottom: '16px' }} />
-                    <p style={{ margin: '0', fontSize: '1rem' }}>Keine Personen gefunden</p>
+                    <IonIcon icon={ICON_SUCHE_GEFUELLT} style={{ fontSize: 'var(--app-anzeige-riesig)', opacity: 0.3, marginBottom: 'var(--app-abstand-basis)' }} />
+                    <p style={{ margin: '0', fontSize: 'var(--app-text-standard)' }}>Keine Personen gefunden</p>
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-eng)' }}>
                     {filteredKonfis.map((konfi) => {
                       const isSelected = selectedKonfis.includes(konfi.id);
 
@@ -424,19 +427,21 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
                             alignItems: 'center',
                             justifyContent: 'space-between',
                             marginBottom: '0',
-                            background: isSelected ? 'rgba(220, 38, 38, 0.08)' : undefined
+                            background: isSelected ? 'rgba(var(--app-color-events-rgb), 0.08)' : undefined
                           }}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)', flex: 1, minWidth: 0 }}>
                             <div className="app-icon-circle app-icon-circle--events">
-                              <IonIcon icon={person} />
+                              <IonIcon icon={ICON_PERSON_GEFUELLT} />
                             </div>
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div className="app-list-item__title">{konfi.name}</div>
                               <div className="app-list-item__subtitle">
                                 {konfi.role_name === 'teamer'
                                   ? `Teamer:in${konfi.jahrgang_name ? ` \u00B7 ${konfi.jahrgang_name}` : ''}`
-                                  : (konfi.jahrgang_name || '')}
+                                  : (konfi.role_name === 'admin' || konfi.role_name === 'org_admin')
+                                    ? 'Leitung'
+                                    : (konfi.jahrgang_name || '')}
                               </div>
                             </div>
                           </div>

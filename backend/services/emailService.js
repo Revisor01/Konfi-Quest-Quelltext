@@ -4,6 +4,7 @@
  */
 
 const nodemailer = require('nodemailer');
+const { formatUhrzeit, formatDatum } = require('../utils/zeitformat');
 
 // Gecachter Transporter (wird einmalig erstellt und wiederverwendet)
 let cachedTransporter = null;
@@ -226,7 +227,7 @@ Dein Konfi Quest Team
  * @param {number} daysLeft - verbleibende Tage
  */
 const sendLicenseExpiryReminderEmail = async (email, name, orgName, endDate, daysLeft) => {
-  const dateStr = new Date(endDate).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const dateStr = formatDatum(endDate, { day: '2-digit', month: '2-digit', year: 'numeric' });
   const subject = `Lizenz läuft in ${daysLeft} Tagen ab - Konfi Quest`;
 
   const text = `
@@ -299,8 +300,8 @@ const formatKonfirmationDate = (value) => {
   if (!value) return 'noch kein Termin';
   // Datum UND Uhrzeit (falls zwei Konfirmationen am selben Tag -> Uhrzeit unterscheidet sie).
   const d = new Date(value);
-  const datum = d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  const zeit = d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Berlin' });
+  const datum = formatDatum(d, { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const zeit = formatUhrzeit(d);
   return `${datum}, ${zeit} Uhr`;
 };
 
@@ -403,25 +404,6 @@ Dein Konfi Quest Team
   return sendEmail({ to: email, subject, text, html });
 };
 
-/**
- * Testet die E-Mail-Konfiguration
- */
-const testEmailConnection = async () => {
-  if (!validateSmtpConfig()) {
-    return false;
-  }
-
-  try {
-    const transporter = getTransporter();
-    await transporter.verify();
-    return true;
-  } catch (error) {
-    console.error('SMTP-Verbindungsfehler:', error);
-    cachedTransporter = null;
-    return false;
-  }
-};
-
 module.exports = {
   sendEmail,
   sendPasswordResetEmail,
@@ -429,5 +411,4 @@ module.exports = {
   sendLicenseExpiryReminderEmail,
   sendJahrgangDeletionWarningEmail,
   sendKonfiMatrixEmail,
-  testEmailConnection
 };

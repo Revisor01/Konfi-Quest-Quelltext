@@ -23,6 +23,7 @@ const LOSUNG_ENDPUNKTE = process.env.LOSUNG_API_BASE_URL
 
 // Intern darf der Timeout knapp sein — kommt keine Antwort, ist der
 // Container nicht erreichbar und der oeffentliche Weg soll sofort greifen.
+const { formatDatum, heuteBerlin } = require('../utils/zeitformat');
 const TIMEOUT_INTERN_MS = 2000;
 const TIMEOUT_OEFFENTLICH_MS = 5000;
 
@@ -53,7 +54,9 @@ function istGesperrt(schluessel) {
 }
 
 async function fetchTageslosung(db, translation) {
-  const today = new Date().toISOString().split('T')[0];
+  // heuteBerlin() statt toISOString(): Letzteres liefert IMMER den UTC-Tag,
+  // die Tageslosung wechselte dadurch erst um 02:00 statt um Mitternacht.
+  const today = heuteBerlin();
   const schluessel = `${today}:${translation}`;
 
   const laufend = laufendeAbrufe.get(schluessel);
@@ -153,7 +156,7 @@ async function holeTageslosung(db, translation, today) {
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
     await db.query(
       'DELETE FROM daily_verses WHERE date < $1',
-      [sevenDaysAgo.toISOString().split('T')[0]]
+      [heuteBerlin(sevenDaysAgo)]
     );
   } catch (cleanupErr) {
     console.error('Cleanup error:', cleanupErr.message);
@@ -174,7 +177,7 @@ async function holeTageslosung(db, translation, today) {
  */
 function tageslosungFallback() {
   return {
-    date: new Date().toLocaleDateString('de-DE', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
+    date: formatDatum(new Date(), { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
     losung: { text: "Der HERR ist mein Hirte, mir wird nichts mangeln.", reference: "Psalm 23,1", testament: "AT" },
     lehrtext: { text: "Jesus spricht: Ich bin der gute Hirte. Der gute Hirte lässt sein Leben für die Schafe.", reference: "Johannes 10,11", testament: "NT" },
     translation: { code: "LUT", name: "Lutherbibel 2017", language: "German" },
@@ -182,8 +185,77 @@ function tageslosungFallback() {
   };
 }
 
+/**
+ * Die Tageslosung fuer eine Route beantworten -- EINE Quelle fuer Konfis und
+ * Teamer:innen.
+ *
+ * Was sich je Rolle WIRKLICH unterscheidet, ist genau eins: der Schluessel des
+ * Abschalters in `settings`. Deshalb ist er der einzige Parameter.
+ *
+ * ANTWORTFORM UNVERAENDERT. Ausgelieferte Store-Apps lesen beide Routen; die
+ * Felder (success, data, translation, fallback, error) und der 204er bei
+ * abgeschalteter Losung bleiben exakt wie bisher.
+ *
+ * @param {object} db
+ * @param {object} req  Express-Request mit req.user (aus rbacVerifier)
+ * @param {object} res
+ * @param {string} einstellungsSchluessel  Zeile in `settings`, die die Losung
+ *   fuer diese Rolle abschaltet ('dashboard_show_losung' fuer Konfis,
+ *   'teamer_dashboard_show_losung' fuer Teamer:innen).
+ */
+async function beantworteTageslosung(db, req, res, einstellungsSchluessel) {
+  try {
+    const { rows: [losungSetting] } = await db.query(
+      'SELECT value FROM settings WHERE organization_id = $1 AND key = $2',
+      [req.user.organization_id, einstellungsSchluessel]
+    );
+    if (losungSetting && (losungSetting.value === 'false' || losungSetting.value === '0')) {
+      return res.status(204).end();
+    }
+
+    const { rows: [nutzer] } = await db.query(
+      'SELECT bible_translation FROM users WHERE id = $1',
+      [req.user.id]
+    );
+    const translation = nutzer?.bible_translation || 'LUT';
+    const result = await fetchTageslosung(db, translation);
+
+    return res.json({ success: true, ...result });
+  } catch (err) {
+    console.error('Tageslosung fehlgeschlagen:', err);
+
+    // Erste Rueckfallebene: die zuletzt gecachte Losung aus der Datenbank.
+    try {
+      const { rows: [gecacht] } = await db.query(
+        'SELECT verse_data, translation FROM daily_verses ORDER BY date DESC LIMIT 1'
+      );
+      if (gecacht) {
+        return res.json({
+          success: true,
+          data: gecacht.verse_data,
+          translation: gecacht.translation,
+          fallback: true,
+          error: 'Aktuelle Tageslosung nicht verfügbar - verwende letzte verfügbare Losung'
+        });
+      }
+    } catch (fallbackErr) {
+      console.error('Fallback cache error:', fallbackErr.message);
+    }
+
+    // Zweite Rueckfallebene: ein fester Psalm statt HTTP 500. Eine leere
+    // Startseite ist schlechter als ein bekannter Vers.
+    return res.json({
+      success: true,
+      data: tageslosungFallback(),
+      fallback: true,
+      error: 'Losungen API nicht erreichbar - Fallback verwendet'
+    });
+  }
+}
+
 module.exports = {
   fetchTageslosung,
   tageslosungFallback,
+  beantworteTageslosung,
   _resetNegativCache: () => gescheiterteAbrufe.clear()
 };

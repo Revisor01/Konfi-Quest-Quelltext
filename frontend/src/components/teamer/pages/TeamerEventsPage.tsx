@@ -1,74 +1,59 @@
+import { FARBEN } from '../../../theme/colors';
+import {
+  ICON_ABSAGE,
+  ICON_ANHANG,
+  ICON_CHAT,
+  ICON_DATEI_GEFUELLT,
+  ICON_ENTSPERRT,
+  ICON_FILTER,
+  ICON_GEMEINDE_GEFUELLT,
+  ICON_GOTTESDIENST_GEFUELLT,
+  ICON_GRUPPE_GEFUELLT,
+  ICON_HINZUFUEGEN_GEFUELLT,
+  ICON_INFO_GEFUELLT,
+  ICON_KATEGORIE_GEFUELLT,
+  ICON_KOPIEREN_GEFUELLT,
+  ICON_LINK,
+  ICON_LISTE,
+  ICON_MATERIAL,
+  ICON_OFFLINE,
+  ICON_ORT_GEFUELLT,
+  ICON_POKAL_GEFUELLT,
+  ICON_QRCODE,
+  ICON_SCANNEN,
+  ICON_SCHUTZ_GEFUELLT,
+  ICON_SUCHE_GEFUELLT,
+  ICON_TERMIN,
+  ICON_TERMIN_GEFUELLT,
+  ICON_UHRZEIT_GEFUELLT,
+  ICON_UNENDLICH,
+  ICON_WARTEND_GEFUELLT,
+  ICON_ZURUECK,
+  ICON_ZUSAGE_GEFUELLT,
+} from '../../shared/icons';
+import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import {
-  IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
-  IonContent,
-  IonRefresher,
-  IonRefresherContent,
-  IonIcon,
-  IonSegment,
-  IonSegmentButton,
-  IonLabel,
-  IonButton,
-  IonList,
-  IonListHeader,
-  IonCard,
-  IonCardContent,
-  IonFab,
-  IonFabButton,
-  IonItem,
-  IonItemGroup,
-  IonInput,
-  IonButtons,
-  IonBackButton,
-  useIonModal,
-  useIonAlert,
-  useIonViewWillEnter
-} from '@ionic/react';
+import { useAppLocation } from '../../../navigation/useAppLocation';
+import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonRefresher, IonRefresherContent, IonIcon, IonSegment, IonSegmentButton, IonLabel, IonButton, IonList, IonListHeader, IonCard, IonCardContent, IonItem, IonItemGroup, IonInput, IonButtons, useIonModal, useIonAlert, useIonViewWillEnter } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
-import { useLocation } from 'react-router-dom';
+
 // useLocation bleibt für Query-Parameter Auswertung (React Router v5 API)
-import {
-  calendar,
-  time,
-  location,
-  people,
-  checkmarkCircle,
-  closeCircle,
-  hourglass,
-  calendarOutline,
-  arrowBack,
-  trophy,
-  bagHandle,
-  qrCodeOutline,
-  navigateOutline,
-  informationCircle,
-  informationCircleOutline,
-  closeOutline,
-  pricetag,
-  shieldCheckmark,
-  home,
-  document as documentIcon,
-  attachOutline,
-  search,
-  filterOutline,
-  lockOpenOutline,
-  lockOpen,
-  copy,
-  chatbubbleOutline,
-  personAdd,
-  infinite,
-  add,
-  listOutline,
-  ribbon,
-  cloudOfflineOutline
-} from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import api from '../../../services/api';
+
+/** Ein Eintrag aus GET /material/by-event/:eventId (material.js). */
+interface EventMaterial {
+  id: number;
+  title: string;
+  description?: string | null;
+  created_at: string;
+  created_by_name?: string | null;
+  /** Serverseitig bereits als Zahl geliefert. */
+  file_count: number;
+  link_url?: string | null;
+}
 import { writeQueue } from '../../../services/writeQueue';
 import { useWartendeVorgaenge } from '../../../hooks/useWartendeVorgaenge';
 import WartendeVorgaengeKarte from '../../shared/WartendeVorgaengeKarte';
@@ -76,42 +61,33 @@ import { networkMonitor } from '../../../services/networkMonitor';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../../services/offlineCache';
 import { removeDeliveredForEvents } from '../../../services/notifications';
-import { SectionHeader, ListSection, StatusBadge, EventLegendModal, EventCornerBadges, formatEventDate as formatDate, formatEventTime as formatTime, formatEventDateLong as formatDateLong, istVergangen } from '../../shared';
+import { SectionHeader, ListSection, EventLegendModal, EventCornerBadges, formatEventDate as formatDate, formatEventTime as formatTime, formatEventDateLong as formatDateLong, istVergangen, kategorienText, zeigtPunkteart, punkteartText } from '../../shared';
 import { getStatusIcon } from '../../shared/StatusBadge';
-import EmptyState from '../../shared/EmptyState';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import QRScannerModal from '../../konfi/modals/QRScannerModal';
 import QRDisplayModal from '../../shared/QRDisplayModal';
 import RequestsView from '../../konfi/views/RequestsView';
 import TeamerActivityRequestModal from '../modals/TeamerActivityRequestModal';
+import TeamerAbsageModal from '../modals/TeamerAbsageModal';
 import RequestDetailModal from '../../konfi/modals/RequestDetailModal';
 import TeamerMaterialDetailPage from './TeamerMaterialDetailPage';
 import { Event } from '../../../types/event';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { safeUUID } from '../../../utils/uuid';
+// Kein eigener ActivityRequest mehr: Die Seite reicht die Antraege an
+// RequestDetailModal weiter, und zwei gleichnamige Typen mit
+// unterschiedlicher Nullbarkeit haben genau dort gebissen. Der Modal-Typ ist
+// der genauere — er kennt Teamer-Antraege ohne Punkte und ohne Typ.
+import type { ActivityRequest } from '../../konfi/modals/RequestDetailModal';
 
 // Einmaliger Hinweis nach dem Tab-Umbau: die Aktivitäten/Anträge sind aus
 // ihrem eigenen Tab in dieses Segment gewandert (analog zu Admin/Konfi).
 
-interface ActivityRequest {
-  id: number;
-  activity_id: number;
-  activity_name: string;
-  activity_points: number;
-  activity_type: 'gottesdienst' | 'gemeinde';
-  requested_date: string;
-  comment?: string;
-  photo_filename?: string;
-  status: 'pending' | 'approved' | 'rejected';
-  admin_comment?: string;
-  created_at: string;
-  updated_at: string;
-}
 
 const TeamerEventsPage: React.FC = () => {
   const { user, setSuccess, setError, isOnline } = useApp();
   const { pageRef, presentingElement } = useModalPage('teamer-events');
-  const routerLocation = useLocation();
+  const routerLocation = useAppLocation();
   const router = useIonRouter();
   const queryEventId = new URLSearchParams(routerLocation.search).get('eventId');
   const [presentAlert] = useIonAlert();
@@ -124,7 +100,7 @@ const TeamerEventsPage: React.FC = () => {
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [bookingLoading, setBookingLoading] = useState(false);
   const [initialEventHandled, setInitialEventHandled] = useState(false);
-  const [eventMaterials, setEventMaterials] = useState<any[]>([]);
+  const [eventMaterials, setEventMaterials] = useState<EventMaterial[]>([]);
   const [eventTimeslots, setEventTimeslots] = useState<Array<{ id: number; start_time: string; end_time: string; max_participants: number; registered_count: number; waitlist_count?: number }>>([]);
   const materialIdRef = useRef<number | null>(null);
 
@@ -138,7 +114,6 @@ const TeamerEventsPage: React.FC = () => {
       setMainSegment('events');
     }
   }, [routerLocation.search]);
-
 
   // Offline-Query: Events
   const { data: events, loading, refresh, refreshLive } = useOfflineQuery<Event[]>(
@@ -211,31 +186,6 @@ const TeamerEventsPage: React.FC = () => {
     });
   };
 
-  const getRequestStatusColor = (status: string) => {
-    switch (status) {
-      case 'pending': return 'warning';
-      case 'approved': return 'success';
-      case 'rejected': return 'danger';
-      default: return 'medium';
-    }
-  };
-
-  const getRequestStatusText = (status: string) => {
-    switch (status) {
-      case 'pending': return 'Offen';
-      case 'approved': return 'Verbucht';
-      case 'rejected': return 'Abgelehnt';
-      default: return 'Unbekannt';
-    }
-  };
-
-  // RequestsView verlangt diese Props, nutzt sie im teamerMode aber NICHT —
-  // Gottesdienst/Gemeinde gibt es bei Teamer-Aktivitäten nicht. Deshalb
-  // bewusst neutral: wuerde die View sie eines Tages doch auswerten, stünde
-  // hier kein falsches "Gemeinde".
-  const getRequestTypeIcon = (_type: string) => ribbon;
-  const getRequestTypeText = (_type: string) => 'Aktivität';
-
   const getFilteredRequests = () => {
     const allRequests = Array.isArray(requests) ? requests : [];
     switch (requestsTab) {
@@ -272,8 +222,8 @@ const TeamerEventsPage: React.FC = () => {
             try {
               await api.delete(`/teamer/requests/${request.id}`);
               refreshRequests();
-            } catch (error: any) {
-              setError(error.response?.data?.error || 'Fehler beim Löschen der Aktivität');
+            } catch (error) {
+              setError(fehlerText(error, 'Fehler beim Löschen der Aktivität'));
             }
           }
         }
@@ -289,7 +239,9 @@ const TeamerEventsPage: React.FC = () => {
 
   // Material Detail Modal (useRef für dynamische materialId)
   const [presentMaterialModal, dismissMaterialModal] = useIonModal(TeamerMaterialDetailPage, {
-    get materialId() { return materialIdRef.current; },
+    // Der Ref wird beim Antippen gesetzt (Zeile ~1054), BEVOR das Modal
+    // geoeffnet wird — beim Rendern ist er null, beim Anzeigen nie.
+    get materialId() { return materialIdRef.current as number; },
     onClose: () => dismissMaterialModal()
   });
 
@@ -435,11 +387,12 @@ const TeamerEventsPage: React.FC = () => {
     ];
   }, [activeTab, safeEvents, meineEvents, alleEvents, teamEvents]);
 
-  const handleZusage = async (event: Event, dabei: boolean) => {
+  const handleZusage = async (event: Event, dabei: boolean, reason?: string) => {
     setBookingLoading(true);
+    const body = reason && reason.trim() ? { dabei, reason: reason.trim() } : { dabei };
     try {
       if (networkMonitor.isOnline) {
-        await api.post(`/teamer/events/${event.id}/zusage`, { dabei });
+        await api.post(`/teamer/events/${event.id}/zusage`, body);
         const updated = (await api.get('/events')).data.find((e: Event) => e.id === event.id);
         if (updated) setSelectedEvent(updated);
         setSuccess(dabei ? 'Du bist dabei' : 'Absage gespeichert');
@@ -447,7 +400,7 @@ const TeamerEventsPage: React.FC = () => {
         await writeQueue.enqueue({
           method: 'POST',
           url: `/teamer/events/${event.id}/zusage`,
-          body: { dabei },
+          body,
           maxRetries: 5,
           hasFileUpload: false,
           metadata: {
@@ -459,11 +412,103 @@ const TeamerEventsPage: React.FC = () => {
         setSuccess('Wird gesendet, sobald du wieder online bist');
       }
       refreshLive();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Fehler beim Speichern');
+    } catch (err) {
+      setError(fehlerText(err, 'Fehler beim Speichern'));
     } finally {
       setBookingLoading(false);
     }
+  };
+
+  // Nimmt DIESE Absage eine Zusage zurueck? Dann verlangt das Backend einen
+  // Grund (confirmed ODER waitlist — die Aussage "Ich bin dabei" zaehlt,
+  // nicht der zugeteilte Platz). 'pending' ist ein Alt-Status mit derselben
+  // Bedeutung wie waitlist und wird gleich behandelt.
+  const absageBrauchtGrund = (event: Event): boolean =>
+    event.booking_status === 'confirmed' ||
+    event.booking_status === 'waitlist' ||
+    event.booking_status === 'pending';
+
+  const [presentAbsageModal, dismissAbsageModal] = useIonModal(TeamerAbsageModal, {
+    eventName: selectedEvent?.name || '',
+    grundPflicht: selectedEvent ? absageBrauchtGrund(selectedEvent) : false,
+    onAbsage: (reason: string) => {
+      if (selectedEvent) handleZusage(selectedEvent, false, reason);
+    },
+    dismiss: (data?: string, role?: string) => dismissAbsageModal(data, role)
+  });
+
+  const oeffneAbsage = () => {
+    presentAbsageModal({ presentingElement: presentingElement || pageRef.current || undefined });
+  };
+
+  /**
+   * Die Zusage/Absage-Knoepfe. EINE Stelle fuer alle vier Faelle, in denen
+   * sie vorkommen (frei, Warteliste offen, kein Platz mehr, bereits dabei) --
+   * vorher stand die Logik viermal im JSX und lief auseinander.
+   *
+   * Also:
+   *   noch nichts gewaehlt -> zwei Knoepfe: "Dabei" (gruen) / "Nicht dabei" (rot)
+   *   zugesagt             -> EIN Knopf, rot:  "Nicht mehr dabei"
+   *   abgesagt             -> EIN Knopf, gruen: "Doch dabei"
+   *
+   * Immer fill="outline". Der eigene Stand steht im Eck-Zeichen der Karte und
+   * in den Eckdaten, nicht in einem gefuellten Knopf.
+   */
+  const ZusageKnoepfe: React.FC<{
+    event: Event;
+    /** Beschriftung der Zusage, wenn es um die Warteliste geht. */
+    zusageText?: string;
+    /** Kein Platz mehr frei: Zusagen geht nicht, absagen schon. */
+    zusageMoeglich?: boolean;
+  }> = ({ event, zusageText, zusageMoeglich = true }) => {
+    const abgesagt = event.booking_status === 'opted_out';
+    const zugesagt = event.is_registered;
+
+    const zusageKnopf = (
+      <IonButton
+        className="app-action-button"
+        expand="block"
+        fill="outline"
+        color="success"
+        onClick={() => handleBook(event)}
+        disabled={bookingLoading || !isOnline || !zusageMoeglich}
+      >
+        <IonIcon icon={bookingLoading || isOnline ? ICON_ZUSAGE_GEFUELLT : ICON_OFFLINE} slot="start" />
+        {bookingLoading
+          ? 'Wird verarbeitet...'
+          : !isOnline
+            ? 'Du bist offline'
+            : abgesagt ? 'Doch dabei' : (zusageText || 'Dabei')}
+      </IonButton>
+    );
+
+    const absageKnopf = (
+      <IonButton
+        className="app-action-button"
+        expand="block"
+        fill="outline"
+        color="danger"
+        onClick={oeffneAbsage}
+        disabled={bookingLoading}
+      >
+        <IonIcon icon={ICON_ABSAGE} slot="start" />
+        {bookingLoading
+          ? 'Wird verarbeitet...'
+          : zugesagt ? 'Nicht mehr dabei' : 'Nicht dabei'}
+      </IonButton>
+    );
+
+    // Bereits entschieden -> nur der Gegenknopf.
+    if (zugesagt) return <div className="app-button-row app-button-row--in-card">{absageKnopf}</div>;
+    if (abgesagt) return <div className="app-button-row app-button-row--in-card">{zusageKnopf}</div>;
+
+    // Noch nichts gesagt -> beide nebeneinander.
+    return (
+      <div className="app-button-row app-button-row--in-card">
+        {zusageKnopf}
+        {absageKnopf}
+      </div>
+    );
   };
 
   // Status-Infos für Event-Karten
@@ -480,8 +525,8 @@ const TeamerEventsPage: React.FC = () => {
       bonus: 'var(--app-color-bonus)',
       info: 'var(--app-color-info)',
       teamer: 'var(--app-color-teamer)',
-      past: '#6c757d',
-      neutral: '#9ca3af',
+      past: 'var(--app-color-neutral)',
+      neutral: 'var(--app-color-neutral-hell)',
     };
     // Default: reines Konfi-Event, zu dem der Teamer sich NICHT anmelden kann.
     // Das ist NICHT gruen, sondern neutral ("Nur Info"), damit keine Anmeldung
@@ -512,6 +557,12 @@ const TeamerEventsPage: React.FC = () => {
     } else if (isPastEvent) {
       statusColor = C.past;
       statusText = 'Vergangen';
+    } else if (event.booking_status === 'opted_out') {
+      // Eigene Absage: eigener Zustand statt "Offen"/"Ausgebucht" — die
+      // Absage ist eine abgegebene Rueckmeldung, kein offener Termin.
+      // Umentscheiden geht weiterhin ueber "Ich bin dabei" im Detail.
+      statusColor = C.danger;
+      statusText = 'Abgesagt von dir';
     } else if (canRegister && event.teamer_registration_status === 'closed') {
       statusColor = C.danger;
       statusText = 'Ausgebucht';
@@ -528,7 +579,7 @@ const TeamerEventsPage: React.FC = () => {
     }
 
     // Icon zentral aus der StatusBadge-Map -> Kreis-Icon == Corner-Badge-Icon.
-    const statusIcon = getStatusIcon(statusText) || informationCircle;
+    const statusIcon = getStatusIcon(statusText) || ICON_INFO_GEFUELLT;
     const shouldGrayOut = isPastEvent && !event.is_registered;
 
     return { statusColor, statusText, statusIcon, isPastEvent, shouldGrayOut };
@@ -563,42 +614,20 @@ const TeamerEventsPage: React.FC = () => {
         // spaeter einschraenken koennte.
         setError('Für die Buchung brauchst du eine Verbindung — sonst wüsstest du nicht, ob du einen Platz oder die Warteliste bekommst.');
       }
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Fehler bei der Buchung');
+    } catch (err) {
+      setError(fehlerText(err, 'Fehler bei der Buchung'));
     } finally {
       setBookingLoading(false);
     }
   };
 
-  const handleUnbook = async (event: Event) => {
-    setBookingLoading(true);
-    try {
-      if (networkMonitor.isOnline) {
-        await api.delete(`/events/${event.id}/book`);
-        await refresh();
-        const updated = (await api.get('/events')).data.find((e: Event) => e.id === event.id);
-        if (updated) setSelectedEvent(updated);
-      } else {
-        await writeQueue.enqueue({
-          method: 'DELETE',
-          url: `/events/${event.id}/book`,
-          body: {},
-          maxRetries: 5,
-          hasFileUpload: false,
-          metadata: {
-            type: 'teamer',
-            clientId: safeUUID(),
-            label: 'Event abmelden',
-          },
-        });
-        setSuccess('Abmeldung wird gesendet sobald du wieder online bist');
-      }
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Fehler beim Stornieren');
-    } finally {
-      setBookingLoading(false);
-    }
-  };
+  // KEIN handleUnbook (DELETE /events/:id/book) mehr: Der
+  // Loesch-Weg protokollierte nichts — wer nach einer Zusage abserang, war
+  // fuer die Leitung nicht von "hat nie reagiert" zu unterscheiden, und der
+  // Pflicht-Grund liess sich gar nicht erst abgeben. Jede Absage laeuft
+  // jetzt ueber die Zusage-Route (oeffneAbsage -> handleZusage dabei=false),
+  // die den Zustand als 'opted_out' samt Grund stehen laesst. Die
+  // DELETE-Route selbst bleibt im Backend — Store-Apps rufen sie noch.
 
   // Status-Farben für SectionHeader — globale Tokens
   // Darf sich ein Teamer zu diesem Event überhaupt anmelden? Nur bei
@@ -612,8 +641,8 @@ const TeamerEventsPage: React.FC = () => {
     const bonus = { primary: 'var(--app-color-bonus)', secondary: 'var(--app-color-bonus)' };
     const info = { primary: 'var(--app-color-info)', secondary: 'var(--app-color-info)' };
     const teamer = { primary: 'var(--app-color-teamer)', secondary: 'var(--app-color-teamer)' };
-    const past = { primary: '#6c757d', secondary: '#6c757d' };
-    const neutral = { primary: '#9ca3af', secondary: '#9ca3af' };
+    const past = { primary: FARBEN.neutral, secondary: FARBEN.neutral };
+    const neutral = { primary: FARBEN.neutralHell, secondary: FARBEN.neutralHell };
 
     const isPastEvent = istVergangen(event);
     const isOnWaitlist = event.booking_status === 'waitlist' || event.booking_status === 'pending';
@@ -628,6 +657,7 @@ const TeamerEventsPage: React.FC = () => {
     if (isOnWaitlist) return bonus;
     if (event.is_registered && !isPastEvent) return info; // angemeldet = blau
     if (isPastEvent) return past;
+    if (event.booking_status === 'opted_out') return danger; // eigene Absage
     if (event.registration_status === 'open') {
       // Anmeldbares Team-Event = rosa (Teamer-Farbe), nicht gruen.
       return teamerCanRegister(event) ? teamer : neutral;
@@ -647,6 +677,7 @@ const TeamerEventsPage: React.FC = () => {
     if (isOnWaitlist) return 'Warteliste';
     if (event.is_registered && !isPastEvent) return 'Dabei';
     if (isPastEvent) return 'Vergangen';
+    if (event.booking_status === 'opted_out') return 'Abgesagt von dir';
     if (event.registration_status === 'open') {
       return teamerCanRegister(event) ? 'Offen' : 'Nur Info';
     }
@@ -659,7 +690,7 @@ const TeamerEventsPage: React.FC = () => {
     switch (activeTab) {
       case 'meine': return 'Du bist noch bei keinem Event dabei';
       case 'alle': return 'Keine Events vorhanden';
-      case 'team': return 'Keine Events für Teamer:innen verfügbar';
+      case 'team': return 'Keine Events fürs Team verfügbar';
       default: return 'Keine Events';
     }
   };
@@ -680,7 +711,7 @@ const TeamerEventsPage: React.FC = () => {
             {!hideBackButton && (
               <IonButtons slot="start">
                 <IonButton onClick={() => setSelectedEvent(null)} aria-label="Zurück zur Event-Liste">
-                  <IonIcon icon={arrowBack} slot="icon-only" />
+                  <IonIcon icon={ICON_ZURUECK} slot="icon-only" />
                 </IonButton>
               </IonButtons>
             )}
@@ -699,7 +730,7 @@ const TeamerEventsPage: React.FC = () => {
                   aria-label="Event-Chat öffnen"
                   onClick={() => router.push(`/teamer/chat/room/${selectedEvent.chat_room_id}`, 'root')}
                 >
-                  <IonIcon icon={chatbubbleOutline} slot="icon-only" />
+                  <IonIcon icon={ICON_CHAT} slot="icon-only" />
                 </IonButton>
               )}
               <IonButton
@@ -708,7 +739,7 @@ const TeamerEventsPage: React.FC = () => {
                   presentingElement: pageRef.current || presentingElement || undefined
                 })}
               >
-                <IonIcon icon={qrCodeOutline} slot="icon-only" />
+                <IonIcon icon={ICON_QRCODE} slot="icon-only" />
               </IonButton>
             </IonButtons>
           </IonToolbar>
@@ -744,7 +775,7 @@ const TeamerEventsPage: React.FC = () => {
               <SectionHeader
                 title={selectedEvent.name}
                 subtitle={getStatusText(selectedEvent)}
-                icon={calendar}
+                icon={ICON_TERMIN_GEFUELLT}
                 colors={getStatusColors(selectedEvent)}
                 stats={nurTeam
                   ? [
@@ -766,7 +797,7 @@ const TeamerEventsPage: React.FC = () => {
           <IonList className="app-section-inset" inset={true}>
             <IonListHeader>
               <div className="app-section-icon app-section-icon--events">
-                <IonIcon icon={calendar} />
+                <IonIcon icon={ICON_TERMIN_GEFUELLT} />
               </div>
               <IonLabel>Details</IonLabel>
             </IonListHeader>
@@ -774,7 +805,7 @@ const TeamerEventsPage: React.FC = () => {
               <IonCardContent className="app-card-content">
                 {/* Datum */}
                 <div className="app-info-row">
-                  <IonIcon icon={calendar} className="app-info-row__icon app-icon-color--events" />
+                  <IonIcon icon={ICON_TERMIN_GEFUELLT} className="app-info-row__icon app-icon-color--events" />
                   <div>
                     <div className="app-info-row__label">Datum</div>
                     <div className="app-info-row__value">
@@ -790,7 +821,7 @@ const TeamerEventsPage: React.FC = () => {
                     keine Konfi-Teilnahme, die Zeile zeigte "0 / \u221E") */}
                 {!selectedEvent.teamer_only && (
                   <div className="app-info-row">
-                    <IonIcon icon={people} className="app-info-row__icon app-icon-color--participants" />
+                    <IonIcon icon={ICON_GRUPPE_GEFUELLT} className="app-info-row__icon app-icon-color--participants" />
                     <div>
                       <div className="app-info-row__label">Teilnehmer:innen</div>
                       <div className="app-info-row__value">
@@ -803,7 +834,7 @@ const TeamerEventsPage: React.FC = () => {
                 {/* Zeitslots mit Belegung + Warteliste pro Slot */}
                 {selectedEvent.has_timeslots && eventTimeslots.length > 0 && (
                   <div className="app-info-row app-info-row--top">
-                    <IonIcon icon={time} className="app-info-row__icon app-icon-color--time app-event-detail__icon--align-top" />
+                    <IonIcon icon={ICON_UHRZEIT_GEFUELLT} className="app-info-row__icon app-icon-color--time app-event-detail__icon--align-top" />
                     <div className="app-event-detail__timeslot-list">
                       <div className="app-info-row__label">Zeitfenster</div>
                       {eventTimeslots.map((slot, idx) => (
@@ -821,7 +852,7 @@ const TeamerEventsPage: React.FC = () => {
                     `konfi/views/EventDetailView.tsx`). */}
                 {!selectedEvent.mandatory && (
                   <div className="app-info-row app-info-row--top">
-                    <IonIcon icon={lockOpen} className="app-info-row__icon app-icon-color--events app-event-detail__icon--align-top" />
+                    <IonIcon icon={ICON_ENTSPERRT} className="app-info-row__icon app-icon-color--events app-event-detail__icon--align-top" />
                     <div>
                       <div className="app-info-row__label">Anmeldung</div>
                       {selectedEvent.registration_opens_at ? (
@@ -847,9 +878,9 @@ const TeamerEventsPage: React.FC = () => {
                     frischen "5 gesucht"-Event genau die Zeile "0 / 5". */}
                 {(selectedEvent.teamer_needed || selectedEvent.teamer_only) && (
                   <div className="app-info-row">
-                    <IonIcon icon={people} className="app-info-row__icon app-icon-color--team" />
+                    <IonIcon icon={ICON_GRUPPE_GEFUELLT} className="app-info-row__icon app-icon-color--team" />
                     <div>
-                      <div className="app-info-row__label">Teamer:innen</div>
+                      <div className="app-info-row__label">Team</div>
                       <div className="app-info-row__value">
                         {(selectedEvent.teamer_count || 0)} / {(selectedEvent.teamer_max_participants || 0) > 0 ? selectedEvent.teamer_max_participants : '∞'}
                       </div>
@@ -860,7 +891,7 @@ const TeamerEventsPage: React.FC = () => {
                 {/* Teamer-Warteliste — nur bei begrenztem Kontingent + aktiver Warteliste */}
                 {(selectedEvent.teamer_max_participants || 0) > 0 && selectedEvent.teamer_waitlist_enabled && (
                   <div className="app-info-row">
-                    <IonIcon icon={listOutline} className="app-info-row__icon app-icon-color--waitlist" />
+                    <IonIcon icon={ICON_LISTE} className="app-info-row__icon app-icon-color--waitlist" />
                     <div>
                       <div className="app-info-row__label">Team-Warteliste</div>
                       <div className="app-info-row__value">
@@ -881,7 +912,7 @@ const TeamerEventsPage: React.FC = () => {
                   && !selectedEvent.is_konfirmation && (selectedEvent.points || 0) > 0 && (
                   <>
                     <div className="app-info-row">
-                      <IonIcon icon={trophy} className="app-info-row__icon app-icon-color--points" />
+                      <IonIcon icon={ICON_POKAL_GEFUELLT} className="app-info-row__icon app-icon-color--points" />
                       <div>
                         <div className="app-info-row__label">Punkte</div>
                         <div className="app-info-row__value">{selectedEvent.points}</div>
@@ -889,7 +920,7 @@ const TeamerEventsPage: React.FC = () => {
                     </div>
                     <div className="app-info-row">
                       <IonIcon
-                        icon={selectedEvent.point_type === 'gottesdienst' ? home : people}
+                        icon={selectedEvent.point_type === 'gottesdienst' ? ICON_GOTTESDIENST_GEFUELLT : ICON_GEMEINDE_GEFUELLT}
                         className={`app-info-row__icon ${selectedEvent.point_type === 'gottesdienst' ? 'app-icon-color--gottesdienst' : 'app-icon-color--gemeinde'}`}
                       />
                       <div>
@@ -903,7 +934,7 @@ const TeamerEventsPage: React.FC = () => {
                 {/* Kategorien */}
                 {selectedEvent.category_names && (
                   <div className="app-info-row">
-                    <IonIcon icon={pricetag} className="app-info-row__icon app-icon-color--category" />
+                    <IonIcon icon={ICON_KATEGORIE_GEFUELLT} className="app-info-row__icon app-icon-color--category" />
                     <div>
                       <div className="app-info-row__label">Kategorien</div>
                       <div className="app-info-row__value">{selectedEvent.category_names}</div>
@@ -914,7 +945,7 @@ const TeamerEventsPage: React.FC = () => {
                 {/* Ort */}
                 {selectedEvent.location && (
                   <div className="app-info-row">
-                    <IonIcon icon={location} className="app-info-row__icon app-icon-color--location" />
+                    <IonIcon icon={ICON_ORT_GEFUELLT} className="app-info-row__icon app-icon-color--location" />
                     <div
                       onClick={() => {
                         if (selectedEvent.location_maps_url) {
@@ -933,7 +964,7 @@ const TeamerEventsPage: React.FC = () => {
                 {/* Pflicht-Event */}
                 {selectedEvent.mandatory && (
                   <div className="app-info-row">
-                    <IonIcon icon={shieldCheckmark} className="app-info-row__icon app-icon-color--events" />
+                    <IonIcon icon={ICON_SCHUTZ_GEFUELLT} className="app-info-row__icon app-icon-color--events" />
                     <div>
                       <div className="app-info-row__label">Pflicht-Event</div>
                       <div className="app-info-row__value">Teilnahme erforderlich</div>
@@ -944,9 +975,9 @@ const TeamerEventsPage: React.FC = () => {
                 {/* Team gesucht */}
                 {isTeamerEvent && (
                   <div className="app-info-row">
-                    <IonIcon icon={people} className="app-info-row__icon app-icon-color--team" />
+                    <IonIcon icon={ICON_GRUPPE_GEFUELLT} className="app-info-row__icon app-icon-color--team" />
                     <div>
-                      <div className="app-info-row__label">Teamer-Zugang</div>
+                      <div className="app-info-row__label">Team-Zugang</div>
                       <div className="app-info-row__value">{selectedEvent.teamer_only ? 'Nur Team' : 'Team gesucht'}</div>
                     </div>
                   </div>
@@ -960,7 +991,7 @@ const TeamerEventsPage: React.FC = () => {
                     lesen ihren Termin aus der Liste. */}
                 {selectedEvent.is_series && (
                   <div className="app-info-row">
-                    <IonIcon icon={copy} className="app-info-row__icon app-icon-color--events" />
+                    <IonIcon icon={ICON_KOPIEREN_GEFUELLT} className="app-info-row__icon app-icon-color--events" />
                     <div>
                       <div className="app-info-row__label">Terminreihe</div>
                       <div className="app-info-row__value">Teil einer Serie</div>
@@ -975,11 +1006,11 @@ const TeamerEventsPage: React.FC = () => {
                     die sind zwei Tage und stehen im Anmelde-Abschnitt. */}
                 {selectedEvent.checkin_window && (
                   <div className="app-info-row app-info-row--top">
-                    <IonIcon icon={qrCodeOutline} className="app-info-row__icon app-icon-color--events app-event-detail__icon--align-top" />
+                    <IonIcon icon={ICON_QRCODE} className="app-info-row__icon app-icon-color--events app-event-detail__icon--align-top" />
                     <div>
                       <div className="app-info-row__label">Check-in-Fenster</div>
                       <div className="app-info-row__value">
-                        QR-Code {selectedEvent.checkin_window} Min. vor bis {selectedEvent.checkin_window} Min. nach Beginn
+                        QR-Code {selectedEvent.checkin_window} Min. (vor/nach Beginn)
                       </div>
                     </div>
                   </div>
@@ -988,10 +1019,33 @@ const TeamerEventsPage: React.FC = () => {
                 {/* Was mitbringen */}
                 {selectedEvent.bring_items && (
                   <div className="app-info-row app-info-row--top">
-                    <IonIcon icon={bagHandle} className="app-info-row__icon app-icon-color--bring app-event-detail__icon--align-top" />
+                    <IonIcon icon={ICON_MATERIAL} className="app-info-row__icon app-icon-color--bring app-event-detail__icon--align-top" />
                     <div>
                       <div className="app-info-row__label">Mitbringen</div>
                       <div className="app-info-row__value">{selectedEvent.bring_items}</div>
+                    </div>
+                  </div>
+                )}
+
+                {eventMaterials.length > 0 && (
+                  <div className="app-info-row">
+                    <IonIcon icon={ICON_DATEI_GEFUELLT} className="app-info-row__icon app-icon-color--material" />
+                    <div
+                      onClick={() => {
+                        if (eventMaterials.length === 1) {
+                          materialIdRef.current = eventMaterials[0].id;
+                          presentMaterialModal({ presentingElement: presentingElement || pageRef.current || undefined });
+                          return;
+                        }
+                        document.getElementById('teamer-material-abschnitt')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      }}
+                    >
+                      <div className="app-info-row__label">Material</div>
+                      <div className="app-info-row__value app-event-detail__material-link">
+                        {eventMaterials.length === 1
+                          ? eventMaterials[0].title
+                          : `${eventMaterials.length} Materialien`}
+                      </div>
                     </div>
                   </div>
                 )}
@@ -1004,7 +1058,7 @@ const TeamerEventsPage: React.FC = () => {
             <IonList className="app-section-inset" inset={true}>
               <IonListHeader>
                 <div className="app-section-icon app-section-icon--events">
-                  <IonIcon icon={informationCircle} />
+                  <IonIcon icon={ICON_INFO_GEFUELLT} />
                 </div>
                 <IonLabel>Beschreibung</IonLabel>
               </IonListHeader>
@@ -1018,22 +1072,113 @@ const TeamerEventsPage: React.FC = () => {
             </IonList>
           )}
 
-          {/* Material */}
+          <IonList className="app-section-inset" inset={true}>
+            <IonListHeader>
+              <div className="app-section-icon app-section-icon--events">
+                <IonIcon icon={ICON_GRUPPE_GEFUELLT} />
+              </div>
+              <IonLabel>Bist du dabei?</IonLabel>
+            </IonListHeader>
+            <IonCard className="app-card">
+              <IonCardContent className="app-card-content">
+                {isPast ? (
+                  selectedEvent.is_registered ? (
+                    <div style={{ textAlign: 'center' }}>
+                      {selectedEvent.attendance_status === 'present' && (
+                        <div className="app-status-box app-status-box--success">
+                          <IonIcon icon={ICON_ZUSAGE_GEFUELLT} />
+                          Anwesend
+                        </div>
+                      )}
+                      {selectedEvent.attendance_status === 'absent' && (
+                        <div className="app-status-box app-status-box--danger">
+                          <IonIcon icon={ICON_ABSAGE} />
+                          Abwesend
+                        </div>
+                      )}
+                      {!selectedEvent.attendance_status && (
+                        <div className="app-status-box app-status-box--bonus">
+                          <IonIcon icon={ICON_WARTEND_GEFUELLT} />
+                          Anwesenheit ausstehend
+                        </div>
+                      )}
+                    </div>
+                  ) : null
+                ) : (
+                  selectedEvent.is_registered ? (
+                    <ZusageKnoepfe event={selectedEvent} />
+                  ) : teamerCanRegister(selectedEvent) ? (
+                    (() => {
+                      const teamerMax = selectedEvent.teamer_max_participants || 0;
+                      const teamerCount = selectedEvent.teamer_count || 0;
+                      const teamerFull = teamerMax > 0 && teamerCount >= teamerMax;
+
+                      if (!teamerFull) {
+                        // Kontingent frei (oder unbegrenzt).
+                        return <ZusageKnoepfe event={selectedEvent} />;
+                      }
+
+                      const teamerWaitlistMax = selectedEvent.teamer_max_waitlist_size || 0;
+                      const teamerWaitlistCount = selectedEvent.teamer_waitlist_count || 0;
+                      const waitlistOpen = !!selectedEvent.teamer_waitlist_enabled &&
+                        (teamerWaitlistMax === 0 || teamerWaitlistCount < teamerWaitlistMax);
+
+                      if (waitlistOpen) {
+                        // Kontingent voll, aber Warteliste offen. Der
+                        // Absage-Knopf gehoert AUCH hierher: Gerade wenn kein
+                        // Platz frei ist, will die Leitung wissen, wer
+                        // nachruecken wuerde und wer nicht.
+                        return (
+                          <ZusageKnoepfe
+                            event={selectedEvent}
+                            zusageText={`Warteliste (${teamerWaitlistCount}/${teamerWaitlistMax || '∞'})`}
+                          />
+                        );
+                      }
+
+                      // Kontingent voll und Warteliste voll/deaktiviert. Zusagen
+                      // geht nicht mehr -- absagen schon: Die Leitung sieht so,
+                      // dass diese Person auch bei einem frei werdenden Platz
+                      // nicht einspringt.
+                      return <ZusageKnoepfe event={selectedEvent} zusageMoeglich={false} />;
+                    })()
+                  ) : (
+                    // Reines Konfi-Event: Teamer kann sich NICHT anmelden -> nur Hinweis.
+                    <div
+                      className="app-status-box"
+                      style={{
+                        backgroundColor: 'rgba(var(--app-color-neutral-hell-rgb), 0.12)',
+                        color: 'var(--app-color-neutral)',
+                        borderColor: 'rgba(var(--app-color-neutral-hell-rgb), 0.35)'
+                      }}
+                    >
+                      <IonIcon icon={ICON_INFO_GEFUELLT} />
+                      Nur zur Info - keine Anmeldung
+                    </div>
+                  )
+                )}
+              </IonCardContent>
+            </IonCard>
+          </IonList>
+
+          {/* Material — die id ist das Sprungziel des Material-Hinweises in
+              den Eckdaten: bei mehreren Materialien scrollt der
+              Tipp hierher statt eines zu raten. */}
           {eventMaterials.length > 0 && (
-            <IonList className="app-section-inset" inset={true}>
+            <IonList id="teamer-material-abschnitt" className="app-section-inset" inset={true}>
               <IonListHeader>
                 <div className="app-section-icon app-section-icon--events">
-                  <IonIcon icon={documentIcon} />
+                  <IonIcon icon={ICON_DATEI_GEFUELLT} />
                 </div>
                 <IonLabel>Material ({eventMaterials.length})</IonLabel>
               </IonListHeader>
               <IonCard className="app-card">
                 <IonCardContent className="app-card-content">
-                  {eventMaterials.map((mat: any) => (
+                  {eventMaterials.map((mat) => (
                     <div
                       key={mat.id}
                       className="app-list-item app-list-item--material"
-                      style={{ cursor: 'pointer', marginBottom: '8px' }}
+                      style={{ cursor: 'pointer', marginBottom: 'var(--app-abstand-eng)' }}
                       onClick={() => {
                         materialIdRef.current = mat.id;
                         presentMaterialModal({ presentingElement: presentingElement || pageRef.current || undefined });
@@ -1042,15 +1187,22 @@ const TeamerEventsPage: React.FC = () => {
                       <div className="app-list-item__row">
                         <div className="app-list-item__main">
                           <div className="app-icon-circle app-icon-circle--material">
-                            <IonIcon icon={documentIcon} />
+                            <IonIcon icon={mat.link_url ? ICON_LINK : ICON_DATEI_GEFUELLT} />
                           </div>
                           <div className="app-list-item__content">
                             <div className="app-list-item__title">{mat.title}</div>
                             <div className="app-list-item__meta">
-                              <span className="app-list-item__meta-item">
-                                <IonIcon icon={attachOutline} className="app-icon-color--material" />
-                                {mat.file_count || 0} {(mat.file_count || 0) === 1 ? 'Datei' : 'Dateien'}
-                              </span>
+                              {mat.link_url ? (
+                                <span className="app-list-item__meta-item">
+                                  <IonIcon icon={ICON_LINK} className="app-icon-color--material" />
+                                  Link
+                                </span>
+                              ) : (
+                                <span className="app-list-item__meta-item">
+                                  <IonIcon icon={ICON_ANHANG} className="app-icon-color--material" />
+                                  {mat.file_count || 0} {(mat.file_count || 0) === 1 ? 'Datei' : 'Dateien'}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -1062,144 +1214,6 @@ const TeamerEventsPage: React.FC = () => {
             </IonList>
           )}
 
-          {/* Action Buttons */}
-          <div className="app-event-detail__action-area">
-            {isPast ? (
-              selectedEvent.is_registered ? (
-                <div style={{ textAlign: 'center', padding: '12px 16px' }}>
-                  {selectedEvent.attendance_status === 'present' && (
-                    <div className="app-status-box app-status-box--success">
-                      <IonIcon icon={checkmarkCircle} />
-                      Anwesend
-                    </div>
-                  )}
-                  {selectedEvent.attendance_status === 'absent' && (
-                    <div className="app-status-box app-status-box--danger">
-                      <IonIcon icon={closeCircle} />
-                      Abwesend
-                    </div>
-                  )}
-                  {!selectedEvent.attendance_status && (
-                    <div className="app-status-box app-status-box--bonus">
-                      <IonIcon icon={hourglass} />
-                      Anwesenheit ausstehend
-                    </div>
-                  )}
-                </div>
-              ) : null
-            ) : (
-              selectedEvent.is_registered ? (
-                <IonButton
-                  className="app-action-button"
-                  expand="block"
-                  fill="outline"
-                  color="danger"
-                  onClick={() => handleUnbook(selectedEvent)}
-                  disabled={bookingLoading}
-                >
-                  <IonIcon icon={closeCircle} slot="start" />
-                  {bookingLoading
-                    ? 'Wird verarbeitet...'
-                    : selectedEvent.booking_status === 'waitlist'
-                      ? 'Von der Warteliste austragen'
-                      : 'Nicht mehr dabei'}
-                </IonButton>
-              ) : teamerCanRegister(selectedEvent) ? (
-                (() => {
-                  const teamerMax = selectedEvent.teamer_max_participants || 0;
-                  const teamerCount = selectedEvent.teamer_count || 0;
-                  const teamerFull = teamerMax > 0 && teamerCount >= teamerMax;
-
-                  if (!teamerFull) {
-                    // Kontingent frei (oder unbegrenzt) -> normaler Buchen-Button.
-                    return (
-                      <>
-                        <IonButton
-                          className="app-action-button"
-                          expand="block"
-                          color="success"
-                          onClick={() => handleBook(selectedEvent)}
-                          disabled={bookingLoading || !isOnline}
-                        >
-                          <IonIcon icon={bookingLoading || isOnline ? checkmarkCircle : cloudOfflineOutline} slot="start" />
-                          {bookingLoading
-                            ? 'Wird verarbeitet...'
-                            : !isOnline ? 'Du bist offline' : 'Ich bin dabei'}
-                        </IonButton>
-                        {/* Gegenknopf: Ohne ihn war eine Absage nicht von
-                            "hat noch nicht reagiert" zu unterscheiden. Bei
-                            bereits abgesagten Terminen entfaellt er. */}
-                        {selectedEvent.booking_status !== 'opted_out' && (
-                          <IonButton
-                            className="app-action-button"
-                            expand="block"
-                            fill="outline"
-                            color="medium"
-                            onClick={() => handleZusage(selectedEvent, false)}
-                            disabled={bookingLoading}
-                          >
-                            <IonIcon icon={closeCircle} slot="start" />
-                            Ich bin nicht dabei
-                          </IonButton>
-                        )}
-                      </>
-                    );
-                  }
-
-                  const teamerWaitlistMax = selectedEvent.teamer_max_waitlist_size || 0;
-                  const teamerWaitlistCount = selectedEvent.teamer_waitlist_count || 0;
-                  const waitlistOpen = !!selectedEvent.teamer_waitlist_enabled &&
-                    (teamerWaitlistMax === 0 || teamerWaitlistCount < teamerWaitlistMax);
-
-                  if (waitlistOpen) {
-                    // Kontingent voll, aber Warteliste offen -> Warteliste-Button.
-                    return (
-                      <IonButton
-                        className="app-action-button"
-                        expand="block"
-                        color="warning"
-                        onClick={() => handleBook(selectedEvent)}
-                        disabled={bookingLoading || !isOnline}
-                      >
-                        <IonIcon icon={bookingLoading || isOnline ? hourglass : cloudOfflineOutline} slot="start" />
-                        {bookingLoading
-                          ? 'Wird verarbeitet...'
-                          : !isOnline
-                            ? 'Du bist offline'
-                            : `Auf die Warteliste (${teamerWaitlistCount}/${teamerWaitlistMax || '∞'})`}
-                      </IonButton>
-                    );
-                  }
-
-                  // Kontingent voll und Warteliste voll/deaktiviert -> nur Hinweis.
-                  return (
-                    <IonButton
-                      className="app-action-button"
-                      expand="block"
-                      disabled
-                      color="medium"
-                    >
-                      <IonIcon icon={informationCircle} slot="start" />
-                      Kein Platz mehr frei
-                    </IonButton>
-                  );
-                })()
-              ) : (
-                // Reines Konfi-Event: Teamer kann sich NICHT anmelden -> nur Hinweis.
-                <div
-                  className="app-status-box"
-                  style={{
-                    backgroundColor: 'rgba(156, 163, 175, 0.12)',
-                    color: '#6b7280',
-                    borderColor: 'rgba(156, 163, 175, 0.35)'
-                  }}
-                >
-                  <IonIcon icon={informationCircle} />
-                  Nur zur Info - keine Anmeldung
-                </div>
-              )
-            )}
-          </div>
         </IonContent>
       </IonPage>
     );
@@ -1240,7 +1254,12 @@ const TeamerEventsPage: React.FC = () => {
           <IonButtons slot="end">
             {isAntraege && (
               <IonButton onClick={handleAddRequest} aria-label="Neue Aktivität melden">
-                <IonIcon icon={add} />
+                <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
+              </IonButton>
+            )}
+            {!isAntraege && (
+              <IonButton onClick={() => presentScannerModal()} aria-label="QR-Code scannen">
+                <IonIcon icon={ICON_SCANNEN} />
               </IonButton>
             )}
           </IonButtons>
@@ -1276,10 +1295,6 @@ const TeamerEventsPage: React.FC = () => {
               activeTab={requestsTab}
               onTabChange={setRequestsTab}
               formatDate={formatRequestDate}
-              getStatusColor={getRequestStatusColor}
-              getStatusText={getRequestStatusText}
-              getTypeIcon={getRequestTypeIcon}
-              getTypeText={getRequestTypeText}
               teamerMode={true}
               headerSlot={
                 <>
@@ -1303,7 +1318,7 @@ const TeamerEventsPage: React.FC = () => {
             <SectionHeader
               title="Events"
               subtitle="Termine und Veranstaltungen"
-              icon={calendar}
+              icon={ICON_TERMIN_GEFUELLT}
               preset="events"
               stats={statsData}
               onInfo={() => presentLegend({ presentingElement: presentingElement || pageRef.current || undefined })}
@@ -1311,31 +1326,12 @@ const TeamerEventsPage: React.FC = () => {
 
             {mainSegmentSlot}
 
-            {/* Suche & Filter — gleiches Pattern wie Konfi/Admin */}
-            <IonList inset={true} style={{ margin: '16px' }}>
-              <IonListHeader>
-                <div className="app-section-icon app-section-icon--events">
-                  <IonIcon icon={filterOutline} />
-                </div>
-                <IonLabel>Suche & Filter</IonLabel>
-              </IonListHeader>
-              <IonItemGroup>
-                <IonItem>
-                  <IonIcon icon={search} slot="start" className="app-icon-color--system" style={{ fontSize: '1rem' }} />
-                  <IonInput
-                    value={searchText}
-                    onIonInput={(e) => setSearchText(e.detail.value || '')}
-                    placeholder="Events durchsuchen..."
-                  />
-                </IonItem>
-              </IonItemGroup>
-            </IonList>
-
-            {/* 3 Segmente */}
+            {/* Reiter ZUERST, Suche darunter: erst
+                eingrenzen, dann darin suchen -- wie im Chat. */}
             <div className="app-segment-wrapper">
               <IonSegment
                 value={activeTab}
-                onIonChange={(e) => setActiveTab(e.detail.value as any)}
+                onIonChange={(e) => setActiveTab(e.detail.value as 'meine' | 'alle' | 'team')}
               >
                 <IonSegmentButton value="alle">
                   <IonLabel>Alle</IonLabel>
@@ -1349,17 +1345,37 @@ const TeamerEventsPage: React.FC = () => {
               </IonSegment>
             </div>
 
+            {/* Suche -- steht UNTER den Reitern, siehe Kommentar oben */}
+            <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
+              <IonListHeader>
+                <div className="app-section-icon app-section-icon--events">
+                  <IonIcon icon={ICON_FILTER} />
+                </div>
+                <IonLabel>Suche</IonLabel>
+              </IonListHeader>
+              <IonItemGroup>
+                <IonItem>
+                  <IonIcon icon={ICON_SUCHE_GEFUELLT} slot="start" className="app-icon-color--system" style={{ fontSize: 'var(--app-text-standard)' }} />
+                  <IonInput
+                    value={searchText}
+                    onIonInput={(e) => setSearchText(e.detail.value || '')}
+                    placeholder="Events durchsuchen..."
+                  />
+                </IonItem>
+              </IonItemGroup>
+            </IonList>
+
             {/* Events Liste */}
             <ListSection
-              icon={calendarOutline}
+              icon={ICON_TERMIN}
               title="Events"
               count={filteredEvents.length}
               iconColorClass="events"
               isEmpty={filteredEvents.length === 0}
-              emptyIcon={calendarOutline}
+              emptyIcon={ICON_TERMIN}
               emptyTitle="Keine Events"
               emptyMessage={getEmptyMessage()}
-              emptyIconColor="#dc2626"
+              emptyIconColor="var(--app-color-events)"
             >
               {filteredEvents.map((event, index) => {
                 const { statusColor, statusText, statusIcon, isPastEvent, shouldGrayOut } = getEventStatusInfo(event);
@@ -1376,7 +1392,7 @@ const TeamerEventsPage: React.FC = () => {
                       detail={false}
                       lines="none"
                       style={{
-                        marginBottom: index < filteredEvents.length - 1 ? '8px' : '0',
+                        marginBottom: index < filteredEvents.length - 1 ? 'var(--app-abstand-eng)' : '0',
                         '--background': 'transparent',
                         '--padding-start': '0',
                         '--padding-end': '0',
@@ -1421,15 +1437,15 @@ const TeamerEventsPage: React.FC = () => {
                               <div
                                 className="app-list-item__title app-list-item__title--events"
                                 style={{
-                                  color: shouldGrayOut ? '#999' : undefined,
-                                  paddingRight: showBadge ? '70px' : '0',
-                                  paddingTop: showBadge ? '4px' : '0'
+                                  color: shouldGrayOut ? 'var(--app-text-muted)' : undefined,
+                                  paddingRight: showBadge ? 'var(--app-freiraum-aktion-l)' : '0',
+                                  paddingTop: showBadge ? 'var(--app-abstand-mini)' : '0'
                                 }}
                               >
                                 {event.name}
                               </div>
                               {event.jahrgang_names && (
-                                <div className="app-list-item__subtitle" style={{ color: shouldGrayOut ? '#999' : undefined }}>
+                                <div className="app-list-item__subtitle" style={{ color: shouldGrayOut ? 'var(--app-text-muted)' : undefined }}>
                                   {event.jahrgang_names.split(',').join(' · ')}
                                 </div>
                               )}
@@ -1437,16 +1453,16 @@ const TeamerEventsPage: React.FC = () => {
                               <div className="app-list-item__meta">
                                 {event.teamer_only ? (
                                   <span className="app-list-item__meta-item">
-                                    <IonIcon icon={people} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--team'} />
+                                    <IonIcon icon={ICON_GRUPPE_GEFUELLT} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--team'} />
                                     {Math.max(0, event.teamer_count || 0)}
                                     {(event.teamer_max_participants || 0) > 0
                                       ? `/${event.teamer_max_participants}`
-                                      : <>/<IonIcon icon={infinite} style={{ verticalAlign: 'middle', fontSize: '0.9em' }} /></>} Team
+                                      : <>/<IonIcon icon={ICON_UNENDLICH} style={{ verticalAlign: 'middle', fontSize: 'var(--app-icon-inline)' }} /></>} Team
                                   </span>
                                 ) : null}
                                 {event.teamer_only && (event.teamer_waitlist_count ?? 0) > 0 && (
                                   <span className="app-list-item__meta-item">
-                                    <IonIcon icon={listOutline} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--waitlist'} />
+                                    <IonIcon icon={ICON_LISTE} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--waitlist'} />
                                     {event.teamer_waitlist_count}
                                     {(event.teamer_max_waitlist_size || 0) > 0 ? `/${event.teamer_max_waitlist_size}` : ''}
                                   </span>
@@ -1454,26 +1470,38 @@ const TeamerEventsPage: React.FC = () => {
                                 {!event.teamer_only && (
                                   <>
                                     <span className="app-list-item__meta-item">
-                                      <IonIcon icon={people} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--participants'} />
-                                      {Math.max(0, event.registered_count || 0)}{event.max_participants > 0 ? `/${event.max_participants}` : <>/<IonIcon icon={infinite} style={{ verticalAlign: 'middle', fontSize: '0.9em' }} /></>}
+                                      <IonIcon icon={ICON_GRUPPE_GEFUELLT} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--participants'} />
+                                      {Math.max(0, event.registered_count || 0)}{event.max_participants > 0 ? `/${event.max_participants}` : <>/<IonIcon icon={ICON_UNENDLICH} style={{ verticalAlign: 'middle', fontSize: 'var(--app-icon-inline)' }} /></>}
                                     </span>
                                     {(event.teamer_count !== undefined && event.teamer_count > 0) && (
                                       <span className="app-list-item__meta-item">
-                                        <IonIcon icon={people} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--team'} />
+                                        <IonIcon icon={ICON_GRUPPE_GEFUELLT} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--team'} />
                                         {event.teamer_count} Team
                                       </span>
                                     )}
                                     {(event.teamer_waitlist_count ?? 0) > 0 && (
                                       <span className="app-list-item__meta-item">
-                                        <IonIcon icon={listOutline} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--waitlist'} />
+                                        <IonIcon icon={ICON_LISTE} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--waitlist'} />
                                         {event.teamer_waitlist_count}
                                         {(event.teamer_max_waitlist_size || 0) > 0 ? `/${event.teamer_max_waitlist_size}` : ''} wartet
                                       </span>
                                     )}
                                     {event.points > 0 && (
                                       <span className="app-list-item__meta-item">
-                                        <IonIcon icon={trophy} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--points'} />
+                                        <IonIcon icon={ICON_POKAL_GEFUELLT} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--points'} />
                                         {event.points}P
+                                      </span>
+                                    )}
+                                    {/* Punkteart direkt hinter den Punkten.
+                                        Gleiche Regel wie im Detail: keine
+                                        Konfi-Punkte, keine Art. */}
+                                    {zeigtPunkteart(event) && (
+                                      <span className="app-list-item__meta-item">
+                                        <IonIcon
+                                          icon={event.point_type === 'gottesdienst' ? ICON_GOTTESDIENST_GEFUELLT : ICON_GEMEINDE_GEFUELLT}
+                                          className={shouldGrayOut ? 'app-icon-color--muted' : (event.point_type === 'gottesdienst' ? 'app-icon-color--gottesdienst' : 'app-icon-color--gemeinde')}
+                                        />
+                                        {punkteartText(event)}
                                       </span>
                                     )}
                                   </>
@@ -1481,41 +1509,51 @@ const TeamerEventsPage: React.FC = () => {
                               </div>
 
                               {/* Datum + Uhrzeit */}
-                              <div className="app-list-item__meta" style={{ marginTop: '4px' }}>
+                              <div className="app-list-item__meta" style={{ marginTop: 'var(--app-abstand-mini)' }}>
                                 <span className="app-list-item__meta-item">
-                                  <IonIcon icon={calendar} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--events'} />
+                                  <IonIcon icon={ICON_TERMIN_GEFUELLT} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--events'} />
                                   {formatDate(event.event_date)}
                                 </span>
                                 <span className="app-list-item__meta-item">
-                                  <IonIcon icon={time} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--time'} />
+                                  <IonIcon icon={ICON_UHRZEIT_GEFUELLT} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--time'} />
                                   {formatTime(event.event_date)}
                                 </span>
                               </div>
 
                               {/* Ort */}
                               {event.location && (
-                                <div className="app-list-item__meta" style={{ marginTop: '4px' }}>
+                                <div className="app-list-item__meta" style={{ marginTop: 'var(--app-abstand-mini)' }}>
                                   <span className="app-list-item__meta-item">
-                                    <IonIcon icon={location} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--location'} />
+                                    <IonIcon icon={ICON_ORT_GEFUELLT} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--location'} />
                                     {event.location}
+                                  </span>
+                                </div>
+                              )}
+
+                              {/* Kategorien */}
+                              {kategorienText(event) && (
+                                <div className="app-list-item__meta" style={{ marginTop: 'var(--app-abstand-mini)' }}>
+                                  <span className="app-list-item__meta-item app-list-item__meta-item--multiline">
+                                    <IonIcon icon={ICON_KATEGORIE_GEFUELLT} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--category'} />
+                                    {kategorienText(event)}
                                   </span>
                                 </div>
                               )}
 
                               {/* Was mitbringen */}
                               {event.bring_items && (
-                                <div className="app-list-item__meta" style={{ marginTop: '4px' }}>
+                                <div className="app-list-item__meta" style={{ marginTop: 'var(--app-abstand-mini)' }}>
                                   <span className="app-list-item__meta-item app-list-item__meta-item--multiline">
-                                    <IonIcon icon={bagHandle} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--bring'} />
+                                    <IonIcon icon={ICON_MATERIAL} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--bring'} />
                                     {event.bring_items}
                                   </span>
                                 </div>
                               )}
                               {/* Material */}
                               {(event.material_count || 0) > 0 && (
-                                <div className="app-list-item__meta" style={{ marginTop: '4px' }}>
+                                <div className="app-list-item__meta" style={{ marginTop: 'var(--app-abstand-mini)' }}>
                                   <span className="app-list-item__meta-item">
-                                    <IonIcon icon={attachOutline} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--material'} />
+                                    <IonIcon icon={ICON_ANHANG} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--material'} />
                                     {event.material_count} {event.material_count === 1 ? 'Material' : 'Materialien'}
                                   </span>
                                 </div>
@@ -1529,12 +1567,6 @@ const TeamerEventsPage: React.FC = () => {
               })}
             </ListSection>
 
-            {/* FAB für QR-Scanner */}
-            <IonFab vertical="bottom" horizontal="end" slot="fixed">
-              <IonFabButton onClick={() => presentScannerModal()}>
-                <IonIcon icon={qrCodeOutline} />
-              </IonFabButton>
-            </IonFab>
           </>
         )}
       </IonContent>

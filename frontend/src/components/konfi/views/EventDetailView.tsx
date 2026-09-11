@@ -1,3 +1,31 @@
+import { FARBEN } from '../../../theme/colors';
+import {
+  ICON_ABSAGE,
+  ICON_CHAT,
+  ICON_ENTSPERRT,
+  ICON_GEMEINDE_GEFUELLT,
+  ICON_GOTTESDIENST_GEFUELLT,
+  ICON_GRUPPE_GEFUELLT,
+  ICON_INFO_GEFUELLT,
+  ICON_KATEGORIE_GEFUELLT,
+  ICON_KOPIEREN_GEFUELLT,
+  ICON_LISTE,
+  ICON_MATERIAL,
+  ICON_OFFLINE,
+  ICON_ORT_GEFUELLT,
+  ICON_PERSON,
+  ICON_POKAL_GEFUELLT,
+  ICON_QRCODE,
+  ICON_SCHUTZ_GEFUELLT,
+  ICON_TERMIN_GEFUELLT,
+  ICON_UHRZEIT_GEFUELLT,
+  ICON_UNENDLICH,
+  ICON_WARNUNG_GEFUELLT,
+  ICON_WARTEND_GEFUELLT,
+  ICON_ZURUECK,
+  ICON_ZUSAGE_GEFUELLT,
+} from '../../shared/icons';
+import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   IonPage,
@@ -21,34 +49,11 @@ import {
   IonNote
 } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
-import {
-  arrowBack,
-  calendar,
-  location,
-  people,
-  time,
-  trophy,
-  checkmarkCircle,
-  closeCircle,
-  informationCircle,
-  warning,
-  hourglass,
-  listOutline,
-  home,
-  pricetag,
-  personOutline,
-  shieldCheckmark,
-  bagHandle,
-  qrCodeOutline,
-  cloudOfflineOutline,
-  lockOpen,
-  copy,
-  chatbubbleOutline,
-  infinite
-} from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import api from '../../../services/api';
+import type { ActionSheetButton } from '@ionic/core';
+import OfflinePlatzhalter from '../../shared/OfflinePlatzhalter';
 import { track } from '../../../services/analytics';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
@@ -56,7 +61,7 @@ import LoadingSpinner from '../../common/LoadingSpinner';
 import { SectionHeader, formatEventDateLong as formatDate, formatEventTime as formatTime, istVergangen } from '../../shared';
 import UnregisterModal from '../modals/UnregisterModal';
 import QRScannerModal from '../modals/QRScannerModal';
-import { Event, Category } from '../../../types/event';
+import { Event } from '../../../types/event';
 import { useLiveUpdate, useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { safeUUID } from '../../../utils/uuid';
@@ -127,8 +132,8 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
         // Kein Erfolgs-Toast: der Server schickt bereits einen Push.
         await refreshEvents();
         triggerRefresh('events');
-      } catch (err: any) {
-        setError(err.response?.data?.error || 'Fehler bei der Abmeldung');
+      } catch (err) {
+        setError(fehlerText(err, 'Fehler bei der Abmeldung'));
       }
     } else {
       await writeQueue.enqueue({
@@ -155,8 +160,8 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
       // Kein Erfolgs-Toast: der Server schickt bereits einen Push.
       await refreshEvents();
       triggerRefresh('events');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Fehler bei der Wiederanmeldung');
+    } catch (err) {
+      setError(fehlerText(err, 'Fehler bei der Wiederanmeldung'));
     }
   };
 
@@ -166,25 +171,44 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
       return;
     }
 
+    // Wie beim Opt-out: Ohne Verbindung in die Warteschlange, statt den Knopf
+    // zu sperren. Eine Abmeldung gibt einen Platz FREI — es gibt
+    // nichts zu pruefen, was offline unbekannt waere. Das unterscheidet sie
+    // vom Anmelden, das wegen der begrenzten Plaetze gesperrt bleibt.
+    const clientId = safeUUID();
+
+    if (!networkMonitor.isOnline) {
+      await writeQueue.enqueue({
+        method: 'DELETE',
+        url: `/konfi/events/${eventData.id}/register`,
+        body: { reason: reason.trim(), client_id: clientId },
+        maxRetries: 5,
+        hasFileUpload: false,
+        metadata: {
+          type: 'opt-out',
+          clientId,
+          label: `Abmeldung von "${eventData.name}"`,
+        },
+      });
+      setSuccess('Abmeldung wird gesendet sobald du wieder online bist');
+      return;
+    }
+
     try {
       await api.delete(`/konfi/events/${eventData.id}/register`, {
-        data: { reason: reason.trim() }
+        data: { reason: reason.trim(), client_id: clientId }
       });
 
       // Kein Erfolgs-Toast: der Server schickt bereits einen Push.
       await refreshEvents();
       triggerRefresh('events');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Fehler bei der Abmeldung');
+    } catch (err) {
+      setError(fehlerText(err, 'Fehler bei der Abmeldung'));
     }
   };
 
   const [presentUnregisterModal, dismissUnregisterModal] = useIonModal(UnregisterModal, {
     eventName: eventData?.name || '',
-    onClose: () => {
-      dismissUnregisterModal();
-      refreshEvents();
-    },
     onUnregister: handleUnregister,
     dismiss: (data?: string, role?: string) => {
       dismissUnregisterModal(data, role);
@@ -195,9 +219,6 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
   const [presentOptOutModal, dismissOptOutModal] = useIonModal(UnregisterModal, {
     eventName: eventData?.name || '',
     mandatory: true,
-    onClose: () => {
-      dismissOptOutModal();
-    },
     onUnregister: handleOptOut,
     dismiss: (data?: string, role?: string) => {
       dismissOptOutModal(data, role);
@@ -206,7 +227,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
 
   const [presentScannerModal, dismissScannerModal] = useIonModal(QRScannerModal, {
     onClose: () => dismissScannerModal(),
-    onSuccess: (eventId: number, eventName: string) => {
+    onSuccess: (_eventId: number, _eventName: string) => {
       dismissScannerModal();
       refreshEvents();
       setSuccess('Erfolgreich eingecheckt!');
@@ -219,6 +240,28 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
   // 
   const [detailEpoch, setDetailEpoch] = useState(0);
 
+  // Welcher Termin gerade gelten soll. Antworten, die zu einem vorher
+  // geoeffneten Termin gehoeren, duerfen den Stand nicht mehr ueberschreiben.
+  const aktuelleEventId = useRef(eventId);
+
+  // Beim Wechsel des Termins den Stand des VORIGEN leeren.
+  //
+  // Dieselbe Ursache wie in der Leitungsansicht (admin/views/EventDetailView):
+  // Der IonRouterOutlet behaelt gemountete Seiten im Speicher, ParamSeite
+  // (MainTabs.tsx) reicht nur eine neue eventId in DIESELBE Instanz. eventData
+  // wird aus der Liste abgeleitet und stimmt sofort — die nachgeladenen Werte
+  // aber nicht: Zeitfenster, Teilnehmerliste und der Konfirmations-Check
+  // blieben die des vorigen Termins. Online sah man sie, bis die neue Antwort
+  // eintraf; OFFLINE dauerhaft, denn der Effekt unten bricht ohne Verbindung
+  // vor dem Laden ab und laesst die alten Werte stehen.
+  useEffect(() => {
+    aktuelleEventId.current = eventId;
+    setTimeslots([]);
+    setParticipants([]);
+    setHasExistingKonfirmation(false);
+    setTimeslotsLoadFailed(false);
+  }, [eventId]);
+
   useLiveRefresh(['events'], useCallback(() => {
     refreshEventsLive();
     setDetailEpoch((n) => n + 1);
@@ -230,37 +273,50 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
   // vorbeilaufen — der Konfi landete ohne Slot im Event.
   useEffect(() => {
     if (!eventData) return;
+    const fuerEventId = eventId;
+    // Eine Antwort gilt nur, solange sie zum aktuell geoeffneten Termin
+    // gehoert. Bei schnellem Wechsel kann die Antwort fuer den ERSTEN nach der
+    // des zweiten eintreffen und dessen Liste sonst falsch ueberschreiben.
+    const gilt = () => aktuelleEventId.current === fuerEventId;
     const loadDetails = async () => {
-      if (!networkMonitor.isOnline) return;
+      // Das ist KEIN stilles Scheitern im Sinne von offlineAktion.ts: Hier
+      // bricht keine Nutzeraktion ab, sondern ein Lade-Effekt laesst den
+      // vorhandenen Stand stehen. Eine Fehlermeldung waere hier falsch — die
+      // Seite zeigt den Termin ja. Was offline fehlt, sagen die Platzhalter
+      // in den betroffenen Abschnitten.
+      const offline = !networkMonitor.isOnline;
+      if (offline) return;
       setTimeslotsLoadFailed(false);
       try {
         if (eventData.has_timeslots) {
-          const tsRes = await api.get(`/konfi/events/${eventId}/timeslots`);
-          setTimeslots(tsRes.data || []);
-        } else {
+          const tsRes = await api.get(`/konfi/events/${fuerEventId}/timeslots`);
+          if (gilt()) setTimeslots(tsRes.data || []);
+        } else if (gilt()) {
           setTimeslots([]);
         }
-      } catch (err) {
-        setTimeslots([]);
-        setTimeslotsLoadFailed(true);
+      } catch {
+        if (gilt()) {
+          setTimeslots([]);
+          setTimeslotsLoadFailed(true);
+        }
       }
       // Teilnehmerliste und Konfirmations-Check sind für die Anmeldung nicht
       // kritisch — sie duerfen weiterhin still fehlschlagen.
       try {
-        const partRes = await api.get(`/konfi/events/${eventId}/participants`);
-        setParticipants(partRes.data || []);
-      } catch (err) {
+        const partRes = await api.get(`/konfi/events/${fuerEventId}/participants`);
+        if (gilt()) setParticipants(partRes.data || []);
+      } catch {
         // Teilnehmerliste ist nur Anzeige
       }
       try {
         const hasKonf = await checkExistingKonfirmation();
-        setHasExistingKonfirmation(hasKonf);
-      } catch (err) {
+        if (gilt()) setHasExistingKonfirmation(hasKonf);
+      } catch {
         // Konfirmations-Check wird bei der Anmeldung erneut geprüft
       }
     };
     loadDetails();
-  }, [eventData?.id, detailEpoch]);
+  }, [eventData?.id, eventId, detailEpoch]);
 
   const canUnregister = (event: Event) => {
     if (!event.is_registered) return false;
@@ -281,7 +337,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
       // Andere, bereits gebuchte Konfirmation (nicht dieses Event selbst).
       const myEvents = response.data.filter((e: Event) => e.is_registered && e.id !== eventData?.id);
       return myEvents.some((e: Event) => isKonfirmationEvent(e));
-    } catch (err) {
+    } catch {
       return false;
     }
   };
@@ -290,7 +346,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     if (!eventData) return;
 
     try {
-      const payload: any = {};
+      const payload: { timeslot_id?: number } = {};
       if (timeslotId) {
         payload.timeslot_id = timeslotId;
       }
@@ -308,8 +364,8 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
       }
       await refreshEvents();
       triggerRefresh('events');
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Fehler bei der Anmeldung');
+    } catch (err) {
+      setError(fehlerText(err, 'Fehler bei der Anmeldung'));
     }
   };
 
@@ -346,7 +402,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
       const waitlistEnabled = !!eventData.waitlist_enabled;
       const maxWaitlist = eventData.max_waitlist_size || 0;
 
-      const timeslotButtons = timeslots.map((slot) => {
+      const timeslotButtons: ActionSheetButton[] = timeslots.map((slot) => {
         const isFull = slot.max_participants > 0 && parseInt(String(slot.registered_count || 0)) >= slot.max_participants;
         const slotWaitlist = parseInt(String(slot.waitlist_count || 0));
         // Auf einen vollen Slot kann man sich auf die Warteliste setzen, solange
@@ -383,9 +439,9 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
 
       timeslotButtons.push({
         text: 'Abbrechen',
-        role: 'cancel' as any,
+        role: 'cancel',
         handler: () => {}
-      } as any);
+      });
 
       presentActionSheet({
         header: 'Zeitslot auswählen',
@@ -404,7 +460,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     const info = { primary: 'var(--app-color-info)', secondary: 'var(--app-color-info)' }; // Konfirmation=blau, Pflicht-angemeldet=blau
     const success = { primary: 'var(--app-color-success)', secondary: 'var(--app-color-success)' };
     const bonus = { primary: 'var(--app-color-bonus)', secondary: 'var(--app-color-bonus)' };
-    const past = { primary: '#6c757d', secondary: '#6c757d' };
+    const past = { primary: FARBEN.neutral, secondary: FARBEN.neutral };
 
     if (!eventData) return events;
 
@@ -463,7 +519,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
             {!hideBackButton && (
               <IonButtons slot="start">
                 <IonButton aria-label="Zurück" onClick={onBack}>
-                  <IonIcon icon={arrowBack} />
+                  <IonIcon icon={ICON_ZURUECK} />
                 </IonButton>
               </IonButtons>
             )}
@@ -485,7 +541,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
             {!hideBackButton && (
               <IonButtons slot="start">
                 <IonButton aria-label="Zurück" onClick={onBack}>
-                  <IonIcon icon={arrowBack} />
+                  <IonIcon icon={ICON_ZURUECK} />
                 </IonButton>
               </IonButtons>
             )}
@@ -511,7 +567,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           {!hideBackButton && (
             <IonButtons slot="start">
               <IonButton aria-label="Zurück" onClick={onBack}>
-                <IonIcon icon={arrowBack} />
+                <IonIcon icon={ICON_ZURUECK} />
               </IonButton>
             </IonButtons>
           )}
@@ -530,7 +586,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                 aria-label="Event-Chat öffnen"
                 onClick={() => router.push(`/konfi/chat/room/${eventData.chat_room_id}`, 'root')}
               >
-                <IonIcon icon={chatbubbleOutline} slot="icon-only" />
+                <IonIcon icon={ICON_CHAT} slot="icon-only" />
               </IonButton>
             </IonButtons>
           )}
@@ -555,7 +611,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
         <SectionHeader
           title={eventData.name}
           subtitle={getStatusText()}
-          icon={calendar}
+          icon={ICON_TERMIN_GEFUELLT}
           colors={getStatusColors()}
           stats={[
             // Unbegrenzt -> "∞ Frei" statt einer irrefuehrenden 0.
@@ -570,12 +626,12 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
 
         {/* QR Check-in Status / Button */}
         {eventData.attendance_status === 'present' ? (
-          <div className="app-status-box app-status-box--success" style={{ margin: '0 16px 8px 16px' }}>
-            <IonIcon icon={checkmarkCircle} style={{ fontSize: '1.3rem' }} />
+          <div className="app-status-box app-status-box--success" style={{ margin: '0 var(--app-abstand-basis) var(--app-abstand-eng) var(--app-abstand-basis)' }}>
+            <IonIcon icon={ICON_ZUSAGE_GEFUELLT} style={{ fontSize: 'var(--app-text-titel)' }} />
             Anwesend
           </div>
         ) : (eventData.booking_status === 'confirmed' && !eventData.attendance_status) && (
-          <div style={{ padding: '0 16px', marginBottom: '8px' }}>
+          <div style={{ padding: '0 var(--app-abstand-basis)', marginBottom: 'var(--app-abstand-eng)' }}>
             <IonButton
               expand="block"
               fill="outline"
@@ -584,7 +640,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                 presentingElement: pageRef.current || undefined
               })}
             >
-              <IonIcon icon={qrCodeOutline} slot="start" />
+              <IonIcon icon={ICON_QRCODE} slot="start" />
               Einchecken
             </IonButton>
           </div>
@@ -594,7 +650,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
         <IonList className="app-section-inset" inset={true}>
           <IonListHeader>
             <div className="app-section-icon app-section-icon--events">
-              <IonIcon icon={calendar} />
+              <IonIcon icon={ICON_TERMIN_GEFUELLT} />
             </div>
             <IonLabel>Details</IonLabel>
           </IonListHeader>
@@ -602,7 +658,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
             <IonCardContent className="app-card-content">
               {/* Datum */}
               <div className="app-info-row">
-                <IonIcon icon={calendar} className="app-info-row__icon app-icon-color--events" />
+                <IonIcon icon={ICON_TERMIN_GEFUELLT} className="app-info-row__icon app-icon-color--events" />
                 <div>
                   <div className="app-info-row__label">Datum</div>
                   <div className="app-info-row__value">
@@ -615,9 +671,12 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
               </div>
 
               {/* Zeitslots anzeigen wenn vorhanden (wie Admin) */}
+              {eventData.has_timeslots && timeslots.length === 0 && !isOnline && (
+                <OfflinePlatzhalter was="Die Zeitfenster-Auswahl" />
+              )}
               {eventData.has_timeslots && timeslots.length > 0 && (
                 <div className="app-info-row app-info-row--top">
-                  <IonIcon icon={time} className="app-info-row__icon app-icon-color--time app-event-detail__icon--align-top" />
+                  <IonIcon icon={ICON_UHRZEIT_GEFUELLT} className="app-info-row__icon app-icon-color--time app-event-detail__icon--align-top" />
                   <div className="app-event-detail__timeslot-list">
                     <div className="app-info-row__label">Zeitfenster</div>
                     {timeslots.map((slot, idx) => (
@@ -646,7 +705,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
               {/* Anmeldezeitraum — wie Zeitfenster aufgebaut, nicht bei Pflicht-Events */}
               {!eventData.mandatory && (
                 <div className="app-info-row app-info-row--top">
-                  <IonIcon icon={lockOpen} className="app-info-row__icon app-icon-color--events app-event-detail__icon--align-top" />
+                  <IonIcon icon={ICON_ENTSPERRT} className="app-info-row__icon app-icon-color--events app-event-detail__icon--align-top" />
                   <div>
                     <div className="app-info-row__label">Anmeldung</div>
                     {eventData.registration_opens_at ? (
@@ -669,17 +728,17 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
 
               {/* TN gesamt — ohne Teamer */}
               <div className="app-info-row">
-                <IonIcon icon={people} className="app-info-row__icon app-icon-color--participants" />
+                <IonIcon icon={ICON_GRUPPE_GEFUELLT} className="app-info-row__icon app-icon-color--participants" />
                 <div>
                   <div className="app-info-row__label">Teilnehmer:innen</div>
-                  <div className="app-info-row__value">{(eventData.registered_count || 0)} / {eventData.max_participants > 0 ? eventData.max_participants : <IonIcon icon={infinite} style={{ verticalAlign: 'middle', fontSize: '0.9em' }} />}</div>
+                  <div className="app-info-row__value">{(eventData.registered_count || 0)} / {eventData.max_participants > 0 ? eventData.max_participants : <IonIcon icon={ICON_UNENDLICH} style={{ verticalAlign: 'middle', fontSize: 'var(--app-icon-inline)' }} />}</div>
                 </div>
               </div>
 
               {/* Warteliste */}
               {eventData.waitlist_enabled && (
                 <div className="app-info-row">
-                  <IonIcon icon={listOutline} className="app-info-row__icon app-icon-color--waitlist" />
+                  <IonIcon icon={ICON_LISTE} className="app-info-row__icon app-icon-color--waitlist" />
                   <div>
                     <div className="app-info-row__label">Warteliste</div>
                     <div className="app-info-row__value">
@@ -697,7 +756,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
               {(eventData.points || 0) > 0 && !eventData.mandatory && !eventData.is_konfirmation && (
                 <>
                   <div className="app-info-row">
-                    <IonIcon icon={trophy} className="app-info-row__icon app-icon-color--points" />
+                    <IonIcon icon={ICON_POKAL_GEFUELLT} className="app-info-row__icon app-icon-color--points" />
                     <div>
                       <div className="app-info-row__label">Punkte</div>
                       <div className="app-info-row__value">{eventData.points}</div>
@@ -705,7 +764,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                   </div>
                   <div className="app-info-row">
                     <IonIcon
-                      icon={eventData.point_type === 'gottesdienst' ? home : people}
+                      icon={eventData.point_type === 'gottesdienst' ? ICON_GOTTESDIENST_GEFUELLT : ICON_GEMEINDE_GEFUELLT}
                       className={`app-info-row__icon ${eventData.point_type === 'gottesdienst' ? 'app-icon-color--gottesdienst' : 'app-icon-color--gemeinde'}`}
                     />
                     <div>
@@ -719,7 +778,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
               {/* Kategorien */}
               {eventData.categories && eventData.categories.length > 0 && (
                 <div className="app-info-row">
-                  <IonIcon icon={pricetag} className="app-info-row__icon app-icon-color--category" />
+                  <IonIcon icon={ICON_KATEGORIE_GEFUELLT} className="app-info-row__icon app-icon-color--category" />
                   <div>
                     <div className="app-info-row__label">Kategorien</div>
                     <div className="app-info-row__value">{eventData.categories.map(c => c.name).join(', ')}</div>
@@ -730,7 +789,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
               {/* Ort */}
               {eventData.location && (
                 <div className="app-info-row">
-                  <IonIcon icon={location} className="app-info-row__icon app-icon-color--location" />
+                  <IonIcon icon={ICON_ORT_GEFUELLT} className="app-info-row__icon app-icon-color--location" />
                   <div
                     onClick={() => {
                       if (eventData.location_maps_url) {
@@ -750,7 +809,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
               {/* Pflicht-Badge */}
               {eventData.mandatory && (
                 <div className="app-info-row">
-                  <IonIcon icon={shieldCheckmark} className="app-info-row__icon app-icon-color--events" />
+                  <IonIcon icon={ICON_SCHUTZ_GEFUELLT} className="app-info-row__icon app-icon-color--events" />
                   <div>
                     <div className="app-info-row__label">Pflicht-Event</div>
                     <div className="app-info-row__value">Teilnahme erforderlich</div>
@@ -766,7 +825,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                   lesen ihren Termin aus der Liste. */}
               {eventData.is_series && (
                 <div className="app-info-row">
-                  <IonIcon icon={copy} className="app-info-row__icon app-icon-color--events" />
+                  <IonIcon icon={ICON_KOPIEREN_GEFUELLT} className="app-info-row__icon app-icon-color--events" />
                   <div>
                     <div className="app-info-row__label">Terminreihe</div>
                     <div className="app-info-row__value">Teil einer Serie</div>
@@ -781,11 +840,11 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                   die sind zwei Tage und stehen im Anmelde-Abschnitt. */}
               {eventData.checkin_window && (
                 <div className="app-info-row app-info-row--top">
-                  <IonIcon icon={qrCodeOutline} className="app-info-row__icon app-icon-color--events app-event-detail__icon--align-top" />
+                  <IonIcon icon={ICON_QRCODE} className="app-info-row__icon app-icon-color--events app-event-detail__icon--align-top" />
                   <div>
                     <div className="app-info-row__label">Check-in-Fenster</div>
                     <div className="app-info-row__value">
-                      QR-Code {eventData.checkin_window} Min. vor bis {eventData.checkin_window} Min. nach Beginn
+                      QR-Code {eventData.checkin_window} Min. (vor/nach Beginn)
                     </div>
                   </div>
                 </div>
@@ -794,7 +853,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
               {/* Was mitbringen */}
               {eventData.bring_items && (
                 <div className="app-info-row app-info-row--top">
-                  <IonIcon icon={bagHandle} className="app-info-row__icon app-icon-color--bring app-event-detail__icon--align-top" />
+                  <IonIcon icon={ICON_MATERIAL} className="app-info-row__icon app-icon-color--bring app-event-detail__icon--align-top" />
                   <div>
                     <div className="app-info-row__label">Mitbringen</div>
                     <div className="app-info-row__value">{eventData.bring_items}</div>
@@ -812,7 +871,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           <IonList className="app-section-inset" inset={true}>
             <IonListHeader>
               <div className="app-section-icon app-section-icon--events">
-                <IonIcon icon={informationCircle} />
+                <IonIcon icon={ICON_INFO_GEFUELLT} />
               </div>
               <IonLabel>Beschreibung</IonLabel>
             </IonListHeader>
@@ -826,17 +885,175 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           </IonList>
         )}
 
+        <IonList className="app-section-inset" inset={true}>
+          <IonListHeader>
+            <div className="app-section-icon app-section-icon--events">
+              <IonIcon icon={ICON_GRUPPE_GEFUELLT} />
+            </div>
+            <IonLabel>Bist du dabei?</IonLabel>
+          </IonListHeader>
+          <IonCard className="app-card">
+            <IonCardContent className="app-card-content">
+              {eventData.mandatory ? (
+                (() => {
+                  const isPastEvent = istVergangen(eventData);
+                  const isOptedOut = eventData.is_opted_out || eventData.booking_status === 'opted_out';
+
+                  if (isPastEvent) {
+                    return (
+                      <IonNote color="medium" style={{ display: 'block', textAlign: 'center', fontSize: 'var(--app-text-betont)' }}>
+                        <IonIcon icon={ICON_SCHUTZ_GEFUELLT} style={{ verticalAlign: 'middle', marginRight: 'var(--app-abstand-kompakt)' }} />
+                        Pflicht-Event (vergangen)
+                      </IonNote>
+                    );
+                  }
+
+                  if (isOptedOut) {
+                    return (
+                      <div style={{ textAlign: 'center' }}>
+                        <div className="app-status-box app-status-box--events" style={{ marginBottom: 'var(--app-abstand-mittel)' }}>
+                          <IonIcon icon={ICON_ABSAGE} />
+                          Du hast dich abgemeldet
+                        </div>
+                        <IonButton
+                          className="app-action-button"
+                          expand="block"
+                          color="success"
+                          onClick={handleOptIn}
+                        >
+                          <IonIcon icon={ICON_ZUSAGE_GEFUELLT} slot="start" />
+                          Wieder anmelden
+                        </IonButton>
+                      </div>
+                    );
+                  }
+
+                  if (eventData.is_registered) {
+                    return (
+                      <div style={{ textAlign: 'center' }}>
+                        <IonNote color="medium" style={{ display: 'block', marginBottom: 'var(--app-abstand-mittel)', fontSize: 'var(--app-text-betont)' }}>
+                          <IonIcon icon={ICON_SCHUTZ_GEFUELLT} style={{ verticalAlign: 'middle', marginRight: 'var(--app-abstand-kompakt)' }} />
+                          Du bist automatisch angemeldet
+                        </IonNote>
+                        <IonButton
+                          className="app-action-button"
+                          expand="block"
+                          fill="outline"
+                          color="danger"
+                          onClick={() => presentOptOutModal({
+                            presentingElement: pageRef.current || undefined
+                          })}
+                        >
+                          <IonIcon icon={ICON_ABSAGE} slot="start" />
+                          {!isOnline
+                            ? <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Abmelden (wird gesendet)</>
+                            : 'Abmelden'}
+                        </IonButton>
+                      </div>
+                    );
+                  }
+
+                  // Nicht angemeldet bei Pflicht-Event -- nur Hinweis, kein Button
+                  return (
+                    <IonNote color="medium" style={{ display: 'block', textAlign: 'center', fontSize: 'var(--app-text-betont)' }}>
+                      <IonIcon icon={ICON_SCHUTZ_GEFUELLT} style={{ verticalAlign: 'middle', marginRight: 'var(--app-abstand-kompakt)' }} />
+                      Pflicht-Event
+                    </IonNote>
+                  );
+                })()
+              ) : eventData.is_registered ? (
+                <div>
+                  {canUnregister(eventData) ? (
+                    <IonButton
+                      className="app-action-button"
+                      expand="block"
+                      fill="outline"
+                      color="danger"
+                      onClick={() => presentUnregisterModal({
+                        presentingElement: pageRef.current || undefined
+                      })}
+                    >
+                      <IonIcon icon={ICON_ABSAGE} slot="start" />
+                      {!isOnline
+                        ? <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Abmelden (wird gesendet)</>
+                        : 'Abmelden'}
+                    </IonButton>
+                  ) : (
+                    <IonButton
+                      className="app-action-button"
+                      expand="block"
+                      fill="outline"
+                      color="medium"
+                      disabled
+                    >
+                      <IonIcon icon={ICON_WARNUNG_GEFUELLT} slot="start" />
+                      {/* Grund nennen statt nur zu sperren: abmelden geht bis
+                          2 Tage vor dem Termin (siehe canUnregister). */}
+                      Abmelden geht nur bis 2 Tage vorher
+                    </IonButton>
+                  )}
+                </div>
+              ) : (isKonfirmationEvent(eventData) && hasExistingKonfirmation) ? (
+                <IonButton
+                  className="app-action-button"
+                  expand="block"
+                  disabled
+                  color="medium"
+                >
+                  <IonIcon icon={ICON_WARNUNG_GEFUELLT} slot="start" />
+                  Konfirmationstermin bereits gebucht
+                </IonButton>
+              ) : eventData.can_register && eventData.registration_status === 'open' && (eventData.max_participants === 0 || eventData.registered_count < eventData.max_participants) ? (
+                <IonButton
+                  className="app-action-button"
+                  expand="block"
+                  color="success"
+                  disabled={!isOnline}
+                  onClick={handleRegister}
+                >
+                  <IonIcon icon={ICON_ZUSAGE_GEFUELLT} slot="start" />
+                  {!isOnline ? <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Du bist offline</> : `Anmelden (${eventData.registered_count}/${eventData.max_participants})`}
+                </IonButton>
+              ) : eventData.waitlist_enabled && eventData.max_participants > 0 && eventData.registered_count >= eventData.max_participants && eventData.registration_status === 'open' ? (
+                <IonButton
+                  className="app-action-button"
+                  expand="block"
+                  color="warning"
+                  disabled={!isOnline}
+                  onClick={handleRegister}
+                >
+                  <IonIcon icon={ICON_WARTEND_GEFUELLT} slot="start" />
+                  {!isOnline ? <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Du bist offline</> : `Warteliste offen (${eventData.waitlist_count || 0}/${eventData.max_waitlist_size || 0})`}
+                </IonButton>
+              ) : (
+                <IonButton
+                  className="app-action-button"
+                  expand="block"
+                  disabled
+                  color="medium"
+                >
+                  <IonIcon icon={ICON_INFO_GEFUELLT} slot="start" />
+                  {eventData.registration_status === 'closed' ? 'Anmeldung geschlossen' : 'Nicht verfügbar'}
+                </IonButton>
+              )}
+            </IonCardContent>
+          </IonCard>
+        </IonList>
+
         {/* Teilnehmer-Liste */}
+        {participants.length === 0 && !isOnline && (
+          <OfflinePlatzhalter was="Die Teilnehmerliste" />
+        )}
         {participants.length > 0 && (
           <IonList className="app-section-inset" inset={true}>
             <IonListHeader>
               <div className="app-section-icon app-section-icon--events">
-                <IonIcon icon={people} />
+                <IonIcon icon={ICON_GRUPPE_GEFUELLT} />
               </div>
               <IonLabel>Teilnehmer:innen ({participants.length})</IonLabel>
             </IonListHeader>
             <IonCard className="app-card">
-              <IonCardContent style={{ padding: '12px' }}>
+              <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   {participants.map((participant) => (
                     <div
@@ -846,7 +1063,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                       <div className="app-list-item__row">
                         <div className="app-list-item__main">
                           <div className="app-icon-circle app-icon-circle--events">
-                            <IonIcon icon={personOutline} />
+                            <IonIcon icon={ICON_PERSON} />
                           </div>
                           <div className="app-list-item__content">
                             <div className="app-list-item__title">{participant.display_name}</div>
@@ -861,149 +1078,6 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           </IonList>
         )}
 
-        {/* Action Buttons */}
-        <div className="app-event-detail__action-area">
-          {eventData.mandatory ? (
-            (() => {
-              const isPastEvent = istVergangen(eventData);
-              const isOptedOut = eventData.is_opted_out || eventData.booking_status === 'opted_out';
-
-              if (isPastEvent) {
-                return (
-                  <IonNote color="medium" style={{ display: 'block', textAlign: 'center', padding: '16px', fontSize: '0.95rem' }}>
-                    <IonIcon icon={shieldCheckmark} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
-                    Pflicht-Event (vergangen)
-                  </IonNote>
-                );
-              }
-
-              if (isOptedOut) {
-                return (
-                  <div style={{ textAlign: 'center', padding: '12px 16px' }}>
-                    <div className="app-status-box app-status-box--events" style={{ marginBottom: '12px' }}>
-                      <IonIcon icon={closeCircle} />
-                      Du hast dich abgemeldet
-                    </div>
-                    <IonButton
-                      className="app-action-button"
-                      expand="block"
-                      color="success"
-                      onClick={handleOptIn}
-                    >
-                      <IonIcon icon={checkmarkCircle} slot="start" />
-                      Wieder anmelden
-                    </IonButton>
-                  </div>
-                );
-              }
-
-              if (eventData.is_registered) {
-                return (
-                  <div style={{ textAlign: 'center', padding: '12px 16px' }}>
-                    <IonNote color="medium" style={{ display: 'block', marginBottom: '12px', fontSize: '0.95rem' }}>
-                      <IonIcon icon={shieldCheckmark} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
-                      Du bist automatisch angemeldet
-                    </IonNote>
-                    <IonButton
-                      className="app-action-button"
-                      expand="block"
-                      fill="outline"
-                      color="danger"
-                      disabled={!isOnline}
-                      onClick={() => presentOptOutModal({
-                        presentingElement: pageRef.current || undefined
-                      })}
-                    >
-                      <IonIcon icon={closeCircle} slot="start" />
-                      {!isOnline ? <><IonIcon icon={cloudOfflineOutline} style={{ marginRight: 4 }} /> Du bist offline</> : 'Abmelden'}
-                    </IonButton>
-                  </div>
-                );
-              }
-
-              // Nicht angemeldet bei Pflicht-Event -- nur Hinweis, kein Button
-              return (
-                <IonNote color="medium" style={{ display: 'block', textAlign: 'center', padding: '16px', fontSize: '0.95rem' }}>
-                  <IonIcon icon={shieldCheckmark} style={{ verticalAlign: 'middle', marginRight: '6px' }} />
-                  Pflicht-Event
-                </IonNote>
-              );
-            })()
-          ) : eventData.is_registered ? (
-            <div>
-              {canUnregister(eventData) ? (
-                <IonButton
-                  className="app-action-button"
-                  expand="block"
-                  fill="outline"
-                  color="danger"
-                  disabled={!isOnline}
-                  onClick={() => presentUnregisterModal({
-                    presentingElement: pageRef.current || undefined
-                  })}
-                >
-                  <IonIcon icon={closeCircle} slot="start" />
-                  {!isOnline ? <><IonIcon icon={cloudOfflineOutline} style={{ marginRight: 4 }} /> Du bist offline</> : 'Abmelden'}
-                </IonButton>
-              ) : (
-                <IonButton
-                  className="app-action-button"
-                  expand="block"
-                  fill="outline"
-                  color="medium"
-                  disabled
-                >
-                  <IonIcon icon={warning} slot="start" />
-                  {/* Grund nennen statt nur zu sperren: abmelden geht bis
-                      2 Tage vor dem Termin (siehe canUnregister). */}
-                  Abmelden geht nur bis 2 Tage vorher
-                </IonButton>
-              )}
-            </div>
-          ) : (isKonfirmationEvent(eventData) && hasExistingKonfirmation) ? (
-            <IonButton
-              className="app-action-button"
-              expand="block"
-              disabled
-              color="medium"
-            >
-              <IonIcon icon={warning} slot="start" />
-              Konfirmationstermin bereits gebucht
-            </IonButton>
-          ) : eventData.can_register && eventData.registration_status === 'open' && (eventData.max_participants === 0 || eventData.registered_count < eventData.max_participants) ? (
-            <IonButton
-              className="app-action-button"
-              expand="block"
-              color="success"
-              disabled={!isOnline}
-              onClick={handleRegister}
-            >
-              <IonIcon icon={checkmarkCircle} slot="start" />
-              {!isOnline ? <><IonIcon icon={cloudOfflineOutline} style={{ marginRight: 4 }} /> Du bist offline</> : `Anmelden (${eventData.registered_count}/${eventData.max_participants})`}
-            </IonButton>
-          ) : eventData.waitlist_enabled && eventData.max_participants > 0 && eventData.registered_count >= eventData.max_participants && eventData.registration_status === 'open' ? (
-            <IonButton
-              className="app-action-button"
-              expand="block"
-              color="warning"
-              disabled={!isOnline}
-              onClick={handleRegister}
-            >
-              <IonIcon icon={hourglass} slot="start" />
-              {!isOnline ? <><IonIcon icon={cloudOfflineOutline} style={{ marginRight: 4 }} /> Du bist offline</> : `Warteliste offen (${eventData.waitlist_count || 0}/${eventData.max_waitlist_size || 0})`}
-            </IonButton>
-          ) : (
-            <IonButton
-              className="app-action-button"
-              expand="block"
-              disabled
-              color="medium"
-            >
-              <IonIcon icon={informationCircle} slot="start" />
-              {eventData.registration_status === 'closed' ? 'Anmeldung geschlossen' : 'Nicht verfügbar'}
-            </IonButton>
-          )}
-        </div>
 
       </IonContent>
     </IonPage>

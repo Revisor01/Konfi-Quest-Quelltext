@@ -1,0 +1,86 @@
+/*
+   Zusammengelegt wurden nur Nachbarwerte mit 1px Differenz
+   (3px->4px, 5px->4px) und Schatten-Alphas unter 0.03
+   Unterschied — beides optisch nicht wahrnehmbar.
+   ============================================================ */
+
+:root {
+  /* ---- Abstands-Skala (padding, margin, gap) ----
+     Aufsteigend; "basis" (16px) ist der Standardabstand
+     der Karten und Listen, "eng" (8px) der Standard fuer
+     Elemente innerhalb einer Zeile. */
+  --app-abstand-haar: 1px;        /* Feinjustierung, z. B. Icon-Ausrichtung */
+  --app-abstand-winzig: 2px;
+  --app-abstand-mini: 4px;        /* auch fuer ehem. 3px/5px (1px-Zusammenlegung) */
+  --app-abstand-kompakt: 6px;
+  --app-abstand-eng: 8px;
+  --app-abstand-schmal: 10px;
+  --app-abstand-mittel: 12px;
+  --app-abstand-mittelweit: 14px;
+  --app-abstand-basis: 16px;
+  --app-abstand-gross: 20px;
+  --app-abstand-weit: 24px;
+  --app-abstand-sehrweit: 28px;
+  --app-abstand-extraweit: 32px;
+  --app-abstand-riesig: 40px;
+  --app-abstand-block: 48px;      /* z. B. Innenabstand zentrierter Lade-Spinner */
+
+  /* ---- Freiraum-Tokens (grosse Layout-Versaetze) ----
+     Kein Rhythmus, sondern reservierter Platz fuer ueberlagernde
+     Elemente. "aktion": padding-right im Listeneintrag, damit Text
+     nicht unter absolut positionierte Badges/Buttons rechts laeuft —
+     die Breite richtet sich nach dem Badge der jeweiligen Ansicht.
+     "kopf": Abstand von oben fuer Hero-/Detail-Koepfe und
+     Ladehinweise. */
+  --app-freiraum-aktion-xxs: 34px;
+  --app-freiraum-aktion-xs: 36px;
+  --app-freiraum-aktion-s: 50px;
+  --app-freiraum-aktion-m: 60px;
+  --app-freiraum-aktion-l: 70px;
+  --app-freiraum-aktion-xl: 80px;
+  --app-freiraum-aktion-xxl: 100px;
+  --app-freiraum-aktion-xxl-plus: 110px;
+  --app-freiraum-aktion-xxxl: 120px;
+  --app-freiraum-kopf-m: 60px;
+  --app-freiraum-kopf-l: 70px;
+  --app-freiraum-kopf-xl: 80px;
+  --app-freiraum-fuss: 56px;      /* Onboarding: Platz fuer Punkte/Steuerung unten */
+
+  /* ---- Eckradien ----
+     "karte" (12px) ist der Standard der App-Karten,
+     "knopf" (10px) der kleiner Bedienelemente. */
+  /* Von 15 auf 9 Stufen eingedampft: Sechs Stufen waren
+     Einzelgaenger mit 0-3 Nutzungen und standen dem eigentlichen Zweck im Weg
+     -- eine kurze Liste, in der man die passende Stufe auf einen Blick findet.
+     Zusammengelegt (max. 4px Unterschied, unsichtbar):
+       2 -> 4 (haarfein)      6 -> 8 (schmal)
+      18 -> 16 (Chat-Blase)  20 -> 16 (extragross)
+      22 -> 24 (Kachel)      28 -> 24 (grosse Kachel) */
+  --app-radius-fein: 4px;
+  --app-radius-klein: 8px;
+  --app-radius-knopf: 10px;
+  --app-radius-karte: 12px;
+  --app-radius-weich: 14px;
+  --app-radius-gross: 16px;
+  --app-radius-modal: 24px;
+  --app-radius-kreis: 50%;
+  --app-radius-band: 0 10px 0 10px; /* diagonal abgeschraegtes Eckband ("Neu"-Banderole) */
+
+  /* ---- Schatten ----
+     Neutrale Grau-Schatten, aufsteigend nach Hoehe.
+     Farbige Glows einzelner Markenflaechen bleiben bewusst bei
+     ihren Komponenten (siehe Kommentar dort). */
+  --app-schatten-fein: 0 1px 4px rgba(0, 0, 0, 0.06);
+  --app-schatten-flach: 0 1px 3px rgba(0, 0, 0, 0.1);
+  --app-schatten-flach-stark: 0 1px 3px rgba(0, 0, 0, 0.2);
+  --app-schatten-hauch: 0 2px 8px rgba(0, 0, 0, 0.05);
+  --app-schatten-karte: 0 2px 8px rgba(0, 0, 0, 0.1);
+  --app-schatten-karte-stark: 0 2px 8px rgba(0, 0, 0, 0.15);
+  --app-schatten-schwebend: 0 4px 12px rgba(0, 0, 0, 0.1);
+  --app-schatten-schwebend-stark: 0 4px 16px rgba(0, 0, 0, 0.15);
+  --app-schatten-hoch: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --app-schatten-modal: 0 10px 28px rgba(0, 0, 0, 0.18);
+  /* Wiederkehrende farbige Schatten */
+  --app-schatten-punkt-erfolg: 0 2px 6px rgba(16, 185, 129, 0.5); /* gruener Status-Punkt */
+  --app-schatten-glow-challenges: 0 4px 12px rgba(var(--app-color-challenges-rgb), 0.35);
+}

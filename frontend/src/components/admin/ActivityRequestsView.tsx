@@ -10,16 +10,17 @@ import {
   IonSegmentButton
 } from '@ionic/react';
 import {
-  checkmarkCircle,
-  closeCircle,
-  hourglass,
-  documentTextOutline,
-  calendar,
-  home,
-  people,
-  trophy,
-  returnUpBack
-} from 'ionicons/icons';
+  ICON_ABSAGE,
+  ICON_ANTWORTEN,
+  ICON_GEMEINDE_GEFUELLT,
+  ICON_GOTTESDIENST_GEFUELLT,
+  ICON_GRUPPE_GEFUELLT,
+  ICON_POKAL_GEFUELLT,
+  ICON_TERMIN_GEFUELLT,
+  ICON_TEXTDOKUMENT,
+  ICON_WARTEND_GEFUELLT,
+  ICON_ZUSAGE_GEFUELLT,
+} from '../shared/icons';
 import { SectionHeader, ListSection, StatusBadge } from '../shared';
 import { closeOpenSlidingItems } from '../../utils/slidingItems';
 
@@ -46,20 +47,20 @@ interface ActivityRequest {
 
 interface ActivityRequestsViewProps {
   requests: ActivityRequest[];
-  onUpdate: () => void;
   onSelectRequest: (request: ActivityRequest) => void;
   onResetRequest: (request: ActivityRequest) => void;
   // Zusaetzlicher Inhalt DIREKT UNTER dem SectionHeader (z.B. das Events|Aktivitäten-
   // Hauptsegment der Page, analog zum Konfi-Pattern in KonfiEventsPage).
   headerSlot?: React.ReactNode;
+  ohneJahrgang?: boolean;
 }
 
 const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
   requests: requestsRaw,
-  onUpdate,
   onSelectRequest,
   onResetRequest,
-  headerSlot
+  headerSlot,
+  ohneJahrgang = false
 }) => {
   // Defensive: bei kaputten/gecachten Responses (Object statt Array) auf [] fallen
   const requests: ActivityRequest[] = Array.isArray(requestsRaw) ? requestsRaw : [];
@@ -96,11 +97,11 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
   };
 
   const getTypeIcon = (type: string) => {
-    return type === 'gottesdienst' ? home : people;
+    return type === 'gottesdienst' ? ICON_GOTTESDIENST_GEFUELLT : ICON_GEMEINDE_GEFUELLT;
   };
 
   const getTypeColor = (type: string) => {
-    return type === 'gottesdienst' ? '#007aff' : '#059669';
+    return type === 'gottesdienst' ? 'var(--app-color-info)' : 'var(--app-color-gemeinde)';
   };
 
   return (
@@ -108,7 +109,7 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
       <SectionHeader
         title="Aktivitäten"
         subtitle="Gemeldete Aktivitäten verwalten"
-        icon={documentTextOutline}
+        icon={ICON_TEXTDOKUMENT}
         preset="activities"
         stats={[
           // Die Kacheln entsprechen den drei Filter-Reitern und schalten dorthin.
@@ -121,10 +122,10 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
       {headerSlot}
 
       {/* Tab Filter - wie bei Events */}
-      <div style={{ margin: '16px 16px 8px 16px' }}>
+      <div style={{ margin: 'var(--app-abstand-basis) var(--app-abstand-basis) var(--app-abstand-eng) var(--app-abstand-basis)' }}>
         <IonSegment
           value={statusFilter}
-          onIonChange={(e) => setStatusFilter(e.detail.value as any)}
+          onIonChange={(e) => setStatusFilter(e.detail.value as 'all' | 'pending' | 'approved' | 'rejected')}
         >
           <IonSegmentButton value="pending">
             <IonLabel>Offen</IonLabel>
@@ -139,15 +140,19 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
       </div>
       {/* Aktivitäten-Liste */}
       <ListSection
-        icon={documentTextOutline}
+        icon={ICON_TEXTDOKUMENT}
         title="Aktivitäten"
         count={filteredAndSortedRequests.length}
         iconColorClass="success"
         isEmpty={filteredAndSortedRequests.length === 0}
-        emptyIcon={documentTextOutline}
-        emptyTitle="Keine Aktivitäten vorhanden"
-        emptyMessage="Konfirmand:innen können Aktivitäten beantragen"
-        emptyIconColor="#059669"
+        emptyIcon={ICON_TEXTDOKUMENT}
+        emptyTitle={ohneJahrgang ? 'Kein Jahrgang zugewiesen' : 'Keine Aktivitäten vorhanden'}
+        emptyMessage={
+          ohneJahrgang
+            ? 'Dir ist noch kein Jahrgang zugewiesen, deshalb siehst du keine Meldungen von Konfis. Die Leitung deiner Gemeinde kann das in den Einstellungen ändern.'
+            : 'Konfirmand:innen können Aktivitäten beantragen'
+        }
+        emptyIconColor="var(--app-color-success-strong)"
       >
         {filteredAndSortedRequests.map((request, index) => {
                   const isPending = request.status === 'pending';
@@ -155,11 +160,11 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
                   const isRejected = request.status === 'rejected';
 
                   // Status-Farbe und Text
-                  const statusColor = isPending ? '#ff9500' : isApproved ? '#059669' : '#dc3545';
+                  const statusColor = isPending ? 'var(--app-color-warning)' : isApproved ? 'var(--app-color-success-strong)' : 'var(--app-color-danger)';
                   const statusText = isPending ? 'Offen' : isApproved ? 'Verbucht' : 'Abgelehnt';
 
                   return (
-                    <IonItemSliding key={request.id} style={{ marginBottom: index < filteredAndSortedRequests.length - 1 ? '8px' : '0' }}>
+                    <IonItemSliding key={request.id} style={{ marginBottom: index < filteredAndSortedRequests.length - 1 ? 'var(--app-abstand-eng)' : '0' }}>
                       <IonItem
                         button
                         onClick={() => onSelectRequest(request)}
@@ -191,10 +196,10 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
                               <>
                                 <div
                                   className="app-corner-badge"
-                                  style={{ backgroundColor: 'var(--app-color-teamer)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
+                                  style={{ backgroundColor: 'var(--app-color-teamer)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
                                   title="Team-Aktivität"
                                 >
-                                  <IonIcon icon={people} style={{ color: '#fff', fontSize: '0.85rem' }} />
+                                  <IonIcon icon={ICON_GRUPPE_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                                 </div>
                                 <div className="app-corner-badges__separator" />
                               </>
@@ -208,7 +213,7 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
                                 className="app-icon-circle app-icon-circle--lg"
                                 style={{ backgroundColor: statusColor }}
                               >
-                                <IonIcon icon={isPending ? hourglass : isApproved ? checkmarkCircle : closeCircle} />
+                                <IonIcon icon={isPending ? ICON_WARTEND_GEFUELLT : isApproved ? ICON_ZUSAGE_GEFUELLT : ICON_ABSAGE} />
                               </div>
 
                               {/* Content */}
@@ -217,8 +222,8 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
                                 <div
                                   className="app-list-item__title"
                                   style={{
-                                    color: (isApproved || isRejected) ? '#999' : undefined,
-                                    paddingRight: '70px'
+                                    color: (isApproved || isRejected) ? 'var(--app-text-muted)' : undefined,
+                                    paddingRight: 'var(--app-freiraum-aktion-l)'
                                   }}
                                 >
                                   {request.konfi_name}
@@ -226,7 +231,7 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
 
                                 {/* Zeile 2: Aktivitätsname */}
                                 <div className="app-list-item__subtitle" style={{
-                                  color: (isApproved || isRejected) ? '#999' : '#666',
+                                  color: (isApproved || isRejected) ? 'var(--app-text-muted)' : 'var(--app-text-secondary)',
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',
                                   whiteSpace: 'nowrap'
@@ -237,28 +242,28 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
                                 {/* Zeile 3: Meta-Infos */}
                                 <div className="app-list-item__meta">
                                   <span className="app-list-item__meta-item">
-                                    <IonIcon icon={calendar} style={{ color: (isApproved || isRejected) ? '#999' : '#059669' }} />
+                                    <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ color: (isApproved || isRejected) ? 'var(--app-text-muted)' : 'var(--app-color-success-strong)' }} />
                                     {formatDate(request.requested_date)}
                                   </span>
                                   {/* Teamer-Antraege sind reiner Nachweis -> KEINE Punkte und KEIN
                                       Punkte-Typ (GD/Gem.) anzeigen; stattdessen "Team"-Kennzeichnung. */}
                                   {request.activity_target_role === 'teamer' ? (
                                     <span className="app-list-item__meta-item">
-                                      <IonIcon icon={people} style={{ color: (isApproved || isRejected) ? '#999' : 'var(--app-color-teamer)' }} />
+                                      <IonIcon icon={ICON_GRUPPE_GEFUELLT} style={{ color: (isApproved || isRejected) ? 'var(--app-text-muted)' : 'var(--app-color-teamer)' }} />
                                       Team
                                     </span>
                                   ) : (
                                     <>
                                       {request.activity_points && (
                                         <span className="app-list-item__meta-item">
-                                          <IonIcon icon={trophy} style={{ color: (isApproved || isRejected) ? '#999' : '#ff9500' }} />
+                                          <IonIcon icon={ICON_POKAL_GEFUELLT} style={{ color: (isApproved || isRejected) ? 'var(--app-text-muted)' : 'var(--app-color-warning)' }} />
                                           {request.activity_points}P
                                         </span>
                                       )}
                                       <span className="app-list-item__meta-item">
                                         <IonIcon
                                           icon={getTypeIcon(request.activity_type || 'gemeinde')}
-                                          style={{ color: (isApproved || isRejected) ? '#999' : getTypeColor(request.activity_type || 'gemeinde') }}
+                                          style={{ color: (isApproved || isRejected) ? 'var(--app-text-muted)' : getTypeColor(request.activity_type || 'gemeinde') }}
                                         />
                                         {request.activity_type === 'gottesdienst' ? 'GD' : 'Gem.'}
                                       </span>
@@ -282,7 +287,7 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
                             className="app-swipe-action"
                           >
                             <div className="app-icon-circle app-icon-circle--lg app-icon-circle--warning">
-                              <IonIcon icon={returnUpBack} />
+                              <IonIcon icon={ICON_ANTWORTEN} />
                             </div>
                           </IonItemOption>
                         </IonItemOptions>

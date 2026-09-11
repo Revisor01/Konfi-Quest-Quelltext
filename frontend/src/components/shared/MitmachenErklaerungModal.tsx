@@ -1,5 +1,5 @@
 import React from 'react';
-import { calendarOutline, checkmarkCircleOutline, swapHorizontalOutline } from 'ionicons/icons';
+import { ICON_TERMIN, ICON_WECHSEL, ICON_ZUSAGE } from './icons';
 import OnboardingTour, { OnboardingSlide } from './OnboardingTour';
 
 interface MitmachenErklaerungModalProps {
@@ -15,14 +15,14 @@ interface MitmachenErklaerungModalProps {
 // Neuerungen der Version streift.
 export const SLIDES_BASIS: OnboardingSlide[] = [
   {
-    icon: swapHorizontalOutline,
+    icon: ICON_WECHSEL,
     color: 'var(--app-color-activities)',
     rgb: '--app-color-activities-rgb',
     title: 'Alles an einem Ort',
     text: 'Events und Aktivitäten wohnen zusammen im Tab "Mitmachen" — oben schaltest du zwischen beiden Reitern um. Einen eigenen Tab für Anträge gibt es nicht mehr: Aus den Anträgen sind die Aktivitäten geworden.',
   },
   {
-    icon: calendarOutline,
+    icon: ICON_TERMIN,
     color: 'var(--app-color-events)',
     rgb: '--app-color-events-rgb',
     title: 'Events: vorher anmelden',
@@ -31,7 +31,7 @@ export const SLIDES_BASIS: OnboardingSlide[] = [
 ];
 
 const SLIDE_AKTIVITAETEN_KONFI: OnboardingSlide = {
-  icon: checkmarkCircleOutline,
+  icon: ICON_ZUSAGE,
   color: 'var(--app-color-activities)',
   rgb: '--app-color-activities-rgb',
   title: 'Aktivitäten: hinterher melden',
@@ -41,7 +41,7 @@ const SLIDE_AKTIVITAETEN_KONFI: OnboardingSlide = {
 // Nur die Leitung bestätigt Meldungen: PUT /activities/requests/:id ist
 // requireAdmin (activities.js:473), Teamer:innen sind dort ausgeschlossen.
 const SLIDE_AKTIVITAETEN_LEITUNG: OnboardingSlide = {
-  icon: checkmarkCircleOutline,
+  icon: ICON_ZUSAGE,
   color: 'var(--app-color-activities)',
   rgb: '--app-color-activities-rgb',
   title: 'Aktivitäten: bestätigen',
@@ -49,7 +49,7 @@ const SLIDE_AKTIVITAETEN_LEITUNG: OnboardingSlide = {
 };
 
 const SLIDE_AKTIVITAETEN_TEAMER: OnboardingSlide = {
-  icon: checkmarkCircleOutline,
+  icon: ICON_ZUSAGE,
   color: 'var(--app-color-activities)',
   rgb: '--app-color-activities-rgb',
   title: 'Aktivitäten: hinterher melden',

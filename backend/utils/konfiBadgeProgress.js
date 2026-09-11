@@ -14,6 +14,7 @@
 const { computeCurrentStreak } = require('./streakCalculation');
 const { KONFI_BADGE_EVENT_CONDITION } = require('./badgeEventRule');
 const { berechneBadgeProgress, bedingungFehlt } = require('./badgeProgress');
+const { KONFI_KATEGORIE_NAMEN_SQL } = require('./badgeKategorieRegel');
 
 // Ermittelt Badges (earned + available + Fortschritt) für einen Konfi.
 // Erwartet: db (pg Pool), konfiId (users.id), organizationId.
@@ -61,7 +62,8 @@ async function getKonfiBadgeProgress(db, konfiId, organizationId) {
     bonusPointsRes,
     datesRes,
     categoryCountsRes,
-    activityNameCountsRes
+    activityNameCountsRes,
+    kategorieNamenRes
   ] = await Promise.all([
     db.query(query, [konfiId, organizationId]),
     db.query(
@@ -113,7 +115,11 @@ async function getKonfiBadgeProgress(db, konfiId, organizationId) {
        WHERE ua.user_id = $1 AND a.organization_id = $2
        GROUP BY a.name`,
       [konfiId, organizationId]
-    )
+    ),
+    // category_combination: aus welchen Kategorien war der Konfi dabei.
+    // Query-Text aus utils/badgeKategorieRegel.js -- byte-identisch zur
+    // Wertung in routes/badges.js (Konfi-Zweig).
+    db.query(KONFI_KATEGORIE_NAMEN_SQL, [konfiId, organizationId])
   ]);
 
   const badges = badgesRes.rows;
@@ -134,6 +140,9 @@ async function getKonfiBadgeProgress(db, konfiId, organizationId) {
   // Map statt Plain Object: schuetzt vor Prototype-Keys als Kategorie-/Aktivitaetsnamen.
   const categoryCounts = new Map(categoryCountsRes.rows.map(r => [r.name, parseInt(r.count)]));
   const activityNameCounts = new Map(activityNameCountsRes.rows.map(r => [r.name, parseInt(r.count)]));
+  // Set statt Map: bei category_combination zaehlt jede Kategorie hoechstens
+  // einmal, die Anzahl interessiert dort nicht.
+  const abgedeckteKategorien = new Set(kategorieNamenRes.rows.map(r => r.name));
 
   const isUnreachable = (badge) => {
     if (bedingungFehlt(badge)) return true;
@@ -178,6 +187,7 @@ async function getKonfiBadgeProgress(db, konfiId, organizationId) {
       teamerJahre: 0,
       proKategorie: categoryCounts,
       proAktivitaetsname: activityNameCounts,
+      abgedeckteKategorien,
       // erfuellteEventTitel bewusst NICHT gesetzt: Die Konfi-Wertung zaehlt
       // bei activity_combination allein die Aktivitaeten.
       streak: currentStreak,

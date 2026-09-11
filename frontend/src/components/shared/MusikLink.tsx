@@ -4,7 +4,7 @@
 // Musikdienst kontaktiert werden.
 import React from 'react';
 import { IonIcon } from '@ionic/react';
-import { openOutline, musicalNotesOutline } from 'ionicons/icons';
+import { ICON_EXTERN_OEFFNEN, ICON_MUSIK } from './icons';
 import { linkTeile } from '../../utils/linkDisplay';
 
 interface MusikLinkProps {
@@ -39,23 +39,23 @@ const MusikLink: React.FC<MusikLinkProps> = ({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '10px',
-        marginTop: '8px',
-        padding: '10px 12px',
-        borderRadius: '10px',
+        gap: 'var(--app-abstand-schmal)',
+        marginTop: 'var(--app-abstand-eng)',
+        padding: 'var(--app-abstand-schmal) var(--app-abstand-mittel)',
+        borderRadius: 'var(--app-radius-knopf)',
         background: 'var(--app-surface-subtle, rgba(127,127,127,0.08))',
         textDecoration: 'none',
         maxWidth: '100%'
       }}
     >
       <IonIcon
-        icon={hatMetadaten ? musicalNotesOutline : openOutline}
-        style={{ flexShrink: 0, fontSize: '1.3rem', color: farbe }}
+        icon={hatMetadaten ? ICON_MUSIK : ICON_EXTERN_OEFFNEN}
+        style={{ flexShrink: 0, fontSize: 'var(--app-text-titel)', color: farbe }}
       />
       <div style={{ minWidth: 0, flex: 1 }}>
         <div
           style={{
-            fontSize: '0.92rem', fontWeight: 700, color: 'var(--app-text-primary, inherit)',
+            fontSize: 'var(--app-text-basis)', fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-text-primary, inherit)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
           }}
         >
@@ -64,7 +64,7 @@ const MusikLink: React.FC<MusikLinkProps> = ({
         {interpret && (
           <div
             style={{
-              fontSize: '0.84rem', color: 'var(--app-text-secondary, #6b7280)',
+              fontSize: 'var(--app-text-sekundaer)', color: 'var(--app-text-secondary)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
             }}
           >
@@ -74,7 +74,7 @@ const MusikLink: React.FC<MusikLinkProps> = ({
         {album && (
           <div
             style={{
-              fontSize: '0.78rem', color: 'var(--app-text-system, #8e8e93)',
+              fontSize: 'var(--app-text-hinweis)', color: 'var(--app-text-system)',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
             }}
           >
@@ -82,12 +82,12 @@ const MusikLink: React.FC<MusikLinkProps> = ({
           </div>
         )}
         {dienst && (
-          <div style={{ fontSize: '0.74rem', color: farbe, fontWeight: 600, marginTop: '2px' }}>
+          <div style={{ fontSize: 'var(--app-text-klein)', color: farbe, fontWeight: 'var(--app-schrift-halbfett)', marginTop: 'var(--app-abstand-winzig)' }}>
             {dienst}
           </div>
         )}
       </div>
-      <IonIcon icon={openOutline} style={{ flexShrink: 0, color: farbe, fontSize: '1rem' }} />
+      <IonIcon icon={ICON_EXTERN_OEFFNEN} style={{ flexShrink: 0, color: farbe, fontSize: 'var(--app-text-standard)' }} />
     </a>
   );
 };

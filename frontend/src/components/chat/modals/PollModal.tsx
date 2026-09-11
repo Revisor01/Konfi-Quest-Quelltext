@@ -21,16 +21,16 @@ import {
   IonSpinner
 } from '@ionic/react';
 import {
-  closeOutline,
-  checkmarkOutline,
-  addOutline,
-  removeCircleOutline,
-  helpCircleOutline,
-  listOutline,
-  settingsOutline,
-  timeOutline,
-  cloudOfflineOutline
-} from 'ionicons/icons';
+  ICON_EINSTELLUNGEN,
+  ICON_ENTFERNEN,
+  ICON_HAKEN,
+  ICON_HILFE,
+  ICON_HINZUFUEGEN,
+  ICON_LISTE,
+  ICON_OFFLINE,
+  ICON_SCHLIESSEN,
+  ICON_UHRZEIT,
+} from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import api from '../../../services/api';
@@ -138,26 +138,26 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton className="app-modal-close-btn" onClick={handleClose} disabled={creating} aria-label="Schließen">
-              <IonIcon icon={closeOutline} slot="icon-only" />
+              <IonIcon icon={ICON_SCHLIESSEN} slot="icon-only" />
             </IonButton>
           </IonButtons>
           <IonTitle>Neue Umfrage</IonTitle>
           <IonButtons slot="end">
             <IonButton className="app-modal-submit-btn app-modal-submit-btn--chat" onClick={createPoll} disabled={!canCreate() || creating || !isOnline} aria-label="Umfrage erstellen">
-              {!isOnline ? <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</> : creating ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} slot="icon-only" />}
+              {!isOnline ? <><IonIcon icon={ICON_OFFLINE} /> Du bist offline</> : creating ? <IonSpinner name="crescent" /> : <IonIcon icon={ICON_HAKEN} slot="icon-only" />}
             </IonButton>
           </IonButtons>
         </IonToolbar>
       </IonHeader>
 
       <IonContent className="app-gradient-background">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-basis)' }}>
 
           {/* Frage */}
           <IonList inset={true}>
             <IonListHeader>
               <div className="app-section-icon app-section-icon--chat">
-                <IonIcon icon={helpCircleOutline} />
+                <IonIcon icon={ICON_HILFE} />
               </div>
               <IonLabel>Frage</IonLabel>
             </IonListHeader>
@@ -182,7 +182,7 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
           <IonList inset={true}>
             <IonListHeader>
               <div className="app-section-icon app-section-icon--chat">
-                <IonIcon icon={listOutline} />
+                <IonIcon icon={ICON_LISTE} />
               </div>
               <IonLabel>Antwortmöglichkeiten</IonLabel>
             </IonListHeader>
@@ -204,9 +204,9 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
                       fill="clear"
                       slot="end"
                       onClick={() => removeOption(index)}
-                      style={{ '--color': '#dc3545' }}
+                      style={{ '--color': 'var(--app-color-danger)' }}
                     >
-                      <IonIcon icon={removeCircleOutline} />
+                      <IonIcon icon={ICON_ENTFERNEN} />
                     </IonButton>
                   )}
                 </IonItem>
@@ -215,8 +215,8 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
               {/* Option hinzufügen */}
               {options.length < 10 && (
                 <IonItem button onClick={addOption} detail={false}>
-                  <IonIcon icon={addOutline} slot="start" style={{ color: '#06b6d4' }} />
-                  <IonLabel style={{ color: '#06b6d4' }}>Option hinzufügen</IonLabel>
+                  <IonIcon icon={ICON_HINZUFUEGEN} slot="start" style={{ color: 'var(--app-color-chat)' }} />
+                  <IonLabel style={{ color: 'var(--app-color-chat)' }}>Option hinzufügen</IonLabel>
                 </IonItem>
               )}
             </IonItemGroup>
@@ -226,7 +226,7 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
           <IonList inset={true}>
             <IonListHeader>
               <div className="app-section-icon app-section-icon--chat">
-                <IonIcon icon={settingsOutline} />
+                <IonIcon icon={ICON_EINSTELLUNGEN} />
               </div>
               <IonLabel>Einstellungen</IonLabel>
             </IonListHeader>
@@ -303,7 +303,7 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
 
               {hasExpiration && (
                 <IonItem>
-                  <IonIcon icon={timeOutline} slot="start" style={{ color: '#06b6d4' }} />
+                  <IonIcon icon={ICON_UHRZEIT} slot="start" style={{ color: 'var(--app-color-chat)' }} />
                   <IonSelect
                     value={expirationHours}
                     onIonChange={(e) => setExpirationHours(e.detail.value)}

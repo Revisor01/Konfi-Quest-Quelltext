@@ -17,18 +17,17 @@ import {
   IonCardContent
 } from '@ionic/react';
 import {
-  closeOutline,
-  documentTextOutline,
-  camera,
-  checkmarkCircle,
-  closeCircle,
-  hourglass,
-  trashOutline
-} from 'ionicons/icons';
-import { useApp } from '../../../contexts/AppContext';
+  ICON_ABSAGE,
+  ICON_KAMERA_GEFUELLT,
+  ICON_LOESCHEN,
+  ICON_SCHLIESSEN,
+  ICON_TEXTDOKUMENT,
+  ICON_WARTEND_GEFUELLT,
+  ICON_ZUSAGE_GEFUELLT,
+} from '../../shared/icons';
 import api from '../../../services/api';
 
-interface ActivityRequest {
+export interface ActivityRequest {
   id: number;
   activity_id: number;
   activity_name: string;
@@ -58,7 +57,6 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
   onClose,
   onDelete
 }) => {
-  const { setError } = useApp();
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [loadingPhoto, setLoadingPhoto] = useState(false);
   const [photoLoadFailed, setPhotoLoadFailed] = useState(false);
@@ -67,17 +65,6 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
   // Teamer-Anträge haben weder Punkte noch Gottesdienst/Gemeinde — die Rolle
   // kommt aus den Daten, damit die Aufrufer nichts setzen müssen.
   const isTeamerRequest = request?.activity_target_role === 'teamer';
-
-  useEffect(() => {
-    if (request?.photo_filename && request.status === 'pending') {
-      loadPhoto(request.id);
-    }
-    return () => {
-      if (photoUrl) {
-        URL.revokeObjectURL(photoUrl);
-      }
-    };
-  }, [request]);
 
   const loadPhoto = async (id: number) => {
     setLoadingPhoto(true);
@@ -98,6 +85,27 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
       setLoadingPhoto(false);
     }
   };
+
+  // Beim Antragswechsel den Foto-Zustand zuruecksetzen — sonst bleibt das
+  // Bild des VORHERIGEN Antrags stehen, wenn der neue keins hat.
+  useEffect(() => {
+    setPhotoUrl(null);
+    setPhotoLoadFailed(false);
+    if (request?.photo_filename && request.status === 'pending') {
+      loadPhoto(request.id);
+    }
+  }, [request]);
+
+  // Freigabe an photoUrl koppeln, NICHT an request: Das fruehere Cleanup im
+  // [request]-Effekt las photoUrl aus der Closure des Effekt-Laufs — dort war
+  // es noch null, die Blob-URL wurde nie freigegeben (Leck pro Foto-Ansicht).
+  useEffect(() => {
+    if (!photoUrl) return;
+    return () => {
+      URL.revokeObjectURL(photoUrl);
+    };
+  }, [photoUrl]);
+
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('de-DE', {
@@ -125,13 +133,13 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
             <IonTitle>Aktivität laden...</IonTitle>
             <IonButtons slot="start">
               <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose}>
-                <IonIcon icon={closeOutline} />
+                <IonIcon icon={ICON_SCHLIESSEN} />
               </IonButton>
             </IonButtons>
           </IonToolbar>
         </IonHeader>
         <IonContent>
-          <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+          <div style={{ padding: 'var(--app-abstand-riesig) var(--app-abstand-gross)', textAlign: 'center' }}>
             <IonSpinner name="crescent" />
           </div>
         </IonContent>
@@ -150,7 +158,7 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
           <IonTitle>Deine Meldung</IonTitle>
           <IonButtons slot="start">
             <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose}>
-              <IonIcon icon={closeOutline} />
+              <IonIcon icon={ICON_SCHLIESSEN} />
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -161,7 +169,7 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--requests">
-              <IonIcon icon={documentTextOutline} />
+              <IonIcon icon={ICON_TEXTDOKUMENT} />
             </div>
             <IonLabel>Worum geht es</IonLabel>
           </IonListHeader>
@@ -221,7 +229,7 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
           <IonList inset={true} className="app-modal-section">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--requests">
-                <IonIcon icon={camera} />
+                <IonIcon icon={ICON_KAMERA_GEFUELLT} />
               </div>
               <IonLabel>Dein Foto</IonLabel>
             </IonListHeader>
@@ -229,13 +237,13 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
               <IonCardContent>
                 {loadingPhoto ? (
                   <div style={{
-                    background: '#f5f5f5',
-                    borderRadius: '12px',
-                    padding: '24px 16px',
+                    background: 'var(--app-surface-muted)',
+                    borderRadius: 'var(--app-radius-karte)',
+                    padding: 'var(--app-abstand-weit) var(--app-abstand-basis)',
                     textAlign: 'center'
                   }}>
                     <IonSpinner name="crescent" />
-                    <p style={{ margin: '12px 0 0 0', fontSize: '0.9rem', color: '#666' }}>
+                    <p style={{ margin: 'var(--app-abstand-mittel) 0 0 0', fontSize: 'var(--app-text-basis)', color: 'var(--app-text-secondary)' }}>
                       Lade Foto...
                     </p>
                   </div>
@@ -245,23 +253,23 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                     alt="Foto zur Aktivität"
                     style={{
                       maxWidth: '100%',
-                      borderRadius: '8px',
-                      boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+                      borderRadius: 'var(--app-radius-klein)',
+                      boxShadow: 'var(--app-schatten-karte)',
                       display: 'block'
                     }}
                   />
                 ) : (
                   <div style={{
-                    background: '#f5f5f5',
-                    borderRadius: '12px',
-                    padding: '24px 16px',
+                    background: 'var(--app-surface-muted)',
+                    borderRadius: 'var(--app-radius-karte)',
+                    padding: 'var(--app-abstand-weit) var(--app-abstand-basis)',
                     textAlign: 'center'
                   }}>
                     <IonIcon
-                      icon={camera}
-                      style={{ fontSize: '2.5rem', color: '#999', marginBottom: '12px', display: 'block' }}
+                      icon={ICON_KAMERA_GEFUELLT}
+                      style={{ fontSize: 'var(--app-anzeige-gross)', color: 'var(--app-text-muted)', marginBottom: 'var(--app-abstand-mittel)', display: 'block' }}
                     />
-                    <p style={{ margin: '0', fontSize: '0.9rem', color: '#666' }}>
+                    <p style={{ margin: '0', fontSize: 'var(--app-text-basis)', color: 'var(--app-text-secondary)' }}>
                       {photoLoadFailed
                         ? 'Dein Foto konnte nicht geladen werden. Zieh die Seite nach unten, um es erneut zu versuchen.'
                         : 'Kein Foto hochgeladen'}
@@ -279,10 +287,10 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
             <div
               className="app-section-icon"
               style={{
-                backgroundColor: isPending ? '#ff9500' : isApproved ? '#059669' : '#dc3545'
+                backgroundColor: isPending ? 'var(--app-color-warning)' : isApproved ? 'var(--app-color-success-strong)' : 'var(--app-color-danger)'
               }}
             >
-              <IonIcon icon={isPending ? hourglass : isApproved ? checkmarkCircle : closeCircle} />
+              <IonIcon icon={isPending ? ICON_WARTEND_GEFUELLT : isApproved ? ICON_ZUSAGE_GEFUELLT : ICON_ABSAGE} />
             </div>
             <IonLabel>Status</IonLabel>
           </IonListHeader>
@@ -292,7 +300,7 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                 <IonItem lines="inset">
                   <IonLabel>
                     <p>Stand</p>
-                    <h2 style={{ color: isPending ? '#ff9500' : isApproved ? '#059669' : '#dc3545' }}>
+                    <h2 style={{ color: isPending ? 'var(--app-color-warning)' : isApproved ? 'var(--app-color-success-strong)' : 'var(--app-color-danger)' }}>
                       {isPending ? 'Dein Team schaut es sich an'
                         : isApproved ? (isTeamerRequest ? 'Angerechnet' : 'Punkte sind da')
                         : 'Abgelehnt'}
@@ -305,7 +313,7 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
                   <IonItem lines="none">
                     <IonLabel className="ion-text-wrap">
                       <p>Grund der Ablehnung</p>
-                      <h2 style={{ color: '#dc3545', whiteSpace: 'pre-wrap' }}>{request.admin_comment}</h2>
+                      <h2 style={{ color: 'var(--app-color-danger)', whiteSpace: 'pre-wrap' }}>{request.admin_comment}</h2>
                     </IonLabel>
                   </IonItem>
                 )}
@@ -316,21 +324,21 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
 
         {/* Löschen Button - nur bei pending */}
         {isPending && onDelete && (
-          <div style={{ padding: '0 16px 24px 16px' }}>
+          <div style={{ padding: '0 var(--app-abstand-basis) var(--app-abstand-weit) var(--app-abstand-basis)' }}>
             <IonButton
               expand="block"
               fill="outline"
               onClick={() => onDelete(request)}
               style={{
-                '--border-color': '#dc3545',
-                '--color': '#dc3545',
-                '--background-hover': 'rgba(220, 53, 69, 0.1)',
+                '--border-color': 'var(--app-color-danger)',
+                '--color': 'var(--app-color-danger)',
+                '--background-hover': 'rgba(var(--app-color-danger-rgb), 0.1)',
                 '--border-width': '2px',
                 height: '48px',
-                fontWeight: '600'
+                fontWeight: 'var(--app-schrift-halbfett)'
               }}
             >
-              <IonIcon icon={trashOutline} slot="start" />
+              <IonIcon icon={ICON_LOESCHEN} slot="start" />
               Aktivität löschen
             </IonButton>
           </div>

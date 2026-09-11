@@ -1,4 +1,5 @@
 import React, { useState, useRef } from 'react';
+import { CRITERIA_COLORS } from '../../../utils/badgeCriteria';
 import {
   IonCard,
   IonCardContent,
@@ -15,50 +16,36 @@ import {
 } from '@ionic/react';
 import { SectionHeader, EmptyState } from '../../shared';
 import {
-  trophy,
-  trophyOutline,
-  ribbon,
-  checkmarkCircle,
-  flame,
-  people,
-  gift,
-  sunny,
-  calendar,
-  calendarOutline,
-  time,
-  lockClosed,
-  layersOutline,
-  gridOutline,
-  prismOutline,
-  cubeOutline,
-  handLeft,
-  shield,
-  checkmark,
-  search,
-  filterOutline,
-  eyeOff
-} from 'ionicons/icons';
+  ICON_ABZEICHEN_GEFUELLT,
+  ICON_BONUS_GEFUELLT,
+  ICON_FILTER,
+  ICON_FLAMME_GEFUELLT,
+  ICON_GRUPPE_GEFUELLT,
+  ICON_HAKEN_GEFUELLT,
+  ICON_HAND_GEFUELLT,
+  ICON_POKAL,
+  ICON_POKAL_GEFUELLT,
+  ICON_PRISMA,
+  ICON_RASTER,
+  ICON_SCHILD_GEFUELLT,
+  ICON_SONNE,
+  ICON_SPERRE_GEFUELLT,
+  ICON_STUFEN,
+  ICON_SUCHE_GEFUELLT,
+  ICON_TERMIN,
+  ICON_TERMIN_GEFUELLT,
+  ICON_UHRZEIT_GEFUELLT,
+  ICON_VERBORGEN_GEFUELLT,
+  ICON_WUERFEL,
+  ICON_ZUSAGE_GEFUELLT,
+} from '../../shared/icons';
 import { getIconFromString } from '../../../utils/badgeIcons';
 import BadgePopoverContent, { BadgePopoverData } from '../../shared/BadgePopoverContent';
+import { FARBEN } from '../../../theme/colors';
 
 
 
-interface Badge {
-  id: number;
-  name: string;
-  description?: string;
-  icon: string;
-  criteria_type: string;
-  criteria_value: number;
-  criteria_extra?: string;
-  is_hidden: boolean;
-  is_active: boolean;
-  color?: string;
-  is_earned: boolean;
-  earned_at?: string;
-  progress_points?: number;
-  progress_percentage?: number;
-}
+import type { AnzeigeBadge as Badge } from '../../../types/dashboard';
 
 interface BadgesViewProps {
   badges: Badge[];
@@ -81,7 +68,7 @@ const BadgesView: React.FC<BadgesViewProps> = ({
 
   // Badges nach Kategorien gruppieren
   const getBadgeCategories = () => {
-    let filtered = badges;
+    let filtered: Badge[];
     switch (selectedFilter) {
       case 'nicht_erhalten':
         filtered = badges.filter(badge => !badge.is_earned);
@@ -103,27 +90,30 @@ const BadgesView: React.FC<BadgesViewProps> = ({
     }
 
     const categories: { key: string; title: string; icon: string; color: string; badges: Badge[] }[] = [
-      { key: 'total_points', title: 'Punkte-Sammler', icon: trophy, color: '#ffd700', badges: filtered.filter(b => b.criteria_type === 'total_points').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'gottesdienst_points', title: 'Gottesdienst-Held', icon: sunny, color: '#ff9500', badges: filtered.filter(b => b.criteria_type === 'gottesdienst_points').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'gemeinde_points', title: 'Gemeinde-Star', icon: people, color: '#059669', badges: filtered.filter(b => b.criteria_type === 'gemeinde_points').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'bonus_points', title: 'Bonus-Jäger', icon: gift, color: '#ff6b9d', badges: filtered.filter(b => b.criteria_type === 'bonus_points').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'both_categories', title: 'Allrounder', icon: layersOutline, color: '#5856d6', badges: filtered.filter(b => b.criteria_type === 'both_categories').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'activity_count', title: 'Aktiv dabei', icon: checkmarkCircle, color: '#3880ff', badges: filtered.filter(b => b.criteria_type === 'activity_count').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'unique_activities', title: 'Vielseitig', icon: gridOutline, color: '#10dc60', badges: filtered.filter(b => b.criteria_type === 'unique_activities').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'activity_combination', title: 'Kombinier-Profi', icon: prismOutline, color: '#7044ff', badges: filtered.filter(b => b.criteria_type === 'activity_combination').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'category_activities', title: 'Kategorie-Meister', icon: cubeOutline, color: '#0cd1e8', badges: filtered.filter(b => b.criteria_type === 'category_activities').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'specific_activity', title: 'Spezialist', icon: handLeft, color: '#ffce00', badges: filtered.filter(b => b.criteria_type === 'specific_activity').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'streak', title: 'Serien-Champion', icon: flame, color: '#eb445a', badges: filtered.filter(b => b.criteria_type === 'streak').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'time_based', title: 'Zeitreisender', icon: time, color: '#8e8e93', badges: filtered.filter(b => b.criteria_type === 'time_based').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'event_count', title: 'Event-Champion', icon: calendar, color: '#e63946', badges: filtered.filter(b => b.criteria_type === 'event_count').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'total_points', title: 'Punkte-Sammler', icon: ICON_POKAL_GEFUELLT, color: CRITERIA_COLORS.total_points, badges: filtered.filter(b => b.criteria_type === 'total_points').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'gottesdienst_points', title: 'Gottesdienst-Held', icon: ICON_SONNE, color: CRITERIA_COLORS.gottesdienst_points, badges: filtered.filter(b => b.criteria_type === 'gottesdienst_points').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'gemeinde_points', title: 'Gemeinde-Star', icon: ICON_GRUPPE_GEFUELLT, color: CRITERIA_COLORS.gemeinde_points, badges: filtered.filter(b => b.criteria_type === 'gemeinde_points').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'bonus_points', title: 'Bonus-Jäger', icon: ICON_BONUS_GEFUELLT, color: CRITERIA_COLORS.bonus_points, badges: filtered.filter(b => b.criteria_type === 'bonus_points').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'both_categories', title: 'Allrounder', icon: ICON_STUFEN, color: CRITERIA_COLORS.both_categories, badges: filtered.filter(b => b.criteria_type === 'both_categories').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'activity_count', title: 'Aktiv dabei', icon: ICON_ZUSAGE_GEFUELLT, color: CRITERIA_COLORS.activity_count, badges: filtered.filter(b => b.criteria_type === 'activity_count').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'unique_activities', title: 'Vielseitig', icon: ICON_RASTER, color: CRITERIA_COLORS.unique_activities, badges: filtered.filter(b => b.criteria_type === 'unique_activities').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'activity_combination', title: 'Kombinier-Profi', icon: ICON_PRISMA, color: CRITERIA_COLORS.activity_combination, badges: filtered.filter(b => b.criteria_type === 'activity_combination').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'category_activities', title: 'Kategorie-Meister', icon: ICON_WUERFEL, color: CRITERIA_COLORS.category_activities, badges: filtered.filter(b => b.criteria_type === 'category_activities').sort((a, b) => a.criteria_value - b.criteria_value) },
+      // Ohne eigene Gruppe taucht ein Abzeichen dieses Typs in der Liste NIE
+      // auf, obwohl es vergeben wird.
+      { key: 'category_combination', title: 'Kategorie-Kombinierer', icon: ICON_PRISMA, color: CRITERIA_COLORS.category_combination, badges: filtered.filter(b => b.criteria_type === 'category_combination').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'specific_activity', title: 'Spezialist', icon: ICON_HAND_GEFUELLT, color: CRITERIA_COLORS.specific_activity, badges: filtered.filter(b => b.criteria_type === 'specific_activity').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'streak', title: 'Serien-Champion', icon: ICON_FLAMME_GEFUELLT, color: CRITERIA_COLORS.streak, badges: filtered.filter(b => b.criteria_type === 'streak').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'time_based', title: 'Zeitreisender', icon: ICON_UHRZEIT_GEFUELLT, color: CRITERIA_COLORS.time_based, badges: filtered.filter(b => b.criteria_type === 'time_based').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'event_count', title: 'Event-Champion', icon: ICON_TERMIN_GEFUELLT, color: CRITERIA_COLORS.event_count, badges: filtered.filter(b => b.criteria_type === 'event_count').sort((a, b) => a.criteria_value - b.criteria_value) },
       // Fehlte hier, obwohl der Typ ueberall sonst gepflegt ist: Das Abzeichen
       // wurde vergeben und die Meldung kam, aber in der Liste tauchte es nie
       // auf, weil ohne passende Kategorie nichts angezeigt wird
       // 
-      { key: 'mandatory_event_count', title: 'Immer dabei', icon: shield, color: '#b91c1c', badges: filtered.filter(b => b.criteria_type === 'mandatory_event_count').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'teamer_year', title: 'Erfahrung', icon: ribbon, color: '#5b21b6', badges: filtered.filter(b => b.criteria_type === 'teamer_year').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'collection', title: 'Sammler', icon: trophy, color: '#ffd700', badges: filtered.filter(b => b.criteria_type === 'collection').sort((a, b) => a.criteria_value - b.criteria_value) },
-      { key: 'yearly', title: 'Jahres-Badges', icon: calendarOutline, color: '#8e8e93', badges: filtered.filter(b => b.criteria_type === 'yearly').sort((a, b) => a.criteria_value - b.criteria_value) }
+      { key: 'mandatory_event_count', title: 'Immer dabei', icon: ICON_SCHILD_GEFUELLT, color: CRITERIA_COLORS.mandatory_event_count, badges: filtered.filter(b => b.criteria_type === 'mandatory_event_count').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'teamer_year', title: 'Erfahrung', icon: ICON_ABZEICHEN_GEFUELLT, color: CRITERIA_COLORS.teamer_year, badges: filtered.filter(b => b.criteria_type === 'teamer_year').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'collection', title: 'Sammler', icon: ICON_POKAL_GEFUELLT, color: FARBEN.gold, badges: filtered.filter(b => b.criteria_type === 'collection').sort((a, b) => a.criteria_value - b.criteria_value) },
+      { key: 'yearly', title: 'Jahres-Badges', icon: ICON_TERMIN, color: FARBEN.textSystem, badges: filtered.filter(b => b.criteria_type === 'yearly').sort((a, b) => a.criteria_value - b.criteria_value) }
     ];
 
     return categories.filter(cat => cat.badges.length > 0);
@@ -135,14 +125,14 @@ const BadgesView: React.FC<BadgesViewProps> = ({
   const getBadgeColor = (badge: Badge) => {
     if (badge.color) return badge.color;
     if (badge.criteria_type === 'total_points') {
-      if (badge.criteria_value <= 5) return '#cd7f32';
-      if (badge.criteria_value <= 15) return '#c0c0c0';
-      return '#ffd700';
+      if (badge.criteria_value <= 5) return FARBEN.bronze;
+      if (badge.criteria_value <= 15) return FARBEN.silber;
+      return FARBEN.gold;
     }
-    return '#667eea';
+    return FARBEN.abzeichenFallback;
   };
 
-  const [presentBadgePopover, dismissBadgePopover] = useIonPopover(BadgePopoverContent, {
+  const [presentBadgePopover] = useIonPopover(BadgePopoverContent, {
     dataRef: badgePopoverRef
   });
 
@@ -163,7 +153,10 @@ const BadgesView: React.FC<BadgesViewProps> = ({
       <SectionHeader
         title="Deine Badges"
         subtitle="Sammle alle Erfolge!"
-        icon={trophy}
+        // Band wie im Tab und im Onboarding: Die Sache
+        // trug vier Zeichen -- Stern im Tab, Pokal hier, Band bei Teamer und
+        // Leitung. Ein Konfi sah fuer dasselbe Stern UND Pokal.
+        icon={ICON_ABZEICHEN_GEFUELLT}
         preset="badges"
         stats={[
           { value: badges.filter(b => b.is_earned && !b.is_hidden).length, label: 'ERREICHT' },
@@ -173,16 +166,16 @@ const BadgesView: React.FC<BadgesViewProps> = ({
       />
 
       {/* Suche & Filter — wie Events-Pattern: Section-Header, Suchleiste, dann Tab-Leiste */}
-      <IonList inset={true} style={{ margin: '16px' }}>
+      <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
         <IonListHeader>
           <div className="app-section-icon app-section-icon--warning">
-            <IonIcon icon={filterOutline} />
+            <IonIcon icon={ICON_FILTER} />
           </div>
           <IonLabel>Suche & Filter</IonLabel>
         </IonListHeader>
         <IonItemGroup>
           <IonItem>
-            <IonIcon icon={search} slot="start" style={{ color: '#8e8e93', fontSize: '1rem' }} />
+            <IonIcon icon={ICON_SUCHE_GEFUELLT} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
             <IonInput
               value={searchText}
               onIonInput={(e) => setSearchText(e.detail.value || '')}
@@ -201,10 +194,10 @@ const BadgesView: React.FC<BadgesViewProps> = ({
       </div>
 
       {/* Badges Grid */}
-      <IonList inset={true} style={{ margin: '16px' }}>
+      <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
         <IonListHeader>
           <div className="app-section-icon app-section-icon--warning">
-            <IonIcon icon={trophy} />
+            <IonIcon icon={ICON_ABZEICHEN_GEFUELLT} />
           </div>
           <IonLabel>Erreichte Badges ({badges.filter(b => b.is_earned).length})</IonLabel>
         </IonListHeader>
@@ -213,24 +206,24 @@ const BadgesView: React.FC<BadgesViewProps> = ({
             <IonCardContent>
               {selectedFilter === 'nicht_erhalten' ? (
                 <EmptyState
-                  icon={checkmarkCircle}
+                  icon={ICON_ZUSAGE_GEFUELLT}
                   title="Alle Badges erreicht!"
                   message="Du hast alle sichtbaren Badges eingesammelt."
-                  iconColor="#f59e0b"
+                  iconColor="var(--app-color-badges)"
                 />
               ) : selectedFilter === 'in_arbeit' ? (
                 <EmptyState
-                  icon={trophyOutline}
+                  icon={ICON_POKAL}
                   title="Keine Badges in Arbeit"
                   message="Sammle Punkte, um den Fortschritt bei Badges zu starten!"
-                  iconColor="#f59e0b"
+                  iconColor="var(--app-color-badges)"
                 />
               ) : (
                 <EmptyState
-                  icon={trophyOutline}
+                  icon={ICON_POKAL}
                   title="Keine Badges gefunden"
                   message="Sammle Punkte für deine ersten Badges!"
-                  iconColor="#f59e0b"
+                  iconColor="var(--app-color-badges)"
                 />
               )}
             </IonCardContent>
@@ -245,35 +238,35 @@ const BadgesView: React.FC<BadgesViewProps> = ({
             const categoryHasUndiscoveredSecrets = categorySecretCount > categoryEarnedSecretCount;
 
             return (
-              <IonCard key={category.key} className="app-card" style={{ marginTop: index > 0 ? '8px' : '0' }}>
-                <IonCardContent style={{ padding: '12px' }}>
+              <IonCard key={category.key} className="app-card" style={{ marginTop: index > 0 ? 'var(--app-abstand-eng)' : '0' }}>
+                <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
                   {/* Category Header */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--app-abstand-basis)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)' }}>
                       <div style={{
-                        width: '42px', height: '42px', borderRadius: '12px',
+                        width: '42px', height: '42px', borderRadius: 'var(--app-radius-karte)',
                         background: `linear-gradient(135deg, ${category.color} 0%, ${category.color}cc 100%)`,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         boxShadow: `0 4px 12px ${category.color}40`
                       }}>
-                        <IonIcon icon={category.icon} style={{ fontSize: '1.3rem', color: 'white' }} />
+                        <IonIcon icon={category.icon} style={{ fontSize: 'var(--app-text-titel)', color: 'white' }} />
                       </div>
                       <div>
-                        <h3 style={{ margin: '0', fontSize: '1.1rem', fontWeight: '700', color: '#333' }}>{category.title}</h3>
-                        <span style={{ fontSize: '0.85rem', color: '#888' }}>{earnedCount} von {totalCount}</span>
+                        <h3 style={{ margin: '0', fontSize: 'var(--app-text-gross)', fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-text-primary)' }}>{category.title}</h3>
+                        <span style={{ fontSize: 'var(--app-text-sekundaer)', color: 'var(--app-text-tertiary)' }}>{earnedCount} von {totalCount}</span>
                       </div>
                     </div>
 
                     {/* Progress Circle */}
                     <div style={{ width: '48px', height: '48px', position: 'relative' }}>
                       <svg width="48" height="48" style={{ transform: 'rotate(-90deg)' }}>
-                        <circle cx="24" cy="24" r="20" fill="none" stroke="#e8e8e8" strokeWidth="4" />
+                        <circle cx="24" cy="24" r="20" fill="none" stroke={FARBEN.silberHell} strokeWidth="4" />
                         <circle cx="24" cy="24" r="20" fill="none" stroke={category.color} strokeWidth="4" strokeLinecap="round" strokeDasharray={`${progressPercent * 1.257} 125.7`} />
                       </svg>
                       <span style={{
                         position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
-                        fontSize: progressPercent === 100 && categoryHasUndiscoveredSecrets ? '0.6rem' : '0.7rem',
-                        fontWeight: '700', color: category.color
+                        fontSize: progressPercent === 100 && categoryHasUndiscoveredSecrets ? 'var(--app-text-winzig)' : 'var(--app-text-meta)',
+                        fontWeight: 'var(--app-schrift-fett)', color: category.color
                       }}>
                         {progressPercent === 100 && categoryHasUndiscoveredSecrets ? '100%?' : `${progressPercent}%`}
                       </span>
@@ -284,7 +277,7 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                   <div style={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(3, 1fr)',
-                    gap: '12px'
+                    gap: 'var(--app-abstand-mittel)'
                   }}>
                     {category.badges.map((badge) => {
                       const badgeColor = getBadgeColor(badge);
@@ -299,9 +292,9 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                             display: 'flex',
                             flexDirection: 'column',
                             alignItems: 'center',
-                            padding: '12px 8px',
-                            borderRadius: '16px',
-                            background: isEarned ? `${badgeColor}10` : '#f5f5f5',
+                            padding: 'var(--app-abstand-mittel) var(--app-abstand-eng)',
+                            borderRadius: 'var(--app-radius-gross)',
+                            background: isEarned ? `${badgeColor}10` : 'var(--app-surface-muted)',
                             border: isEarned ? `2px solid ${badgeColor}40` : '2px solid transparent',
                             cursor: 'pointer',
                             transition: 'transform 0.2s',
@@ -316,30 +309,30 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                           <div style={{
                             width: '56px',
                             height: '56px',
-                            borderRadius: '50%',
+                            borderRadius: 'var(--app-radius-kreis)',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
                             background: isEarned
                               ? `linear-gradient(145deg, ${badgeColor} 0%, ${badgeColor}cc 100%)`
-                              : 'linear-gradient(145deg, #d0d0d0 0%, #b8b8b8 100%)',
+                              : 'var(--app-gradient-badge-gesperrt)',
                             boxShadow: isEarned ? `0 4px 12px ${badgeColor}40` : '0 2px 8px rgba(0,0,0,0.1)',
                             position: 'relative',
-                            marginBottom: '8px'
+                            marginBottom: 'var(--app-abstand-eng)'
                           }}>
                             {/* Progress Ring */}
                             {hasProgress && (
                               <svg style={{ position: 'absolute', top: '-4px', left: '-4px', width: '64px', height: '64px', transform: 'rotate(-90deg)' }}>
                                 <circle cx="32" cy="32" r="28" fill="none" stroke="rgba(0,0,0,0.1)" strokeWidth="3" />
-                                <circle cx="32" cy="32" r="28" fill="none" stroke="#667eea" strokeWidth="3" strokeLinecap="round" strokeDasharray={`${(badge.progress_percentage || 0) * 1.76} 176`} />
+                                <circle cx="32" cy="32" r="28" fill="none" stroke={FARBEN.abzeichenFallback} strokeWidth="3" strokeLinecap="round" strokeDasharray={`${(badge.progress_percentage || 0) * 1.76} 176`} />
                               </svg>
                             )}
 
                             <IonIcon
                               icon={getIconFromString(badge.icon)}
                               style={{
-                                fontSize: '1.8rem',
-                                color: isEarned ? 'white' : '#999'
+                                fontSize: 'var(--app-anzeige-basis)',
+                                color: isEarned ? 'white' : 'var(--app-text-muted)'
                               }}
                             />
 
@@ -351,14 +344,14 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                                 right: '-2px',
                                 width: '20px',
                                 height: '20px',
-                                borderRadius: '50%',
-                                background: '#22c55e',
+                                borderRadius: 'var(--app-radius-kreis)',
+                                background: 'var(--app-color-success)',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 border: '2px solid white'
                               }}>
-                                <IonIcon icon={checkmark} style={{ fontSize: '0.7rem', color: 'white' }} />
+                                <IonIcon icon={ICON_HAKEN_GEFUELLT} style={{ fontSize: 'var(--app-text-meta)', color: 'white' }} />
                               </div>
                             )}
 
@@ -370,23 +363,23 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                                 right: '-2px',
                                 width: '20px',
                                 height: '20px',
-                                borderRadius: '50%',
-                                background: '#8e8e93',
+                                borderRadius: 'var(--app-radius-kreis)',
+                                background: 'var(--app-text-system)',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 border: '2px solid white'
                               }}>
-                                <IonIcon icon={lockClosed} style={{ fontSize: '0.6rem', color: 'white' }} />
+                                <IonIcon icon={ICON_SPERRE_GEFUELLT} style={{ fontSize: 'var(--app-text-winzig)', color: 'white' }} />
                               </div>
                             )}
                           </div>
 
                           {/* Badge Name */}
                           <span style={{
-                            fontSize: '0.75rem',
-                            fontWeight: '600',
-                            color: isEarned ? '#333' : '#999',
+                            fontSize: 'var(--app-text-klein)',
+                            fontWeight: 'var(--app-schrift-halbfett)',
+                            color: isEarned ? 'var(--app-text-primary)' : 'var(--app-text-muted)',
                             textAlign: 'center',
                             lineHeight: '1.2',
                             maxWidth: '100%',
@@ -402,10 +395,10 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                           {/* Progress percentage for in-progress badges */}
                           {hasProgress && (
                             <span style={{
-                              fontSize: '0.65rem',
-                              fontWeight: '700',
-                              color: '#667eea',
-                              marginTop: '2px'
+                              fontSize: 'var(--app-text-mini)',
+                              fontWeight: 'var(--app-schrift-fett)',
+                              color: 'var(--app-color-users)',
+                              marginTop: 'var(--app-abstand-winzig)'
                             }}>
                               {Math.round(badge.progress_percentage || 0)}%
                             </span>
@@ -417,15 +410,15 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                               <div
                                 className="app-corner-badge"
                                 style={{
-                                  background: 'linear-gradient(135deg, #ff6b35 0%, #f7931e 100%)',
+                                  background: 'var(--app-gradient-rakete)',
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'center',
-                                  padding: '4px 8px'
+                                  padding: 'var(--app-abstand-mini) var(--app-abstand-eng)'
                                 }}
                                 title="Geheimes Badge"
                               >
-                                <IonIcon icon={eyeOff} style={{ color: '#fff', fontSize: '0.85rem' }} />
+                                <IonIcon icon={ICON_VERBORGEN_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                               </div>
                             </div>
                           )}

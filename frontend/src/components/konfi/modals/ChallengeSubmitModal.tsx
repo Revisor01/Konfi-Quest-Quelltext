@@ -1,3 +1,4 @@
+import { fehlerTextOderMessage } from '../../../utils/fehler';
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   IonPage,
@@ -20,24 +21,24 @@ import {
   IonSpinner
 } from '@ionic/react';
 import {
-  close,
-  checkmark,
-  documentTextOutline,
-  imageOutline,
-  micOutline,
-  videocamOutline,
-  linkOutline,
-  musicalNotesOutline,
-  camera,
-  imagesOutline,
-  trash,
-  checkmarkCircle,
-  eyeOutline,
-  eyeOffOutline,
-  lockClosedOutline,
-  personCircleOutline,
-  mic
-} from 'ionicons/icons';
+  ICON_BILD,
+  ICON_GALERIE,
+  ICON_HAKEN_GEFUELLT,
+  ICON_KAMERA_GEFUELLT,
+  ICON_LINK,
+  ICON_LOESCHEN_GEFUELLT,
+  ICON_MIKROFON,
+  ICON_MIKROFON_GEFUELLT,
+  ICON_MUSIK,
+  ICON_PROFIL,
+  ICON_SCHLIESSEN_GEFUELLT,
+  ICON_SICHTBAR,
+  ICON_SPERRE,
+  ICON_TEXTDOKUMENT,
+  ICON_VERBORGEN,
+  ICON_VIDEO,
+  ICON_ZUSAGE_GEFUELLT,
+} from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import api from '../../../services/api';
@@ -59,18 +60,18 @@ import type {
 // kompakten Hinweis-Chip im Kopf.
 
 const MEDIA_OPTIONS: { value: ChallengeMediaType; label: string; icon: string; hint: string }[] = [
-  { value: 'text', label: 'Text', icon: documentTextOutline, hint: 'Schreib deine Gedanken auf' },
-  { value: 'photo', label: 'Foto', icon: imageOutline, hint: 'Aufnehmen oder aus der Galerie' },
-  { value: 'audio', label: 'Audio', icon: micOutline, hint: 'Direkt aufnehmen' },
-  { value: 'video', label: 'Video', icon: videocamOutline, hint: 'Aufnehmen oder aus der Galerie' },
-  { value: 'link', label: 'Link', icon: linkOutline, hint: 'Ein Lied von Spotify, Apple Music, YouTube Music oder Deezer' }
+  { value: 'text', label: 'Text', icon: ICON_TEXTDOKUMENT, hint: 'Schreib deine Gedanken auf' },
+  { value: 'photo', label: 'Foto', icon: ICON_BILD, hint: 'Aufnehmen oder aus der Galerie' },
+  { value: 'audio', label: 'Audio', icon: ICON_MIKROFON, hint: 'Direkt aufnehmen' },
+  { value: 'video', label: 'Video', icon: ICON_VIDEO, hint: 'Aufnehmen oder aus der Galerie' },
+  { value: 'link', label: 'Link', icon: ICON_LINK, hint: 'Ein Lied von Spotify, Apple Music, YouTube Music oder Deezer' }
 ];
 
 // Kurze Labels + kurzer Untertitel statt langer Erklaersaetze.
 const CONSENT_OPTIONS: { value: ChallengeConsent; label: string; hint: string; icon: string }[] = [
-  { value: 'publish', label: 'Öffentlich', hint: 'mit deinem Namen', icon: personCircleOutline },
-  { value: 'anonymous', label: 'Anonym', hint: 'ohne Namen', icon: eyeOffOutline },
-  { value: 'private', label: 'Nur Leitung', hint: 'nicht in der Galerie', icon: lockClosedOutline }
+  { value: 'publish', label: 'Öffentlich', hint: 'mit deinem Namen', icon: ICON_PROFIL },
+  { value: 'anonymous', label: 'Anonym', hint: 'ohne Namen', icon: ICON_VERBORGEN },
+  { value: 'private', label: 'Nur Leitung', hint: 'nicht in der Galerie', icon: ICON_SPERRE }
 ];
 
 // Serverlimit laut Spec: 50 MB pro Datei.
@@ -323,8 +324,8 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
       recordTimerRef.current = setInterval(() => {
         setRecordSeconds((s) => s + 1);
       }, 1000);
-    } catch (err: any) {
-      const message = String(err?.message || '');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
       if (/permission|denied/i.test(message)) {
         setError('Zugriff aufs Mikrofon wurde nicht erlaubt.');
       } else {
@@ -414,8 +415,8 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
         setSuccess(getSuccessMessage(challenge, isChoice ? consent : 'publish'));
         if (mediaPreview) URL.revokeObjectURL(mediaPreview);
         onSuccess();
-      } catch (err: any) {
-        setError(err.response?.data?.error || err.message || 'Fehler beim Einreichen');
+      } catch (err) {
+        setError(fehlerTextOderMessage(err, 'Fehler beim Einreichen'));
       } finally {
         setUploadProgress(0);
       }
@@ -433,7 +434,7 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
           <IonTitle>Dein Beitrag</IonTitle>
           <IonButtons slot="start">
             <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose} disabled={isSubmitting}>
-              <IonIcon icon={close} />
+              <IonIcon icon={ICON_SCHLIESSEN_GEFUELLT} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
@@ -442,7 +443,7 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
               onClick={handleSubmit}
               disabled={isSubmitting}
             >
-              <IonIcon icon={checkmark} />
+              <IonIcon icon={ICON_HAKEN_GEFUELLT} />
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -458,7 +459,7 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
           <div className="app-header-banner__circle-bottom" />
           <div className="app-header-banner__header">
             <div className="app-header-banner__icon">
-              <IonIcon icon={documentTextOutline} />
+              <IonIcon icon={ICON_TEXTDOKUMENT} />
             </div>
             <div>
               <h2 className="app-header-banner__title">{challenge.title}</h2>
@@ -472,12 +473,12 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
           <IonList inset={true} className="app-segment-wrapper">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--challenges">
-                <IonIcon icon={imagesOutline} />
+                <IonIcon icon={ICON_GALERIE} />
               </div>
               <IonLabel>Wie möchtest du antworten?</IonLabel>
             </IonListHeader>
             <IonCard className="app-card">
-              <IonCardContent style={{ padding: '12px' }}>
+              <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   {availableOptions.map((option) => {
                     const isSelected = option.value === mediaType;
@@ -499,9 +500,9 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
                             </div>
                             {isSelected && (
                               <IonIcon
-                                icon={checkmarkCircle}
+                                icon={ICON_ZUSAGE_GEFUELLT}
                                 className="app-icon-color--challenges"
-                                style={{ fontSize: '1.3rem', flexShrink: 0 }}
+                                style={{ fontSize: 'var(--app-text-titel)', flexShrink: 0 }}
                               />
                             )}
                           </div>
@@ -519,7 +520,7 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
         <IonList inset={true} className="app-segment-wrapper">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--challenges">
-              <IonIcon icon={currentOption?.icon || documentTextOutline} />
+              <IonIcon icon={currentOption?.icon || ICON_TEXTDOKUMENT} />
             </div>
             <IonLabel>
               {mediaType === 'text' ? 'Dein Text'
@@ -530,7 +531,7 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
             </IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: '12px' }}>
+            <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
 
               {mediaType === 'text' && (
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
@@ -550,12 +551,12 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
                       und erst die Fehlermeldung es ihm sagt. */}
                   <div
                     style={{
-                      display: 'flex', alignItems: 'flex-start', gap: '6px',
-                      padding: '2px 16px 6px 16px',
-                      fontSize: '0.8rem', color: 'var(--ion-color-medium)', lineHeight: 1.4
+                      display: 'flex', alignItems: 'flex-start', gap: 'var(--app-abstand-kompakt)',
+                      padding: 'var(--app-abstand-winzig) var(--app-abstand-basis) var(--app-abstand-kompakt) var(--app-abstand-basis)',
+                      fontSize: 'var(--app-text-hinweis)', color: 'var(--ion-color-medium)', lineHeight: 1.4
                     }}
                   >
-                    <IonIcon icon={musicalNotesOutline} style={{ flexShrink: 0, marginTop: '2px' }} />
+                    <IonIcon icon={ICON_MUSIK} style={{ flexShrink: 0, marginTop: 'var(--app-abstand-winzig)' }} />
                     <span>
                       Erlaubt sind Musik-Links von {ERLAUBTE_DIENSTE_TEXT}.
                       Titel und Interpret werden automatisch dazugeschrieben.
@@ -588,10 +589,10 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
                   <div
                     onClick={() => !pickingMedia && !mediaPreview && pickPhoto()}
                     style={{
-                      padding: mediaPreview ? '0' : '16px',
+                      padding: mediaPreview ? '0' : 'var(--app-abstand-basis)',
                       backgroundColor: 'transparent',
-                      borderRadius: '10px',
-                      border: mediaPreview ? 'none' : '1px dashed #c7c7cc',
+                      borderRadius: 'var(--app-radius-knopf)',
+                      border: mediaPreview ? 'none' : '1px dashed var(--app-border-strong)',
                       cursor: mediaPreview ? 'default' : 'pointer',
                       overflow: 'hidden'
                     }}
@@ -603,7 +604,7 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
                           alt="Dein Foto"
                           style={{
                             width: '100%', maxHeight: '280px', objectFit: 'cover',
-                            borderRadius: '10px', display: 'block'
+                            borderRadius: 'var(--app-radius-knopf)', display: 'block'
                           }}
                         />
                         <IonButton
@@ -614,7 +615,7 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
                           aria-label="Bild entfernen"
                           style={{ position: 'absolute', top: '8px', right: '8px', '--border-radius': '8px' }}
                         >
-                          <IonIcon icon={trash} slot="icon-only" />
+                          <IonIcon icon={ICON_LOESCHEN_GEFUELLT} slot="icon-only" />
                         </IonButton>
                       </div>
                     ) : (
@@ -624,11 +625,11 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
                         ) : (
                           <>
                             <IonIcon
-                              icon={camera}
+                              icon={ICON_KAMERA_GEFUELLT}
                               className="app-icon-color--challenges"
-                              style={{ fontSize: '1.2rem' }}
+                              style={{ fontSize: 'var(--app-text-untertitel)' }}
                             />
-                            <span style={{ fontWeight: '500', color: '#666' }}>
+                            <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-secondary)' }}>
                               Foto hinzufügen
                             </span>
                           </>
@@ -636,7 +637,7 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
                       </div>
                     )}
                   </div>
-                  <IonItem lines="none" style={{ '--background': 'transparent', marginTop: '8px' }}>
+                  <IonItem lines="none" style={{ '--background': 'transparent', marginTop: 'var(--app-abstand-eng)' }}>
                     <IonTextarea
                       value={textContent}
                       onIonInput={(e) => setTextContent(e.detail.value || '')}
@@ -653,10 +654,10 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
                   <div
                     onClick={() => !pickingMedia && !mediaPreview && pickVideo()}
                     style={{
-                      padding: mediaPreview ? '0' : '16px',
+                      padding: mediaPreview ? '0' : 'var(--app-abstand-basis)',
                       backgroundColor: 'transparent',
-                      borderRadius: '10px',
-                      border: mediaPreview ? 'none' : '1px dashed #c7c7cc',
+                      borderRadius: 'var(--app-radius-knopf)',
+                      border: mediaPreview ? 'none' : '1px dashed var(--app-border-strong)',
                       cursor: mediaPreview ? 'default' : 'pointer',
                       overflow: 'hidden'
                     }}
@@ -668,7 +669,7 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
                           controls
                           style={{
                             width: '100%', maxHeight: '280px',
-                            borderRadius: '10px', display: 'block', background: '#000'
+                            borderRadius: 'var(--app-radius-knopf)', display: 'block', background: 'black'
                           }}
                         />
                         <IonButton
@@ -679,7 +680,7 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
                           aria-label="Video entfernen"
                           style={{ position: 'absolute', top: '8px', right: '8px', '--border-radius': '8px' }}
                         >
-                          <IonIcon icon={trash} slot="icon-only" />
+                          <IonIcon icon={ICON_LOESCHEN_GEFUELLT} slot="icon-only" />
                         </IonButton>
                       </div>
                     ) : (
@@ -689,11 +690,11 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
                         ) : (
                           <>
                             <IonIcon
-                              icon={videocamOutline}
+                              icon={ICON_VIDEO}
                               className="app-icon-color--challenges"
-                              style={{ fontSize: '1.2rem' }}
+                              style={{ fontSize: 'var(--app-text-untertitel)' }}
                             />
-                            <span style={{ fontWeight: '500', color: '#666' }}>
+                            <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-secondary)' }}>
                               Video hinzufügen
                             </span>
                           </>
@@ -701,7 +702,7 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
                       </div>
                     )}
                   </div>
-                  <IonItem lines="none" style={{ '--background': 'transparent', marginTop: '8px' }}>
+                  <IonItem lines="none" style={{ '--background': 'transparent', marginTop: 'var(--app-abstand-eng)' }}>
                     <IonTextarea
                       value={textContent}
                       onIonInput={(e) => setTextContent(e.detail.value || '')}
@@ -722,59 +723,59 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
                       else startRecording();
                     }}
                     style={{
-                      padding: mediaPreview ? '10px 12px' : '16px',
+                      padding: mediaPreview ? 'var(--app-abstand-schmal) var(--app-abstand-mittel)' : 'var(--app-abstand-basis)',
                       backgroundColor: mediaPreview
                         ? 'rgba(0, 0, 0, 0.04)'
                         : isRecording
-                          ? 'rgba(220, 53, 69, 0.08)'
+                          ? 'rgba(var(--app-color-danger-rgb), 0.08)'
                           : 'transparent',
-                      borderRadius: '10px',
-                      border: mediaPreview || isRecording ? 'none' : '1px dashed #c7c7cc',
+                      borderRadius: 'var(--app-radius-knopf)',
+                      border: mediaPreview || isRecording ? 'none' : '1px dashed var(--app-border-strong)',
                       cursor: mediaPreview ? 'default' : 'pointer'
                     }}
                   >
                     {mediaPreview ? (
                       <>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontWeight: 600, color: '#3c3c43', flex: 1, fontSize: '0.88rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-eng)' }}>
+                          <span style={{ fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-ios)', flex: 1, fontSize: 'var(--app-text-basis)' }}>
                             Aufnahme bereit
                           </span>
                           <IonButton fill="clear" color="danger" size="small" onClick={(e) => { e.stopPropagation(); removeFile(); }} aria-label="Aufnahme entfernen">
-                            <IonIcon icon={trash} slot="icon-only" />
+                            <IonIcon icon={ICON_LOESCHEN_GEFUELLT} slot="icon-only" />
                           </IonButton>
                         </div>
                         <AudioPlayer src={mediaPreview} />
                       </>
                     ) : isRecording ? (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-schmal)', justifyContent: 'center' }}>
                         <span
                           style={{
-                            width: '10px', height: '10px', borderRadius: '50%',
-                            background: '#dc3545', flexShrink: 0
+                            width: '10px', height: '10px', borderRadius: 'var(--app-radius-kreis)',
+                            background: 'var(--app-color-danger)', flexShrink: 0
                           }}
                           className="app-recording-dot"
                         />
-                        <span style={{ fontWeight: 600, color: '#dc3545' }}>
+                        <span style={{ fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-color-danger)' }}>
                           {formatDuration(recordSeconds)}
                         </span>
-                        <span style={{ fontSize: '0.82rem', color: '#dc3545' }}>
+                        <span style={{ fontSize: 'var(--app-text-hinweis)', color: 'var(--app-color-danger)' }}>
                           Antippen zum Stoppen
                         </span>
                       </div>
                     ) : (
                       <div className="app-settings-item" style={{ justifyContent: 'center' }}>
                         <IonIcon
-                          icon={mic}
+                          icon={ICON_MIKROFON_GEFUELLT}
                           className="app-icon-color--challenges"
-                          style={{ fontSize: '1.2rem' }}
+                          style={{ fontSize: 'var(--app-text-untertitel)' }}
                         />
-                        <span style={{ fontWeight: '500', color: '#666' }}>
+                        <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-secondary)' }}>
                           Tippen zum Aufnehmen
                         </span>
                       </div>
                     )}
                   </div>
-                  <IonItem lines="none" style={{ '--background': 'transparent', marginTop: '8px' }}>
+                  <IonItem lines="none" style={{ '--background': 'transparent', marginTop: 'var(--app-abstand-eng)' }}>
                     <IonTextarea
                       value={textContent}
                       onIonInput={(e) => setTextContent(e.detail.value || '')}
@@ -795,12 +796,12 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
           <IonList inset={true} className="app-segment-wrapper">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--challenges">
-                <IonIcon icon={eyeOutline} />
+                <IonIcon icon={ICON_SICHTBAR} />
               </div>
               <IonLabel>Wer sieht deinen Beitrag?</IonLabel>
             </IonListHeader>
             <IonCard className="app-card">
-              <IonCardContent style={{ padding: '12px' }}>
+              <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
                   {CONSENT_OPTIONS.map((option) => {
                     const isSelected = option.value === consent;
@@ -822,9 +823,9 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
                             </div>
                             {isSelected && (
                               <IonIcon
-                                icon={checkmarkCircle}
+                                icon={ICON_ZUSAGE_GEFUELLT}
                                 className="app-icon-color--challenges"
-                                style={{ fontSize: '1.3rem', flexShrink: 0 }}
+                                style={{ fontSize: 'var(--app-text-titel)', flexShrink: 0 }}
                               />
                             )}
                           </div>
@@ -862,13 +863,13 @@ const ChallengeSubmitModal: React.FC<ChallengeSubmitModalProps> = ({
             <IonTitle>Dein Beitrag</IonTitle>
             <IonButtons slot="start">
               <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose}>
-                <IonIcon icon={close} />
+                <IonIcon icon={ICON_SCHLIESSEN_GEFUELLT} />
               </IonButton>
             </IonButtons>
           </IonToolbar>
         </IonHeader>
         <IonContent className="app-gradient-background">
-          <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--app-abstand-riesig)' }}>
             <IonSpinner name="crescent" />
           </div>
         </IonContent>

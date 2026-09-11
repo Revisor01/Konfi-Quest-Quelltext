@@ -1,3 +1,5 @@
+import { ICON_HINZUFUEGEN_GEFUELLT, ICON_ZURUECK } from '../../shared/icons';
+import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useCallback } from 'react';
 import {
   IonPage,
@@ -13,10 +15,6 @@ import {
   useIonModal,
   useIonAlert
 } from '@ionic/react';
-import {
-  add,
-  arrowBack
-} from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
@@ -62,7 +60,6 @@ const AdminOrganizationsPage: React.FC = () => {
   const organizations = organizationsData ?? [];
 
   // Modal state
-  const [selectedOrganization, setSelectedOrganization] = useState<Organization | null>(null);
   const [modalOrganizationId, setModalOrganizationId] = useState<number | null>(null);
 
   // Alert Hook für Bestätigungsdialoge
@@ -72,7 +69,6 @@ const AdminOrganizationsPage: React.FC = () => {
     organizationId: modalOrganizationId,
     onClose: () => {
       dismissOrganizationModalHook();
-      setSelectedOrganization(null);
       setModalOrganizationId(null);
     },
     onSuccess: () => {
@@ -82,7 +78,6 @@ const AdminOrganizationsPage: React.FC = () => {
       // der Vergleich auf die eigene Org war fehleranfaellig (modalOrganizationId
       // wurde teils schon zurückgesetzt). super_admin ohne Org schadet es nicht.
       refreshUser();
-      setSelectedOrganization(null);
       setModalOrganizationId(null);
       loadOrganizations();
     }
@@ -105,12 +100,8 @@ const AdminOrganizationsPage: React.FC = () => {
             try {
               await api.delete(`/organizations/${organization.id}`);
               await loadOrganizations();
-            } catch (err: any) {
-              if (err.response?.data?.error) {
-                setError(err.response.data.error);
-              } else {
-                setError('Fehler beim Löschen der Organisation');
-              }
+            } catch (err) {
+              setError(fehlerText(err, 'Fehler beim Löschen der Organisation'));
             }
           }
         }
@@ -119,7 +110,6 @@ const AdminOrganizationsPage: React.FC = () => {
   };
 
   const handleSelectOrganization = (organization: Organization) => {
-    setSelectedOrganization(organization);
     setModalOrganizationId(organization.id);
     presentOrganizationModalHook({
       presentingElement: presentingElement
@@ -127,7 +117,6 @@ const AdminOrganizationsPage: React.FC = () => {
   };
 
   const presentOrganizationModal = () => {
-    setSelectedOrganization(null);
     setModalOrganizationId(null);
     presentOrganizationModalHook({
       presentingElement: presentingElement
@@ -140,13 +129,13 @@ const AdminOrganizationsPage: React.FC = () => {
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-              <IonIcon icon={arrowBack} />
+              <IonIcon icon={ICON_ZURUECK} />
             </IonButton>
           </IonButtons>
           <IonTitle>Organisationen</IonTitle>
           <IonButtons slot="end">
             <IonButton aria-label="Neue Organisation anlegen" onClick={presentOrganizationModal}>
-              <IonIcon icon={add} />
+              <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -171,7 +160,6 @@ const AdminOrganizationsPage: React.FC = () => {
             <OrganizationView
               organizations={organizations}
               onUpdate={loadOrganizations}
-              onAddOrganizationClick={presentOrganizationModal}
               onSelectOrganization={handleSelectOrganization}
               onDeleteOrganization={handleDeleteOrganization}
             />

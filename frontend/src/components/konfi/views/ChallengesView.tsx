@@ -10,87 +10,25 @@ import {
   IonSegmentButton
 } from '@ionic/react';
 import {
-  flag,
-  flagOutline,
-  timeOutline,
-  personOutline,
-  ribbonOutline,
-  archiveOutline,
-  checkmarkCircle,
-  paperPlaneOutline,
-  sparkles,
-  compass,
-  rocket,
-  flame,
-  trophy,
-  medal,
-  ribbon,
-  star,
-  diamond,
-  shield,
-  flash,
-  thumbsUp,
-  heart,
-  people,
-  personAdd,
-  chatbubbles,
-  gift,
-  book,
-  school,
-  construct,
-  brush,
-  colorPalette,
-  sunny,
-  moon,
-  leaf,
-  rose,
-  calendar,
-  today,
-  time,
-  timer,
-  stopwatch,
-  restaurant,
-  fitness,
-  bicycle,
-  car,
-  airplane,
-  boat,
-  camera,
-  image,
-  musicalNote,
-  balloon,
-  home,
-  business,
-  location,
-  navigate,
-  pin,
-  informationCircle,
-  helpCircle,
-  alertCircle,
-  hammer
-} from 'ionicons/icons';
+  ICON_ABZEICHEN,
+  ICON_ARCHIV,
+  ICON_CHALLENGE,
+  ICON_CHALLENGE_GEFUELLT,
+  ICON_PERSON,
+  ICON_SENDEN,
+  ICON_UHRZEIT,
+} from '../../shared/icons';
 import { EmptyState, SectionHeader } from '../../shared';
 import type { KonfiChallenge, ChallengeMark } from '../../../types/challenges';
+import { getIconFromString } from '../../../utils/badgeIcons';
 
-// Icon-Vorrat der Challenge-Stempel. Bewusst als eigene, schlanke Map hier —
-// der Admin-Auswahldialog (ChallengeManageModal) haelt denselben Schlüssel-
-// Vorrat, aber ihn zu importieren wuerde das komplette Verwaltungs-Modal in das
-// Konfi-Bundle ziehen. Schlüssel müssen mit dem Admin-Vorrat uebereinstimmen.
-const CHALLENGE_BADGE_ICONS: Record<string, string> = {
-  flag, sparkles, compass, rocket, flame,
-  trophy, medal, ribbon, star, checkmarkCircle, diamond, shield,
-  flash, thumbsUp, heart, people, personAdd, chatbubbles, gift,
-  book, school, construct, brush, colorPalette,
-  sunny, moon, leaf, rose,
-  calendar, today, time, timer, stopwatch,
-  restaurant, fitness, bicycle, car, airplane, boat, camera, image, musicalNote, balloon,
-  home, business, location, navigate, pin,
-  informationCircle, helpCircle, alertCircle, hammer
-};
-
-/** Loest den gespeicherten Icon-Namen einer Challenge auf (Fallback: Flagge). */
+/**
+ * Loest den gespeicherten Icon-Namen einer Challenge auf (Rueckfall: Flagge).
+ * Vorrat kommt aus utils/badgeIcons — dasselbe Modul, aus dem der
+ * Admin-Auswahldialog schoepft, damit beide Seiten nicht auseinanderlaufen.
+ */
 export const getChallengeBadgeIcon = (iconName?: string | null): string =>
-  CHALLENGE_BADGE_ICONS[iconName || ''] || flag;
+  getIconFromString(iconName, ICON_CHALLENGE_GEFUELLT);
 
 // Konfi-Sicht der Challenges. Bewusst OHNE Zähler/Fortschritt/Rangliste — der
 // Kern des Features ist die eigene Deutung, nicht die Menge (siehe Konzept).
@@ -102,7 +40,6 @@ interface ChallengesViewProps {
   archive: KonfiChallenge[];
   marks: ChallengeMark[];
   onSelectChallenge: (challenge: KonfiChallenge) => void;
-  onSubmit: (challenge: KonfiChallenge) => void;
   // Zusaetzlicher Inhalt DIREKT UNTER dem SectionHeader (Leitungs-Sicht:
   // Verwalten|Mitmachen). Gleiches Muster wie EventsView/RequestsView.
   headerSlot?: React.ReactNode;
@@ -161,7 +98,6 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
   archive,
   marks,
   onSelectChallenge,
-  onSubmit,
   headerSlot
 }) => {
   // Aktive Challenges: die knappste Frist zuerst — was zuerst endet, steht oben.
@@ -184,18 +120,18 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
   const [reiter, setReiter] = useState<'aktuell' | 'archiv'>('aktuell');
 
   return (
-    <div style={{ paddingBottom: '24px' }}>
+    <div style={{ paddingBottom: 'var(--app-abstand-weit)' }}>
 
       <SectionHeader
         title="Challenges"
         subtitle="Mach mit, sei dabei"
-        icon={flagOutline}
+        icon={ICON_CHALLENGE}
         preset="challenges"
         stats={[
           // Aktiv und Archiv springen zum jeweiligen Reiter; Stempel haben
           // keinen eigenen Reiter und bleiben reine Anzeige.
           { value: active.length, label: 'AKTIV', onClick: () => setReiter('aktuell'), active: reiter === 'aktuell' },
-          { value: marks.length, label: 'ABZEICHEN' },
+          { value: marks.length, label: 'STEMPEL' },
           { value: archive.length, label: 'ARCHIV', onClick: () => setReiter('archiv'), active: reiter === 'archiv' }
         ]}
       />
@@ -219,19 +155,19 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
       {reiter === 'aktuell' && (
       <>
       {/* --- 1. Aktive Challenges --- */}
-      <IonList inset={true} style={{ margin: '16px' }}>
+      <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
         <IonListHeader>
           <div className="app-section-icon app-section-icon--challenges">
-            <IonIcon icon={flagOutline} />
+            <IonIcon icon={ICON_CHALLENGE} />
           </div>
           <IonLabel>Aktuelle Challenges</IonLabel>
         </IonListHeader>
 
         {sortedActive.length === 0 ? (
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: '16px' }}>
+            <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
               <EmptyState
-                icon={flagOutline}
+                icon={ICON_CHALLENGE}
                 title="Gerade läuft keine Challenge"
                 message="Sobald eine neue Challenge startet, findest du sie hier — und bekommst eine Nachricht."
                 iconColor="var(--app-color-challenges)"
@@ -240,7 +176,7 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
           </IonCard>
         ) : (
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: '12px' }}>
+            <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
               {/* Alle laufenden Challenges gleichwertig, einheitliches
                   Listen-Item wie bei Events/Badges — keine Leitkarte mehr. */}
               {sortedActive.map((challenge) => {
@@ -259,7 +195,7 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
                           style={{ backgroundColor: 'var(--app-color-challenges)' }}
                           title="Du hast bereits eingereicht"
                         >
-                          <IonIcon icon={paperPlaneOutline} />
+                          <IonIcon icon={ICON_SENDEN} />
                         </div>
                       </div>
                     )}
@@ -269,17 +205,17 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
                           <IonIcon icon={getChallengeBadgeIcon(challenge.badge_icon)} />
                         </div>
                         <div className="app-list-item__content">
-                          <div className="app-list-item__title" style={{ paddingRight: challenge.has_submission ? '36px' : '0' }}>
+                          <div className="app-list-item__title" style={{ paddingRight: challenge.has_submission ? 'var(--app-freiraum-aktion-xs)' : '0' }}>
                             {challenge.title}
                           </div>
                           <div className="app-list-item__meta">
                             <span className="app-list-item__meta-item">
-                              <IonIcon icon={timeOutline} className="app-icon-color--challenges" />
+                              <IonIcon icon={ICON_UHRZEIT} className="app-icon-color--challenges" />
                               {formatRemaining(challenge.ends_at)}
                             </span>
                             {author && (
                               <span className="app-list-item__meta-item">
-                                <IonIcon icon={personOutline} className="app-icon-color--challenges" />
+                                <IonIcon icon={ICON_PERSON} className="app-icon-color--challenges" />
                                 {author}
                               </span>
                             )}
@@ -288,8 +224,8 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
                           {challenge.description && (
                             <div
                               style={{
-                                fontSize: '0.82rem', lineHeight: 1.4, color: '#666',
-                                marginTop: '6px', whiteSpace: 'pre-wrap',
+                                fontSize: 'var(--app-text-hinweis)', lineHeight: 1.4, color: 'var(--app-text-secondary)',
+                                marginTop: 'var(--app-abstand-kompakt)', whiteSpace: 'pre-wrap',
                                 display: '-webkit-box', WebkitLineClamp: 2,
                                 WebkitBoxOrient: 'vertical', overflow: 'hidden'
                               }}
@@ -314,18 +250,18 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
       {reiter === 'archiv' && (
       <>
       {/* --- 3. Archiv --- */}
-      <IonList inset={true} style={{ margin: '16px' }}>
+      <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
         <IonListHeader>
           <div className="app-section-icon app-section-icon--challenges">
-            <IonIcon icon={archiveOutline} />
+            <IonIcon icon={ICON_ARCHIV} />
           </div>
           <IonLabel>Vorbei</IonLabel>
         </IonListHeader>
         <IonCard className="app-card">
-          <IonCardContent style={{ padding: sortedArchive.length === 0 ? '16px' : '12px' }}>
+          <IonCardContent style={{ padding: sortedArchive.length === 0 ? 'var(--app-abstand-basis)' : 'var(--app-abstand-mittel)' }}>
             {sortedArchive.length === 0 ? (
               <EmptyState
-                icon={archiveOutline}
+                icon={ICON_ARCHIV}
                 title="Noch nichts im Archiv"
                 message="Beendete Challenges kannst du hier später in Ruhe nachlesen."
                 iconColor="var(--app-color-challenges)"
@@ -350,7 +286,7 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
                             style={{ backgroundColor: 'var(--app-color-challenges)' }}
                             title="Du hast bereits eingereicht"
                           >
-                            <IonIcon icon={paperPlaneOutline} />
+                            <IonIcon icon={ICON_SENDEN} />
                           </div>
                         </div>
                       )}
@@ -360,12 +296,12 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
                             <IonIcon icon={getChallengeBadgeIcon(challenge.badge_icon)} />
                           </div>
                           <div className="app-list-item__content">
-                            <div className="app-list-item__title" style={{ paddingRight: challenge.has_submission ? '36px' : '0' }}>
+                            <div className="app-list-item__title" style={{ paddingRight: challenge.has_submission ? 'var(--app-freiraum-aktion-xs)' : '0' }}>
                               {challenge.title}
                             </div>
                             <div className="app-list-item__meta">
                               <span className="app-list-item__meta-item">
-                                <IonIcon icon={timeOutline} className="app-icon-color--challenges" />
+                                <IonIcon icon={ICON_UHRZEIT} className="app-icon-color--challenges" />
                                 {formatDateRange(challenge.starts_at, challenge.ends_at)}
                               </span>
                             </div>
@@ -384,18 +320,18 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
       )}
 
       {/* --- 2. Deine Stempel (bewusst OHNE Zaehler) --- */}
-      <IonList inset={true} style={{ margin: '16px' }}>
+      <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
         <IonListHeader>
           <div className="app-section-icon app-section-icon--challenges">
-            <IonIcon icon={ribbonOutline} />
+            <IonIcon icon={ICON_ABZEICHEN} />
           </div>
           <IonLabel>Deine Stempel</IonLabel>
         </IonListHeader>
         <IonCard className="app-card">
-          <IonCardContent style={{ padding: marks.length === 0 ? '16px' : '16px 12px' }}>
+          <IonCardContent style={{ padding: marks.length === 0 ? 'var(--app-abstand-basis)' : 'var(--app-abstand-basis) var(--app-abstand-mittel)' }}>
             {marks.length === 0 ? (
               <EmptyState
-                icon={ribbonOutline}
+                icon={ICON_ABZEICHEN}
                 title="Noch keine Stempel"
                 message="Für jede Challenge, bei der du mitmachst, bekommst du einen eigenen Stempel."
                 iconColor="var(--app-color-challenges)"
@@ -403,8 +339,8 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
             ) : (
               <div
                 style={{
-                  display: 'flex', gap: '14px', overflowX: 'auto',
-                  paddingBottom: '4px', WebkitOverflowScrolling: 'touch'
+                  display: 'flex', gap: 'var(--app-abstand-mittelweit)', overflowX: 'auto',
+                  paddingBottom: 'var(--app-abstand-mini)', WebkitOverflowScrolling: 'touch'
                 }}
               >
                 {marks.map((mark) => (
@@ -412,25 +348,25 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
                     key={mark.challenge_id}
                     style={{
                       display: 'flex', flexDirection: 'column', alignItems: 'center',
-                      gap: '6px', minWidth: '74px', maxWidth: '92px', flexShrink: 0
+                      gap: 'var(--app-abstand-kompakt)', minWidth: '74px', maxWidth: '92px', flexShrink: 0
                     }}
                   >
                     <div
                       style={{
-                        width: '52px', height: '52px', borderRadius: '50%',
-                        background: 'linear-gradient(135deg, var(--app-color-challenges) 0%, #be123c 100%)',
+                        width: '52px', height: '52px', borderRadius: 'var(--app-radius-kreis)',
+                        background: 'linear-gradient(135deg, var(--app-color-challenges) 0%, var(--app-color-challenges-dunkel) 100%)',
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        boxShadow: '0 4px 12px rgba(var(--app-color-challenges-rgb), 0.35)'
+                        boxShadow: 'var(--app-schatten-glow-challenges)'
                       }}
                     >
                       <IonIcon
                         icon={getChallengeBadgeIcon(mark.badge_icon)}
-                        style={{ fontSize: '1.5rem', color: 'white' }}
+                        style={{ fontSize: 'var(--app-text-ueberschrift)', color: 'white' }}
                       />
                     </div>
                     <div
                       style={{
-                        fontSize: '0.72rem', fontWeight: 600, color: '#3c3c43',
+                        fontSize: 'var(--app-text-meta)', fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-ios)',
                         textAlign: 'center', lineHeight: 1.2
                       }}
                     >

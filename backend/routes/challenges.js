@@ -9,6 +9,7 @@ const router = express.Router();
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { formatDatum } = require('../utils/zeitformat');
 const jwt = require('jsonwebtoken');
 const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
@@ -151,18 +152,12 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
   // HELFER
   // ====================================================================
 
-  // Jahrgänge, die ein Teamer sehen darf. org_admin/admin sehen alles (null =
-  // keine Einschraenkung), super_admin nichts (leeres Array).
   function viewableJahrgangIds(req) {
     if (req.user.role_name === 'super_admin') return [];
-    if (['org_admin', 'admin'].includes(req.user.role_name)) return null;
+    if (req.user.role_name === 'org_admin') return null;
     return (req.user.assigned_jahrgaenge || []).filter(j => j.can_view).map(j => j.id);
   }
 
-  // Darf die Leitung diese Challenge sehen/bearbeiten? org_admin/admin immer,
-  // Teamer nur wenn mindestens ein zugewiesener Jahrgang zugeordnet ist.
-  // Challenges ohne Jahrgangs-Zuordnung sind reine Leitungs-Entwuerfe und nur
-  // für org_admin/admin sichtbar (sonst könnte ein Teamer fremde Entwuerfe sehen).
   async function leadershipMayAccess(req, challengeId) {
     const viewable = viewableJahrgangIds(req);
     if (viewable === null) return true;
@@ -199,8 +194,8 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
   //   audience 'nur_team'        -> Team der Org, ORG-WEIT (keine Jahrgangspruefung)
   //   audience 'konfis*'         -> Jahrgangsbindung:
   //                                 Konfi über konfi_profiles.jahrgang_id,
-  //                                 Teamer über zugewiesene Jahrgänge,
-  //                                 org_admin/admin immer (sehen alles ihrer Org)
+  //                                 admin/Teamer über zugewiesene Jahrgänge,
+  //                                 org_admin immer (sieht alles seiner Org)
   // Gibt { allowed, reason } zurück, damit die Route 403 vs. 404 unterscheiden kann.
   async function participantMayAccess(req, challenge) {
     const role = req.user.role_name;
@@ -217,9 +212,10 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
       return { allowed: jahrgangIds.includes(jahrgangId) };
     }
 
-    if (['org_admin', 'admin'].includes(role)) return { allowed: true };
-
-    if (role === 'teamer') {
+    // org_admin: immer (leadershipMayAccess gibt für ihn sofort true zurück).
+    // admin/teamer: nur bei zugewiesenem Jahrgang — derselbe Weg, damit die
+    // Teilnehmer-Sicht nicht weiter ist als die Leitungs-Sicht.
+    if (['org_admin', 'admin', 'teamer'].includes(role)) {
       return { allowed: await leadershipMayAccess(req, challenge.id) };
     }
 
@@ -401,8 +397,8 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
         return res.status(403).json({ error: 'Kein Zugriff auf Challenges' });
       }
 
-      // Konfi: genau ein Jahrgang. Teamer: zugewiesene Jahrgänge.
-      // org_admin/admin: alle Jahrgänge der Org (viewable === null).
+      // Konfi: genau ein Jahrgang. admin/Teamer: zugewiesene Jahrgänge.
+      // org_admin: alle Jahrgänge der Org (viewable === null).
       let jahrgangIds = null;
       if (role === 'konfi') {
         const jahrgangId = await konfiJahrgangId(req.user.id);
@@ -410,8 +406,8 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
           return res.json({ active: [], archive: [], marks: [] });
         }
         jahrgangIds = [jahrgangId];
-      } else if (role === 'teamer') {
-        jahrgangIds = viewableJahrgangIds(req) || [];
+      } else {
+        jahrgangIds = viewableJahrgangIds(req);
       }
 
       // Sichtbare Challenges: entweder über die Jahrgangs-Zuordnung
@@ -548,7 +544,14 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
            WHERE cs.challenge_id = $1
              AND cs.user_id <> $2
              AND ${PUBLIC_SUBMISSION_SQL}
-           ORDER BY cs.created_at DESC`,
+           -- Die id als zweites Kriterium: Ohne sie ist die
+           -- Reihenfolge bei gleichem Zeitstempel nach SQL UNDEFINIERT --
+           -- PostgreSQL darf sie beliebig liefern. Zwei Beitraege in
+           -- derselben Sekunde sind in einer Gruppe von Konfis normal, und
+           -- die Galerie sortierte sich dann zwischen zwei Aufrufen um.
+           -- Die id waechst monoton, der spaeter eingefuegte steht also
+           -- oben -- genau das, was "neueste zuerst" meint.
+           ORDER BY cs.created_at DESC, cs.id DESC`,
           [challengeId, req.user.id]
         );
 
@@ -558,7 +561,8 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
                   moderation_note, created_at
            FROM challenge_submissions
            WHERE challenge_id = $1 AND user_id = $2
-           ORDER BY created_at DESC`,
+           -- Eindeutig sortieren, siehe Galerie oben.
+           ORDER BY created_at DESC, id DESC`,
           [challengeId, req.user.id]
         );
 
@@ -756,6 +760,34 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
           }
 
           try {
+            // Feed-Push an die Jahrgangs-Konfis — NUR wenn der Beitrag jetzt
+            // schon oeffentlich ist. Bei moderierten Challenges ist er das
+            // nicht; dort feuert der Push erst mit der Freigabe (PUT
+            // /admin/submissions/:id/moderate).
+            //
+            // Dieselbe Sichtbarkeitsregel wie die Galerie (isSubmissionPublic):
+            // Wer den Beitrag nicht sehen darf, erfaehrt auch nichts von ihm.
+            const sichtbar = isSubmissionPublic(
+              { moderation_status: moderationStatus, konfi_consent },
+              challenge
+            );
+            if (sichtbar) {
+              const anonym = isAnonymous({ konfi_consent }, challenge);
+              await PushService.sendChallengeFeedToJahrgaenge(
+                db,
+                req.user.organization_id,
+                challengeId,
+                challenge.title,
+                req.user.id,
+                anonym ? null : req.user.display_name,
+                media_type
+              );
+            }
+          } catch (pushErr) {
+            console.error('Feed-Push fehlgeschlagen:', pushErr.message);
+          }
+
+          try {
             if (moderationStatus === 'approved') {
               const { rows: [{ count: approvedCount }] } = await db.query(
                 `SELECT COUNT(*)::int AS count FROM challenge_submissions
@@ -871,10 +903,7 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
         requester.role_name = membership.role_name;
       }
 
-      // Für Teamer die zugewiesenen Jahrgänge DER AKTIVEN ORG nachladen —
-      // gebraucht, um leadershipMayAccess/viewableJahrgangIds unten identisch
-      // zur rbacVerifier-Logik im Rest der Datei anzuwenden.
-      if (requester.role_name === 'teamer') {
+      if (['admin', 'teamer'].includes(requester.role_name)) {
         const { rows: assigned } = await db.query(
           `SELECT j.id, uja.can_view
            FROM user_jahrgang_assignments uja
@@ -900,21 +929,21 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
       const isOwner = row.user_id === requester.id;
       let mayAccess = isOwner;
 
-      if (!mayAccess && ['org_admin', 'admin'].includes(requester.role_name)) {
-        // org_admin/admin sehen alle Dateien ihrer (aktiven) Org, ohne
+      if (!mayAccess && requester.role_name === 'org_admin') {
+        // org_admin sieht alle Dateien seiner (aktiven) Org, ohne
         // Jahrgangs-Einschraenkung — identisch zu leadershipMayAccess().
         mayAccess = true;
-      } else if (!mayAccess && requester.role_name === 'teamer') {
+      } else if (!mayAccess && ['admin', 'teamer'].includes(requester.role_name)) {
         // 'nur_team'-Challenges sind org-weit (keine Jahrgangs-Zuordnung) —
-        // dort darf jeder Teamer der Org die Dateien sehen, sonst könnte er
-        // seine eigene Team-Runde nicht anschauen (Migration 121).
+        // dort darf jede:r aus dem Team der Org die Dateien sehen, sonst könnte
+        // sie/er die eigene Team-Runde nicht anschauen (Migration 121).
         if (row.audience === 'nur_team') {
           mayAccess = true;
         } else {
-          // Sonst nur für Submissions aus einem seiner zugewiesenen Jahrgänge —
+          // Sonst nur für Submissions aus einem der zugewiesenen Jahrgänge —
           // konsistent zu leadershipMayAccess()/viewableJahrgangIds() oben in
           // dieser Datei (Moderations-Sicht ist sonst weiter als die restlichen
-          // Leitungs-Endpunkte, über die der Teamer die Challenge erst findet).
+          // Leitungs-Endpunkte, über die die Challenge erst gefunden wird).
           const viewable = (requester.assigned_jahrgaenge || [])
             .filter(j => j.can_view)
             .map(j => j.id);
@@ -1025,18 +1054,29 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
       let jahrgangFilter = '';
       if (viewable !== null) {
         if (viewable.length === 0) {
-          return res.json([]);
+          // NICHT fuer super_admin: viewableJahrgangIds gibt auch fuer ihn
+          // [] zurueck, aber aus einem anderen Grund -- er hat keinen Zugriff
+          // auf Jahrgangsdaten, nicht "keine Zuweisung". Heute weist ihn
+          // schon requireTeamer mit 403 ab (rbac.js), der Guard hier ist die
+          // Absicherung, falls sich das einmal aendert -- der Hinweis waere
+          // fuer ihn in jedem Fall falsch.
+          if (req.user.role_name === 'super_admin') {
+            return res.json([]);
+          }
+          res.set('X-Kein-Jahrgang-Zugewiesen', 'true');
+          jahrgangFilter = `AND c.audience = 'nur_team'`;
+        } else {
+          params.push(viewable);
+          // 'nur_team' ist org-weit ohne Jahrgangs-Zuordnung -> für jeden Teamer
+          // sichtbar, sonst könnte er seine eigene Team-Runde nicht verwalten.
+          jahrgangFilter = `AND (
+            c.audience = 'nur_team'
+            OR EXISTS (
+              SELECT 1 FROM challenge_jahrgang_assignments cja2
+              WHERE cja2.challenge_id = c.id AND cja2.jahrgang_id = ANY($3::int[])
+            )
+          )`;
         }
-        params.push(viewable);
-        // 'nur_team' ist org-weit ohne Jahrgangs-Zuordnung -> für jeden Teamer
-        // sichtbar, sonst könnte er seine eigene Team-Runde nicht verwalten.
-        jahrgangFilter = `AND (
-          c.audience = 'nur_team'
-          OR EXISTS (
-            SELECT 1 FROM challenge_jahrgang_assignments cja2
-            WHERE cja2.challenge_id = c.id AND cja2.jahrgang_id = ANY($3::int[])
-          )
-        )`;
       }
 
       const { rows } = await db.query(
@@ -1449,7 +1489,10 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
            LEFT JOIN konfi_profiles kp ON kp.user_id = u.id
            LEFT JOIN jahrgaenge j ON kp.jahrgang_id = j.id
            WHERE cs.challenge_id = $1
-           ORDER BY cs.created_at DESC`,
+           -- Eindeutig sortieren, siehe Galerie oben. Hier faellt es beim
+           -- Moderieren auf: Eine Liste, die sich bei jedem Aktualisieren
+           -- umsortiert, laesst einen den Ueberblick verlieren.
+           ORDER BY cs.created_at DESC, cs.id DESC`,
           [challengeId]
         );
 
@@ -1492,9 +1535,12 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
 
         const { rows: [submission] } = await db.query(
           `SELECT cs.id, cs.challenge_id, cs.user_id, cs.moderation_status,
-                  cs.konfi_consent, c.visibility, c.title AS challenge_title
+                  cs.konfi_consent, cs.media_type, cs.approved_at,
+                  c.visibility, c.title AS challenge_title,
+                  u.display_name AS einreicher_name
            FROM challenge_submissions cs
            JOIN challenges c ON cs.challenge_id = c.id
+           JOIN users u ON u.id = cs.user_id
            WHERE cs.id = $1 AND cs.organization_id = $2`,
           [submissionId, req.user.organization_id]
         );
@@ -1542,12 +1588,23 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
           // approve und unhide fuehren beide zu 'approved' und raeumen die
           // hidden-Metadaten ab (ein wieder eingeblendeter Beitrag ist
           // freigegeben) — inklusive der Ausblende-Begruendung.
+          // approved_by/approved_at halten fest, WER freigegeben hat
+          // (Migration 146). Fuers Ausblenden gab es hidden_by/hidden_at
+          // laengst; die Freigabe -- also die eigentliche Moderationsarbeit --
+          // hinterliess bisher keine Spur. Der Jahresrueckblick macht sie
+          // daraus sichtbar.
+          //
+          // BEWUSST NUR HIER und nicht beim Einreichen: Bei unmoderierten
+          // Challenges entsteht 'approved' automatisch, ohne dass jemand
+          // hingesehen hat. Dort bleibt die Spalte NULL -- niemand bekommt
+          // Arbeit gutgeschrieben, die er nicht geleistet hat.
           ({ rows: [updated] } = await db.query(
             `UPDATE challenge_submissions
              SET moderation_status = 'approved', hidden_by = NULL, hidden_at = NULL,
-                 moderation_note = NULL
+                 moderation_note = NULL,
+                 approved_by = $2, approved_at = NOW()
              WHERE id = $1 RETURNING id, moderation_status, moderation_note`,
-            [submissionId]
+            [submissionId, req.user.id]
           ));
         }
 
@@ -1573,6 +1630,53 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
             // Challenge, ist das Abzeichen jetzt verdient -> Push. Bewusst nur
             // bei 'approve' (nicht 'unhide'): ein wieder eingeblendeter
             // Beitrag war schon einmal freigegeben.
+            // Erst mit der Freigabe wird der Beitrag im Feed sichtbar —
+            // hier feuert deshalb der Feed-Push fuer moderierte Challenges.
+            // Bewusst NUR bei 'approve': Ein wieder eingeblendeter Beitrag
+            // ('unhide') war schon einmal sichtbar, dafuer gaebe es sonst eine
+            // zweite Mitteilung.
+            //
+            // Und nur bei der ERSTEN Freigabe: `approved_at` ist
+            // die Spur, dass dieser Beitrag schon einmal durch war. Ohne die
+            // Pruefung schickte ein zweiter Klick auf "Freigeben" dem ganzen
+            // Jahrgang erneut "Neuer Beitrag von X" -- moeglich per
+            // Doppelklick (die Swipe-Aktion prueft kein isBusy) oder wenn die
+            // Antwort verlorengeht und die App den Aufruf wiederholt. Ein
+            // 'approve' nach einem 'hide' zaehlt genauso: Der Jahrgang kennt
+            // den Beitrag bereits, dieselbe Ueberlegung wie bei 'unhide'.
+            // Der Abzeichen-Push weiter unten war ueber approvedCount === 1
+            // laengst so abgesichert.
+            //
+            // Zwei Merkmale, weil eines allein nicht reicht: `approved_at`
+            // bleibt bei UNmoderierten Challenges bewusst NULL (dort entsteht
+            // 'approved' automatisch, siehe Kommentar beim UPDATE oben), und
+            // `moderation_status` steht bei einem ausgeblendeten Beitrag auf
+            // 'hidden'. Zusammen decken sie beide Wege ab, auf denen ein
+            // Beitrag schon einmal im Feed stand.
+            const schonEinmalFreigegeben =
+              submission.approved_at !== null || submission.moderation_status === 'approved';
+            if (action === 'approve' && !schonEinmalFreigegeben) {
+              const sichtbar = isSubmissionPublic(
+                { moderation_status: 'approved', konfi_consent: submission.konfi_consent },
+                { visibility: submission.visibility }
+              );
+              if (sichtbar) {
+                const anonym = isAnonymous(
+                  { konfi_consent: submission.konfi_consent },
+                  { visibility: submission.visibility }
+                );
+                await PushService.sendChallengeFeedToJahrgaenge(
+                  db,
+                  req.user.organization_id,
+                  submission.challenge_id,
+                  submission.challenge_title,
+                  submission.user_id,
+                  anonym ? null : submission.einreicher_name,
+                  submission.media_type
+                );
+              }
+            }
+
             if (action === 'approve') {
               const { rows: [{ count: approvedCount }] } = await db.query(
                 `SELECT COUNT(*)::int AS count FROM challenge_submissions
@@ -1698,7 +1802,7 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
         for (const row of rows) {
           const anonymous = isAnonymous(row, challenge);
           const name = anonymous ? 'Anonym' : row.display_name;
-          const datum = new Date(row.created_at).toLocaleDateString('de-DE');
+          const datum = formatDatum(row.created_at);
           lines.push(`--- ${name} (${datum}) ---`);
           if (row.text_content) {
             lines.push(row.text_content);

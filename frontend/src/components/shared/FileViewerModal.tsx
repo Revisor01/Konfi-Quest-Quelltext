@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { IonIcon } from '@ionic/react';
-import { closeOutline, downloadOutline, shareOutline, documentOutline } from 'ionicons/icons';
+import { ICON_DATEI, ICON_HERUNTERLADEN, ICON_SCHLIESSEN, ICON_TEILEN } from './icons';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
@@ -180,7 +180,7 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
     return () => {
       Object.values(resolvedUrlsRef.current).forEach((u) => {
         if (u.startsWith('blob:')) {
-          try { URL.revokeObjectURL(u); } catch {}
+          try { URL.revokeObjectURL(u); } catch { /* Freigeben darf scheitern */ }
         }
       });
       resolvedUrlsRef.current = {};
@@ -471,7 +471,7 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
         if (isNative) {
           return (
             <div className="file-viewer-fallback">
-              <IonIcon icon={documentOutline} className="file-viewer-fallback-icon" />
+              <IonIcon icon={ICON_DATEI} className="file-viewer-fallback-icon" />
               <p className="file-viewer-fallback-name">{currentFile.fileName}</p>
               <p className="file-viewer-fallback-type">
                 {nativeOpening ? 'Wird geöffnet...' : 'Tippe zum erneut Öffnen'}
@@ -486,7 +486,7 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
                     });
                   }
                 }}>
-                  <IonIcon icon={documentOutline} />
+                  <IonIcon icon={ICON_DATEI} />
                   Nativ öffnen
                 </button>
               )}
@@ -506,7 +506,7 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
         if (isNative) {
           return (
             <div className="file-viewer-fallback">
-              <IonIcon icon={documentOutline} className="file-viewer-fallback-icon" />
+              <IonIcon icon={ICON_DATEI} className="file-viewer-fallback-icon" />
               <p className="file-viewer-fallback-name">{currentFile.fileName}</p>
               <p className="file-viewer-fallback-type">
                 {nativeOpening ? 'Wird geöffnet...' : 'Tippe zum erneut Öffnen'}
@@ -521,7 +521,7 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
                     });
                   }
                 }}>
-                  <IonIcon icon={documentOutline} />
+                  <IonIcon icon={ICON_DATEI} />
                   Nativ öffnen
                 </button>
               )}
@@ -530,11 +530,11 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
         }
         return (
           <div className="file-viewer-fallback">
-            <IonIcon icon={documentOutline} className="file-viewer-fallback-icon" />
+            <IonIcon icon={ICON_DATEI} className="file-viewer-fallback-icon" />
             <p className="file-viewer-fallback-name">{currentFile.fileName}</p>
             <p className="file-viewer-fallback-type">{currentFile.mimeType}</p>
             <button className="file-viewer-fallback-btn" onClick={handleDownload}>
-              <IonIcon icon={downloadOutline} />
+              <IonIcon icon={ICON_HERUNTERLADEN} />
               Herunterladen
             </button>
           </div>
@@ -555,13 +555,13 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
       default:
         return (
           <div className="file-viewer-fallback">
-            <IonIcon icon={documentOutline} className="file-viewer-fallback-icon" />
+            <IonIcon icon={ICON_DATEI} className="file-viewer-fallback-icon" />
             <p className="file-viewer-fallback-name">{currentFile.fileName}</p>
             <p className="file-viewer-fallback-type">
               {currentFile.mimeType || 'Unbekannter Dateityp'}
             </p>
             <button className="file-viewer-fallback-btn" onClick={handleDownload}>
-              <IonIcon icon={downloadOutline} />
+              <IonIcon icon={ICON_HERUNTERLADEN} />
               Herunterladen
             </button>
           </div>
@@ -575,7 +575,7 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
       <div className="file-viewer-toolbar">
         <div className="file-viewer-toolbar-left">
           <button className="file-viewer-btn" onClick={onClose} aria-label="Schließen">
-            <IonIcon icon={closeOutline} />
+            <IonIcon icon={ICON_SCHLIESSEN} />
           </button>
         </div>
 
@@ -586,11 +586,11 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
         <div className="file-viewer-toolbar-right">
           {isNative ? (
             <button className="file-viewer-btn" onClick={handleShare} aria-label="Teilen">
-              <IonIcon icon={shareOutline} />
+              <IonIcon icon={ICON_TEILEN} />
             </button>
           ) : (
             <button className="file-viewer-btn" onClick={handleDownload} aria-label="Herunterladen">
-              <IonIcon icon={downloadOutline} />
+              <IonIcon icon={ICON_HERUNTERLADEN} />
             </button>
           )}
         </div>

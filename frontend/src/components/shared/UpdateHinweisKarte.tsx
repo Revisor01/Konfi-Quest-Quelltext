@@ -1,6 +1,6 @@
 import React from 'react';
 import { IonIcon } from '@ionic/react';
-import { sparklesOutline, closeOutline, chevronForwardOutline } from 'ionicons/icons';
+import { ICON_FUNKELN, ICON_SCHLIESSEN, ICON_WEITER } from './icons';
 
 interface UpdateHinweisKarteProps {
   // Öffnet den "Was ist neu"-Walkthrough. Der Aufrufer markiert den Hinweis
@@ -24,7 +24,7 @@ const UpdateHinweisKarte: React.FC<UpdateHinweisKarteProps> = ({ onOpen, onDismi
     role="button"
     tabIndex={0}
     style={style}
-    aria-label="Was ist neu in Version 2.0? Die Neuerungen ansehen"
+    aria-label="Was ist neu in Version 2.1? Die Neuerungen ansehen"
     onClick={onOpen}
     onKeyDown={(e) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -33,10 +33,10 @@ const UpdateHinweisKarte: React.FC<UpdateHinweisKarteProps> = ({ onOpen, onDismi
       }
     }}
   >
-    <IonIcon icon={sparklesOutline} className="app-whatsnew__icon" aria-hidden="true" />
+    <IonIcon icon={ICON_FUNKELN} className="app-whatsnew__icon" aria-hidden="true" />
     <div className="app-whatsnew__text">
-      <span className="app-whatsnew__title">Was ist neu in Version 2.0?</span>
-      <span className="app-whatsnew__sub">Challenges, der Mitmachen-Tab und mehr — hier tippen für den Überblick.</span>
+      <span className="app-whatsnew__title">Was ist neu in Version 2.1?</span>
+      <span className="app-whatsnew__sub">Dein Jahresrückblick, Zu- und Absagen, Material mit Links — hier tippen für den Überblick.</span>
     </div>
     {onDismiss ? (
       <button
@@ -48,10 +48,10 @@ const UpdateHinweisKarte: React.FC<UpdateHinweisKarteProps> = ({ onOpen, onDismi
           onDismiss();
         }}
       >
-        <IonIcon icon={closeOutline} aria-hidden="true" />
+        <IonIcon icon={ICON_SCHLIESSEN} aria-hidden="true" />
       </button>
     ) : (
-      <IonIcon icon={chevronForwardOutline} className="app-whatsnew__chevron" aria-hidden="true" />
+      <IonIcon icon={ICON_WEITER} className="app-whatsnew__chevron" aria-hidden="true" />
     )}
   </div>
 );

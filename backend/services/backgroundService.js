@@ -3,6 +3,7 @@ const cron = require('node-cron');
 const { deleteKonfiCascade } = require('../utils/konfiDeletion');
 const emailService = require('./emailService');
 const apm = require('../utils/apm');
+const { formatUhrzeit, heuteBerlin } = require('../utils/zeitformat');
 const { appIconSummenFuerAlle } = require('../utils/appIconBadge');
 
 // Vorlauf für die Lizenz-Ablauf-Erinnerung (Tage vor trial_ends_at)
@@ -128,9 +129,13 @@ class BackgroundService {
       //
       // Gerechnet wird fuer alle, gesendet nur an Geraete mit Token — die
       // Abzeichen-Pruefung unten braucht ohnehin die volle Liste.
-      // Jahrgaenge nur fuer Teamer:innen, und in EINER Abfrage: Nur bei ihnen
-      // haengt die Zahl der offenen Freigaben an der Zuweisung.
-      const teamerIds = users.filter(u => u.user_type === 'teamer').map(u => u.user_id);
+      // Jahrgaenge fuer Teamer:innen UND die Rolle 'admin', in
+      // EINER Abfrage: Bei beiden haengen die Zaehler an der Zuweisung
+      // (Freigaben bei Teamer:innen; Antraege, Termine und Freigaben bei
+      // gebundenen Admins). org_admin zaehlt org-weit und braucht keine.
+      const teamerIds = users
+        .filter(u => u.user_type === 'teamer' || u.role_name === 'admin')
+        .map(u => u.user_id);
       const jahrgaengeProTeamer = new Map();
       if (teamerIds.length > 0) {
         const { rows: zuweisungen } = await db.query(
@@ -453,13 +458,16 @@ class BackgroundService {
           )
       `;
 
-      const tomorrowDate = oneDayFromNow.toISOString().split('T')[0];
+      // heuteBerlin() statt toISOString(): Der Vergleich unten laeuft gegen
+      // e.event_date::date unter Berliner Sitzungszone. Mit dem UTC-Tag traf
+      // der nachts laufende Terminhinweis den falschen Kalendertag.
+      const tomorrowDate = heuteBerlin(oneDayFromNow);
       const { rows: oneDayEvents } = await db.query(oneDayQuery, [tomorrowDate]);
 
       for (const event of oneDayEvents) {
         try {
           // Extrahiere Zeit aus event_date
-          const eventTime = event.event_date ? new Date(event.event_date).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : null;
+          const eventTime = event.event_date ? formatUhrzeit(event.event_date) : null;
           await PushService.sendEventReminderToKonfi(
             db,
             event.user_id,
@@ -504,7 +512,7 @@ class BackgroundService {
 
       for (const event of oneHourEvents) {
         try {
-          const eventTime = event.event_date ? new Date(event.event_date).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' }) : null;
+          const eventTime = event.event_date ? formatUhrzeit(event.event_date) : null;
           await PushService.sendEventReminderToKonfi(
             db,
             event.user_id,
@@ -666,12 +674,31 @@ class BackgroundService {
         'DELETE FROM push_tokens WHERE user_id NOT IN (SELECT id FROM users) RETURNING id'
       );
 
-      const totalDeleted = errorTokens.length + inactiveTokens.length + orphanedTokens.length;
+      // 4. Tokens von Usern ohne eine einzige gueltige Sitzung (stiller
+      //    Sitzungsablauf). Laeuft der letzte Refresh-Token ab oder wird er
+      //    revoked, ohne dass die App den Push-Token abmelden konnte (der
+      //    DELETE verlangt Auth und scheitert nach dem Ablauf mit 401), blieb
+      //    der Token stehen — und Regel 2 griff nie, weil jede erfolgreiche
+      //    Zustellung updated_at auffrischt. Das Geraet bekam unbegrenzt
+      //    weiter Pushes fuer ein Konto, an dem niemand mehr angemeldet ist.
+      //    Jeder Login legt einen Refresh-Token an; wer noch irgendwo
+      //    angemeldet ist, hat immer mindestens eine gueltige Zeile.
+      const { rows: sessionlessTokens } = await db.query(
+        `DELETE FROM push_tokens pt
+         WHERE NOT EXISTS (
+           SELECT 1 FROM refresh_tokens rt
+           WHERE rt.user_id = pt.user_id
+             AND rt.revoked_at IS NULL
+             AND rt.expires_at > NOW()
+         ) RETURNING id`
+      );
+
+      const totalDeleted = errorTokens.length + inactiveTokens.length + orphanedTokens.length + sessionlessTokens.length;
       if (totalDeleted > 0) {
-        console.log(`Token cleanup: ${errorTokens.length} error tokens, ${inactiveTokens.length} inactive tokens, ${orphanedTokens.length} orphaned tokens deleted`);
+        console.log(`Token cleanup: ${errorTokens.length} error tokens, ${inactiveTokens.length} inactive tokens, ${orphanedTokens.length} orphaned tokens, ${sessionlessTokens.length} sessionless tokens deleted`);
       }
 
-      return { errorTokens: errorTokens.length, inactiveTokens: inactiveTokens.length, orphanedTokens: orphanedTokens.length };
+      return { errorTokens: errorTokens.length, inactiveTokens: inactiveTokens.length, orphanedTokens: orphanedTokens.length, sitzungsloseTokens: sessionlessTokens.length };
     } catch (error) {
       console.error('Error in cleanupStaleTokens:', error);
       throw error;
@@ -719,38 +746,53 @@ class BackgroundService {
   }
 
   /**
-   * Prueft ob Wrapped-Snapshots automatisch generiert werden müssen.
-   * Laeuft jaehrlich am 6.1. (Teamer-Wrapped für alle Organisationen).
-   * Konfi-Wrapped wird NICHT mehr automatisch getriggert (Toggle pro Jahrgang, 119).
+   * Legt am 6. Januar in JEDER Organisation den Team-Rueckblick fuer das
+   * abgelaufene Kalenderjahr an -- und gibt ihn frei.
+   *
+   * Der KONFI-Rueckblick laeuft NICHT automatisch: Er umfasst die ganze
+   * Konfi-Zeit bis zum Tag der Erzeugung, und wann dieser Tag ist, weiss
+   * nur die Gemeinde (Konfirmation, Abschlussfahrt, letzter Abend). Ein
+   * Datum im Kalender kann das nicht wissen.
    */
   static async checkWrappedTriggers(db) {
     try {
       const today = new Date();
 
+      // DAS ABGELAUFENE KALENDERJAHR. Der Cron feuert am 6. Januar -- der
+      // Rueckblick gilt dem Jahr davor.
+      const jahr = today.getFullYear() - 1;
+
       let teamerOrgsGenerated = 0;
 
-      // Teamer-Wrapped: Jaehrlich (Cron feuert nur am 6.1.) für alle Organisationen
       const { rows: orgs } = await db.query('SELECT id FROM organizations');
 
       for (const org of orgs) {
         try {
-          // Pruefen ob schon generiert (Idempotenz)
-          const { rows: existing } = await db.query(
-            `SELECT 1 FROM wrapped_snapshots WHERE organization_id = $1 AND wrapped_type = 'teamer' AND year = $2 LIMIT 1`,
-            [org.id, today.getFullYear()]
-          );
+          if (!this.wrappedRouter || !this.wrappedRouter.generateAllTeamerWrapped) continue;
 
-          if (existing.length === 0 && this.wrappedRouter && this.wrappedRouter.generateAllTeamerWrapped) {
-            await this.wrappedRouter.generateAllTeamerWrapped(db, org.id, today.getFullYear());
-            teamerOrgsGenerated++;
-          }
+          // DOPPELTE ANLAGE VERHINDERT generateAllTeamerWrapped SELBST:
+          // Sie prueft, ob fuer diese Organisation schon eine Team-Ausgabe
+          // ueber genau dieses Kalenderjahr steht, und tut dann nichts.
+          //
+          // Die Pruefung gehoert dorthin und nicht hierher, weil sie auch
+          // fuer den manuellen Weg gelten muss -- eine Leitung, die den
+          // Rueckblick am 3. Januar selbst erzeugt, darf am 6. keinen
+          // zweiten bekommen. Zwei Pruefungen an zwei Stellen liefen
+          // irgendwann auseinander.
+          //
+          // Frueher stand hier eine eigene Abfrage auf wrapped_snapshots
+          // (year = laufendes Jahr). Sie war doppelt falsch: Sie pruefte das
+          // LAUFENDE statt des abgelaufenen Jahres, und sie zaehlte
+          // Snapshots statt Ausgaben.
+          const ergebnis = await this.wrappedRouter.generateAllTeamerWrapped(db, org.id, jahr);
+          if (ergebnis && !ergebnis.uebersprungen) teamerOrgsGenerated++;
         } catch (err) {
           console.error(`Wrapped-Cron: Teamer-Org ${org.id} Fehler:`, err.message);
         }
       }
 
       if (teamerOrgsGenerated > 0) {
-        console.log(`Wrapped-Cron: ${teamerOrgsGenerated} Teamer-Orgs generiert`);
+        console.log(`Wrapped-Cron: Team-Rueckblick ${jahr} fuer ${teamerOrgsGenerated} Organisationen erzeugt`);
       }
     } catch (error) {
       console.error('Error in checkWrappedTriggers:', error);

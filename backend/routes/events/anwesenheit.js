@@ -24,8 +24,13 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
 
       await client.query('BEGIN');
 
-      // Nur ANGEMELDETE Konfis ohne Anwesenheits-Status. Teamer:innen werden
-      // weiterhin einzeln verbucht (eigene Liste, keine Punkte).
+      // Nur ANGEMELDETE Konfis ohne Anwesenheits-Status. Die Team-Seite
+      // (Teamer:innen und zugeordnete Leitung) wird ueber rolle='teamer'
+      // getrennt verbucht — eigene Liste, keine Punkte.
+      //
+      // Getrennt wird nach "ist Konfi" / "ist kein Konfi", nicht
+      // mehr nach "ist Teamer": Sonst faellt eine zugeordnete Leitung in den
+      // Konfi-Zweig und bekaeme dort Event-Punkte gutgeschrieben.
       const { rows: unprocessed } = await client.query(
         `SELECT eb.id AS booking_id, eb.user_id
          FROM event_bookings eb
@@ -33,7 +38,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
          JOIN roles r ON u.role_id = r.id
          WHERE eb.event_id = $1 AND eb.status = 'confirmed'
            AND eb.attendance_status IS NULL
-           AND (CASE WHEN $2 = 'teamer' THEN r.name = 'teamer' ELSE COALESCE(r.name, '') <> 'teamer' END)
+           AND (CASE WHEN $2 = 'teamer' THEN COALESCE(r.name, '') <> 'konfi' ELSE r.name = 'konfi' END)
          ORDER BY eb.created_at ASC`,
         [eventId, rolle]
       );

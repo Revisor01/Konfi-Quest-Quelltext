@@ -1,7 +1,9 @@
 import React from 'react';
 import { IonIcon } from '@ionic/react';
-import { timeOutline, alertCircleOutline } from 'ionicons/icons';
+import { ICON_UHRZEIT, ICON_WARNHINWEIS } from './icons';
 import { useApp } from '../../contexts/AppContext';
+import { tageBis } from './eventFormatting';
+import { FARBEN } from '../../theme/colors';
 
 /**
  * Hinweis-Banner für laufende Testphasen.
@@ -17,40 +19,44 @@ const TrialBanner: React.FC<{ style?: React.CSSProperties }> = ({ style }) => {
   if (!user?.trial_ends_at || user?.is_trial !== true) return null;
 
   const end = new Date(user.trial_ends_at);
-  const days = Math.ceil((end.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+  // Kalendertage, nicht 24-Stunden-Bloecke: Sonst zeigt ein Ende heute Abend
+  // "1 Tag" statt "heute", und ueber eine Zeitumstellung verschiebt sich alles
+  // um einen Tag (siehe eventFormatting.ts).
+  const days = tageBis(end);
 
   // Abgelaufen wird serverseitig per Login/Refresh gesperrt — hier nur laufende Trials
   if (days < 0) return null;
 
   const isUrgent = days <= 7;
-  const accent = isUrgent ? '#dc2626' : '#667eea';
-  const bg = isUrgent ? 'rgba(220, 38, 38, 0.08)' : 'rgba(102, 126, 234, 0.08)';
+  // Echte Hexwerte: unten wird `${accent}33` gerechnet — var() geht nicht.
+  const accent = isUrgent ? FARBEN.events : FARBEN.users;
+  const bg = isUrgent ? 'rgba(var(--app-color-events-rgb), 0.08)' : 'rgba(var(--app-color-users-rgb), 0.08)';
 
   return (
     <div
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '10px',
-        margin: '0 16px 12px',
-        padding: '12px 14px',
+        gap: 'var(--app-abstand-schmal)',
+        margin: '0 var(--app-abstand-basis) var(--app-abstand-mittel)',
+        padding: 'var(--app-abstand-mittel) var(--app-abstand-mittelweit)',
         background: bg,
         border: `1px solid ${accent}33`,
-        borderRadius: '12px',
+        borderRadius: 'var(--app-radius-karte)',
         ...style
       }}
     >
       <IonIcon
-        icon={isUrgent ? alertCircleOutline : timeOutline}
-        style={{ color: accent, fontSize: '1.3rem', flexShrink: 0 }}
+        icon={isUrgent ? ICON_WARNHINWEIS : ICON_UHRZEIT}
+        style={{ color: accent, fontSize: 'var(--app-text-titel)', flexShrink: 0 }}
       />
-      <div style={{ fontSize: '0.88rem', color: '#333', lineHeight: 1.35 }}>
+      <div style={{ fontSize: 'var(--app-text-basis)', color: 'var(--app-text-primary)', lineHeight: 1.35 }}>
         <strong style={{ color: accent }}>
           {days === 0
             ? 'Testphase endet heute'
             : `Testphase: noch ${days} Tag${days === 1 ? '' : 'e'}`}
         </strong>
-        <div style={{ color: '#666', fontSize: '0.82rem' }}>
+        <div style={{ color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-hinweis)' }}>
           Läuft bis {end.toLocaleDateString('de-DE')}. Danach wird der Zugang gesperrt.
         </div>
       </div>

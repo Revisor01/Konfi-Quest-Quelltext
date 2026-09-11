@@ -1,4 +1,21 @@
+import {
+  ICON_ABSAGE,
+  ICON_AKTUALISIEREN,
+  ICON_FUNKELN_GEFUELLT,
+  ICON_JAHRGANG_GEFUELLT,
+  ICON_MAIL_GEFUELLT,
+  ICON_OFFLINE,
+  ICON_PERSON_GEFUELLT,
+  ICON_SCHLUESSEL_GEFUELLT,
+  ICON_SICHTBAR,
+  ICON_VERBORGEN,
+  ICON_WARNHINWEIS_GEFUELLT,
+  ICON_ZURUECK,
+  ICON_ZUSAGE_GEFUELLT,
+} from '../shared/icons';
+import { fehlerText, istNetzwerkfehler } from '../../utils/fehler';
 import React, { useState, useEffect, useRef } from 'react';
+import { useAppLocation } from '../../navigation/useAppLocation';
 import {
   IonPage,
   IonContent,
@@ -13,25 +30,10 @@ import {
   useIonRouter
 } from '@ionic/react';
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
-import {
-  person,
-  key,
-  mail,
-  sparkles,
-  alertCircle,
-  closeCircle,
-  eye,
-  eyeOff,
-  checkmarkCircle,
-  school,
-  arrowBack,
-  refreshOutline,
-  cloudOfflineOutline
-} from 'ionicons/icons';
-import { useLocation } from 'react-router-dom';
+
 import api from '../../services/api';
 import { setToken, setUser as setTokenStoreUser } from '../../services/tokenStore';
-import { hasValidUsernameChars, USERNAME_RULES_MESSAGE } from '../../utils/usernameValidation';
+import { hasValidUsernameChars } from '../../utils/usernameValidation';
 import { useApp } from '../../contexts/AppContext';
 
 interface PasswordCheck {
@@ -43,7 +45,7 @@ interface PasswordCheck {
 }
 
 const KonfiRegisterPage: React.FC = () => {
-  const location = useLocation();
+  const location = useAppLocation();
   const router = useIonRouter();
   const { setUser, setSuccess: setAppSuccess, isOnline } = useApp();
 
@@ -154,7 +156,7 @@ const KonfiRegisterPage: React.FC = () => {
       hasUppercase: /[A-Z]/.test(pw),
       hasLowercase: /[a-z]/.test(pw),
       hasNumber: /[0-9]/.test(pw),
-      hasSpecial: /[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/~`]/.test(pw)
+      hasSpecial: /[!@#$%^&*(),.?":{}|<>_\-+=[\]\\/~`]/.test(pw)
     });
   }, [formData.password]);
 
@@ -169,20 +171,20 @@ const KonfiRegisterPage: React.FC = () => {
         organization_name: response.data.organization_name
       });
       setInviteCode(code);
-    } catch (err: any) {
+    } catch (err) {
       // Netzwerkfehler erkennen
-      if (!err.response || err.code === 'ERR_NETWORK') {
+      if (istNetzwerkfehler(err)) {
         setIsNetworkError(true);
         setError('Verbindung fehlgeschlagen. Bitte prüfe deine Internetverbindung.');
       } else {
         // Differenzierte Fehlermeldungen
-        const errorCode = err.response?.data?.error_code;
+        const errorCode = (err as { response?: { data?: { error_code?: string } } }).response?.data?.error_code;
         if (errorCode === 'not_found') {
           setError('Dieser Einladungscode existiert nicht. Bitte prüfe deine Eingabe.');
         } else if (errorCode === 'expired') {
           setError('Dieser Einladungscode ist abgelaufen. Bitte frage deinen Konfi-Leiter nach einem neuen Code.');
         } else {
-          setError(err.response?.data?.error || 'Fehler bei der Code-Validierung');
+          setError(fehlerText(err, 'Fehler bei der Code-Validierung'));
         }
       }
       setInviteInfo(null);
@@ -257,16 +259,17 @@ const KonfiRegisterPage: React.FC = () => {
         }, 1500);
       }
 
-    } catch (err: any) {
+    } catch (err) {
       // Netzwerkfehler erkennen
-      if (!err.response || err.code === 'ERR_NETWORK') {
+      if (istNetzwerkfehler(err)) {
         setIsNetworkError(true);
         setError('Verbindung fehlgeschlagen. Bitte prüfe deine Internetverbindung.');
       } else {
         // Validierungsfehler des Backends kommen als details-Array — die konkrete
         // Meldung anzeigen statt nur "Validierungsfehler".
-        const detailMessage = err.response?.data?.details?.[0]?.message;
-        setError(detailMessage || err.response?.data?.error || 'Fehler bei der Registrierung');
+        const detailMessage = (err as { response?: { data?: { details?: { message?: string }[] } } })
+          .response?.data?.details?.[0]?.message;
+        setError(detailMessage || fehlerText(err, 'Fehler bei der Registrierung'));
       }
       triggerShake();
     } finally {
@@ -286,18 +289,18 @@ const KonfiRegisterPage: React.FC = () => {
 
           <div className="app-auth-container" style={{ textAlign: 'center' }}>
             <div className="app-auth-success-circle">
-              <IonIcon icon={checkmarkCircle} className="app-auth-success-circle__icon" />
+              <IonIcon icon={ICON_ZUSAGE_GEFUELLT} className="app-auth-success-circle__icon" />
             </div>
-            <h1 className="app-auth-hero__title--cosmic" style={{ fontSize: '2.2rem', letterSpacing: '4px' }}>
+            <h1 className="app-auth-hero__title--cosmic" style={{ fontSize: 'var(--app-anzeige-zahl)', letterSpacing: '4px' }}>
               WILLKOMMEN!
             </h1>
             <div className="app-auth-hero__divider">
               <span className="app-auth-hero__divider-icon" />
             </div>
-            <p className="app-auth-hero__subtitle--cosmic" style={{ marginBottom: '24px' }}>
+            <p className="app-auth-hero__subtitle--cosmic" style={{ marginBottom: 'var(--app-abstand-weit)' }}>
               Du wirst zum Dashboard weitergeleitet
             </p>
-            <IonSpinner name="dots" style={{ '--color': '#67e8f9' }} />
+            <IonSpinner name="dots" style={{ '--color': 'var(--app-auth-akzent)' }} />
           </div>
         </IonContent>
       </IonPage>
@@ -322,7 +325,7 @@ const KonfiRegisterPage: React.FC = () => {
         <div className="app-auth-container">
 
           {/* Hero Section */}
-          <div className="app-auth-hero" style={{ marginTop: '50px' }}>
+          <div className="app-auth-hero" style={{ marginTop: 'var(--app-freiraum-kopf-m)' }}>
             <h1 className="app-auth-hero__title app-auth-hero__title--cosmic">
               KONFI<br />QUEST
             </h1>
@@ -343,19 +346,19 @@ const KonfiRegisterPage: React.FC = () => {
             <IonCardContent className="app-auth-card__content--compact">
 
               {loading ? (
-                <div style={{ display: 'flex', justifyContent: 'center', padding: '48px' }}>
+                <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--app-abstand-block)' }}>
                   <IonSpinner name="crescent" />
                 </div>
               ) : !inviteInfo ? (
                 /* Code Eingabe wenn kein gueltiger Code */
                 <>
-                  <div className="app-auth-card__heading" style={{ marginBottom: '24px' }}>
-                    <h2 style={{ fontSize: '1.3rem' }}>Einladungscode eingeben</h2>
-                    <p style={{ fontSize: '0.85rem' }}>Du hast einen Code von deiner Gemeinde erhalten</p>
+                  <div className="app-auth-card__heading" style={{ marginBottom: 'var(--app-abstand-weit)' }}>
+                    <h2 style={{ fontSize: 'var(--app-text-titel)' }}>Einladungscode eingeben</h2>
+                    <p style={{ fontSize: 'var(--app-text-sekundaer)' }}>Du hast einen Code von deiner Gemeinde erhalten</p>
                   </div>
 
                   <IonItem lines="none" className="app-auth-input">
-                    <IonIcon icon={key} slot="start" style={{ color: "#67e8f9" }} />
+                    <IonIcon icon={ICON_SCHLUESSEL_GEFUELLT} slot="start" style={{ color: "var(--app-auth-akzent)" }} />
                     <IonLabel position="stacked" className="app-auth-input__label">
                       Einladungscode
                     </IonLabel>
@@ -370,7 +373,7 @@ const KonfiRegisterPage: React.FC = () => {
 
                   {error && (
                     <div className="app-auth-error">
-                      <IonIcon icon={alertCircle} className="app-auth-error__icon" />
+                      <IonIcon icon={ICON_WARNHINWEIS_GEFUELLT} className="app-auth-error__icon" />
                       <span className="app-auth-error__text">{error}</span>
                     </div>
                   )}
@@ -381,7 +384,7 @@ const KonfiRegisterPage: React.FC = () => {
                       className="app-auth-retry-button"
                       onClick={() => validateCode(manualCode.trim() || inviteCode)}
                     >
-                      <IonIcon icon={refreshOutline} slot="start" />
+                      <IonIcon icon={ICON_AKTUALISIEREN} slot="start" />
                       Erneut versuchen
                     </IonButton>
                   )}
@@ -391,7 +394,7 @@ const KonfiRegisterPage: React.FC = () => {
                     onClick={handleManualCodeSubmit}
                     disabled={manualCode.trim().length < 6}
                     className="app-auth-button"
-                    style={{ marginBottom: '16px' }}
+                    style={{ marginBottom: 'var(--app-abstand-basis)' }}
                   >
                     Code prüfen
                   </IonButton>
@@ -401,7 +404,7 @@ const KonfiRegisterPage: React.FC = () => {
                       onClick={() => router.push('/login')}
                       className="app-auth-link"
                     >
-                      <IonIcon icon={arrowBack} style={{ verticalAlign: 'middle', marginRight: '4px' }} />
+                      <IonIcon icon={ICON_ZURUECK} style={{ verticalAlign: 'middle', marginRight: 'var(--app-abstand-mini)' }} />
                       Zurück zur Anmeldung
                     </span>
                   </div>
@@ -411,7 +414,7 @@ const KonfiRegisterPage: React.FC = () => {
                 <>
                   {/* Einladungs-Info */}
                   <div className="app-auth-invite-info">
-                    <IonIcon icon={school} className="app-auth-invite-info__icon" />
+                    <IonIcon icon={ICON_JAHRGANG_GEFUELLT} className="app-auth-invite-info__icon" />
                     <div className="app-auth-invite-info__title">
                       {inviteInfo.jahrgang_name}
                     </div>
@@ -422,7 +425,7 @@ const KonfiRegisterPage: React.FC = () => {
 
                   {/* Name */}
                   <IonItem lines="none" className="app-auth-input app-auth-input--compact">
-                    <IonIcon icon={person} slot="start" style={{ color: "#67e8f9" }} />
+                    <IonIcon icon={ICON_PERSON_GEFUELLT} slot="start" style={{ color: "var(--app-auth-akzent)" }} />
                     <IonLabel position="stacked" className="app-auth-input__label">
                       Dein Name *
                     </IonLabel>
@@ -437,7 +440,7 @@ const KonfiRegisterPage: React.FC = () => {
 
                   {/* Benutzername */}
                   <IonItem lines="none" className="app-auth-input app-auth-input--compact">
-                    <IonIcon icon={person} slot="start" style={{ color: "#67e8f9" }} />
+                    <IonIcon icon={ICON_PERSON_GEFUELLT} slot="start" style={{ color: "var(--app-auth-akzent)" }} />
                     <IonLabel position="stacked" className="app-auth-input__label">
                       Benutzername *
                     </IonLabel>
@@ -448,7 +451,7 @@ const KonfiRegisterPage: React.FC = () => {
                       placeholder="z.B. max123"
                       disabled={registering}
                       autocapitalize="off"
-                      autocorrect="off"
+                      autocorrect={false}
                       spellcheck={false}
                       className="app-auth-input__value"
                     />
@@ -463,26 +466,26 @@ const KonfiRegisterPage: React.FC = () => {
                   )}
                   {usernameStatus === 'available' && (
                     <div className="app-auth-username-status app-auth-username-status--available">
-                      <IonIcon icon={checkmarkCircle} />
+                      <IonIcon icon={ICON_ZUSAGE_GEFUELLT} />
                       <span>Benutzername verfügbar</span>
                     </div>
                   )}
                   {usernameStatus === 'taken' && (
                     <div className="app-auth-username-status app-auth-username-status--taken">
-                      <IonIcon icon={alertCircle} />
+                      <IonIcon icon={ICON_WARNHINWEIS_GEFUELLT} />
                       <span>Benutzername bereits vergeben</span>
                     </div>
                   )}
                   {usernameStatus === 'invalid' && (
                     <div className="app-auth-username-status app-auth-username-status--taken">
-                      <IonIcon icon={closeCircle} />
+                      <IonIcon icon={ICON_ABSAGE} />
                       <span>Nur Buchstaben, Zahlen, Punkt (.) und Bindestrich (-) — keine Leerzeichen oder Umlaute</span>
                     </div>
                   )}
 
                   {/* E-Mail (optional) */}
                   <IonItem lines="none" className="app-auth-input app-auth-input--compact">
-                    <IonIcon icon={mail} slot="start" style={{ color: "#67e8f9" }} />
+                    <IonIcon icon={ICON_MAIL_GEFUELLT} slot="start" style={{ color: "var(--app-auth-akzent)" }} />
                     <IonLabel position="stacked" className="app-auth-input__label">
                       E-Mail (optional)
                     </IonLabel>
@@ -497,8 +500,8 @@ const KonfiRegisterPage: React.FC = () => {
                   </IonItem>
 
                   {/* Passwort */}
-                  <IonItem lines="none" className="app-auth-input app-auth-input--compact" style={{ marginBottom: '8px' }}>
-                    <IonIcon icon={key} slot="start" style={{ color: "#67e8f9" }} />
+                  <IonItem lines="none" className="app-auth-input app-auth-input--compact" style={{ marginBottom: 'var(--app-abstand-eng)' }}>
+                    <IonIcon icon={ICON_SCHLUESSEL_GEFUELLT} slot="start" style={{ color: "var(--app-auth-akzent)" }} />
                     <IonLabel position="stacked" className="app-auth-input__label">
                       Passwort *
                     </IonLabel>
@@ -509,12 +512,12 @@ const KonfiRegisterPage: React.FC = () => {
                       placeholder="Sicheres Passwort"
                       disabled={registering}
                       autocapitalize="none"
-                      autocorrect="off"
+                      autocorrect={false}
                       spellcheck={false}
                       className="app-auth-input__value"
                     />
                     <IonIcon
-                      icon={showPassword ? eyeOff : eye}
+                      icon={showPassword ? ICON_VERBORGEN : ICON_SICHTBAR}
                       slot="end"
                       onClick={() => setShowPassword(!showPassword)}
                       className="app-auth-input__toggle"
@@ -535,8 +538,8 @@ const KonfiRegisterPage: React.FC = () => {
                   )}
 
                   {/* Passwort bestätigen */}
-                  <IonItem lines="none" className="app-auth-input" style={{ marginBottom: '16px' }}>
-                    <IonIcon icon={key} slot="start" style={{ color: "#67e8f9" }} />
+                  <IonItem lines="none" className="app-auth-input" style={{ marginBottom: 'var(--app-abstand-basis)' }}>
+                    <IonIcon icon={ICON_SCHLUESSEL_GEFUELLT} slot="start" style={{ color: "var(--app-auth-akzent)" }} />
                     <IonLabel position="stacked" className="app-auth-input__label">
                       Passwort bestätigen *
                     </IonLabel>
@@ -546,13 +549,13 @@ const KonfiRegisterPage: React.FC = () => {
                       onIonInput={(e) => setFormData({ ...formData, password_confirm: e.detail.value! })}
                       placeholder="Passwort wiederholen"
                       autocapitalize="none"
-                      autocorrect="off"
+                      autocorrect={false}
                       spellcheck={false}
                       disabled={registering}
                       className="app-auth-input__value"
                     />
                     <IonIcon
-                      icon={showConfirmPassword ? eyeOff : eye}
+                      icon={showConfirmPassword ? ICON_VERBORGEN : ICON_SICHTBAR}
                       slot="end"
                       onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                       className="app-auth-input__toggle"
@@ -562,7 +565,7 @@ const KonfiRegisterPage: React.FC = () => {
                   {/* Passwörter stimmen nicht überein */}
                   {formData.password && formData.password_confirm && formData.password !== formData.password_confirm && (
                     <div className="app-auth-password-match-error">
-                      <IonIcon icon={alertCircle} />
+                      <IonIcon icon={ICON_WARNHINWEIS_GEFUELLT} />
                       Passwörter stimmen nicht überein
                     </div>
                   )}
@@ -570,10 +573,10 @@ const KonfiRegisterPage: React.FC = () => {
                   {/* Fehler */}
                   {error && (
                     <div className="app-auth-error">
-                      <IonIcon icon={alertCircle} className="app-auth-error__icon" />
+                      <IonIcon icon={ICON_WARNHINWEIS_GEFUELLT} className="app-auth-error__icon" />
                       <span className="app-auth-error__text">{error}</span>
                       <IonIcon
-                        icon={closeCircle}
+                        icon={ICON_ABSAGE}
                         onClick={() => { setError(null); setIsNetworkError(false); }}
                         className="app-auth-error__close"
                       />
@@ -586,7 +589,7 @@ const KonfiRegisterPage: React.FC = () => {
                       className="app-auth-retry-button"
                       onClick={handleSubmit}
                     >
-                      <IonIcon icon={refreshOutline} slot="start" />
+                      <IonIcon icon={ICON_AKTUALISIEREN} slot="start" />
                       Erneut versuchen
                     </IonButton>
                   )}
@@ -596,22 +599,22 @@ const KonfiRegisterPage: React.FC = () => {
                     onClick={handleSubmit}
                     disabled={registering || !isPasswordValid || usernameStatus === 'taken' || usernameStatus === 'invalid' || !isOnline}
                     className="app-auth-button"
-                    style={{ marginBottom: '16px' }}
+                    style={{ marginBottom: 'var(--app-abstand-basis)' }}
                   >
                     {registering ? (
                       <IonSpinner name="crescent" style={{ '--color': 'white' }} />
                     ) : !isOnline ? (
-                      <><IonIcon icon={cloudOfflineOutline} style={{ marginRight: 4 }} /> Du bist offline</>
+                      <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Du bist offline</>
                     ) : (
                       <>
                         Registrieren
-                        <IonIcon icon={sparkles} slot="end" />
+                        <IonIcon icon={ICON_FUNKELN_GEFUELLT} slot="end" />
                       </>
                     )}
                   </IonButton>
 
                   <div className="app-auth-footer">
-                    <span style={{ color: 'rgba(0, 0, 0, 0.55)', fontSize: '0.9rem' }}>
+                    <span style={{ color: 'rgba(0, 0, 0, 0.55)', fontSize: 'var(--app-text-basis)' }}>
                       Schon einen Account?{' '}
                       <span
                         onClick={() => router.push('/login')}
@@ -636,12 +639,12 @@ const PasswordCheckItem: React.FC<{ label: string; checked: boolean }> = ({ labe
   <div style={{
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
-    color: checked ? '#10b981' : '#9ca3af'
+    gap: 'var(--app-abstand-kompakt)',
+    color: checked ? 'var(--app-color-success-fresh)' : 'var(--app-color-neutral-hell)'
   }}>
     <IonIcon
-      icon={checked ? checkmarkCircle : alertCircle}
-      style={{ fontSize: '0.9rem' }}
+      icon={checked ? ICON_ZUSAGE_GEFUELLT : ICON_WARNHINWEIS_GEFUELLT}
+      style={{ fontSize: 'var(--app-text-basis)' }}
     />
     <span>{label}</span>
   </div>

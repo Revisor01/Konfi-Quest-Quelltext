@@ -166,12 +166,14 @@ export async function getMediaCacheSize(): Promise<number> {
   try {
     const { files } = await Filesystem.readdir({ path: CACHE_DIR, directory: Directory.Cache });
     let total = 0;
-    for (const f of files) {
+    for (const f of files as unknown[]) {
       // Capacitor >=5 liefert FileInfo-Objekte mit size; aeltere nur Namen.
-      if (typeof f === 'object' && f !== null && 'size' in f && typeof (f as any).size === 'number') {
-        total += (f as any).size;
+      const eintrag = f as { size?: unknown; name?: unknown };
+      if (typeof f === 'object' && f !== null && typeof eintrag.size === 'number') {
+        total += eintrag.size;
       } else {
-        const name = typeof f === 'string' ? f : (f as any).name;
+        const name = typeof f === 'string' ? f : eintrag.name;
+        if (typeof name !== 'string') continue;
         try {
           const stat = await Filesystem.stat({ path: `${CACHE_DIR}/${name}`, directory: Directory.Cache });
           total += stat.size || 0;

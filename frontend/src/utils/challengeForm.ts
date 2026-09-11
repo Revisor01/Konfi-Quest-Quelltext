@@ -55,11 +55,38 @@ export const zeitraumFehler = (formData: ChallengeFormData): string | null => {
   return null;
 };
 
+/**
+ * Rumpf von POST/PUT /challenges. Die Felder unterhalb von `is_draft` fehlen
+ * bewusst, sobald die Challenge gestartet ist — das Backend vergleicht sie auf
+ * Gleichheit und wuerde ein unveraendertes starts_at sonst als Aenderung werten.
+ */
+export interface ChallengePayload {
+  title: string;
+  description: string;
+  allow_multiple: boolean;
+  badge_icon: string;
+  badge_name: string;
+  author_user_id: null;
+  author_freetext: string | null;
+  jahrgang_ids: number[];
+  /**
+   * Null, solange ein Entwurf noch keinen Zeitraum hat — das Formular fuehrt
+   * dann leere Platzhalter, und toBackendTimestamp gibt fuer die null zurueck.
+   */
+  ends_at: string | null;
+  is_draft: boolean;
+  audience?: ChallengeAudience;
+  visibility?: ChallengeVisibility;
+  moderated?: boolean;
+  allowed_media?: ChallengeMediaType[];
+  starts_at?: string | null;
+}
+
 export const baueChallengePayload = (
   formData: ChallengeFormData,
   isStarted: boolean
-): Record<string, any> => {
-  const payload: Record<string, any> = {
+): ChallengePayload => {
+  const payload: ChallengePayload = {
     title: formData.title.trim(),
     description: formData.description.trim(),
     allow_multiple: formData.allow_multiple,

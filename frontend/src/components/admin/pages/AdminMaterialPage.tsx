@@ -1,4 +1,19 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  ICON_ANHANG,
+  ICON_DATEI,
+  ICON_DATEI_GEFUELLT,
+  ICON_FILTER,
+  ICON_HINZUFUEGEN_GEFUELLT,
+  ICON_LINK,
+  ICON_LOESCHEN_GEFUELLT,
+  ICON_SUCHE_GEFUELLT,
+  ICON_TERMIN,
+  ICON_TERMIN_GEFUELLT,
+  ICON_WELT,
+  ICON_ZURUECK,
+} from '../../shared/icons';
+import { fehlerText } from '../../../utils/fehler';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   IonPage,
   IonHeader,
@@ -26,18 +41,6 @@ import {
   useIonAlert,
   useIonModal
 } from '@ionic/react';
-import {
-  document as documentIcon,
-  documentOutline,
-  add,
-  arrowBack,
-  trash,
-  attachOutline,
-  calendar,
-  calendarOutline,
-  filterOutline,
-  search as searchIcon,
-} from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
@@ -50,6 +53,8 @@ import { SectionHeader } from '../../shared';
 import MaterialFormModal from '../modals/MaterialFormModal';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
+import { darfMaterialBearbeiten } from '../../../utils/materialRechte';
+import { materialStats } from '../../../utils/materialStats';
 
 
 interface Material {
@@ -61,6 +66,11 @@ interface Material {
   jahrgang_id?: number;
   jahrgang_name?: string;
   file_count?: number;
+  link_url?: string | null;
+  link_count?: number;
+  ist_global?: boolean;
+  created_by?: number | null;
+  created_by_name?: string | null;
   created_at: string;
 }
 
@@ -71,8 +81,13 @@ const AdminMaterialPage: React.FC = () => {
   const [presentAlert] = useIonAlert();
 
   const [search, setSearch] = useState('');
+  // Der Jahrgangs-Filter kennt drei Zustaende: alle, ein Jahrgang, oder
+  // "nur globales Material". Letzteres filtert die Oberflaeche selbst --
+  // die Route kennt dafuer keinen Parameter.
   const [activeJahrgangId, setActiveJahrgangId] = useState<number | undefined>();
+  const [nurGlobal, setNurGlobal] = useState(false);
   const [editMaterial, setEditMaterial] = useState<Material | null>(null);
+  const [ohneJahrgang, setOhneJahrgang] = useState(false);
 
   useEffect(() => {
     setPresentingElement(pageRef.current);
@@ -87,7 +102,7 @@ const AdminMaterialPage: React.FC = () => {
 
   // Offline-Query: Material (cache-key enthält search + jahrgang filter)
   const { data: materials, loading, refresh: refreshMaterial, refreshLive: refreshMaterialLive } = useOfflineQuery<Material[]>(
-    `admin:material:${user?.organization_id}:${search}:${activeJahrgangId || ''}`,
+    `admin:material:${user?.organization_id}:${search}:${activeJahrgangId || ''}:${nurGlobal ? 'global' : ''}`,
     async () => {
       const res = await api.get('/material', {
         params: {
@@ -95,6 +110,7 @@ const AdminMaterialPage: React.FC = () => {
           ...(activeJahrgangId ? { jahrgang_id: activeJahrgangId } : {})
         }
       });
+      setOhneJahrgang(res.headers?.['x-kein-jahrgang-zugewiesen'] === 'true');
       return res.data;
     },
     { ttl: CACHE_TTL.PROFILE }
@@ -104,7 +120,11 @@ const AdminMaterialPage: React.FC = () => {
   // vorher erst beim nächsten Oeffnen.
   useLiveRefresh('materials', refreshMaterialLive);
 
-  const filteredMaterials = materials || [];
+  // "Nur globales Material" filtert die Oberflaeche. Ein gecachter Eintrag
+  // ohne das Feld gilt als nicht global.
+  const filteredMaterials = nurGlobal
+    ? (materials || []).filter(m => m.ist_global === true)
+    : (materials || []);
 
   const handleDelete = (material: Material) => {
     if (offlineBlockiert(isOnline, setError)) return;
@@ -120,8 +140,8 @@ const AdminMaterialPage: React.FC = () => {
             try {
               await api.delete(`/material/${material.id}`);
               refreshMaterial();
-            } catch (err: any) {
-              setError(err.response?.data?.error || 'Fehler beim Löschen');
+            } catch (err) {
+              setError(fehlerText(err, 'Fehler beim Löschen'));
             }
           }
         }
@@ -129,9 +149,9 @@ const AdminMaterialPage: React.FC = () => {
     });
   };
 
-  // Material Form Modal
   const [presentFormModal, dismissFormModal] = useIonModal(MaterialFormModal, {
     material: editMaterial,
+    nurLesen: editMaterial ? !darfMaterialBearbeiten(user, editMaterial) : false,
     onClose: () => {
       setEditMaterial(null);
       dismissFormModal();
@@ -158,13 +178,6 @@ const AdminMaterialPage: React.FC = () => {
     }
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('de-DE', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-  };
 
   return (
     <IonPage ref={pageRef}>
@@ -172,13 +185,13 @@ const AdminMaterialPage: React.FC = () => {
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-              <IonIcon icon={arrowBack} />
+              <IonIcon icon={ICON_ZURUECK} />
             </IonButton>
           </IonButtons>
           <IonTitle>Material verwalten</IonTitle>
           <IonButtons slot="end">
             <IonButton aria-label="Neues Material anlegen" onClick={openCreateModal}>
-              <IonIcon icon={add} />
+              <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -205,25 +218,29 @@ const AdminMaterialPage: React.FC = () => {
             <SectionHeader
               title="Material"
               subtitle="Dokumente und Dateien"
-              icon={documentIcon}
-              colors={{ primary: 'var(--app-color-material)', secondary: '#b45309' }}
-              stats={[
-                { value: (materials || []).length, label: 'Material' },
-                { value: (materials || []).reduce((sum, m) => sum + (m.file_count || 0), 0), label: 'Dateien' }
-              ]}
+              icon={ICON_DATEI_GEFUELLT}
+              colors={{ primary: 'var(--app-color-material)', secondary: 'var(--app-color-material-dunkel)' }}
+              stats={(() => {
+                const s = materialStats(materials || []);
+                return [
+                  { value: s.material, label: 'Material' },
+                  { value: s.dateien, label: 'Dateien' },
+                  { value: s.links, label: 'Links' }
+                ];
+              })()}
             />
 
             {/* Suche & Filter */}
-            <IonList inset={true} style={{ margin: '16px' }}>
+            <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
               <IonListHeader>
                 <div className="app-section-icon app-section-icon--material">
-                  <IonIcon icon={filterOutline} />
+                  <IonIcon icon={ICON_FILTER} />
                 </div>
                 <IonLabel>Suche & Filter</IonLabel>
               </IonListHeader>
               <IonItemGroup>
                 <IonItem>
-                  <IonIcon icon={searchIcon} slot="start" style={{ color: '#8e8e93', fontSize: '1rem' }} />
+                  <IonIcon icon={ICON_SUCHE_GEFUELLT} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
                   <IonInput
                     value={search}
                     onIonInput={(e) => setSearch(e.detail.value || '')}
@@ -233,15 +250,20 @@ const AdminMaterialPage: React.FC = () => {
                 </IonItem>
                 {(jahrgaenge || []).length > 0 && (
                   <IonItem>
-                    <IonIcon icon={calendarOutline} slot="start" style={{ color: '#8e8e93', fontSize: '1rem' }} />
+                    <IonIcon icon={ICON_TERMIN} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
                     <IonSelect
-                      value={activeJahrgangId ?? 'alle'}
-                      onIonChange={(e) => setActiveJahrgangId(e.detail.value === 'alle' ? undefined : e.detail.value)}
+                      value={nurGlobal ? 'global' : (activeJahrgangId ?? 'alle')}
+                      onIonChange={(e) => {
+                        const wert = e.detail.value;
+                        setNurGlobal(wert === 'global');
+                        setActiveJahrgangId(wert === 'alle' || wert === 'global' ? undefined : wert);
+                      }}
                       interface="popover"
                       placeholder="Jahrgang"
                       style={{ width: '100%' }}
                     >
                       <IonSelectOption value="alle">Alle Jahrgänge</IonSelectOption>
+                      <IonSelectOption value="global">Nur globales Material</IonSelectOption>
                       {(jahrgaenge || []).map(jg => (
                         <IonSelectOption key={jg.id} value={jg.id}>{jg.name}</IonSelectOption>
                       ))}
@@ -255,7 +277,7 @@ const AdminMaterialPage: React.FC = () => {
             <IonList inset={true} className="app-segment-wrapper">
               <IonListHeader>
                 <div className="app-section-icon app-section-icon--material">
-                  <IonIcon icon={documentIcon} />
+                  <IonIcon icon={ICON_DATEI_GEFUELLT} />
                 </div>
                 <IonLabel>Materialien ({filteredMaterials.length})</IonLabel>
               </IonListHeader>
@@ -263,15 +285,19 @@ const AdminMaterialPage: React.FC = () => {
                 <IonCardContent>
                   {filteredMaterials.length === 0 ? (
                     <EmptyState
-                      icon={documentOutline}
-                      title="Keine Materialien"
-                      message="Erstelle dein erstes Material mit dem + Button"
+                      icon={ICON_DATEI}
+                      title={ohneJahrgang && !search && !nurGlobal ? 'Kein Jahrgang zugewiesen' : 'Keine Materialien'}
+                      message={
+                        ohneJahrgang && !search && !nurGlobal
+                          ? 'Dir ist noch kein Jahrgang zugewiesen — du siehst nur Material, das für alle freigegeben ist. Die Leitung deiner Gemeinde kann das in den Einstellungen ändern.'
+                          : 'Erstelle dein erstes Material mit dem + Button'
+                      }
                       iconColor="var(--app-color-material)"
                     />
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
                       {filteredMaterials.map((mat, index) => (
-                        <IonItemSliding key={mat.id} style={{ marginBottom: index < filteredMaterials.length - 1 ? '8px' : '0' }}>
+                        <IonItemSliding key={mat.id} style={{ marginBottom: index < filteredMaterials.length - 1 ? 'var(--app-abstand-eng)' : '0' }}>
                           <IonItem
                             button
                             onClick={() => openEditModal(mat)}
@@ -286,7 +312,7 @@ const AdminMaterialPage: React.FC = () => {
                               <div className="app-list-item__row">
                                 <div className="app-list-item__main">
                                   <div className="app-icon-circle" style={{ backgroundColor: 'var(--app-color-material)' }}>
-                                    <IonIcon icon={documentIcon} />
+                                    <IonIcon icon={mat.link_url ? ICON_LINK : ICON_DATEI_GEFUELLT} />
                                   </div>
                                   <div className="app-list-item__content">
                                     <div className="app-list-item__title">
@@ -304,15 +330,27 @@ const AdminMaterialPage: React.FC = () => {
                                       </div>
                                     )}
                                     <div className="app-list-item__meta">
+                                      {mat.ist_global && (
+                                        <span className="app-list-item__meta-item">
+                                          <IonIcon icon={ICON_WELT} style={{ color: 'var(--app-color-material)' }} />
+                                          Für alle
+                                        </span>
+                                      )}
+                                      {((mat.link_count ?? (mat.link_url ? 1 : 0)) > 0) && (
+                                        <span className="app-list-item__meta-item">
+                                          <IonIcon icon={ICON_LINK} style={{ color: 'var(--app-color-material)' }} />
+                                          {(mat.link_count ?? 1) === 1 ? 'Link' : `${mat.link_count} Links`}
+                                        </span>
+                                      )}
                                       {mat.file_count !== undefined && mat.file_count > 0 && (
                                         <span className="app-list-item__meta-item">
-                                          <IonIcon icon={attachOutline} style={{ color: 'var(--app-color-material)' }} />
+                                          <IonIcon icon={ICON_ANHANG} style={{ color: 'var(--app-color-material)' }} />
                                           {mat.file_count} {mat.file_count === 1 ? 'Datei' : 'Dateien'}
                                         </span>
                                       )}
                                       {(mat.event_count || 0) > 0 && (
                                         <span className="app-list-item__meta-item">
-                                          <IonIcon icon={calendar} style={{ color: 'var(--app-color-events)' }} />
+                                          <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ color: 'var(--app-color-events)' }} />
                                           {mat.event_count} {mat.event_count === 1 ? 'Event' : 'Events'}
                                         </span>
                                       )}
@@ -322,17 +360,19 @@ const AdminMaterialPage: React.FC = () => {
                               </div>
                             </div>
                           </IonItem>
-                          <IonItemOptions className="app-swipe-actions" side="end">
-                            <IonItemOption
-                              className="app-swipe-action"
-                              onClick={() => { closeOpenSlidingItems(); handleDelete(mat); }}
-                              aria-label="Material löschen"
-                            >
-                              <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
-                                <IonIcon icon={trash} />
-                              </div>
-                            </IonItemOption>
-                          </IonItemOptions>
+                          {darfMaterialBearbeiten(user, mat) && (
+                            <IonItemOptions className="app-swipe-actions" side="end">
+                              <IonItemOption
+                                className="app-swipe-action"
+                                onClick={() => { closeOpenSlidingItems(); handleDelete(mat); }}
+                                aria-label="Material löschen"
+                              >
+                                <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
+                                  <IonIcon icon={ICON_LOESCHEN_GEFUELLT} />
+                                </div>
+                              </IonItemOption>
+                            </IonItemOptions>
+                          )}
                         </IonItemSliding>
                       ))}
                     </div>

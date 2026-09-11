@@ -1,26 +1,13 @@
+import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useRef } from 'react';
+import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton, IonItem, IonLabel, IonInput, IonIcon, IonSpinner, IonList, IonListHeader, IonCard, IonCardContent, IonRange, useIonAlert } from '@ionic/react';
 import {
-  IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
-  IonContent,
-  IonButtons,
-  IonButton,
-  IonItem,
-  IonLabel,
-  IonInput,
-  IonIcon,
-  IonSpinner,
-  IonList,
-  IonListHeader,
-  IonCard,
-  IonCardContent,
-  IonRange,
-  IonModal,
-  useIonAlert
-} from '@ionic/react';
-import { checkmarkOutline, closeOutline, create, pricetag, checkmarkCircle, peopleOutline } from 'ionicons/icons';
+  ICON_BEARBEITEN_GEFUELLT,
+  ICON_GRUPPE,
+  ICON_HAKEN,
+  ICON_KATEGORIE_GEFUELLT,
+  ICON_SCHLIESSEN,
+} from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import api from '../../../services/api';
@@ -32,7 +19,7 @@ interface Activity {
   id: number;
   name: string;
   points: number;
-  type: 'gottesdienst' | 'gemeinde';
+  type: 'gottesdienst' | 'gemeinde' | null;
   categories?: Category[];
   target_role?: 'konfi' | 'teamer';
 }
@@ -61,7 +48,7 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
   onSuccess,
   dismiss
 }) => {
-  const { setSuccess, setError, isOnline } = useApp();
+  const { setSuccess, setError } = useApp();
   const { isSubmitting, guard } = useActionGuard();
   const [loading, setLoading] = useState(false);
   const [initializing, setInitializing] = useState(true);
@@ -151,7 +138,7 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
           setFormData({
             name: activity.name,
             points: activity.points,
-            type: activity.type,
+            type: activity.type ?? '',
             category_ids: activity.categories?.map((cat: Category) => cat.id) || [],
             target_role: activity.target_role || targetRole
           });
@@ -201,7 +188,7 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
     await guard(async () => {
     setLoading(true);
     try {
-      const payload: any = {
+      const payload = {
         name: formData.name.trim(),
         points: formData.target_role === 'teamer' ? 0 : formData.points,
         type: formData.target_role === 'teamer' ? null : formData.type,
@@ -243,12 +230,8 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
 
       setIsDirty(false);
       onSuccess();
-    } catch (error: any) {
-      if (error.response?.data?.error) {
-        setError(error.response.data.error);
-      } else {
-        setError('Fehler beim Speichern der Aktivität');
-      }
+    } catch (error) {
+      setError(fehlerText(error, 'Fehler beim Speichern der Aktivität'));
     } finally {
       setLoading(false);
     }
@@ -270,7 +253,7 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
               disabled={loading}
               className="app-modal-close-btn"
             >
-              <IonIcon icon={closeOutline} />
+              <IonIcon icon={ICON_SCHLIESSEN} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
@@ -282,7 +265,7 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
               {loading ? (
                 <IonSpinner name="crescent" />
               ) : (
-                <IonIcon icon={checkmarkOutline} />
+                <IonIcon icon={ICON_HAKEN} />
               )}
             </IonButton>
           </IonButtons>
@@ -295,13 +278,13 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--activities">
-              <IonIcon icon={peopleOutline} />
+              <IonIcon icon={ICON_GRUPPE} />
             </div>
             <IonLabel>Zielgruppe</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
             <IonCardContent>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-eng)' }}>
                 <div
                   className="app-list-item"
                   onClick={() => !loading && setFormData({ ...formData, target_role: 'konfi', points: formData.target_role === 'teamer' ? 1 : formData.points, type: formData.target_role === 'teamer' ? 'gottesdienst' : formData.type })}
@@ -311,11 +294,11 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     marginBottom: '0',
-                    borderLeftColor: '#059669',
-                    background: formData.target_role === 'konfi' ? 'rgba(5, 150, 105, 0.1)' : undefined
+                    borderLeftColor: 'var(--app-color-success-strong)',
+                    background: formData.target_role === 'konfi' ? 'rgba(var(--app-color-success-strong-rgb), 0.1)' : undefined
                   }}
                 >
-                  <span style={{ fontWeight: '500', color: '#333' }}>Konfis</span>
+                  <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-primary)' }}>Konfis</span>
                 </div>
                 <div
                   className="app-list-item"
@@ -326,11 +309,11 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
                     alignItems: 'center',
                     justifyContent: 'space-between',
                     marginBottom: '0',
-                    borderLeftColor: '#059669',
-                    background: formData.target_role === 'teamer' ? 'rgba(5, 150, 105, 0.1)' : undefined
+                    borderLeftColor: 'var(--app-color-success-strong)',
+                    background: formData.target_role === 'teamer' ? 'rgba(var(--app-color-success-strong-rgb), 0.1)' : undefined
                   }}
                 >
-                  <span style={{ fontWeight: '500', color: '#333' }}>Teamer:innen</span>
+                  <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-primary)' }}>Team</span>
                 </div>
               </div>
             </IonCardContent>
@@ -342,7 +325,7 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--activities">
-              <IonIcon icon={create} />
+              <IonIcon icon={ICON_BEARBEITEN_GEFUELLT} />
             </div>
             <IonLabel>Grunddaten</IonLabel>
           </IonListHeader>
@@ -361,16 +344,16 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
                 </IonItem>
 
                 {formData.target_role === 'teamer' && (
-                  <div style={{ padding: '8px 16px', color: '#666', fontSize: '0.85rem' }}>
-                    Teamer:innen-Aktivitäten haben keine Punkte und keinen Typ.
+                  <div style={{ padding: 'var(--app-abstand-eng) var(--app-abstand-basis)', color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-sekundaer)' }}>
+                    Aktivitäten fürs Team haben keine Punkte und keinen Typ.
                   </div>
                 )}
 
                 {formData.target_role !== 'teamer' && (
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
-                  <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Punkte * <span style={{ fontWeight: 700, color: 'var(--ion-color-primary)' }}>{formData.points}</span></IonLabel>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', width: '100%' }}>
-                    <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>1</span>
+                  <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Punkte * <span style={{ fontWeight: 'var(--app-schrift-fett)', color: 'var(--ion-color-primary)' }}>{formData.points}</span></IonLabel>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-eng)', width: '100%' }}>
+                    <span style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)', minWidth: '24px', textAlign: 'center' }}>1</span>
                     <IonRange
                       min={1} max={5} step={1}
                       pin={true} pinFormatter={(value: number) => `${value}`}
@@ -379,7 +362,7 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
                       disabled={loading}
                       style={{ flex: 1 }}
                     />
-                    <span style={{ fontSize: '0.75rem', color: '#8e8e93', minWidth: '24px', textAlign: 'center' }}>5</span>
+                    <span style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)', minWidth: '24px', textAlign: 'center' }}>5</span>
                   </div>
                 </IonItem>
                 )}
@@ -387,10 +370,10 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
               </IonList>
               {formData.target_role !== 'teamer' && (
               <>
-                <div style={{ padding: '8px 0 0' }}>
-                  <span style={{ fontSize: '0.9rem', fontWeight: '500', color: '#666', padding: '0 16px' }}>Typ *</span>
+                <div style={{ padding: 'var(--app-abstand-eng) 0 0' }}>
+                  <span style={{ fontSize: 'var(--app-text-basis)', fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-secondary)', padding: '0 var(--app-abstand-basis)' }}>Typ *</span>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-eng)' }}>
                   <div
                     className="app-list-item"
                     onClick={() => !loading && setFormData({ ...formData, type: 'gottesdienst' })}
@@ -401,11 +384,11 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       marginBottom: '0',
-                      borderLeftColor: '#3b82f6',
-                      background: formData.type === 'gottesdienst' ? 'rgba(59, 130, 246, 0.1)' : undefined
+                      borderLeftColor: 'var(--app-color-gottesdienst)',
+                      background: formData.type === 'gottesdienst' ? 'rgba(var(--app-color-gottesdienst-rgb), 0.1)' : undefined
                     }}
                   >
-                    <span style={{ fontWeight: '500', color: '#333' }}>Gottesdienst</span>
+                    <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-primary)' }}>Gottesdienst</span>
                   </div>
                   <div
                     className="app-list-item"
@@ -417,11 +400,11 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
                       alignItems: 'center',
                       justifyContent: 'space-between',
                       marginBottom: '0',
-                      borderLeftColor: '#059669',
-                      background: formData.type === 'gemeinde' ? 'rgba(5, 150, 105, 0.1)' : undefined
+                      borderLeftColor: 'var(--app-color-success-strong)',
+                      background: formData.type === 'gemeinde' ? 'rgba(var(--app-color-gemeinde-rgb), 0.1)' : undefined
                     }}
                   >
-                    <span style={{ fontWeight: '500', color: '#333' }}>Gemeinde</span>
+                    <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-primary)' }}>Gemeinde</span>
                   </div>
                 </div>
               </>
@@ -434,14 +417,14 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--activities">
-              <IonIcon icon={pricetag} />
+              <IonIcon icon={ICON_KATEGORIE_GEFUELLT} />
             </div>
             <IonLabel>Kategorien</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: '16px' }}>
+            <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
             {initializing ? (
-              <div style={{ padding: '40px 20px', textAlign: 'center' }}>
+              <div style={{ padding: 'var(--app-abstand-riesig) var(--app-abstand-gross)', textAlign: 'center' }}>
                 <IonSpinner name="crescent" />
               </div>
             ) : categories.length > 0 ? (
@@ -468,23 +451,23 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        marginBottom: index < categories.length - 1 ? '8px' : '0',
-                        background: isChecked ? 'rgba(14, 165, 233, 0.08)' : undefined
+                        marginBottom: index < categories.length - 1 ? 'var(--app-abstand-eng)' : '0',
+                        background: isChecked ? 'rgba(var(--app-color-categories-rgb), 0.08)' : undefined
                       }}
                     >
-                      <span style={{ fontWeight: '500', color: '#333' }}>{category.name}</span>
+                      <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-primary)' }}>{category.name}</span>
                     </div>
                   );
                 })}
               </div>
             ) : (
               <div style={{
-                padding: '40px 20px',
+                padding: 'var(--app-abstand-riesig) var(--app-abstand-gross)',
                 textAlign: 'center',
-                color: '#666'
+                color: 'var(--app-text-secondary)'
               }}>
-                <IonIcon icon={pricetag} style={{ fontSize: '3rem', opacity: 0.3, marginBottom: '16px' }} />
-                <p style={{ margin: '0', fontSize: '1rem' }}>Keine Kategorien verfügbar</p>
+                <IonIcon icon={ICON_KATEGORIE_GEFUELLT} style={{ fontSize: 'var(--app-anzeige-riesig)', opacity: 0.3, marginBottom: 'var(--app-abstand-basis)' }} />
+                <p style={{ margin: '0', fontSize: 'var(--app-text-standard)' }}>Keine Kategorien verfügbar</p>
               </div>
             )}
           </IonCardContent>

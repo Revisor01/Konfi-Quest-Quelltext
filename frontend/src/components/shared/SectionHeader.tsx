@@ -1,6 +1,7 @@
 import React from 'react';
 import { IonIcon } from '@ionic/react';
-import { informationCircleOutline } from 'ionicons/icons';
+import { ICON_INFO } from './icons';
+import { FARBEN } from '../../theme/colors';
 
 interface SectionHeaderProps {
   title: string;
@@ -16,28 +17,28 @@ interface SectionHeaderProps {
   onInfo?: () => void;
 }
 
-// Liest --app-color-XYZ aus :root, mit Hex-Fallback für SSR/Initial-Render
 const cssColor = (token: string, fallback: string): string => {
   if (typeof window === 'undefined') return fallback;
   const v = getComputedStyle(document.documentElement).getPropertyValue(`--app-color-${token}`).trim();
   return v || fallback;
 };
 
-// Presets: primary kommt aus CSS-Variable, secondary bleibt als feste Hover-Stufe
+// Presets: primary kommt aus CSS-Variable, secondary ist die feste
+// Verlaufs-/Hover-Stufe (Token --app-color-*-dunkel).
 const PRESET_COLORS: Record<string, { primary: string; secondary: string }> = {
-  events: { primary: cssColor('events', '#dc2626'), secondary: '#b91c1c' },
-  activities: { primary: cssColor('activities', '#047857'), secondary: '#065f46' },
-  konfis: { primary: cssColor('konfis', '#5b21b6'), secondary: '#4c1d95' },
-  teamer: { primary: cssColor('teamer', '#be185d'), secondary: '#831843' },
-  users: { primary: cssColor('users', '#667eea'), secondary: '#5a67d8' },
-  organizations: { primary: cssColor('users', '#667eea'), secondary: '#5a67d8' },
-  badges: { primary: cssColor('badges', '#f59e0b'), secondary: '#d97706' },
-  requests: { primary: cssColor('activities', '#047857'), secondary: '#065f46' },
-  'konfi-requests': { primary: cssColor('activities', '#047857'), secondary: '#065f46' },
-  jahrgang: { primary: cssColor('jahrgang', '#007aff'), secondary: '#0066d6' },
-  categories: { primary: cssColor('categories', '#0ea5e9'), secondary: '#0284c7' },
-  level: { primary: cssColor('level', '#ec4899'), secondary: '#db2777' },
-  challenges: { primary: cssColor('challenges', '#be185d'), secondary: '#831843' },
+  events: { primary: cssColor('events', FARBEN.events), secondary: cssColor('events-dunkel', FARBEN.eventsDunkel) },
+  activities: { primary: cssColor('activities', FARBEN.activities), secondary: cssColor('activities-dunkel', FARBEN.activitiesDunkel) },
+  konfis: { primary: cssColor('konfis', FARBEN.konfis), secondary: cssColor('konfis-dunkel', FARBEN.konfisDunkel) },
+  teamer: { primary: cssColor('teamer', FARBEN.teamer), secondary: cssColor('teamer-dunkel', FARBEN.teamerDunkel) },
+  users: { primary: cssColor('users', FARBEN.users), secondary: cssColor('users-dunkel', FARBEN.usersDunkel) },
+  organizations: { primary: cssColor('users', FARBEN.users), secondary: cssColor('users-dunkel', FARBEN.usersDunkel) },
+  badges: { primary: cssColor('badges', FARBEN.badges), secondary: cssColor('badges-dunkel', FARBEN.badgesDunkel) },
+  requests: { primary: cssColor('activities', FARBEN.activities), secondary: cssColor('activities-dunkel', FARBEN.activitiesDunkel) },
+  'konfi-requests': { primary: cssColor('activities', FARBEN.activities), secondary: cssColor('activities-dunkel', FARBEN.activitiesDunkel) },
+  jahrgang: { primary: cssColor('jahrgang', FARBEN.jahrgang), secondary: cssColor('jahrgang-dunkel', FARBEN.jahrgangDunkel) },
+  categories: { primary: cssColor('categories', FARBEN.categories), secondary: cssColor('categories-dunkel', FARBEN.categoriesDunkel) },
+  level: { primary: cssColor('level', FARBEN.level), secondary: cssColor('level-dunkel', FARBEN.levelDunkel) },
+  challenges: { primary: cssColor('challenges', FARBEN.challenges), secondary: cssColor('challenges-dunkel', FARBEN.challengesDunkel) },
 };
 
 // Hilfsfunktion: HEX zu RGB-String für rgba()
@@ -57,8 +58,8 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
   onInfo,
 }) => {
   const resolvedColors = preset ? PRESET_COLORS[preset] : colors;
-  const primary = resolvedColors?.primary || '#667eea';
-  const secondary = resolvedColors?.secondary || '#5a67d8';
+  const primary = resolvedColors?.primary || FARBEN.users;
+  const secondary = resolvedColors?.secondary || FARBEN.usersDunkel;
 
   return (
     <div
@@ -80,7 +81,7 @@ const SectionHeader: React.FC<SectionHeaderProps> = ({
           onClick={onInfo}
           aria-label="Erklärung anzeigen"
         >
-          <IonIcon icon={informationCircleOutline} />
+          <IonIcon icon={ICON_INFO} />
         </button>
       )}
 

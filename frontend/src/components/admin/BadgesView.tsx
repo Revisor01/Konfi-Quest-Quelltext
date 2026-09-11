@@ -16,25 +16,25 @@ import {
   IonItemOption
 } from '@ionic/react';
 import {
-  trash,
-  ribbon,
-  ribbonOutline,
-  trophy,
-  checkmark,
-  close,
-  eye,
-  eyeOff,
-  filterOutline,
-  search
-} from 'ionicons/icons';
+  ICON_ABZEICHEN,
+  ICON_ABZEICHEN_GEFUELLT,
+  ICON_FILTER,
+  ICON_HAKEN_GEFUELLT,
+  ICON_LOESCHEN_GEFUELLT,
+  ICON_POKAL_GEFUELLT,
+  ICON_SCHLIESSEN_GEFUELLT,
+  ICON_SICHTBAR_GEFUELLT,
+  ICON_SUCHE_GEFUELLT,
+  ICON_VERBORGEN_GEFUELLT,
+} from '../shared/icons';
 import api from '../../services/api';
 import { filterBySearchTerm } from '../../utils/helpers';
 import { SectionHeader, ListSection } from '../shared';
 
-import { star } from 'ionicons/icons';
 import { closeOpenSlidingItems } from '../../utils/slidingItems';
 import { getIconFromString } from '../../utils/badgeIcons';
 import { getCriteriaIcon as getCriteriaTypeIcon } from '../../utils/badgeCriteria';
+import type { BadgeKriteriumExtra } from '../../utils/badgeCriteria';
 
 
 
@@ -55,8 +55,6 @@ interface Badge {
 
 interface BadgesViewProps {
   badges: Badge[];
-  onUpdate: () => void;
-  onAddBadgeClick: () => void;
   onSelectBadge: (badge: Badge) => void;
   onDeleteBadge: (badge: Badge) => void;
   targetRole?: 'konfi' | 'teamer';
@@ -65,8 +63,6 @@ interface BadgesViewProps {
 
 const BadgesView: React.FC<BadgesViewProps> = ({
   badges,
-  onUpdate,
-  onAddBadgeClick,
   onSelectBadge,
   onDeleteBadge,
   targetRole = 'konfi',
@@ -122,13 +118,7 @@ const BadgesView: React.FC<BadgesViewProps> = ({
     return badges.filter(badge => badge.is_active && !badge.is_hidden);
   };
 
-  const getHiddenBadges = () => {
-    return badges.filter(badge => badge.is_hidden);
-  };
 
-  const getInactiveBadges = () => {
-    return badges.filter(badge => !badge.is_active);
-  };
 
   const getTotalEarnedCount = () => {
     return badges.reduce((sum, badge) => sum + (badge.earned_count || 0), 0);
@@ -143,6 +133,7 @@ const BadgesView: React.FC<BadgesViewProps> = ({
       case 'both_categories': return 'Beide Kategorien';
       case 'activity_combination': return 'Aktivitätskombination';
       case 'category_activities': return 'Kategorie-Aktivitäten';
+      case 'category_combination': return 'Kategorie-Kombination';
       case 'time_based': return 'Zeitbasiert';
       case 'activity_count': return 'Aktivitätsanzahl';
       case 'event_count': return 'Event-Teilnahmen';
@@ -156,7 +147,7 @@ const BadgesView: React.FC<BadgesViewProps> = ({
   };
 
   const getCriteriaDetail = (badge: Badge): string | null => {
-    let extra: any = {};
+    let extra: BadgeKriteriumExtra = {};
     try {
       if (badge.criteria_extra) {
         let parsed = typeof badge.criteria_extra === 'string'
@@ -206,9 +197,19 @@ const BadgesView: React.FC<BadgesViewProps> = ({
       }
       case 'category_activities':
         return extra.required_category ? `${badge.criteria_value}x in "${extra.required_category}"` : `${badge.criteria_value}x`;
-      case 'time_based':
+      case 'category_combination': {
+        // Wie bei activity_combination: bis zu zwei Namen ausschreiben, danach
+        // zaehlen, sonst sprengt die Zeile die Listenbreite.
+        const k = extra.required_categories ?? [];
+        if (!k.length) return `${badge.criteria_value} Kategorien`;
+        return k.length <= 2
+          ? `${k.join(' + ')}, min. ${badge.criteria_value}`
+          : `${badge.criteria_value} aus ${k.length} Kategorien`;
+      }
+      case 'time_based': {
         const weeks = extra.days ? Math.round(extra.days / 7) : (extra.weeks || '?');
         return `${badge.criteria_value} in ${weeks} Wochen`;
+      }
       case 'activity_count':
         return `${badge.criteria_value} Aktivitäten`;
       case 'event_count':
@@ -224,24 +225,14 @@ const BadgesView: React.FC<BadgesViewProps> = ({
     }
   };
 
-  const getBadgeStatusColor = (badge: Badge) => {
-    if (!badge.is_active) return 'danger';
-    if (badge.is_hidden) return 'warning';
-    return 'success';
-  };
 
-  const getBadgeStatusText = (badge: Badge) => {
-    if (!badge.is_active) return 'Inaktiv';
-    if (badge.is_hidden) return 'Versteckt';
-    return 'Aktiv';
-  };
 
   return (
     <>
       <SectionHeader
         title="Badges"
         subtitle="Auszeichnungen und Erfolge"
-        icon={ribbon}
+        icon={ICON_ABZEICHEN_GEFUELLT}
         preset="badges"
         stats={[
           { value: badges.length, label: 'GESAMT', onClick: () => setSelectedFilter('alle'), active: selectedFilter === 'alle' },
@@ -257,28 +248,28 @@ const BadgesView: React.FC<BadgesViewProps> = ({
         <IonSegment
           value={targetRole}
           onIonChange={(e) => onRoleChange(e.detail.value as 'konfi' | 'teamer')}
-          style={{ margin: '0 16px 8px', maxWidth: 'calc(100% - 32px)' }}
+          style={{ margin: '0 var(--app-abstand-basis) var(--app-abstand-eng)', maxWidth: 'calc(100% - 32px)' }}
         >
           <IonSegmentButton value="konfi">
             <IonLabel>Konfis</IonLabel>
           </IonSegmentButton>
           <IonSegmentButton value="teamer">
-            <IonLabel>Teamer:innen</IonLabel>
+            <IonLabel>Team</IonLabel>
           </IonSegmentButton>
         </IonSegment>
       )}
 
       {/* Suche */}
-      <IonList inset={true} style={{ margin: '16px' }}>
+      <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
         <IonListHeader>
           <div className="app-section-icon app-section-icon--badges">
-            <IonIcon icon={filterOutline} />
+            <IonIcon icon={ICON_FILTER} />
           </div>
           <IonLabel>Suche & Filter</IonLabel>
         </IonListHeader>
         <IonItemGroup>
           <IonItem>
-            <IonIcon icon={search} slot="start" style={{ color: '#8e8e93', fontSize: '1rem' }} />
+            <IonIcon icon={ICON_SUCHE_GEFUELLT} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
             <IonInput
               value={searchTerm}
               onIonInput={(e) => setSearchTerm(e.detail.value!)}
@@ -312,14 +303,14 @@ const BadgesView: React.FC<BadgesViewProps> = ({
       {/* Badges Liste - Gruppiert nach Typ */}
       {filteredAndSortedBadges.length === 0 ? (
         <ListSection
-          icon={ribbonOutline}
+          icon={ICON_ABZEICHEN}
           title="Badges"
           count={0}
           iconColorClass="badges"
-          emptyIcon={ribbonOutline}
+          emptyIcon={ICON_ABZEICHEN}
           emptyTitle="Keine Badges gefunden"
           emptyMessage="Erstelle deinen ersten Badge!"
-          emptyIconColor="#f59e0b"
+          emptyIconColor="var(--app-color-badges)"
         >
           <></>
         </ListSection>
@@ -339,7 +330,7 @@ const BadgesView: React.FC<BadgesViewProps> = ({
           );
 
           return sortedGroups.map(([criteriaType, typeBadges]) => (
-            <IonList key={criteriaType} inset={true} style={{ margin: '16px' }}>
+            <IonList key={criteriaType} inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
               <IonListHeader>
                 <div className="app-section-icon app-section-icon--badges">
                   <IonIcon icon={getCriteriaTypeIcon(criteriaType)} />
@@ -347,22 +338,22 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                 <IonLabel>{getCriteriaTypeText(criteriaType)} ({typeBadges.length})</IonLabel>
               </IonListHeader>
               <IonCard className="app-card">
-                <IonCardContent style={{ padding: '12px' }}>
+                <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
                     {typeBadges.map((badge, index) => {
-                      const badgeColor = badge.color || '#667eea';
+                      const badgeColor = badge.color || 'var(--app-color-users)';
                       const isInactive = !badge.is_active;
 
                       // Status-Farbe und Text (Aktiv/Inaktiv)
-                      const activeColor = badge.is_active ? '#34c759' : '#dc3545';
+                      const activeColor = badge.is_active ? 'var(--app-color-success)' : 'var(--app-color-danger)';
                       const activeText = badge.is_active ? 'Aktiv' : 'Inaktiv';
 
                       // Sichtbarkeits-Farbe und Text (Sichtbar/Geheim)
-                      const visibilityColor = badge.is_hidden ? '#fd7e14' : '#007aff';
+                      const visibilityColor = badge.is_hidden ? 'var(--app-color-bonus)' : 'var(--app-color-info)';
                       const visibilityText = badge.is_hidden ? 'Geheim' : 'Sichtbar';
 
                       return (
-                        <IonItemSliding key={badge.id} style={{ marginBottom: index < typeBadges.length - 1 ? '8px' : '0' }}>
+                        <IonItemSliding key={badge.id} style={{ marginBottom: index < typeBadges.length - 1 ? 'var(--app-abstand-eng)' : '0' }}>
                           <IonItem
                             button
                             onClick={() => onSelectBadge(badge)}
@@ -393,19 +384,19 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                                 {/* Sichtbarkeits-Badge */}
                                 <div
                                   className="app-corner-badge"
-                                  style={{ backgroundColor: visibilityColor, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
+                                  style={{ backgroundColor: visibilityColor, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
                                   title={visibilityText}
                                 >
-                                  <IonIcon icon={badge.is_hidden ? eyeOff : eye} style={{ color: '#fff', fontSize: '0.85rem' }} />
+                                  <IonIcon icon={badge.is_hidden ? ICON_VERBORGEN_GEFUELLT : ICON_SICHTBAR_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                                 </div>
                                 <div className="app-corner-badges__separator" />
                                 {/* Aktiv/Inaktiv-Badge */}
                                 <div
                                   className="app-corner-badge"
-                                  style={{ backgroundColor: activeColor, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
+                                  style={{ backgroundColor: activeColor, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
                                   title={activeText}
                                 >
-                                  <IonIcon icon={badge.is_active ? checkmark : close} style={{ color: '#fff', fontSize: '0.85rem' }} />
+                                  <IonIcon icon={badge.is_active ? ICON_HAKEN_GEFUELLT : ICON_SCHLIESSEN_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                                 </div>
                               </div>
                               <div className="app-list-item__row">
@@ -413,7 +404,7 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                                   {/* Badge Icon - mit Badge-eigener Farbe */}
                                   <div
                                     className="app-icon-circle app-icon-circle--lg"
-                                    style={{ backgroundColor: isInactive ? '#999' : badgeColor }}
+                                    style={{ backgroundColor: isInactive ? 'var(--app-text-muted)' : badgeColor }}
                                   >
                                     <IonIcon icon={getIconFromString(badge.icon)} />
                                   </div>
@@ -424,8 +415,8 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                                     <div
                                       className="app-list-item__title"
                                       style={{
-                                        color: isInactive ? '#999' : undefined,
-                                        paddingRight: '120px'
+                                        color: isInactive ? 'var(--app-text-muted)' : undefined,
+                                        paddingRight: 'var(--app-freiraum-aktion-xxxl)'
                                       }}
                                     >
                                       {badge.name}
@@ -434,7 +425,7 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                                     {/* Zeile 2: Beschreibung */}
                                     {badge.description && (
                                       <div className="app-list-item__subtitle" style={{
-                                        color: isInactive ? '#999' : '#666',
+                                        color: isInactive ? 'var(--app-text-muted)' : 'var(--app-text-secondary)',
                                         overflow: 'hidden',
                                         textOverflow: 'ellipsis',
                                         whiteSpace: 'nowrap'
@@ -447,12 +438,12 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                                     <div className="app-list-item__meta">
                                       {getCriteriaDetail(badge) && (
                                         <span className="app-list-item__meta-item">
-                                          <IonIcon icon={getCriteriaTypeIcon(badge.criteria_type)} style={{ color: isInactive ? '#999' : badgeColor }} />
+                                          <IonIcon icon={getCriteriaTypeIcon(badge.criteria_type)} style={{ color: isInactive ? 'var(--app-text-muted)' : badgeColor }} />
                                           {getCriteriaDetail(badge)}
                                         </span>
                                       )}
                                       <span className="app-list-item__meta-item">
-                                        <IonIcon icon={trophy} style={{ color: isInactive ? '#999' : '#ff9500' }} />
+                                        <IonIcon icon={ICON_POKAL_GEFUELLT} style={{ color: isInactive ? 'var(--app-text-muted)' : 'var(--app-color-warning)' }} />
                                         {badge.earned_count || 0}x verliehen
                                       </span>
                                     </div>
@@ -469,7 +460,7 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                               className="app-swipe-action"
                             >
                               <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
-                                <IonIcon icon={trash} />
+                                <IonIcon icon={ICON_LOESCHEN_GEFUELLT} />
                               </div>
                             </IonItemOption>
                           </IonItemOptions>

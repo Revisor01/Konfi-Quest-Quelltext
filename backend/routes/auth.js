@@ -277,7 +277,10 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
 
   // Change password (for authenticated users)
   router.post('/change-password', rbacVerifier, validateChangePassword, async (req, res) => {
-    const { currentPassword, newPassword } = req.body;
+    // device_id + platform (optional): Geraet der AKTUELLEN Sitzung. Neue
+    // App-Versionen schicken es mit, damit unten nur die Push-Tokens der
+    // ANDEREN Geraete fallen. Alte Versionen kennen die Felder nicht.
+    const { currentPassword, newPassword, device_id, platform } = req.body;
     const userId = req.user.id;
     
     if (!currentPassword || !newPassword) {
@@ -319,6 +322,27 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         'UPDATE refresh_tokens SET revoked_at = NOW(), expires_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL',
         [userId]
       );
+
+      // Push-Tokens der beendeten Sitzungen mitloeschen: Der Versand haengt
+      // im pushService nur an user_id, NICHT an einer gueltigen Sitzung.
+      // Ohne diese Loeschung bekaeme ein gerade ausgesperrtes Geraet weiter
+      // Push-Nachrichten (inkl. Chat-Inhalten) — und zwar unbegrenzt, weil
+      // jede Zustellung updated_at auffrischt und die 30-Tage-Bereinigung
+      // dadurch nie greift. Genau der Fall "Passwort geaendert, weil jemand
+      // Zugriff hat".
+      //
+      // Das Geraet der aktuellen Sitzung bleibt verschont, wenn der Client
+      // es mitgeschickt hat. Alte App-Versionen schicken nichts — dann fallen
+      // ALLE Tokens des Users (sicherer Default); das eigene Geraet
+      // registriert sich beim naechsten App-Start selbst neu.
+      if (device_id && platform) {
+        await db.query(
+          'DELETE FROM push_tokens WHERE user_id = $1 AND NOT (device_id = $2 AND platform = $3)',
+          [userId, device_id, platform]
+        );
+      } else {
+        await db.query('DELETE FROM push_tokens WHERE user_id = $1', [userId]);
+      }
       invalidateUserCache(userId);
 
       // Frisches Token-Paar für die AKTUELLE Sitzung: Ohne das wuerde der
@@ -1083,6 +1107,11 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         'UPDATE refresh_tokens SET revoked_at = NOW(), expires_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL',
         [resetRecord.user_id]
       );
+      // Beim Reset ueberlebt KEINE Sitzung — also darf auch kein Geraet mehr
+      // Push-Nachrichten bekommen. Alle Push-Tokens des Users fallen (der
+      // Versand haengt nur an user_id, nicht an einer gueltigen Sitzung);
+      // jedes Geraet registriert sich beim naechsten Login neu.
+      await db.query('DELETE FROM push_tokens WHERE user_id = $1', [resetRecord.user_id]);
       await db.query('UPDATE password_resets SET used_at = NOW() WHERE id = $1', [resetRecord.id]);
       invalidateUserCache(resetRecord.user_id);
 

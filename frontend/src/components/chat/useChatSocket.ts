@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { initializeWebSocket, getSocket, joinRoom, leaveRoom, onReconnect } from '../../services/websocket';
 import { getToken } from '../../services/tokenStore';
 import { writeQueue } from '../../services/writeQueue';
-import { Message, Reaction } from '../../types/chat';
+import { Message, PollStand, Reaction } from '../../types/chat';
 
 /**
  * Socket-Verdrahtung des Chatraums (beim Aufteilen von ChatRoom.tsx hierher
@@ -82,7 +82,7 @@ export function useChatSocket({
       socket.on('connect', handleConnect);
 
       // Listen for new messages
-      socket.on('newMessage', (data: { roomId: number; message: any }) => {
+      socket.on('newMessage', (data: { roomId: number; message: Message }) => {
         if (data.roomId === roomId) {
           if (data.message?.client_id) {
             pendingSendsRef.current.delete(data.message.client_id);
@@ -167,20 +167,21 @@ export function useChatSocket({
       // Variante: stammt das Event vom eigenen Vote, ist die eigene Stimme
       // serverseitig ohnehin schon enthalten. Wir ersetzen nur den Poll-Teil der
       // betroffenen Nachricht, nicht die ganze Nachricht.
-      socket.on('pollUpdated', (data: { roomId: number; messageId: number; poll: any }) => {
-        if (data.roomId !== roomId || !data.poll) return;
+      socket.on('pollUpdated', (data: { roomId: number; messageId: number; poll: PollStand | null }) => {
+        const poll = data.poll;
+        if (data.roomId !== roomId || !poll) return;
         setMessages(prev => prev.map(m => {
           if (m.id !== data.messageId) return m;
           return {
             ...m,
-            question: data.poll.question ?? m.question,
-            options: data.poll.options ?? m.options,
-            multiple_choice: data.poll.multiple_choice ?? m.multiple_choice,
-            anonymous: data.poll.anonymous ?? m.anonymous,
-            exclusive_options: data.poll.exclusive_options ?? m.exclusive_options,
-            expires_at: data.poll.expires_at ?? m.expires_at,
-            poll_id: data.poll.poll_id ?? m.poll_id,
-            votes: data.poll.votes ?? m.votes,
+            question: poll.question ?? m.question,
+            options: poll.options ?? m.options,
+            multiple_choice: poll.multiple_choice ?? m.multiple_choice,
+            anonymous: poll.anonymous ?? m.anonymous,
+            exclusive_options: poll.exclusive_options ?? m.exclusive_options,
+            expires_at: poll.expires_at ?? m.expires_at,
+            poll_id: poll.poll_id ?? m.poll_id,
+            votes: poll.votes ?? m.votes,
           };
         }));
       });

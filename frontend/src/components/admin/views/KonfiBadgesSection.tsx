@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { FARBEN } from '../../../theme/colors';
 import {
   IonCard,
   IonCardContent,
@@ -8,11 +9,7 @@ import {
   IonListHeader,
   useIonPopover
 } from '@ionic/react';
-import {
-  trophy,
-  trophyOutline,
-  checkmark
-} from 'ionicons/icons';
+import { ICON_HAKEN_GEFUELLT, ICON_POKAL, ICON_POKAL_GEFUELLT } from '../../shared/icons';
 import api from '../../../services/api';
 import { EmptyState } from '../../shared';
 import { getIconFromString } from '../../../utils/badgeIcons';
@@ -37,11 +34,11 @@ interface Badge {
 const getBadgeColor = (badge: Badge): string => {
   if (badge.color) return badge.color;
   if (badge.criteria_type === 'total_points') {
-    if (badge.criteria_value <= 5) return '#cd7f32';
-    if (badge.criteria_value <= 15) return '#c0c0c0';
-    return '#ffd700';
+    if (badge.criteria_value <= 5) return FARBEN.bronze;
+    if (badge.criteria_value <= 15) return FARBEN.silber;
+    return FARBEN.gold;
   }
-  return '#667eea';
+  return FARBEN.abzeichenFallback;
 };
 
 // Der Abzeichen-Popover liegt jetzt gemeinsam in shared/BadgePopoverContent
@@ -109,24 +106,24 @@ const KonfiBadgesSection: React.FC<KonfiBadgesSectionProps> = ({ konfiId, role =
     <IonList className="app-section-inset" inset={true}>
       <IonListHeader>
         <div className="app-section-icon app-section-icon--badges">
-          <IonIcon icon={trophy} />
+          <IonIcon icon={ICON_POKAL_GEFUELLT} />
         </div>
         <IonLabel>Badges ({earnedBadges.length})</IonLabel>
       </IonListHeader>
       <IonCard className="app-card">
-        <IonCardContent style={{ padding: earnedBadges.length === 0 ? '16px' : '12px' }}>
+        <IonCardContent style={{ padding: earnedBadges.length === 0 ? 'var(--app-abstand-basis)' : 'var(--app-abstand-mittel)' }}>
           {earnedBadges.length === 0 ? (
             <EmptyState
-              icon={trophyOutline}
+              icon={ICON_POKAL}
               title="Keine Badges"
               message="Noch keine Badges erreicht"
-              iconColor="#f59e0b"
+              iconColor="var(--app-color-badges)"
             />
           ) : (
             <div style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(4, 1fr)',
-              gap: '12px'
+              gap: 'var(--app-abstand-mittel)'
             }}>
               {earnedBadges.map((badge) => {
                 const badgeColor = getBadgeColor(badge);
@@ -138,8 +135,8 @@ const KonfiBadgesSection: React.FC<KonfiBadgesSectionProps> = ({ konfiId, role =
                       display: 'flex',
                       flexDirection: 'column',
                       alignItems: 'center',
-                      padding: '10px 4px',
-                      borderRadius: '16px',
+                      padding: 'var(--app-abstand-schmal) var(--app-abstand-mini)',
+                      borderRadius: 'var(--app-radius-gross)',
                       background: `${badgeColor}10`,
                       border: `2px solid ${badgeColor}40`,
                       cursor: 'pointer',
@@ -150,18 +147,18 @@ const KonfiBadgesSection: React.FC<KonfiBadgesSectionProps> = ({ konfiId, role =
                     <div style={{
                       width: '52px',
                       height: '52px',
-                      borderRadius: '50%',
+                      borderRadius: 'var(--app-radius-kreis)',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       background: `linear-gradient(145deg, ${badgeColor} 0%, ${badgeColor}cc 100%)`,
                       boxShadow: `0 4px 12px ${badgeColor}40`,
                       position: 'relative',
-                      marginBottom: '6px'
+                      marginBottom: 'var(--app-abstand-kompakt)'
                     }}>
                       <IonIcon
                         icon={getIconFromString(badge.icon)}
-                        style={{ fontSize: '1.7rem', color: 'white' }}
+                        style={{ fontSize: 'var(--app-anzeige-basis)', color: 'white' }}
                       />
                       <div style={{
                         position: 'absolute',
@@ -169,20 +166,20 @@ const KonfiBadgesSection: React.FC<KonfiBadgesSectionProps> = ({ konfiId, role =
                         right: '-2px',
                         width: '18px',
                         height: '18px',
-                        borderRadius: '50%',
-                        background: '#22c55e',
+                        borderRadius: 'var(--app-radius-kreis)',
+                        background: 'var(--app-color-success)',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
                         border: '2px solid white'
                       }}>
-                        <IonIcon icon={checkmark} style={{ fontSize: '0.65rem', color: 'white' }} />
+                        <IonIcon icon={ICON_HAKEN_GEFUELLT} style={{ fontSize: 'var(--app-text-mini)', color: 'white' }} />
                       </div>
                     </div>
                     <span style={{
-                      fontSize: '0.72rem',
-                      fontWeight: '600',
-                      color: '#333',
+                      fontSize: 'var(--app-text-meta)',
+                      fontWeight: 'var(--app-schrift-halbfett)',
+                      color: 'var(--app-text-primary)',
                       textAlign: 'center',
                       lineHeight: '1.2',
                       maxWidth: '100%',

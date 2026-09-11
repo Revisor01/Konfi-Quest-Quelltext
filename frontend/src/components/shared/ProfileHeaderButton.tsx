@@ -1,7 +1,7 @@
 import React from 'react';
 import { IonButtons, IonButton, IonIcon } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
-import { personCircleOutline } from 'ionicons/icons';
+import { ICON_PROFIL } from './icons';
 
 interface ProfileHeaderButtonProps {
   href: string;
@@ -20,9 +20,9 @@ const ProfileHeaderButton: React.FC<ProfileHeaderButtonProps> = ({ href, variant
       <IonButton onClick={() => router.push(href)} aria-label="Profil öffnen">
         <IonIcon
           slot="icon-only"
-          icon={personCircleOutline}
+          icon={ICON_PROFIL}
           className={colorClass}
-          style={{ fontSize: '1.7rem' }}
+          style={{ fontSize: 'var(--app-anzeige-basis)' }}
         />
       </IonButton>
     </IonButtons>

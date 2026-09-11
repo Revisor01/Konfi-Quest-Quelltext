@@ -42,7 +42,7 @@ async function initNetworkMonitor(): Promise<void> {
         notifyListeners();
       }, 300);
     });
-  } catch (err) {
+  } catch {
     console.warn('Capacitor Network Plugin nicht verfügbar, nutze Web-Fallback');
   }
 

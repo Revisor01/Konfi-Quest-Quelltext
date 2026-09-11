@@ -12,26 +12,23 @@ import {
   useIonModal
 } from '@ionic/react';
 import {
-  calendar,
-  time,
-  location,
-  people,
-  checkmarkCircle,
-  hourglass,
-  close,
-  trophy,
-  listOutline,
-  calendarOutline,
-  lockOpenOutline,
-  shieldCheckmark,
-  bagHandle,
-  closeCircle,
-  search,
-  flame,
-  filterOutline,
-  infinite
-} from 'ionicons/icons';
-import { SectionHeader, ListSection, StatusBadge, EventLegendModal, EventCornerBadges, formatEventDate as formatDate, formatEventTime as formatTime, istVergangen } from '../../shared';
+  ICON_FILTER,
+  ICON_GEMEINDE_GEFUELLT,
+  ICON_GOTTESDIENST_GEFUELLT,
+  ICON_GRUPPE_GEFUELLT,
+  ICON_KATEGORIE_GEFUELLT,
+  ICON_LISTE,
+  ICON_MATERIAL,
+  ICON_ORT_GEFUELLT,
+  ICON_POKAL_GEFUELLT,
+  ICON_SUCHE_GEFUELLT,
+  ICON_TERMIN,
+  ICON_TERMIN_GEFUELLT,
+  ICON_UHRZEIT_GEFUELLT,
+  ICON_UNENDLICH,
+  ICON_ZUSAGE_GEFUELLT,
+} from '../../shared/icons';
+import { SectionHeader, ListSection, EventLegendModal, EventCornerBadges, formatEventDate as formatDate, formatEventTime as formatTime, istVergangen, kategorienText, zeigtPunkteart, punkteartText } from '../../shared';
 import { getStatusIcon } from '../../shared/StatusBadge';
 import { Event } from '../../../types/event';
 
@@ -40,7 +37,6 @@ interface EventsViewProps {
   activeTab: 'meine' | 'alle' | 'konfirmation';
   onTabChange: (tab: 'meine' | 'alle' | 'konfirmation') => void;
   onSelectEvent: (event: Event) => void;
-  onUpdate: () => void;
   // Für Card-Modal-Optik (Sheet über der Seite statt Vollbild).
   presentingElement?: HTMLElement | null;
   // Im iPad-Split-View aktuell rechts geoeffnetes Event (für Highlighting).
@@ -55,7 +51,6 @@ const EventsView: React.FC<EventsViewProps> = ({
   activeTab,
   onTabChange,
   onSelectEvent,
-  onUpdate,
   presentingElement,
   selectedEventId,
   headerSlot
@@ -81,14 +76,17 @@ const EventsView: React.FC<EventsViewProps> = ({
     konfirmationEvents.some(e => e.is_registered),
   [konfirmationEvents]);
 
+  // istVergangen() statt eines Vergleichs auf event_date: Mehrtaegige Termine
+  // sind erst nach event_end_time vorbei. Am 12. einer Freizeit vom 10.-14.
+  // sagte das Abzeichen 'laeuft', die Liste zeigte sie aber nicht mehr an.
   const eventCounts = useMemo(() => ({
     all: events.length,
     meine: events.filter(e => e.is_registered || e.booking_status === 'opted_out').length,
-    alle: nonKonfirmationEvents.filter(e => new Date(e.event_date) >= new Date()).length,
-    meineUpcoming: events.filter(e => (e.is_registered || e.booking_status === 'opted_out') && new Date(e.event_date) >= new Date()).length,
-    meinePast: events.filter(e => (e.is_registered || e.booking_status === 'opted_out') && new Date(e.event_date) < new Date()).length,
+    alle: nonKonfirmationEvents.filter(e => !istVergangen(e)).length,
+    meineUpcoming: events.filter(e => (e.is_registered || e.booking_status === 'opted_out') && !istVergangen(e)).length,
+    meinePast: events.filter(e => (e.is_registered || e.booking_status === 'opted_out') && istVergangen(e)).length,
     konfirmation: konfirmationEvents.length,
-    konfirmationUpcoming: konfirmationEvents.filter(e => new Date(e.event_date) >= new Date()).length,
+    konfirmationUpcoming: konfirmationEvents.filter(e => !istVergangen(e)).length,
     konfirmationRegistered: konfirmationEvents.filter(e => e.is_registered).length
   }), [events, konfirmationEvents, nonKonfirmationEvents]);
 
@@ -96,27 +94,27 @@ const EventsView: React.FC<EventsViewProps> = ({
     switch (activeTab) {
       case 'meine':
         return [
-          { label: 'Gebucht', count: eventCounts.meine, icon: calendar },
-          { label: 'Anstehend', count: eventCounts.meineUpcoming, icon: time },
-          { label: 'Vergangen', count: eventCounts.meinePast, icon: checkmarkCircle }
+          { label: 'Gebucht', count: eventCounts.meine, icon: ICON_TERMIN_GEFUELLT },
+          { label: 'Anstehend', count: eventCounts.meineUpcoming, icon: ICON_UHRZEIT_GEFUELLT },
+          { label: 'Vergangen', count: eventCounts.meinePast, icon: ICON_ZUSAGE_GEFUELLT }
         ];
       case 'alle':
         return [
-          { label: 'Gesamt', count: eventCounts.alle, icon: calendar },
-          { label: 'Anstehend', count: nonKonfirmationEvents.filter(e => new Date(e.event_date) >= new Date() && !e.is_registered).length, icon: time },
-          { label: 'Gebucht', count: nonKonfirmationEvents.filter(e => e.is_registered).length, icon: checkmarkCircle }
+          { label: 'Gesamt', count: eventCounts.alle, icon: ICON_TERMIN_GEFUELLT },
+          { label: 'Anstehend', count: nonKonfirmationEvents.filter(e => !istVergangen(e) && !e.is_registered).length, icon: ICON_UHRZEIT_GEFUELLT },
+          { label: 'Gebucht', count: nonKonfirmationEvents.filter(e => e.is_registered).length, icon: ICON_ZUSAGE_GEFUELLT }
         ];
       case 'konfirmation':
         return [
-          { label: 'Gesamt', count: eventCounts.konfirmation, icon: calendar },
-          { label: 'Anstehend', count: eventCounts.konfirmationUpcoming, icon: time },
-          { label: 'Gebucht', count: eventCounts.konfirmationRegistered, icon: checkmarkCircle }
+          { label: 'Gesamt', count: eventCounts.konfirmation, icon: ICON_TERMIN_GEFUELLT },
+          { label: 'Anstehend', count: eventCounts.konfirmationUpcoming, icon: ICON_UHRZEIT_GEFUELLT },
+          { label: 'Gebucht', count: eventCounts.konfirmationRegistered, icon: ICON_ZUSAGE_GEFUELLT }
         ];
       default:
         return [
-          { label: 'Gesamt', count: eventCounts.all, icon: calendar },
-          { label: 'Anstehend', count: eventCounts.alle, icon: time },
-          { label: 'Gebucht', count: eventCounts.meine, icon: checkmarkCircle }
+          { label: 'Gesamt', count: eventCounts.all, icon: ICON_TERMIN_GEFUELLT },
+          { label: 'Anstehend', count: eventCounts.alle, icon: ICON_UHRZEIT_GEFUELLT },
+          { label: 'Gebucht', count: eventCounts.meine, icon: ICON_ZUSAGE_GEFUELLT }
         ];
     }
   };
@@ -171,9 +169,9 @@ const EventsView: React.FC<EventsViewProps> = ({
       success: 'var(--app-color-success)',   // gruen (Anwesend/Offen/Verbucht)
       info: 'var(--app-color-info)',         // blau (Pflicht angemeldet, Angemeldet)
       konfis: 'var(--app-color-konfis)',     // lila (Konfirmation)
-      past: '#6c757d',                       // grau (vergangen) — kein Token
+      past: 'var(--app-color-neutral)',      // grau (vergangen)
     };
-    let statusColor = C.bonus;
+    let statusColor: string;
     if (isCancelled) statusColor = C.danger;
     else if (isMandatory && isOptedOut) statusColor = C.events;
     else if (isMandatory && isPastEvent && attendanceStatus === 'present') statusColor = C.success;
@@ -200,7 +198,7 @@ const EventsView: React.FC<EventsViewProps> = ({
     else statusColor = C.danger;
 
     // Bestimme Text (Pflicht ist separates Badge, nicht im Status-Text)
-    let statusText = 'Offen';
+    let statusText: string;
     if (isCancelled) statusText = 'Abgesagt';
     else if (isMandatory && isOptedOut) statusText = 'Abgemeldet';
     else if (isMandatory && isPastEvent && attendanceStatus === 'present') statusText = 'Anwesend';
@@ -222,7 +220,7 @@ const EventsView: React.FC<EventsViewProps> = ({
     else statusText = 'Geschlossen';
 
     // Icon zentral aus der StatusBadge-Map -> Kreis-Icon == Corner-Badge-Icon.
-    const statusIcon = getStatusIcon(statusText) || calendar;
+    const statusIcon = getStatusIcon(statusText) || ICON_TERMIN_GEFUELLT;
 
     const shouldGrayOut = isPastEvent && !isParticipated && !isAusstehend;
 
@@ -235,7 +233,7 @@ const EventsView: React.FC<EventsViewProps> = ({
       case 'meine':
         return events.filter(e => e.is_registered || e.booking_status === 'opted_out');
       case 'alle':
-        return nonKonfirmationEvents.filter(e => new Date(e.event_date) >= new Date());
+        return nonKonfirmationEvents.filter(e => !istVergangen(e));
       case 'konfirmation':
         return konfirmationEvents;
       default:
@@ -256,7 +254,7 @@ const EventsView: React.FC<EventsViewProps> = ({
       <SectionHeader
         title="Deine Events"
         subtitle="Termine und Veranstaltungen"
-        icon={calendar}
+        icon={ICON_TERMIN_GEFUELLT}
         preset="events"
         stats={statsMitSprung}
         onInfo={() => presentLegend({ presentingElement: presentingElement || undefined })}
@@ -264,31 +262,12 @@ const EventsView: React.FC<EventsViewProps> = ({
 
       {headerSlot}
 
-      {/* Suche & Filter — wie Chat-Pattern */}
-      <IonList inset={true} style={{ margin: '16px' }}>
-        <IonListHeader>
-          <div className="app-section-icon app-section-icon--events">
-            <IonIcon icon={filterOutline} />
-          </div>
-          <IonLabel>Suche & Filter</IonLabel>
-        </IonListHeader>
-        <IonItemGroup>
-          <IonItem>
-            <IonIcon icon={search} slot="start" className="app-icon-color--system" style={{ fontSize: '1rem' }} />
-            <IonInput
-              value={searchText}
-              onIonInput={(e) => setSearchText(e.detail.value || '')}
-              placeholder="Events durchsuchen..."
-            />
-          </IonItem>
-        </IonItemGroup>
-      </IonList>
-
-      {/* Tab Navigation */}
+      {/* Reiter ZUERST, Suche darunter: erst
+          eingrenzen, dann darin suchen -- wie im Chat. */}
       <div className="app-segment-wrapper">
         <IonSegment
           value={activeTab}
-          onIonChange={(e) => onTabChange(e.detail.value as any)}
+          onIonChange={(e) => onTabChange(e.detail.value as 'meine' | 'alle' | 'konfirmation')}
         >
           <IonSegmentButton value="alle">
             <IonLabel>Alle</IonLabel>
@@ -302,14 +281,34 @@ const EventsView: React.FC<EventsViewProps> = ({
         </IonSegment>
       </div>
 
+      {/* Suche -- steht UNTER den Reitern, siehe Kommentar oben */}
+      <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
+        <IonListHeader>
+          <div className="app-section-icon app-section-icon--events">
+            <IonIcon icon={ICON_FILTER} />
+          </div>
+          <IonLabel>Suche</IonLabel>
+        </IonListHeader>
+        <IonItemGroup>
+          <IonItem>
+            <IonIcon icon={ICON_SUCHE_GEFUELLT} slot="start" className="app-icon-color--system" style={{ fontSize: 'var(--app-text-standard)' }} />
+            <IonInput
+              value={searchText}
+              onIonInput={(e) => setSearchText(e.detail.value || '')}
+              placeholder="Events durchsuchen..."
+            />
+          </IonItem>
+        </IonItemGroup>
+      </IonList>
+
       {/* Events Liste */}
       <ListSection
-        icon={calendarOutline}
+        icon={ICON_TERMIN}
         title="Events"
         count={filteredEvents.length}
         iconColorClass="events"
         isEmpty={filteredEvents.length === 0}
-        emptyIcon={calendarOutline}
+        emptyIcon={ICON_TERMIN}
         emptyTitle="Keine Events gefunden"
         emptyMessage={
           activeTab === 'meine'
@@ -318,7 +317,7 @@ const EventsView: React.FC<EventsViewProps> = ({
             ? 'Keine Konfirmationstermine verfügbar'
             : 'Keine anstehenden Events'
         }
-        emptyIconColor="#dc2626"
+        emptyIconColor="var(--app-color-events)"
       >
         {filteredEvents.map((event, index) => {
           const statusInfo = getEventStatusInfo(event);
@@ -351,7 +350,7 @@ const EventsView: React.FC<EventsViewProps> = ({
                   '--border-style': 'none',
                   '--min-height': 'auto',
                   display: 'block',
-                  marginBottom: index < filteredEvents.length - 1 ? '8px' : '0'
+                  marginBottom: index < filteredEvents.length - 1 ? 'var(--app-abstand-eng)' : '0'
                 }}
               >
                 <div
@@ -391,9 +390,9 @@ const EventsView: React.FC<EventsViewProps> = ({
                         <div
                           className="app-list-item__title app-list-item__title--events"
                           style={{
-                            color: isCancelled || shouldGrayOut ? '#999' : undefined,
+                            color: isCancelled || shouldGrayOut ? 'var(--app-text-muted)' : undefined,
                             textDecoration: isCancelled ? 'line-through' : 'none',
-                            paddingRight: showBadge ? '70px' : '0'
+                            paddingRight: showBadge ? 'var(--app-freiraum-aktion-l)' : '0'
                           }}
                         >
                           {event.name}
@@ -403,50 +402,70 @@ const EventsView: React.FC<EventsViewProps> = ({
                         <div className="app-list-item__meta">
                           {!event.mandatory && (
                           <span className="app-list-item__meta-item">
-                            <IonIcon icon={people} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--participants'} />
-                            {(event.registered_count || 0)}/{(event.max_participants || 0) > 0 ? event.max_participants : <IonIcon icon={infinite} style={{ verticalAlign: 'middle', fontSize: '0.9em' }} />}
+                            <IonIcon icon={ICON_GRUPPE_GEFUELLT} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--participants'} />
+                            {(event.registered_count || 0)}/{(event.max_participants || 0) > 0 ? event.max_participants : <IonIcon icon={ICON_UNENDLICH} style={{ verticalAlign: 'middle', fontSize: 'var(--app-icon-inline)' }} />}
                           </span>
                           )}
                           {event.waitlist_enabled && (event.waitlist_count ?? 0) > 0 && (
                             <span className="app-list-item__meta-item">
-                              <IonIcon icon={listOutline} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--waitlist'} />
+                              <IonIcon icon={ICON_LISTE} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--waitlist'} />
                               {event.waitlist_count}/{event.max_waitlist_size || 10}
                             </span>
                           )}
                           {event.points > 0 && (
                             <span className="app-list-item__meta-item">
-                              <IonIcon icon={trophy} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--points'} />
+                              <IonIcon icon={ICON_POKAL_GEFUELLT} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--points'} />
                               {event.points}P
+                            </span>
+                          )}
+                          {/* Punkteart direkt hinter den Punkten. Gleiche Regel
+                              wie im Detail: keine Konfi-Punkte, keine Art. */}
+                          {zeigtPunkteart(event) && (
+                            <span className="app-list-item__meta-item">
+                              <IonIcon
+                                icon={event.point_type === 'gottesdienst' ? ICON_GOTTESDIENST_GEFUELLT : ICON_GEMEINDE_GEFUELLT}
+                                className={shouldGrayOut ? 'app-icon-color--muted' : (event.point_type === 'gottesdienst' ? 'app-icon-color--gottesdienst' : 'app-icon-color--gemeinde')}
+                              />
+                              {punkteartText(event)}
                             </span>
                           )}
                         </div>
 
                         {/* Zeile 3: Datum + Uhrzeit */}
-                        <div className="app-list-item__meta" style={{ marginTop: '4px' }}>
+                        <div className="app-list-item__meta" style={{ marginTop: 'var(--app-abstand-mini)' }}>
                           <span className="app-list-item__meta-item">
-                            <IonIcon icon={calendar} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--events'} />
+                            <IonIcon icon={ICON_TERMIN_GEFUELLT} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--events'} />
                             {formatDate(event.event_date)}
                           </span>
                           <span className="app-list-item__meta-item">
-                            <IonIcon icon={time} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--time'} />
+                            <IonIcon icon={ICON_UHRZEIT_GEFUELLT} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--time'} />
                             {formatTime(event.event_date)}
                           </span>
                         </div>
 
                         {/* Zeile 4: Ort (eigene Zeile) */}
                         {event.location && (
-                          <div className="app-list-item__meta" style={{ marginTop: '4px' }}>
+                          <div className="app-list-item__meta" style={{ marginTop: 'var(--app-abstand-mini)' }}>
                             <span className="app-list-item__meta-item">
-                              <IonIcon icon={location} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--location'} />
+                              <IonIcon icon={ICON_ORT_GEFUELLT} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--location'} />
                               {event.location}
                             </span>
                           </div>
                         )}
-                        {/* Zeile 5: Was mitbringen */}
-                        {event.bring_items && (
-                          <div className="app-list-item__meta" style={{ marginTop: '4px' }}>
+                        {/* Zeile 5: Kategorien */}
+                        {kategorienText(event) && (
+                          <div className="app-list-item__meta" style={{ marginTop: 'var(--app-abstand-mini)' }}>
                             <span className="app-list-item__meta-item app-list-item__meta-item--multiline">
-                              <IonIcon icon={bagHandle} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--bring'} />
+                              <IonIcon icon={ICON_KATEGORIE_GEFUELLT} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--category'} />
+                              {kategorienText(event)}
+                            </span>
+                          </div>
+                        )}
+                        {/* Zeile 6: Was mitbringen */}
+                        {event.bring_items && (
+                          <div className="app-list-item__meta" style={{ marginTop: 'var(--app-abstand-mini)' }}>
+                            <span className="app-list-item__meta-item app-list-item__meta-item--multiline">
+                              <IonIcon icon={ICON_MATERIAL} className={shouldGrayOut ? 'app-icon-color--muted' : 'app-icon-color--bring'} />
                               {event.bring_items}
                             </span>
                           </div>

@@ -13,7 +13,7 @@ import {
   useIonModal,
   useIonAlert
 } from '@ionic/react';
-import { add } from 'ionicons/icons';
+import { ICON_HINZUFUEGEN_GEFUELLT } from './icons';
 import { useBadge } from '../../contexts/BadgeContext';
 import { useModalPage } from '../../contexts/ModalContext';
 import { useLiveRefresh } from '../../contexts/LiveUpdateContext';
@@ -43,9 +43,15 @@ const ChallengesPage: React.FC<ChallengesPageProps> = ({ cacheKey, modalPageId }
   const { refreshAllCounts } = useBadge();
   const { pageRef, presentingElement } = useModalPage(modalPageId);
 
+  const [ohneJahrgang, setOhneJahrgang] = useState(false);
+
   const { data: challenges, loading, refresh: refreshChallenges, refreshLive: refreshChallengesLive } = useOfflineQuery<AdminChallenge[]>(
     cacheKey,
-    async () => { const res = await api.get('/challenges/admin'); return res.data; },
+    async () => {
+      const res = await api.get('/challenges/admin');
+      setOhneJahrgang(res.headers?.['x-kein-jahrgang-zugewiesen'] === 'true');
+      return res.data;
+    },
     { ttl: CACHE_TTL.REQUESTS }
   );
 
@@ -164,7 +170,7 @@ const ChallengesPage: React.FC<ChallengesPageProps> = ({ cacheKey, modalPageId }
           <IonTitle>Challenges</IonTitle>
           <IonButtons slot="end">
             <IonButton aria-label="Neue Challenge anlegen" onClick={openCreate} title="Neue Challenge">
-              <IonIcon icon={add} />
+              <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -189,6 +195,7 @@ const ChallengesPage: React.FC<ChallengesPageProps> = ({ cacheKey, modalPageId }
         ) : (
           <ChallengesManageView
             challenges={challenges || []}
+            ohneJahrgang={ohneJahrgang}
             marks={marks}
             onSelectChallenge={openModeration}
             onEditChallenge={openEdit}

@@ -1,5 +1,6 @@
 import React from 'react';
 import SlideBase from '../SlideBase';
+import { teamerUeberschrift } from '../../ueberschrift';
 import type { SlideProps } from '../../../../types/wrapped';
 
 interface TeamerIntroSlideProps extends SlideProps {
@@ -8,19 +9,15 @@ interface TeamerIntroSlideProps extends SlideProps {
 }
 
 const TeamerIntroSlide: React.FC<TeamerIntroSlideProps> = ({ isActive, displayName, year }) => {
+  const ueberschrift = teamerUeberschrift(year);
+
   return (
-    <SlideBase isActive={isActive} className="teamer-intro-slide">
-      <div className="wrapped-anim-fly-left">
-        <p className="wrapped-label">Willkommen zu deinem</p>
+    <SlideBase isActive={isActive} className="teamer-intro-slide" kachel="teamer-intro">
+      <div className="kat-auge">Willkommen zu deinem</div>
+      <div className="kat-slogan">
+        {ueberschrift.map((z, i) => <span key={i} style={{ display: 'block' }}>{z}</span>)}
       </div>
-      <div className="wrapped-anim-fly-left wrapped-anim-delay-1">
-        <h1 className="wrapped-hero-text">
-          Teamer-<br />Jahr<br />{year}
-        </h1>
-      </div>
-      <div className="wrapped-anim-fade wrapped-anim-delay-2">
-        <p className="wrapped-subtitle" style={{ marginTop: '16px' }}>{displayName}</p>
-      </div>
+      <div className="kat-nachsatz" style={{ fontWeight: 'var(--app-schrift-fett)', fontSize: 'var(--app-text-untertitel)' }}>{displayName}</div>
     </SlideBase>
   );
 };

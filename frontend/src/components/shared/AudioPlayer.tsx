@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { IonIcon } from '@ionic/react';
-import { play, pause } from 'ionicons/icons';
+import { ICON_ABSPIELEN, ICON_PAUSE } from './icons';
 
 // Gestylter, kompakter Audio-Player für Challenge-Beitraege (Galerie, eigene
 // Beitraege, Aufnahme-Vorschau). Ersetzt den nackten <audio controls>-Player.
@@ -121,8 +121,8 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ src, color = 'var(--app-color
   return (
     <div
       style={{
-        display: 'flex', alignItems: 'center', gap: '10px',
-        width: '100%', marginTop: '8px', padding: '8px 10px', borderRadius: '10px',
+        display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-schmal)',
+        width: '100%', marginTop: 'var(--app-abstand-eng)', padding: 'var(--app-abstand-eng) var(--app-abstand-schmal)', borderRadius: 'var(--app-radius-knopf)',
         background: 'rgba(0,0,0,0.03)'
       }}
     >
@@ -145,12 +145,12 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ src, color = 'var(--app-color
         aria-label={isPlaying ? 'Pause' : 'Abspielen'}
         style={{
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          width: '34px', height: '34px', borderRadius: '50%', flexShrink: 0,
-          border: 'none', background: color, color: '#fff', cursor: 'pointer',
+          width: '34px', height: '34px', borderRadius: 'var(--app-radius-kreis)', flexShrink: 0,
+          border: 'none', background: color, color: 'white', cursor: 'pointer',
           padding: 0
         }}
       >
-        <IonIcon icon={isPlaying ? pause : play} style={{ fontSize: '1.05rem' }} />
+        <IonIcon icon={isPlaying ? ICON_PAUSE : ICON_ABSPIELEN} style={{ fontSize: 'var(--app-text-standard)' }} />
       </button>
 
       <input
@@ -172,7 +172,7 @@ const AudioPlayer: React.FC<AudioPlayerProps> = ({ src, color = 'var(--app-color
 
       <span
         style={{
-          fontSize: '0.75rem', color: '#8e8e93', flexShrink: 0,
+          fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)', flexShrink: 0,
           minWidth: '68px', textAlign: 'right', fontVariantNumeric: 'tabular-nums'
         }}
       >

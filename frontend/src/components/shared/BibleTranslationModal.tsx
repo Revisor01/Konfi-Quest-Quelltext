@@ -3,7 +3,7 @@ import {
   IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButton, IonButtons,
   IonIcon, IonList, IonListHeader, IonLabel, IonCard, IonCardContent,
 } from '@ionic/react';
-import { closeOutline, bookOutline, checkmark } from 'ionicons/icons';
+import { ICON_BUCH, ICON_HAKEN_GEFUELLT, ICON_SCHLIESSEN } from './icons';
 
 export const BIBLE_TRANSLATIONS = [
   { code: 'LUT', name: 'Lutherbibel 2017', description: 'Die klassische deutsche Standardübersetzung, nah am Originaltext mit der Sprachkraft Martin Luthers. Weit verbreitet in evangelischen Gottesdiensten.' },
@@ -31,7 +31,7 @@ interface BibleTranslationModalProps {
 // genutzt. Inhalt identisch, nur die Akzentfarbe ist pro Rolle einstellbar.
 const BibleTranslationModal: React.FC<BibleTranslationModalProps> = ({
   onClose, currentTranslation, onSelect,
-  accentColor = '#5b21b6', itemVariant = 'purple', sectionIconVariant = 'purple',
+  accentColor = 'var(--app-color-konfis)', itemVariant = 'purple', sectionIconVariant = 'purple',
 }) => (
   <IonPage>
     <IonHeader>
@@ -39,21 +39,21 @@ const BibleTranslationModal: React.FC<BibleTranslationModalProps> = ({
         <IonTitle>Bibelübersetzung</IonTitle>
         <IonButtons slot="start">
           <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose}>
-            <IonIcon icon={closeOutline} />
+            <IonIcon icon={ICON_SCHLIESSEN} />
           </IonButton>
         </IonButtons>
       </IonToolbar>
     </IonHeader>
     <IonContent className="app-gradient-background">
-      <IonList inset={true} style={{ margin: '16px' }}>
+      <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
         <IonListHeader>
           <div className={`app-section-icon app-section-icon--${sectionIconVariant}`}>
-            <IonIcon icon={bookOutline} />
+            <IonIcon icon={ICON_BUCH} />
           </div>
           <IonLabel>Übersetzung wählen</IonLabel>
         </IonListHeader>
         <IonCard className="app-card">
-          <IonCardContent style={{ padding: '12px' }}>
+          <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {BIBLE_TRANSLATIONS.map((t) => {
                 const isSelected = currentTranslation === t.code;
@@ -72,17 +72,17 @@ const BibleTranslationModal: React.FC<BibleTranslationModalProps> = ({
                       <div className="app-corner-badges">
                         <div
                           className="app-corner-badge"
-                          style={{ backgroundColor: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
+                          style={{ backgroundColor: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
                           title="Ausgewählt"
                         >
-                          <IonIcon icon={checkmark} style={{ color: '#fff', fontSize: '0.85rem' }} />
+                          <IonIcon icon={ICON_HAKEN_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                         </div>
                       </div>
                     )}
                     <div className="app-list-item__row">
                       <div className="app-list-item__main">
                         <div className="app-list-item__content">
-                          <div className="app-list-item__title" style={{ paddingRight: isSelected ? '40px' : '0' }}>{t.name}</div>
+                          <div className="app-list-item__title" style={{ paddingRight: isSelected ? 'var(--app-abstand-riesig)' : '0' }}>{t.name}</div>
                           <div className="app-list-item__subtitle" style={{ whiteSpace: 'normal', lineHeight: '1.4' }}>{t.description}</div>
                         </div>
                       </div>

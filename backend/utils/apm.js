@@ -49,12 +49,13 @@ function record(method, normPath, statusCode, durationMs, rawUrl) {
   const key = `${method} ${normPath}`;
   let s = stats.get(key);
   if (!s) {
-    s = { count: 0, errors: 0, totalMs: 0, maxMs: 0, samples: [] };
+    s = { count: 0, errors: 0, totalMs: 0, maxMs: 0, samples: [], notModified: 0 };
     stats.set(key, s);
   }
   s.count += 1;
   s.totalMs += durationMs;
   if (durationMs > s.maxMs) s.maxMs = durationMs;
+  if (statusCode === 304) s.notModified += 1;
   const isError = statusCode >= 500;
   if (isError) s.errors += 1;
   s.samples.push(durationMs);
@@ -66,7 +67,10 @@ function record(method, normPath, statusCode, durationMs, rawUrl) {
   if (!b) { b = { requests: 0, errors: 0, sumMs: 0 }; buckets.set(nowSec, b); }
   b.requests += 1;
   b.sumMs += durationMs;
-  if (statusCode >= 400) b.errors += 1;
+  // 404 zaehlt NICHT als Fehler: Der Client hat etwas angefragt, das es
+  // nicht gibt — das ist keine Stoerung des Dienstes und darf die Fehlerrate
+  // nicht heben. Sichtbar bleibt es trotzdem im Fehler-Log unten.
+  if (statusCode >= 400 && statusCode !== 404) b.errors += 1;
   if (buckets.size > HISTORY_SECONDS + 60) trimBuckets(nowSec);
 
   // Fehler (4xx + 5xx) ins rollierende Fehler-Log
@@ -96,16 +100,20 @@ function percentile(sortedAsc, p) {
 //   in die eigene Statistik schreiben.
 const IGNORED_PATHS = /^\/api\/(health|status|metrics)\b/;
 
+const SCANNER_PATHS = /(^\/\.|\/\.(env|git|vscode|aws|ssh)|^\/(js|assets|static|functions|cgi-bin|wp-|vendor|phpmyadmin)\/|\.(php|asp|aspx|jsp)$|^\/(robots\.txt|favicon\.ico|sitemap\.xml|bot-connect\.js)$|^\/@vite)/i;
+
 // Express-Middleware: misst jede Request-Dauer, zählt parallele Requests,
 // loggt langsame Requests. Infrastruktur-Pings (s.o.) werden übersprungen.
 function apmMiddleware(req, res, next) {
-  if (IGNORED_PATHS.test((req.originalUrl || req.url || '').split('?')[0])) {
+  const pfad = (req.originalUrl || req.url || '').split('?')[0];
+  if (IGNORED_PATHS.test(pfad) || SCANNER_PATHS.test(pfad)) {
     return next();
   }
   const start = process.hrtime.bigint();
   inFlight += 1;
   if (inFlight > maxInFlight) maxInFlight = inFlight;
   let done = false;
+
   const finish = () => {
     if (done) return;
     done = true;
@@ -127,14 +135,18 @@ function routeRows() {
   const routes = [];
   for (const [route, s] of stats.entries()) {
     const sorted = [...s.samples].sort((a, b) => a - b);
+    const avgMs = s.count ? Math.round(s.totalMs / s.count) : 0;
     routes.push({
       route,
       count: s.count,
       errors: s.errors,
       errorRate: s.count ? +(s.errors / s.count).toFixed(4) : 0,
-      avgMs: s.count ? Math.round(s.totalMs / s.count) : 0,
+      avgMs,
       p95Ms: Math.round(percentile(sorted, 95)),
       maxMs: Math.round(s.maxMs),
+      // Cache-Quote: Anteil der Anfragen, die mit 304 beantwortet wurden.
+      notModified: s.notModified || 0,
+      cacheQuote: s.count ? Math.round(((s.notModified || 0) / s.count) * 100) : 0,
     });
   }
   return routes;
@@ -185,13 +197,18 @@ function snapshot() {
   const routes = routeRows().sort((a, b) => b.p95Ms - a.p95Ms);
   let totalCount = 0;
   let totalErrors = 0;
-  for (const r of routes) { totalCount += r.count; totalErrors += r.errors; }
+  let totalNotModified = 0;
+  for (const r of routes) { totalCount += r.count; totalErrors += r.errors; totalNotModified += r.notModified || 0; }
   return {
     replica: REPLICA_ID,
     uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
     totalRequests: totalCount,
     totalErrors,
     errorRate: totalCount ? +(totalErrors / totalCount).toFixed(4) : 0,
+    // Wie oft der Client die Daten schon hatte (304). Hoch ist gut: Dann
+    // ging nur die Rueckfrage ueber die Leitung, keine Nutzdaten.
+    totalNotModified,
+    cacheQuote: totalCount ? Math.round((totalNotModified / totalCount) * 100) : 0,
     inFlight,
     maxInFlight,
     rps: currentRps(),
@@ -216,25 +233,31 @@ function mergeSnapshots(snaps) {
   const routeMap = new Map();
   const addRoutes = (rows) => {
     for (const r of rows) {
-      const e = routeMap.get(r.route) || { route: r.route, count: 0, errors: 0, sumAvg: 0, p95Ms: 0, maxMs: 0 };
+      const e = routeMap.get(r.route) || { route: r.route, count: 0, errors: 0, sumAvg: 0, p95Ms: 0, maxMs: 0, notModified: 0 };
       e.count += r.count;
       e.errors += r.errors;
       e.sumAvg += r.avgMs * r.count;      // gewichteter Mittelwert ueber count
       e.p95Ms = Math.max(e.p95Ms, r.p95Ms);
       e.maxMs = Math.max(e.maxMs, r.maxMs);
+      e.notModified += r.notModified || 0;
       routeMap.set(r.route, e);
     }
   };
   valid.forEach(s => { addRoutes(s.routesSlowest || []); addRoutes(s.routesBusiest || []); });
-  const routes = [...routeMap.values()].map(e => ({
-    route: e.route,
-    count: e.count,
-    errors: e.errors,
-    errorRate: e.count ? +(e.errors / e.count).toFixed(4) : 0,
-    avgMs: e.count ? Math.round(e.sumAvg / e.count) : 0,
-    p95Ms: e.p95Ms,
-    maxMs: e.maxMs,
-  }));
+  const routes = [...routeMap.values()].map(e => {
+    const avgMs = e.count ? Math.round(e.sumAvg / e.count) : 0;
+    return {
+      route: e.route,
+      count: e.count,
+      errors: e.errors,
+      errorRate: e.count ? +(e.errors / e.count).toFixed(4) : 0,
+      avgMs,
+      p95Ms: e.p95Ms,
+      maxMs: e.maxMs,
+      notModified: e.notModified,
+      cacheQuote: e.count ? Math.round((e.notModified / e.count) * 100) : 0,
+    };
+  });
 
   // Timeline pro Minute (ISO-Zeit) addieren.
   const tlMap = new Map();
@@ -251,6 +274,7 @@ function mergeSnapshots(snaps) {
 
   const totalRequests = valid.reduce((s, x) => s + x.totalRequests, 0);
   const totalErrors = valid.reduce((s, x) => s + x.totalErrors, 0);
+  const totalNotModified = valid.reduce((s, x) => s + (x.totalNotModified || 0), 0);
   const recentErrors = valid.flatMap(x => x.recentErrors || [])
     .sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 50);
 
@@ -259,6 +283,8 @@ function mergeSnapshots(snaps) {
     totalRequests,
     totalErrors,
     errorRate: totalRequests ? +(totalErrors / totalRequests).toFixed(4) : 0,
+    totalNotModified,
+    cacheQuote: totalRequests ? Math.round((totalNotModified / totalRequests) * 100) : 0,
     inFlight: valid.reduce((s, x) => s + x.inFlight, 0),
     maxInFlight: valid.reduce((s, x) => s + x.maxInFlight, 0),
     rps: +valid.reduce((s, x) => s + x.rps, 0).toFixed(2),

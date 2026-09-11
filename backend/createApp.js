@@ -23,6 +23,7 @@ const CHALLENGE_UPLOAD_LIMIT = 50 * 1024 * 1024;
  * @param {object} options.io - Socket.IO-Instanz (Default: Dummy)
  * @param {object} options.rateLimiters - Rate-Limiter-Objekte (Default: {})
  * @param {string} options.uploadsDir - Upload-Verzeichnis (Default: ./uploads)
+ * @param {Function} options.holeStoreVersion - Store-Version-Abfrage fuer /api/app-version (Default: utils/storeVersion, Tests injizieren einen Stub)
  * @returns {express.Application} Express-App
  */
 function createApp(db, options = {}) {
@@ -32,10 +33,23 @@ function createApp(db, options = {}) {
     io = null,
     rateLimiters = {},
     uploadsDir = path.join(__dirname, 'uploads'),
+    corsOrigins = null,
+    holeStoreVersion = null,
   } = options;
 
   const app = express();
   app.set('trust proxy', 1); // Traefik Reverse Proxy
+
+  // CORS nur, wenn ausdruecklich Ursprünge uebergeben werden.
+  //
+  // In Produktion liegen Oberflaeche und API hinter DERSELBEN Domain
+  // (konfi-quest.de) — dort ist jede Anfrage gleichen Ursprungs und CORS
+  // schlicht nicht noetig. Deshalb stand hier nie etwas; nur Socket.IO hatte
+  // eine eigene Liste (server.js:42).
+  if (corsOrigins && corsOrigins.length > 0) {
+    const cors = require('cors');
+    app.use(cors({ origin: corsOrigins, credentials: true }));
+  }
 
   // NUR im Test: Jede Antwort schliesst ihre Verbindung.
   //
@@ -243,7 +257,6 @@ function createApp(db, options = {}) {
 
   const {
     verifyTokenRBAC,
-    filterByJahrgangAccess,
     requireSuperAdmin,
     requireOrgAdmin,
     requireAdmin,
@@ -282,6 +295,13 @@ function createApp(db, options = {}) {
   app.get('/api/health', (req, res) => {
     res.json({ status: 'OK', message: 'Konfi Points API is running' });
   });
+
+  // App-Version-Endpunkt — BEWUSST ohne Auth (wie /health): meldet den Apps
+  // die aktuell im Store veroeffentlichte Version fuer den Update-Hinweis.
+  // Quelle und Begruendung: utils/storeVersion.js (iTunes-Lookup, gecacht).
+  app.use('/api/app-version', require('./routes/appVersion')(
+    holeStoreVersion ? { holeStoreVersion } : {}
+  ));
 
   // Status-Endpoint — Detail-Readiness für Status-Page / Uptime Kuma.
   // Getrennt von /health, weil er echte Abhaengigkeiten prüft (DB) und damit
@@ -433,7 +453,13 @@ function createApp(db, options = {}) {
   // Admin Routes
   app.use('/api/admin/activities', activitiesRouter);
   app.use('/api/admin/badges', badgesRouter);
-  app.use('/api/admin/konfis', require('./routes/konfi-management')(db, rbacVerifier, roleHelpers, filterByJahrgangAccess, badgesRouter.checkAndAwardBadges));
+  // Nur im Test: Die Sperre der Abzeichen-Nachpruefung zuruecksetzen. Die
+  // Test-App wird pro Datei einmal erzeugt, der Merker lebt also ueber alle
+  // Tests der Datei hinweg (siehe routes/badges.js).
+  if (process.env.NODE_ENV === 'test' && badgesRouter.sperreZuruecksetzen) {
+    app.locals.badgeSperreZuruecksetzen = badgesRouter.sperreZuruecksetzen;
+  }
+  app.use('/api/admin/konfis', require('./routes/konfi-management')(db, rbacVerifier, roleHelpers, badgesRouter.checkAndAwardBadges));
   app.use('/api/admin/jahrgaenge', require('./routes/jahrgaenge')(db, rbacVerifier, roleHelpers));
   app.use('/api/admin/categories', require('./routes/categories')(db, rbacVerifier, roleHelpers));
   app.use('/api/admin/users', require('./routes/users')(db, rbacVerifier, roleHelpers, ioOrDummy));

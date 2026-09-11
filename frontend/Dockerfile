@@ -5,7 +5,9 @@ WORKDIR /app
 
 # Install dependencies
 COPY package*.json ./
-RUN npm ci --legacy-peer-deps
+# Kein --legacy-peer-deps mehr, siehe ci.yml: Der Konflikt kam von
+# @eslint/js@10 gegen eslint@9 und ist seit dem Sprung auf ESLint 10 weg.
+RUN npm ci
 
 # Copy source
 COPY . .

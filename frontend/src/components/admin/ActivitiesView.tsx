@@ -15,20 +15,24 @@ import {
   IonSegmentButton
 } from '@ionic/react';
 import {
-  trash,
-  calendar,
-  home,
-  people,
-  ribbon,
-  flash,
-  pricetag,
-  flashOutline,
-  filterOutline,
-  search
-} from 'ionicons/icons';
+  ICON_ABZEICHEN_GEFUELLT,
+  ICON_AKTION,
+  ICON_AKTION_GEFUELLT,
+  ICON_FILTER,
+  ICON_GOTTESDIENST_GEFUELLT,
+  ICON_GRUPPE_GEFUELLT,
+  ICON_KATEGORIE_GEFUELLT,
+  ICON_LOESCHEN_GEFUELLT,
+  ICON_SUCHE_GEFUELLT,
+  ICON_TERMIN_GEFUELLT,
+} from '../shared/icons';
 import { filterBySearchTerm } from '../../utils/helpers';
 import { SectionHeader, ListSection } from '../shared';
 import { closeOpenSlidingItems } from '../../utils/slidingItems';
+
+// Ionic 9 gibt bei ref an IonItemSliding die React-Komponente zurueck, nicht
+// mehr das DOM-Element. Gebraucht wird hier nur close() — das haben beide.
+type SlidingRef = { close: () => Promise<void> };
 
 interface Activity {
   id: number;
@@ -43,8 +47,6 @@ interface Activity {
 
 interface ActivitiesViewProps {
   activities: Activity[];
-  onUpdate: () => void;
-  onAddActivityClick: () => void;
   onSelectActivity: (activity: Activity) => void;
   onDeleteActivity: (activity: Activity) => void;
   canEdit: boolean;
@@ -55,8 +57,6 @@ interface ActivitiesViewProps {
 
 const ActivitiesView: React.FC<ActivitiesViewProps> = ({
   activities,
-  onUpdate,
-  onAddActivityClick,
   onSelectActivity,
   onDeleteActivity,
   canEdit,
@@ -66,7 +66,7 @@ const ActivitiesView: React.FC<ActivitiesViewProps> = ({
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedType, setSelectedType] = useState('alle');
-  const slidingRefs = useRef<Map<number, HTMLIonItemSlidingElement>>(new Map());
+  const slidingRefs = useRef<Map<number, SlidingRef>>(new Map());
 
   const filteredAndSortedActivities = (() => {
     let result = filterBySearchTerm(activities, searchTerm, ['name', 'description']);
@@ -91,29 +91,15 @@ const ActivitiesView: React.FC<ActivitiesViewProps> = ({
   };
 
 
-  const getTypeColor = (type: string | null) => {
-    switch (type) {
-      case 'gottesdienst': return 'primary';
-      case 'gemeinde': return 'primary';
-      default: return 'medium';
-    }
-  };
 
   const getTypeIcon = (type: string | null) => {
     switch (type) {
-      case 'gottesdienst': return home;
-      case 'gemeinde': return people;
-      default: return calendar;
+      case 'gottesdienst': return ICON_GOTTESDIENST_GEFUELLT;
+      case 'gemeinde': return ICON_GRUPPE_GEFUELLT;
+      default: return ICON_TERMIN_GEFUELLT;
     }
   };
 
-  const getTypeText = (type: string | null) => {
-    switch (type) {
-      case 'gottesdienst': return 'Gottesdienst';
-      case 'gemeinde': return 'Gemeinde';
-      default: return 'Unbekannt';
-    }
-  };
 
   const handleDeleteWithSlideClose = async (activity: Activity) => {
     const slidingElement = slidingRefs.current.get(activity.id);
@@ -121,7 +107,7 @@ const ActivitiesView: React.FC<ActivitiesViewProps> = ({
     try {
       await onDeleteActivity(activity);
       // Bei erfolgreichem Löschen schließt sich das Sliding automatisch durch den Re-render
-    } catch (error) {
+    } catch {
       // Bei Fehler: Sliding automatisch schließen für bessere UX
       if (slidingElement) {
         await slidingElement.close();
@@ -134,8 +120,8 @@ const ActivitiesView: React.FC<ActivitiesViewProps> = ({
     <>
       <SectionHeader
         title="Aktivitäten"
-        subtitle={targetRole === 'teamer' ? 'Teamer:innen-Aktivitäten' : 'Punkte und Aufgaben'}
-        icon={flash}
+        subtitle={targetRole === 'teamer' ? 'Aktivitäten fürs Team' : 'Punkte und Aufgaben'}
+        icon={ICON_AKTION_GEFUELLT}
         preset="activities"
         stats={targetRole === 'teamer' ? [
           // Teamer:innen haben keinen Typ-Filter -> Kachel bleibt reine Anzeige.
@@ -153,29 +139,29 @@ const ActivitiesView: React.FC<ActivitiesViewProps> = ({
         <IonSegment
           value={targetRole}
           onIonChange={(e) => onRoleChange(e.detail.value as 'konfi' | 'teamer')}
-          style={{ margin: '0 16px 8px', maxWidth: 'calc(100% - 32px)' }}
+          style={{ margin: '0 var(--app-abstand-basis) var(--app-abstand-eng)', maxWidth: 'calc(100% - 32px)' }}
         >
           <IonSegmentButton value="konfi">
             <IonLabel>Konfis</IonLabel>
           </IonSegmentButton>
           <IonSegmentButton value="teamer">
-            <IonLabel>Teamer:innen</IonLabel>
+            <IonLabel>Team</IonLabel>
           </IonSegmentButton>
         </IonSegment>
       )}
 
       {/* Suche & Filter */}
-      <IonList inset={true} style={{ margin: '16px' }}>
+      <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
         <IonListHeader>
           <div className="app-section-icon app-section-icon--activities">
-            <IonIcon icon={filterOutline} />
+            <IonIcon icon={ICON_FILTER} />
           </div>
           <IonLabel>Suche & Filter</IonLabel>
         </IonListHeader>
         <IonCard className="app-card">
-          <IonCardContent style={{ padding: '8px 16px' }}>
+          <IonCardContent style={{ padding: 'var(--app-abstand-eng) var(--app-abstand-basis)' }}>
             <div className="app-search-bar" style={{ padding: 0 }}>
-              <IonIcon icon={search} className="app-search-bar__icon" />
+              <IonIcon icon={ICON_SUCHE_GEFUELLT} className="app-search-bar__icon" />
               <IonInput
                 value={searchTerm}
                 onIonInput={(e) => setSearchTerm(e.detail.value!)}
@@ -210,15 +196,15 @@ const ActivitiesView: React.FC<ActivitiesViewProps> = ({
 
       {/* Aktivitäten Liste */}
       <ListSection
-        icon={flashOutline}
+        icon={ICON_AKTION}
         title="Aktivitäten"
         count={filteredAndSortedActivities.length}
         iconColorClass="activities"
         isEmpty={filteredAndSortedActivities.length === 0}
-        emptyIcon={flash}
+        emptyIcon={ICON_AKTION_GEFUELLT}
         emptyTitle="Keine Aktivitäten gefunden"
         emptyMessage="Noch keine Aktivitäten angelegt"
-        emptyIconColor="#059669"
+        emptyIconColor="var(--app-color-success-strong)"
       >
         {filteredAndSortedActivities.map((activity, index) => {
               // Teamer:innen-Aktivitäten haben keine Kategorie/keinen Typ und
@@ -226,7 +212,7 @@ const ActivitiesView: React.FC<ActivitiesViewProps> = ({
               const isTeamerActivity = activity.target_role === 'teamer';
               const typeColor = isTeamerActivity
                 ? 'var(--app-color-teamer)'
-                : (activity.type === 'gottesdienst' ? '#007aff' : '#059669');
+                : (activity.type === 'gottesdienst' ? 'var(--app-color-info)' : 'var(--app-color-gemeinde)');
 
               return (
               <IonItemSliding
@@ -238,7 +224,7 @@ const ActivitiesView: React.FC<ActivitiesViewProps> = ({
                     slidingRefs.current.delete(activity.id);
                   }
                 }}
-                style={{ marginBottom: index < filteredAndSortedActivities.length - 1 ? '8px' : '0' }}
+                style={{ marginBottom: index < filteredAndSortedActivities.length - 1 ? 'var(--app-abstand-eng)' : '0' }}
               >
                 <IonItem
                   button={canEdit}
@@ -286,7 +272,7 @@ const ActivitiesView: React.FC<ActivitiesViewProps> = ({
                           className="app-icon-circle app-icon-circle--lg"
                           style={{ backgroundColor: typeColor }}
                         >
-                          <IonIcon icon={isTeamerActivity ? ribbon : getTypeIcon(activity.type)} />
+                          <IonIcon icon={isTeamerActivity ? ICON_ABZEICHEN_GEFUELLT : getTypeIcon(activity.type)} />
                         </div>
 
                         {/* Content */}
@@ -294,7 +280,7 @@ const ActivitiesView: React.FC<ActivitiesViewProps> = ({
                           {/* Zeile 1: Name */}
                           <div
                             className="app-list-item__title"
-                            style={{ paddingRight: '60px' }}
+                            style={{ paddingRight: 'var(--app-freiraum-aktion-m)' }}
                           >
                             {activity.name}
                           </div>
@@ -303,7 +289,7 @@ const ActivitiesView: React.FC<ActivitiesViewProps> = ({
                           <div className="app-list-item__meta">
                             {activity.categories && activity.categories.length > 0 && (
                               <span className="app-list-item__meta-item">
-                                <IonIcon icon={pricetag} style={{ color: '#0ea5e9' }} />
+                                <IonIcon icon={ICON_KATEGORIE_GEFUELLT} style={{ color: 'var(--app-color-categories)' }} />
                                 {activity.categories.map(cat => cat.name).join(', ')}
                               </span>
                             )}
@@ -322,7 +308,7 @@ const ActivitiesView: React.FC<ActivitiesViewProps> = ({
                       className="app-swipe-action"
                     >
                       <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
-                        <IonIcon icon={trash} />
+                        <IonIcon icon={ICON_LOESCHEN_GEFUELLT} />
                       </div>
                     </IonItemOption>
                   </IonItemOptions>

@@ -21,49 +21,36 @@ import BadgesView from '../views/BadgesView';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { safeUUID } from '../../../utils/uuid';
+import type { AnzeigeBadge, ApiBadge, BadgeUebersicht } from '../../../types/dashboard';
 
-interface Badge {
-  id: number;
-  name: string;
-  description?: string;
-  icon: string;
-  criteria_type: string;
-  criteria_value: number;
-  criteria_extra?: string;
-  is_hidden: boolean;
-  is_active: boolean;
-  color?: string; // Badge color from database
-  // Calculated fields
-  is_earned: boolean;
-  earned_at?: string;
-  progress_points?: number;
-  progress_percentage?: number;
-}
-
-interface BadgeData {
-  earned: any[];
-  available: any[];
-  stats: {
-    totalVisible: number;
-    totalSecret: number;
-  };
+/**
+ * Nur die Punktefelder aus GET /konfi/profile, die diese Seite braucht —
+ * sie dienen als Rueckfallebene fuer Abzeichen ohne Server-Fortschritt.
+ */
+interface KonfiPunkte {
+  total_points?: number;
+  gottesdienst_points?: number;
+  gemeinde_points?: number;
 }
 
 const KonfiBadgesPage: React.FC = () => {
-  const { user, setError } = useApp();
+  const { user } = useApp();
   const { refreshAllCounts } = useBadge();
-  const { pageRef, presentingElement } = useModalPage('konfi-badges');
+  const { pageRef } = useModalPage('konfi-badges');
   const [selectedFilter, setSelectedFilter] = useState('alle');
 
   // --- useOfflineQuery: Badges ---
-  const { data: badgeData, loading: badgesLoading, refresh: refreshBadges, refreshLive: refreshBadgesLive } = useOfflineQuery<BadgeData>(
-    'konfi:badges:' + user?.id,
-    () => api.get('/konfi/badges').then(r => r.data),
+  const { data: badgeData, loading: badgesLoading, refresh: refreshBadges, refreshLive: refreshBadgesLive } = useOfflineQuery<BadgeUebersicht>(
+    // Abzeichen-Generation v2: gleiche Huelle wie bisher, aber
+    // ohne die Verwaltungsfelder. Neuer Schluessel, weil im Zwischenspeicher
+    // noch Eintraege MIT diesen Feldern liegen koennen.
+    'konfi:badges:v2:' + user?.id,
+    () => api.get('/konfi/badges/v2').then(r => r.data),
     { ttl: CACHE_TTL.BADGES }
   );
 
   // --- useOfflineQuery: Profile (für Punkte-Progress) ---
-  const { data: konfiData, refresh: refreshProfile, refreshLive: refreshProfileLive } = useOfflineQuery<any>(
+  const { data: konfiData, refresh: refreshProfile, refreshLive: refreshProfileLive } = useOfflineQuery<KonfiPunkte>(
     'konfi:profile:' + user?.id,
     () => api.get('/konfi/profile').then(r => r.data),
     { ttl: CACHE_TTL.PROFILE }
@@ -82,8 +69,8 @@ const KonfiBadgesPage: React.FC = () => {
   useEffect(() => {
     if (badgeData) {
       const unseenIds = badgeData.earned
-        .filter((badge: any) => !badge.seen)
-        .map((badge: any) => badge.id)
+        .filter((badge) => !badge.seen)
+        .map((badge) => badge.id)
         .sort((a: number, b: number) => a - b)
         .join(',');
       const hasUnseenBadges = unseenIds.length > 0 && unseenIds !== lastMarkedRef.current;
@@ -113,7 +100,7 @@ const KonfiBadgesPage: React.FC = () => {
   // Derive processed badges from cached data
   const badgeStats = badgeData?.stats || { totalVisible: 0, totalSecret: 0 };
 
-  const processedBadges: Badge[] = (() => {
+  const processedBadges: AnzeigeBadge[] = (() => {
     if (!badgeData || !konfiData) return [];
 
     // Punkte direkt aus konfi_profiles verwenden
@@ -125,7 +112,7 @@ const KonfiBadgesPage: React.FC = () => {
     const allBadges = [...badgeData.available, ...badgeData.earned];
 
     // Remove duplicates and process
-    const uniqueBadges = allBadges.reduce((acc: any[], current: any) => {
+    const uniqueBadges = allBadges.reduce((acc: ApiBadge[], current) => {
       const existingIndex = acc.findIndex(badge => badge.id === current.id);
       if (existingIndex === -1) {
         acc.push(current);
@@ -137,9 +124,9 @@ const KonfiBadgesPage: React.FC = () => {
       return acc;
     }, []);
 
-    return uniqueBadges.map((badge: any) => {
-      const isEarned = badgeData.earned.some((earned: any) => earned.id === badge.id);
-      const earnedBadge = badgeData.earned.find((earned: any) => earned.id === badge.id);
+    return uniqueBadges.map((badge) => {
+      const isEarned = badgeData.earned.some((earned) => earned.id === badge.id);
+      const earnedBadge = badgeData.earned.find((earned) => earned.id === badge.id);
 
       let progressPoints = badge.progress?.current || 0;
       let progressPercentage = badge.progress?.percentage || 0;

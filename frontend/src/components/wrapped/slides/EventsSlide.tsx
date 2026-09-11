@@ -1,6 +1,4 @@
 import React from 'react';
-import { IonIcon } from '@ionic/react';
-import { calendarOutline, closeCircleOutline } from 'ionicons/icons';
 import SlideBase from './SlideBase';
 import { useCountUp } from '../../../hooks/useCountUp';
 import type { SlideProps, KonfiEventsSlide } from '../../../types/wrapped';
@@ -9,48 +7,88 @@ interface EventsSlideProps extends SlideProps {
   events: KonfiEventsSlide;
 }
 
+/**
+ * Die Termin-Seite -- auf die Slogan-Gestaltung umgezogen.
+ *
+ * Das Snapshot-Feld `slides.events.lieblings_event` BLEIBT im Backend:
+ * Ausgelieferte App-Versionen lesen es, und die Antwortform ist ein
+ * Vertrag. Nur die Anzeige faellt weg -- hier und in der Teilen-Karte.
+ */
+
+/**
+ * Die Schwellen sind eng genug, dass sich 3 Termine anders anfuehlen als 12.
+ * Vorher lag alles zwischen 2 und 9 im selben Topf -- "Du warst dabei" stand
+ * damit ueber einer 3 wie ueber einer 9.
+ */
+function spruchFuer(besucht: number): { auge: string; slogan: string[]; nachsatz: string } {
+  // 1) Sehr viel: 20 und mehr
+  if (besucht >= 20) {
+    return {
+      auge: 'Deine Termine',
+      slogan: ['Du warst', 'öfter da', 'als manche', 'Möbel.'],
+      nachsatz: 'Du hast kaum etwas ausgelassen.'
+    };
+  }
+  // 2) Viel: 10 bis 19
+  if (besucht >= 10) {
+    return {
+      auge: 'Deine Termine',
+      slogan: ['Immer wieder', 'aufgetaucht.'],
+      nachsatz: 'Nicht einmal, nicht zweimal — immer wieder.'
+    };
+  }
+  // 3) Solide: 5 bis 9
+  if (besucht >= 5) {
+    return {
+      auge: 'Deine Termine',
+      slogan: ['Auf dich', 'war', 'Verlass.'],
+      nachsatz: 'Immer wieder hast du dir die Zeit genommen.'
+    };
+  }
+  // 4) Wenig, aber da: 2 bis 4
+  if (besucht >= 2) {
+    return {
+      auge: 'Deine Termine',
+      slogan: ['Du warst', 'dabei.'],
+      nachsatz: 'Und darum geht es.'
+    };
+  }
+  // 5) Einmal oder gar nicht
+  if (besucht === 1) {
+    return {
+      auge: 'Dein Termin',
+      slogan: ['Einmal', 'hingegangen.'],
+      nachsatz: 'Aller Anfang ist genau das.'
+    };
+  }
+  return {
+    auge: 'Deine Termine',
+    slogan: ['Der erste', 'Termin', 'wartet noch.'],
+    nachsatz: 'Es ist immer Platz für dich.'
+  };
+}
+
 const EventsSlide: React.FC<EventsSlideProps> = ({ isActive, events }) => {
   const animatedCount = useCountUp(events.total_attended, isActive);
+  const text = spruchFuer(events.total_attended);
 
   return (
-    <SlideBase isActive={isActive} className="events-slide">
-      <div className="wrapped-anim-fly-left">
-        <p className="wrapped-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <IonIcon icon={calendarOutline} style={{ fontSize: '1rem' }} />
-          Deine Events
-        </p>
-      </div>
-      <div className="wrapped-anim-number-pop wrapped-anim-delay-1">
-        <p className="wrapped-big-number">{animatedCount}</p>
-      </div>
-      <div className="wrapped-anim-fade wrapped-anim-delay-1">
-        <p className="wrapped-subtitle">Events besucht</p>
-        {events.total_available > 0 && (
-          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '0.85rem', marginTop: '4px' }}>
-            von {events.total_available} verfügbaren
-          </p>
-        )}
-      </div>
-      <div className="wrapped-anim-fade wrapped-anim-delay-2" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '12px', color: 'rgba(255,255,255,0.6)', fontSize: '0.9rem' }}>
-        <IonIcon icon={closeCircleOutline} style={{ fontSize: '1.1rem' }} />
-        <span>0 mal abgesagt</span>
-      </div>
-      {events.lieblings_event && (
-        <div className="wrapped-anim-fly-left wrapped-anim-delay-3">
-          <div style={{
-            marginTop: '24px',
-            padding: '16px 20px',
-            background: 'rgba(255,255,255,0.15)',
-            borderRadius: '16px',
-            border: '1px solid rgba(255,255,255,0.1)',
-          }}>
-            <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.8rem', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Dein letztes Event</p>
-            <p style={{ color: '#fff', fontSize: '1.2rem', fontWeight: 700, margin: '4px 0 0 0' }}>
-              {events.lieblings_event.name}
-            </p>
-          </div>
+    <SlideBase isActive={isActive} className="events-slide" kachel="events">
+      <div className="kat-auge">{text.auge}</div>
+
+      {events.total_attended > 0 && (
+        <div className="kat-zahl">
+          {animatedCount}<span className="kat-zahl__mal">×</span>
         </div>
       )}
+
+      <div className="kat-slogan">
+        {text.slogan.map((zeile, i) => (
+          <span key={i} style={{ display: 'block' }}>{zeile}</span>
+        ))}
+      </div>
+
+      <div className="kat-nachsatz">{text.nachsatz}</div>
     </SlideBase>
   );
 };

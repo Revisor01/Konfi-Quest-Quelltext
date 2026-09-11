@@ -10,7 +10,7 @@ import { Preferences } from '@capacitor/preferences';
 // im Schluesselnamen: Wird sie hochgezaehlt, entstehen neue Schluessel, und
 // die Banner erscheinen bei allen wieder — auch bei denen, die die alten
 // weggeklickt hatten. Die alten Flags bleiben liegen und stoeren nicht.
-export const NEUERUNGEN_VERSION = '2_0';
+export const NEUERUNGEN_VERSION = '2_1';
 
 export const UPDATE_WALKTHROUGH_KEY = `update_walkthrough_${NEUERUNGEN_VERSION}_gesehen`;
 

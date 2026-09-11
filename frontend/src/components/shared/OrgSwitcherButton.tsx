@@ -11,7 +11,7 @@ import {
   IonLabel
 } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
-import { swapHorizontalOutline, checkmark, businessOutline } from 'ionicons/icons';
+import { ICON_HAKEN_GEFUELLT, ICON_ORGANISATION, ICON_WECHSEL } from './icons';
 import { useApp } from '../../contexts/AppContext';
 import { UserOrganization } from '../../contexts/AppContext';
 
@@ -87,7 +87,7 @@ const OrgSwitcherButton: React.FC = () => {
         {/* Icon + aktiver Org-Name -> man sieht immer, in welcher Org man ist.
             Kein Groessen-/Farb-Override: Standard-Toolbar-Look wie die Buttons rechts. */}
         <IonButton onClick={open} className="app-org-switcher-btn">
-          <IonIcon slot="start" icon={swapHorizontalOutline} />
+          <IonIcon slot="start" icon={ICON_WECHSEL} />
           <span className="app-org-switcher-btn__name">{currentShort}</span>
         </IonButton>
       </IonButtons>
@@ -113,10 +113,10 @@ const OrgSwitcherButton: React.FC = () => {
                 detail={false}
                 onClick={() => handleSelect(org.id)}
               >
-                <IonIcon slot="start" icon={businessOutline} />
+                <IonIcon slot="start" icon={ICON_ORGANISATION} />
                 <IonLabel>{org.display_name || org.name}</IonLabel>
                 {org.id === currentId && (
-                  <IonIcon slot="end" icon={checkmark} color="success" />
+                  <IonIcon slot="end" icon={ICON_HAKEN_GEFUELLT} color="success" />
                 )}
               </IonItem>
             ))}

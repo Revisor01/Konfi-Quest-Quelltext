@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
+const { filterRolesByHierarchy } = require('../utils/roleHierarchy');
 
 // ============================================
 // VEREINFACHTE ROLLEN-ROUTES
@@ -12,11 +13,20 @@ const { handleValidationErrors } = require('../middleware/validation');
 
 module.exports = (db, rbacVerifier, roleHelpers) => {
 
-  // GET /api/roles - Alle Rollen der Organisation anzeigen
-  // Nur für org_admin (um User zuzuweisen)
+  // Die Antwort wird fuer 'admin' auf die Rollen eingeschraenkt, die er laut
+  // canManageRole ueberhaupt verwalten darf (teamer, konfi) — filterRolesByHierarchy.
+  // Begruendung: Diese Liste ist die Vorlage fuer eine Rollen-ZUWEISUNG. Wer
+  // org_admin/admin/super_admin gar nicht vergeben darf (roleHierarchy.js),
+  // soll sie hier auch nicht angeboten bekommen; sonst waehlt man eine Rolle
+  // aus, die das Backend danach mit 403 zurueckweist. Die Durchsetzung bleibt
+  // wie bisher bei checkUserHierarchy in users.js — das Filtern hier ist die
+  // Anzeige-Seite derselben Regel, keine zusaetzliche Sicherung.
+  // super_admin und org_admin bekommen unveraendert ALLE Rollen der Org, damit
+  // die Rollen-Uebersicht mit ihren Nutzer-Zaehlern vollstaendig bleibt.
+  //
+  // Antwortform bleibt ein Array (ausgelieferte Store-Apps lesen sie so).
   router.get('/', rbacVerifier, async (req, res) => {
-    // Nur org_admin darf Rollen sehen
-    if (!['super_admin', 'org_admin'].includes(req.user.role_name)) {
+    if (!['super_admin', 'org_admin', 'admin'].includes(req.user.role_name)) {
       return res.status(403).json({ error: 'Keine Berechtigung' });
     }
 
@@ -42,7 +52,14 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       `;
 
       const { rows } = await db.query(query, [organizationId]);
-      res.json(rows);
+
+      // Nur fuer 'admin' filtern: super_admin/org_admin sollen die vollstaendige
+      // Uebersicht behalten (inkl. Zaehler fuer nicht zuweisbare Rollen).
+      const sichtbar = req.user.role_name === 'admin'
+        ? filterRolesByHierarchy(rows, req.user.role_name)
+        : rows;
+
+      res.json(sichtbar);
 
     } catch (err) {
  console.error('Database error in GET /roles:', err);

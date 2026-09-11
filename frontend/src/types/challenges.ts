@@ -115,6 +115,34 @@ export interface ChallengeSubmission {
   role_name?: string | null;
 }
 
+/**
+ * Eine Galerie-Zeile, wie sie GET /challenges/konfi/:id liefert.
+ *
+ * Der Name kommt dort als `display_name` (bei anonymen Beitraegen NULL) —
+ * NICHT als `konfi_name`, den die Oberflaeche liest. Deshalb wird er beim
+ * Laden auf konfi_name normalisiert; ohne das erschien jeder Galerie-Beitrag
+ * als "Anonym". Ein `moderation_status` gibt es hier nicht: in der Galerie
+ * stehen ausschliesslich freigegebene Beitraege.
+ */
+export interface ChallengeGalerieZeile {
+  id: number;
+  media_type: ChallengeMediaType;
+  text_content?: string | null;
+  file_path?: string | null;
+  file_name?: string | null;
+  link_url?: string | null;
+  link_title?: string | null;
+  link_author?: string | null;
+  link_album?: string | null;
+  created_at: string;
+  display_name?: string | null;
+  role_name?: string | null;
+  jahrgang_name?: string | null;
+  is_anonymous?: boolean;
+  /** Wird im Frontend aus display_name abgeleitet. */
+  konfi_name?: string | null;
+}
+
 /** Eigener Challenge-Stempel (bewusst ohne Zähler/Fortschritt). */
 export interface ChallengeMark {
   challenge_id: number;

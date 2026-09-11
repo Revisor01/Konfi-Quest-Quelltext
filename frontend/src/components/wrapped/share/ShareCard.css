@@ -22,7 +22,80 @@
   color: #fff;
   overflow: hidden;
   position: relative;
+  /* Eigener Stapelkontext: Sonst faellt das Foto (z-index: -1) hinter die
+     Karte und damit hinter ihren Farbverlauf -- es waere unsichtbar. */
+  isolation: isolate;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+/*
+   Aufbau wie im Rueckblick (WrappedModal.css): Foto vollflaechig, darueber
+   ein Schleier, der nach unten dichter wird. Oben bleibt das Motiv offen,
+   unten -- wo Slogan und Zahl stehen -- traegt die Abdunklung die
+   Lesbarkeit. Eine gleichmaessige Abdeckung waere entweder zu hell fuer den
+   Text oder zu dunkel fuer das Bild. */
+
+.share-card-foto {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  /* Leichter Weichzeichner: Das Motiv bleibt erkennbar, konkurriert aber
+     nicht mit der Schrift um die Schaerfe -- dieselbe Ueberlegung wie auf
+     der Seite selbst. */
+  filter: blur(2px) saturate(1.05);
+  transform: scale(1.06);
+}
+
+/* Der Farbschleier der Seite.
+   ZWEI SCHICHTEN, und beide werden gebraucht:
+
+   1. Die FARBE der Seite (--karten-schleier -- derselbe Verlauf, den die
+      Karte als Hintergrund traegt), auf 62 % heruntergenommen. Voll deckend
+      waere das Foto vollstaendig verdeckt; ganz ohne sie haette das
+      geteilte Bild nicht mehr die Farbe seiner Seite.
+   2. Darueber eine Abdunklung, die nach UNTEN dichter wird. Oben bleibt das
+      Motiv offen, unten -- wo Slogan, Zahl und Wasserzeichen stehen --
+      traegt sie die Lesbarkeit. Eine gleichmaessige Abdeckung waere
+      entweder zu hell fuer den Text oder zu dunkel fuer das Bild. */
+.share-card-schleier {
+  position: absolute;
+  inset: 0;
+  background: var(--karten-schleier, linear-gradient(135deg, #6366f1 0%, #1e1b4b 100%));
+  opacity: 0.62;
+}
+
+/* Die Abdunklung liegt als eigene Schicht darueber -- sie darf NICHT mit
+   der Farbe zusammen abgeschwaecht werden, sonst wird der Text unten
+   wieder unlesbar. */
+.share-card-abdunklung {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0.05) 0%,
+    rgba(0, 0, 0, 0.25) 45%,
+    rgba(0, 0, 0, 0.62) 78%,
+    rgba(0, 0, 0, 0.8) 100%
+  );
+}
+
+/* Der Inhalt liegt ueber Foto und Schleier. `display: contents` loest den
+   Kasten auf: Die Kinder werden direkt zu Flex-Elementen der Karte, und die
+   Ausrichtung jeder Seite (zentriert oder linksbuendig unten) gilt weiter
+   wie vor dem Umbau. Ein eigener Kasten haette Ausrichtung und Innenabstand
+   jeder Seite doppelt gebraucht. */
+.share-card-inhalt {
+  display: contents;
+}
+
+/* Foto und Schleier ganz nach hinten. Die Inhalte der Karte stehen ohne
+   eigene Positionierung darueber -- ein negativer z-index reicht dafuer,
+   solange die Karte selbst einen Stapelkontext aufmacht (isolation). */
+.share-card-foto,
+.share-card-schleier,
+.share-card-abdunklung {
+  z-index: -1;
 }
 
 /* ========================================
@@ -33,11 +106,24 @@
   position: absolute;
   bottom: 40px;
   width: 100%;
-  text-align: center;
-  font-size: 24px;
-  color: rgba(255, 255, 255, 0.3);
-  font-weight: 500;
+  /* Symbol und Schriftzug nebeneinander. Feste Werte wie
+     ueberall auf dieser Karte: Ein 1080px-Exportbild darf nicht an der
+     Systemschriftgroesse haengen. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  font-size: 28px;
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 600;
   letter-spacing: 0.05em;
+}
+
+.share-card-watermark img {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  opacity: 0.9;
 }
 
 /* ========================================
@@ -73,35 +159,80 @@
    ======================================== */
 
 .share-card--intro {
-  background: linear-gradient(135deg, #2d1065 0%, #0a0a0a 60%);
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%);
+  --karten-schleier: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%);
 }
 
 .share-card--punkte {
-  background: linear-gradient(135deg, #1a0533 0%, #0a0a0a 50%, #1a0533 100%);
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 55%, #a78bfa 100%);
+  --karten-schleier: linear-gradient(135deg, #6366f1 0%, #8b5cf6 55%, #a78bfa 100%);
 }
 
 .share-card--events {
-  background: linear-gradient(135deg, #1a0533 0%, #0a0a0a 50%, #1a0533 100%);
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 50%, #60a5fa 100%);
+  --karten-schleier: linear-gradient(135deg, #2563eb 0%, #3b82f6 50%, #60a5fa 100%);
 }
 
 .share-card--badges {
-  background: linear-gradient(135deg, #1a0533 0%, #0a0a0a 50%, #1a0533 100%);
+  background: linear-gradient(135deg, #d946ef 0%, #a855f7 50%, #7c3aed 100%);
+  --karten-schleier: linear-gradient(135deg, #d946ef 0%, #a855f7 50%, #7c3aed 100%);
 }
 
 .share-card--aktivster-monat {
-  background: linear-gradient(135deg, #1e1b4b 0%, #0a0a0a 60%);
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%);
+  --karten-schleier: linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%);
+}
+
+/* Challenges: derselbe Rosa-Ton wie die Momente-Karte -- beide erzaehlen
+   von den Challenges und gehoeren sichtbar zusammen. */
+.share-card--warteliste {
+  background: linear-gradient(135deg, #065f46 0%, #0a0a0a 60%);
+  --karten-schleier: linear-gradient(135deg, #065f46 0%, #0a0a0a 60%);
+}
+
+.share-card--langer-atem {
+  background: linear-gradient(135deg, #0f766e 0%, #0a0a0a 60%);
+  --karten-schleier: linear-gradient(135deg, #0f766e 0%, #0a0a0a 60%);
+}
+
+.share-card--wochentag {
+  background: linear-gradient(135deg, #1e40af 0%, #0a0a0a 60%);
+  --karten-schleier: linear-gradient(135deg, #1e40af 0%, #0a0a0a 60%);
+}
+
+.share-card--vielseitig {
+  background: linear-gradient(135deg, #9a3412 0%, #0a0a0a 60%);
+  --karten-schleier: linear-gradient(135deg, #9a3412 0%, #0a0a0a 60%);
+}
+
+.share-card--challenges {
+  background: linear-gradient(135deg, #a21456 0%, #0a0a0a 60%);
+  --karten-schleier: linear-gradient(135deg, #a21456 0%, #0a0a0a 60%);
+}
+
+/* Dieselbe Seite im Teamer-Rueckblick. Bewusst als EIGENER
+   Block und nicht als Selektorliste an der Regel darueber: Der Waechter
+   (wrappedTeilenAlleSeiten.test.ts) sucht je Seite einen eigenen Block mit
+   --karten-schleier. Eine Sammelregel liest er nicht -- und ohne Schleier
+   traegt das geteilte Bild eine andere Farbe als die Seite. */
+.share-card--teamer-challenge-beitraege {
+  background: linear-gradient(135deg, #a21456 0%, #0a0a0a 60%);
+  --karten-schleier: linear-gradient(135deg, #a21456 0%, #0a0a0a 60%);
 }
 
 .share-card--challenge-momente {
-  background: linear-gradient(135deg, #831843 0%, #0a0a0a 60%);
+  background: linear-gradient(135deg, #be185d 0%, #9d174d 50%, #831843 100%);
+  --karten-schleier: linear-gradient(135deg, #be185d 0%, #9d174d 50%, #831843 100%);
 }
 
 .share-card--endspurt {
-  background: linear-gradient(135deg, #3b0764 0%, #0a0a0a 60%);
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%);
+  --karten-schleier: linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%);
 }
 
 .share-card--abschluss {
-  background: linear-gradient(135deg, #2d1065 0%, #0a0a0a 60%);
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%);
+  --karten-schleier: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%);
 }
 
 /* ========================================
@@ -109,29 +240,213 @@
    ======================================== */
 
 .share-card--teamer.share-card--teamer-intro {
-  background: linear-gradient(135deg, #4c0519 0%, #0a0a0a 60%);
+  background: linear-gradient(135deg, #0891b2 0%, #0e7490 55%, #155e75 100%);
+  --karten-schleier: linear-gradient(135deg, #0891b2 0%, #0e7490 55%, #155e75 100%);
 }
 
 .share-card--teamer.share-card--teamer-events {
-  background: linear-gradient(135deg, #4c0519 0%, #0a0a0a 60%);
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 55%, #3730a3 100%);
+  --karten-schleier: linear-gradient(135deg, #6366f1 0%, #4f46e5 55%, #3730a3 100%);
 }
 
 .share-card--teamer.share-card--teamer-konfis {
-  background: linear-gradient(135deg, #4c0519 0%, #0a0a0a 60%);
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #b45309 100%);
+  --karten-schleier: linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #b45309 100%);
 }
 
 .share-card--teamer.share-card--teamer-badges {
-  background: linear-gradient(135deg, #4c0519 0%, #0a0a0a 60%);
+  background: linear-gradient(135deg, #a855f7 0%, #9333ea 55%, #6b21a8 100%);
+  --karten-schleier: linear-gradient(135deg, #a855f7 0%, #9333ea 55%, #6b21a8 100%);
 }
 
 .share-card--teamer.share-card--teamer-zertifikate {
-  background: linear-gradient(135deg, #831843 0%, #0a0a0a 60%);
+  background: linear-gradient(135deg, #14b8a6 0%, #0d9488 55%, #115e59 100%);
+  --karten-schleier: linear-gradient(135deg, #14b8a6 0%, #0d9488 55%, #115e59 100%);
 }
 
 .share-card--teamer.share-card--teamer-jahre {
-  background: linear-gradient(135deg, #881337 0%, #0a0a0a 60%);
+  background: linear-gradient(135deg, #22c55e 0%, #16a34a 55%, #15803d 100%);
+  --karten-schleier: linear-gradient(135deg, #22c55e 0%, #16a34a 55%, #15803d 100%);
+}
+
+.share-card--teamer.share-card--teamer-team {
+  background: linear-gradient(135deg, #0e7490 0%, #0a0a0a 60%);
+  --karten-schleier: linear-gradient(135deg, #0e7490 0%, #0a0a0a 60%);
+}
+
+.share-card--teamer.share-card--teamer-neu-dabei {
+  background: linear-gradient(135deg, #3f6212 0%, #0a0a0a 60%);
+  --karten-schleier: linear-gradient(135deg, #3f6212 0%, #0a0a0a 60%);
+}
+
+.share-card--teamer.share-card--teamer-anfang {
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 55%, #c2410c 100%);
+  --karten-schleier: linear-gradient(135deg, #f97316 0%, #ea580c 55%, #c2410c 100%);
+}
+
+.share-card--teamer.share-card--teamer-erstes-abzeichen {
+  background: linear-gradient(135deg, #d946ef 0%, #c026d3 55%, #86198f 100%);
+  --karten-schleier: linear-gradient(135deg, #d946ef 0%, #c026d3 55%, #86198f 100%);
+}
+
+.share-card--teamer.share-card--teamer-antworten {
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 55%, #5b21b6 100%);
+  --karten-schleier: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 55%, #5b21b6 100%);
+}
+
+.share-card--teamer.share-card--teamer-konfi-zeit {
+  background: linear-gradient(135deg, #0ea5e9 0%, #0369a1 55%, #075985 100%);
+  --karten-schleier: linear-gradient(135deg, #0ea5e9 0%, #0369a1 55%, #075985 100%);
 }
 
 .share-card--teamer.share-card--teamer-abschluss {
-  background: linear-gradient(135deg, #4c0519 0%, #0a0a0a 60%);
+  background: linear-gradient(135deg, #e11d48 0%, #be123c 55%, #9f1239 100%);
+  --karten-schleier: linear-gradient(135deg, #e11d48 0%, #be123c 55%, #9f1239 100%);
+}
+
+/* Was du dem Jahrgang aufgegeben hast. */
+.share-card--teamer.share-card--teamer-challenges {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #b45309 100%);
+  --karten-schleier: linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #b45309 100%);
+}
+
+/* Der Zuspruch statt eines leeren Rueckblicks -- dieselben
+   Farben wie die Seiten im Rueckblick selbst. */
+.share-card--teamer.share-card--teamer-segen {
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 55%, #4c1d95 100%);
+  --karten-schleier: linear-gradient(135deg, #7c3aed 0%, #6d28d9 55%, #4c1d95 100%);
+}
+
+.share-card--teamer.share-card--teamer-segen-abschluss {
+  background: linear-gradient(135deg, #e11d48 0%, #be123c 55%, #9f1239 100%);
+  --karten-schleier: linear-gradient(135deg, #e11d48 0%, #be123c 55%, #9f1239 100%);
+}
+
+.share-card--highlight {
+  background: linear-gradient(135deg, #0ea5e9 0%, #0369a1 50%, #1e3a8a 100%);
+  --karten-schleier: linear-gradient(135deg, #0ea5e9 0%, #0369a1 50%, #1e3a8a 100%);
+}
+
+/* ========================================
+   Seiten-Typografie (Slogan-Gestaltung)
+   ========================================
+   Die Kategorie-, Datums-, Konfirmations- und Einladungs-Seiten leben vom
+   SLOGAN, nicht von einer Zahl. Auf der Seite steht er linksbuendig unten;
+   das geteilte Bild uebernimmt diese Anmutung, damit es aussieht wie das,
+   was die Konfi vor sich hatte.
+
+   Absolute Pixel wie im ganzen Bauteil: Das Bild ist 1080x1920 gross und
+   darf nicht an der Systemschriftgroesse des Geraets haengen. */
+
+.share-auge {
+  font-size: 30px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.75);
+  margin-bottom: 20px;
+}
+
+.share-zahl {
+  font-size: 88px;
+  font-weight: 800;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.9);
+  margin-bottom: 12px;
+}
+
+.share-zahl-mal {
+  font-size: 48px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.6);
+  margin-left: 8px;
+}
+
+.share-slogan {
+  font-size: 130px;
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: -0.02em;
+  text-transform: uppercase;
+  margin-bottom: 32px;
+}
+
+.share-nachsatz {
+  font-size: 38px;
+  font-weight: 400;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.85);
+  max-width: 860px;
+}
+
+/* Die Slogan-Seiten stehen linksbuendig am unteren Rand -- wie im
+   Rueckblick selbst. Zentriert saehen sie aus wie eine Statistikkachel. */
+.share-card--stavanger-2026,
+.share-card--kategorie-seite,
+.share-card--datums-seite,
+.share-card--konfirmation,
+.share-card--werde-teamer,
+.share-card--weiter-so {
+  justify-content: flex-end;
+  align-items: flex-start;
+  text-align: left;
+  /* 300px unten: Darueber steht das Wasserzeichen (40px vom Rand), und der
+     Nachsatz darf ihm nicht auf die Zeile ruecken. Gemessen am fertigen
+     Bild -- bei 220px stand der letzte Satz fast auf der Kante. */
+  padding: 0 80px 300px;
+}
+
+
+.share-card--kategorie {
+  background: linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%);
+  --karten-schleier: linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%);
+}
+
+.share-card--konfirmation {
+  background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #d946ef 100%);
+  --karten-schleier: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #d946ef 100%);
+}
+
+.share-card--ueber-das-ziel {
+  background: linear-gradient(135deg, #f59e0b 0%, #eab308 50%, #ca8a04 100%);
+  --karten-schleier: linear-gradient(135deg, #f59e0b 0%, #eab308 50%, #ca8a04 100%);
+}
+
+.share-card--seltenstes {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #b45309 100%);
+  --karten-schleier: linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #b45309 100%);
+}
+
+.share-card--werde-teamer {
+  background: linear-gradient(135deg, #ec4899 0%, #db2777 55%, #831843 100%);
+  --karten-schleier: linear-gradient(135deg, #ec4899 0%, #db2777 55%, #831843 100%);
+}
+
+/* Der Blick nach vorn waehrend der Konfizeit. Waermer als die
+   Team-Einladung und heller als der Abschluss: Es geht noch weiter. */
+.share-card--weiter-so {
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 55%, #9a3412 100%);
+  --karten-schleier: linear-gradient(135deg, #f97316 0%, #ea580c 55%, #9a3412 100%);
+}
+
+/* Sommerfreizeit 2026, Stavanger. Kaltes Nordmeerblau -- dieselbe Farbe wie
+   auf der Seite selbst (WrappedModal.css), damit Bild und Seite
+   zusammengehoeren. */
+.share-card--stavanger-2026 {
+  background: linear-gradient(135deg, #0e7490 0%, #155e75 55%, #082f49 100%);
+  --karten-schleier: linear-gradient(135deg, #0e7490 0%, #155e75 55%, #082f49 100%);
+}
+
+/* Die dynamischen Seiten teilen sich je eine Sammelklasse: Der Doppelpunkt
+   in 'kategorie:fest' ist in CSS kein gueltiges Zeichen, und welche
+   Kategorien es gibt, entscheidet die Gemeinde-Verwaltung -- eine
+   Aufzaehlung waere beim naechsten Eintrag veraltet. */
+.share-card--kategorie-seite {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 55%, #3730a3 100%);
+  --karten-schleier: linear-gradient(135deg, #6366f1 0%, #4f46e5 55%, #3730a3 100%);
+}
+
+.share-card--datums-seite {
+  background: linear-gradient(135deg, #5b21b6 0%, #4c1d95 55%, #2e1065 100%);
+  --karten-schleier: linear-gradient(135deg, #5b21b6 0%, #4c1d95 55%, #2e1065 100%);
 }

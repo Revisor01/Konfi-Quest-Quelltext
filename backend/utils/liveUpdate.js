@@ -5,6 +5,39 @@ let _io = null;
 let _db = null;
 
 /**
+ * OFFENE NACHLAEUFER -- nur im Test gefuehrt.
+ *
+ * Die send*-Funktionen sind `async` und fragen die Datenbank ab, werden aber
+ * an 118 Stellen OHNE `await` gerufen: Ein Live-Update ist Beiwerk, die
+ * Antwort soll nicht darauf warten. In Produktion ist das richtig.
+ *
+ * Im Test ist es die Ursache eines sporadischen Fehlschlags: supertest
+ * schliesst die Verbindung, sobald die Antwort da ist. Laeuft die Abfrage
+ * dann noch, riss der Abbruch etwa jeden 1200. Test mit --
+ * "Parse Error: Expected HTTP/, RTSP/ or ICE/", wechselnd welchen.
+ *
+ * Statt 118 Aufrufe einzeln zu wickeln, meldet sich der Nachlauf hier
+ * selbst an. `warteAufLiveUpdates()` wartet auf alle -- gerufen wird es aus
+ * tests/helpers/testApp.js zusammen mit den uebrigen Nachwehen.
+ */
+const _offene = new Set();
+
+function _merken(lauf) {
+  if (process.env.NODE_ENV !== 'test') return lauf;
+  _offene.add(lauf);
+  lauf.finally(() => _offene.delete(lauf));
+  return lauf;
+}
+
+/** Wartet, bis alle angefangenen Live-Updates durch sind. Nur fuer Tests. */
+async function warteAufLiveUpdates() {
+  // Mehrfach durchlaufen: Ein Update kann ein weiteres anstossen.
+  for (let runde = 0; runde < 10 && _offene.size > 0; runde++) {
+    await Promise.allSettled([..._offene]);
+  }
+}
+
+/**
  * @param {object} io - Socket.IO-Instanz
  * @param {object} [db] - Datenbank-Pool. Wird er uebergeben, nutzen die
  *   Rollen-Abfragen genau diesen Pool. Ohne ihn faellt das Modul auf das
@@ -322,8 +355,11 @@ module.exports = {
   sendToKonfi,
   sendToAdmin,
   sendToUserByRole,
-  sendToOrgAdmins,
-  sendToOrgKonfis,
-  sendToOrg,
-  sendToJahrgang
+  // Die send*-Funktionen laufen durch _merken: Im Test wird ihr Nachlauf
+  // mitgeschrieben, in Produktion ist es ein durchgereichter Aufruf.
+  sendToOrgAdmins: (...a) => _merken(sendToOrgAdmins(...a)),
+  sendToOrgKonfis: (...a) => _merken(sendToOrgKonfis(...a)),
+  sendToOrg: (...a) => _merken(sendToOrg(...a)),
+  sendToJahrgang: (...a) => _merken(sendToJahrgang(...a)),
+  warteAufLiveUpdates
 };

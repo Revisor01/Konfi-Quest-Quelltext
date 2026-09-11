@@ -38,6 +38,11 @@ export function useChatDateien({ messages }: ChatDateienDeps) {
   const { setError } = useApp();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [selectedFilePreview, setSelectedFilePreview] = useState<string | null>(null);
+  // Welche Datei gerade geladen wird und wie weit. Ohne Rueckmeldung sieht man
+  // beim Antippen einer PDF gar nichts passieren und tippt weiter.
+  // `prozent` ist null, solange der Server keine Groesse meldet —
+  // dann laeuft die Anzeige unbestimmt statt auf einer geratenen Zahl.
+  const [ladendeDatei, setLadendeDatei] = useState<{ pfad: string; prozent: number | null } | null>(null);
   const viewerRef = useRef<{ files: FileItem[]; initialIndex: number }>({ files: [], initialIndex: 0 });
 
   // FileViewer Modal mit useIonModal Hook (universeller Datei-Viewer)
@@ -102,11 +107,24 @@ export function useChatDateien({ messages }: ChatDateienDeps) {
   };
 
   const handleFileClick = async (filePath: string, fileName: string, mimeType: string) => {
+    // Zweiter Tipp auf dieselbe Datei, waehrend sie laedt: ignorieren statt
+    // einen zweiten Download zu starten.
+    if (ladendeDatei) return;
     try {
       await Haptics.impact({ style: ImpactStyle.Light });
+      setLadendeDatei({ pfad: filePath, prozent: 0 });
 
       // Angeklickte Datei als Blob laden
-      const response = await api.get(`/chat/files/${filePath}`, { responseType: 'blob' });
+      const response = await api.get(`/chat/files/${filePath}`, {
+        responseType: 'blob',
+        onDownloadProgress: (ereignis) => {
+          const gesamt = ereignis.total;
+          setLadendeDatei({
+            pfad: filePath,
+            prozent: gesamt ? Math.min(Math.round((ereignis.loaded / gesamt) * 100), 100) : null
+          });
+        }
+      });
       const blob = response.data;
       const contentType = response.headers?.['content-type'];
       const mime: string = typeof contentType === 'string' ? contentType : mimeType;
@@ -132,6 +150,10 @@ export function useChatDateien({ messages }: ChatDateienDeps) {
       presentFileViewer({ cssClass: 'file-viewer-modal' });
     } catch {
       setError('Fehler beim Öffnen der Datei');
+    } finally {
+      // finally statt einzelner Aufrufe: Der Zweig "nativ geoeffnet" steigt
+      // per return aus, und ohne finally bliebe die Anzeige dort haengen.
+      setLadendeDatei(null);
     }
   };
 
@@ -141,5 +163,6 @@ export function useChatDateien({ messages }: ChatDateienDeps) {
     handleFileSelect,
     clearSelectedFile,
     handleFileClick,
+    ladendeDatei,
   };
 }

@@ -1,29 +1,17 @@
+import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useRef } from 'react';
 import { useActionGuard } from '../../../hooks/useActionGuard';
+import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButton, IonButtons, IonItem, IonLabel, IonList, IonListHeader, IonIcon, IonTextarea, IonCard, IonCardContent, IonSpinner, IonDatetime, IonDatetimeButton, IonModal, useIonAlert } from '@ionic/react';
 import {
-  IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
-  IonContent,
-  IonButton,
-  IonButtons,
-  IonItem,
-  IonLabel,
-  IonInput,
-  IonList,
-  IonListHeader,
-  IonIcon,
-  IonTextarea,
-  IonCard,
-  IonCardContent,
-  IonSpinner,
-  IonDatetime,
-  IonDatetimeButton,
-  IonModal,
-  useIonAlert
-} from '@ionic/react';
-import { closeOutline, checkmarkOutline, flash, calendar, home, people, pricetag, ribbon } from 'ionicons/icons';
+  ICON_ABZEICHEN_GEFUELLT,
+  ICON_AKTION_GEFUELLT,
+  ICON_GEMEINDE_GEFUELLT,
+  ICON_GOTTESDIENST_GEFUELLT,
+  ICON_HAKEN,
+  ICON_KATEGORIE_GEFUELLT,
+  ICON_SCHLIESSEN,
+  ICON_TERMIN_GEFUELLT,
+} from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
@@ -49,7 +37,7 @@ interface ActivityModalProps {
 }
 
 const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave, dismiss, targetRole, punkteartFlags }) => {
-  const { isOnline, setError } = useApp();
+  const { setError } = useApp();
   const [activities, setActivities] = useState<Activity[]>([]);
   const [selectedActivity, setSelectedActivity] = useState<number | null>(null);
   const [comment, setComment] = useState('');
@@ -130,13 +118,13 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
           setIsDirty(false);
           await onSave();
           doClose();
-        } catch (err: any) {
+        } catch (err) {
           // Ohne diese Meldung blieb das Modal bei einer Ablehnung des Servers
           // einfach offen stehen — etwa wenn die Punktart im Jahrgang
           // abgeschaltet ist. Für die Leitung sah das so aus, als passiere
           // nichts.
           console.error('Error saving activity:', err);
-          setError(err?.response?.data?.error || 'Aktivität konnte nicht gespeichert werden');
+          setError(fehlerText(err, 'Aktivität konnte nicht gespeichert werden'));
         }
       } else {
         await writeQueue.enqueue({
@@ -172,12 +160,12 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
           <IonTitle>Aktivität hinzufügen</IonTitle>
           <IonButtons slot="start">
             <IonButton aria-label="Schließen" onClick={handleClose} disabled={isSubmitting} className="app-modal-close-btn">
-              <IonIcon icon={closeOutline} />
+              <IonIcon icon={ICON_SCHLIESSEN} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
             <IonButton aria-label="Aktivität speichern" onClick={handleSave} disabled={!selectedActivity || isSubmitting} className={`app-modal-submit-btn app-modal-submit-btn--${sectionClass}`}>
-              {isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} />}
+              {isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={ICON_HAKEN} />}
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -188,13 +176,13 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--activities">
-              <IonIcon icon={calendar} />
+              <IonIcon icon={ICON_TERMIN_GEFUELLT} />
             </div>
             <IonLabel>Datum & Kommentar</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: '16px' }}>
-              <p className="app-text-sub" style={{ marginBottom: '4px' }}>Datum *</p>
+            <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
+              <p className="app-text-sub" style={{ marginBottom: 'var(--app-abstand-mini)' }}>Datum *</p>
               <IonDatetimeButton datetime="activity-date" style={{ justifyContent: 'flex-start' }} />
               <IonModal keepContentsMounted={true}>
                 <IonDatetime
@@ -212,7 +200,7 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
                 />
               </IonModal>
 
-              <p className="app-text-sub" style={{ marginTop: '16px', marginBottom: '4px' }}>Kommentar (optional)</p>
+              <p className="app-text-sub" style={{ marginTop: 'var(--app-abstand-basis)', marginBottom: 'var(--app-abstand-mini)' }}>Kommentar (optional)</p>
               <IonList style={{ background: 'transparent' }}>
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonTextarea
@@ -232,13 +220,13 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--activities">
-              <IonIcon icon={flash} />
+              <IonIcon icon={ICON_AKTION_GEFUELLT} />
             </div>
             <IonLabel>Aktivität auswählen</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: '16px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-eng)' }}>
                 {[...activities]
                   .sort((a, b) => {
                     // NULL-SICHER: Teamer-Aktivitäten duerfen type = NULL haben
@@ -302,16 +290,16 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
                               {/* Teamer-Aktivitaeten haben keinen Typ — sonst
                                   bekaemen sie immer das Gemeinde-Icon.
                                   Gleiches Symbol wie in ActivitiesView. */}
-                              <IonIcon icon={isTeamer ? ribbon : activity.type === 'gottesdienst' ? home : people} />
+                              <IonIcon icon={isTeamer ? ICON_ABZEICHEN_GEFUELLT : activity.type === 'gottesdienst' ? ICON_GOTTESDIENST_GEFUELLT : ICON_GEMEINDE_GEFUELLT} />
                             </div>
                             <div className="app-list-item__content">
-                              <div className="app-list-item__title" style={{ paddingRight: isTeamer ? '0' : '60px', whiteSpace: 'normal' }}>
+                              <div className="app-list-item__title" style={{ paddingRight: isTeamer ? '0' : 'var(--app-freiraum-aktion-m)', whiteSpace: 'normal' }}>
                                 {activity.name}
                               </div>
                               {activity.categories && activity.categories.length > 0 && (
                                 <div className="app-list-item__meta">
                                   <span className="app-list-item__meta-item">
-                                    <IonIcon icon={pricetag} style={{ color: 'var(--app-color-categories)' }} />
+                                    <IonIcon icon={ICON_KATEGORIE_GEFUELLT} style={{ color: 'var(--app-color-categories)' }} />
                                     {activity.categories.map(cat => cat.name).join(', ')}
                                   </span>
                                 </div>

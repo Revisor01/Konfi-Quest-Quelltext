@@ -1,6 +1,6 @@
 import React from 'react';
 import { IonToast } from '@ionic/react';
-import { alertCircleOutline, checkmarkCircleOutline } from 'ionicons/icons';
+import { ICON_WARNHINWEIS, ICON_ZUSAGE } from '../shared/icons';
 import { useApp } from '../../contexts/AppContext';
 
 // Globale Anzeige für setError/setSuccess aus dem AppContext.
@@ -17,7 +17,7 @@ const GlobalToasts: React.FC = () => {
         duration={4000}
         position="top"
         color="danger"
-        icon={alertCircleOutline}
+        icon={ICON_WARNHINWEIS}
         swipeGesture="vertical"
         onDidDismiss={() => setError('')}
       />
@@ -27,7 +27,7 @@ const GlobalToasts: React.FC = () => {
         duration={2500}
         position="top"
         color="success"
-        icon={checkmarkCircleOutline}
+        icon={ICON_ZUSAGE}
         swipeGesture="vertical"
         onDidDismiss={() => setSuccess('')}
       />

@@ -1,45 +1,27 @@
+import { fehlerText } from '../../../utils/fehler';
 import React, { useState } from 'react';
+import { IonButton, IonCard, IonCardContent, IonIcon, IonLabel, IonList, IonListHeader, IonProgressBar, useIonModal, useIonAlert } from '@ionic/react';
 import {
-  IonButton,
-  IonButtons,
-  IonCard,
-  IonCardContent,
-  IonContent,
-  IonHeader,
-  IonIcon,
-  IonItem,
-  IonLabel,
-  IonList,
-  IonListHeader,
-  IonPage,
-  IonProgressBar,
-  IonTitle,
-  IonToolbar,
-  useIonModal,
-  useIonAlert
-} from '@ionic/react';
-import {
-  personOutline,
-  calendarOutline,
-  starOutline,
-  trophy,
-  checkmark,
-  flash,
-  logOutOutline,
-  trashOutline,
-  rocket,
-  keyOutline,
-  bookOutline,
-  locationOutline,
-  mailOutline,
-  timeOutline,
-  compassOutline,
-  imagesOutline,
-  sparklesOutline,
-  chevronForwardOutline
-} from 'ionicons/icons';
+  ICON_ABMELDEN,
+  ICON_AKTION_GEFUELLT,
+  ICON_BUCH,
+  ICON_GALERIE,
+  ICON_HAKEN_GEFUELLT,
+  ICON_KOMPASS,
+  ICON_LOESCHEN,
+  ICON_MAIL,
+  ICON_ORT,
+  ICON_PERSON,
+  ICON_POKAL_GEFUELLT,
+  ICON_RAKETE,
+  ICON_SCHLUESSEL,
+  ICON_STERN,
+  ICON_TERMIN,
+  ICON_UHRZEIT,
+} from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
+import type { BadgeUebersicht } from '../../../types/dashboard';
 import { setUser as setTokenStoreUser } from '../../../services/tokenStore';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
@@ -53,7 +35,7 @@ import SpiritFooter from '../../shared/SpiritFooter';
 import PointsHistoryModal from '../modals/PointsHistoryModal';
 import WrappedModal from '../../wrapped/WrappedModal';
 import KonfiOnboardingModal from '../modals/KonfiOnboardingModal';
-import KonfiUpdateWalkthroughModal from '../modals/KonfiUpdateWalkthroughModal';
+import KonfiUpdate211WalkthroughModal from '../modals/KonfiUpdate211WalkthroughModal';
 import type { WrappedHistoryEntry } from '../../../types/wrapped';
 import { safeUUID } from '../../../utils/uuid';
 import NeuerungenBanner from '../../shared/NeuerungenBanner';
@@ -166,9 +148,12 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
   React.useEffect(() => {
     const loadBadges = async () => {
       try {
-        const response = await api.get('/konfi/badges');
-        const badges = [...(response.data.available || []), ...(response.data.earned || [])];
-        const earnedCount = badges.filter((badge: any) => badge.earned || badge.is_earned).length;
+        const response = await api.get('/konfi/badges/v2');
+        const uebersicht = response.data as BadgeUebersicht;
+        // GET /konfi/badges fuehrt den Status als `earned`; `is_earned` gibt es
+        // nur in der Anzeige-Form der Abzeichen-Seite.
+        const badges = [...(uebersicht.available || []), ...(uebersicht.earned || [])];
+        const earnedCount = badges.filter((badge) => badge.earned).length;
         setEarnedBadgesCount(earnedCount);
       } catch (err) {
  console.warn('Could not load badges for count:', err);
@@ -207,8 +192,8 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
       setSelectedTranslation(translation);
       // Update profile to reflect the change
       await onReload();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Fehler beim Ändern der Bibelübersetzung');
+    } catch (err) {
+      setError(fehlerText(err, 'Fehler beim Ändern der Bibelübersetzung'));
     }
   };
 
@@ -302,35 +287,17 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
     } : undefined
   });
 
-  const getInitials = (name: string | undefined) => {
-    if (!name) return '??';
-    return name
-      .split(' ')
-      .map(word => word.charAt(0))
-      .join('')
-      .toUpperCase()
-      .substring(0, 2);
-  };
 
   const getActivityIcon = (activity: RecentActivity) => {
     switch (activity.type) {
-      case 'badge': return trophy;
-      case 'event': return calendarOutline;
-      case 'activity': return flash;
-      case 'request': return checkmark;
-      default: return starOutline;
+      case 'badge': return ICON_POKAL_GEFUELLT;
+      case 'event': return ICON_TERMIN;
+      case 'activity': return ICON_AKTION_GEFUELLT;
+      case 'request': return ICON_HAKEN_GEFUELLT;
+      default: return ICON_STERN;
     }
   };
 
-  const getActivityColor = (activity: RecentActivity) => {
-    switch (activity.type) {
-      case 'badge': return '#ffd700';
-      case 'event': return '#3880ff';
-      case 'activity': return '#2dd36f';
-      case 'request': return '#ffcc00';
-      default: return '#667eea';
-    }
-  };
 
   const formatDate = (dateString: string | undefined) => {
     if (!dateString) return 'Unbekannt';
@@ -360,7 +327,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
       <SectionHeader
         title={profile.display_name}
         subtitle={`@${profile.username}`}
-        icon={personOutline}
+        icon={ICON_PERSON}
         preset="konfis"
         // Bewusst nur DREI Kacheln: sechs Zahlen nebeneinander waren zu eng und
         // die Aufteilung (GD/Gemeinde/Bonus) steht ohnehin in der
@@ -372,13 +339,16 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
         ]}
       />
 
-      {/* Konfirmationstermin Card - Dashboard Blau Style mit Background Header */}
+      {/* Konfirmationstermin -- nur wenn wirklich einer gebucht ist.
+          Ohne Termin stand hier eine graue Karte, die
+          nichts sagte ausser "Noch kein Termin gebucht". */}
+      {profile.confirmation_date && (
       <div style={{ 
-        margin: '16px', 
-        borderRadius: '24px',
-        background: profile.confirmation_date ? 'linear-gradient(135deg, #5b21b6 0%, #4c1d95 100%)' : 'linear-gradient(135deg, #64748b 0%, #475569 100%)',
+        margin: 'var(--app-abstand-basis)', 
+        borderRadius: 'var(--app-radius-modal)',
+        background: profile.confirmation_date ? 'var(--app-gradient-konfi)' : 'var(--app-gradient-neutral)',
         border: 'none',
-        boxShadow: profile.confirmation_date ? '0 10px 40px rgba(91, 33, 182, 0.3)' : '0 10px 40px rgba(100, 116, 139, 0.3)',
+        boxShadow: profile.confirmation_date ? '0 10px 40px rgba(var(--app-color-konfis-rgb), 0.3)' : '0 10px 40px rgba(100, 116, 139, 0.3)',
         position: 'relative',
         overflow: 'hidden',
         display: 'flex',
@@ -392,8 +362,8 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
           zIndex: 1
         }}>
           <h2 style={{
-            fontSize: '4rem',
-            fontWeight: '900',
+            fontSize: 'var(--app-anzeige-hero)',
+            fontWeight: 'var(--app-schrift-schwer)',
             color: 'rgba(255, 255, 255, 0.1)',
             margin: '0',
             lineHeight: '0.8',
@@ -407,17 +377,17 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
         <div style={{
           position: 'relative',
           zIndex: 2,
-          padding: '50px 24px 24px 24px',
+          padding: 'var(--app-freiraum-kopf-l) var(--app-abstand-weit) var(--app-abstand-weit) var(--app-abstand-weit)',
           flex: 1,
           display: 'flex',
           alignItems: 'center'
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px', width: '100%' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-basis)', width: '100%' }}>
             <div style={{ 
               width: '48px', 
               height: '48px',
               backgroundColor: 'rgba(255, 255, 255, 0.2)',
-              borderRadius: '50%',
+              borderRadius: 'var(--app-radius-kreis)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -426,9 +396,9 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
               border: '2px solid rgba(255, 255, 255, 0.3)'
             }}>
               <IonIcon
-                icon={calendarOutline}
+                icon={ICON_TERMIN}
                 style={{
-                  fontSize: '1.5rem',
+                  fontSize: 'var(--app-text-ueberschrift)',
                   color: 'white'
                 }}
               />
@@ -437,17 +407,17 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
               {profile.confirmation_date ? (
                 <div>
                   <p style={{ 
-                    margin: '0 0 4px 0', 
+                    margin: '0 0 var(--app-abstand-mini) 0', 
                     color: 'white', 
-                    fontSize: '1.1rem', 
-                    fontWeight: '600' 
+                    fontSize: 'var(--app-text-gross)', 
+                    fontWeight: 'var(--app-schrift-halbfett)' 
                   }}>
                     {formatDate(profile.confirmation_date)}
                   </p>
                   <p style={{ 
-                    margin: '0 0 4px 0', 
+                    margin: '0 0 var(--app-abstand-mini) 0', 
                     color: 'rgba(255, 255, 255, 0.8)', 
-                    fontSize: '0.9rem' 
+                    fontSize: 'var(--app-text-basis)' 
                   }}>
                     {new Date(profile.confirmation_date).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr
                   </p>
@@ -456,12 +426,12 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                       style={{ 
                         margin: '0', 
                         color: 'rgba(255, 255, 255, 0.9)', 
-                        fontSize: '0.9rem',
+                        fontSize: 'var(--app-text-basis)',
                         cursor: 'pointer',
-                        fontWeight: '500',
+                        fontWeight: 'var(--app-schrift-mittel)',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '4px'
+                        gap: 'var(--app-abstand-mini)'
                       }}
                       onClick={() => {
                         if (profile.confirmation_location) {
@@ -469,13 +439,13 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                         }
                       }}
                     >
-                      <IonIcon icon={locationOutline} style={{ fontSize: '1rem' }} />
+                      <IonIcon icon={ICON_ORT} style={{ fontSize: 'var(--app-text-standard)' }} />
                       {profile.confirmation_location}
                     </p>
                   )}
                 </div>
               ) : (
-                <p style={{ margin: '0', color: 'rgba(255, 255, 255, 0.8)', fontSize: '0.9rem' }}>
+                <p style={{ margin: '0', color: 'rgba(255, 255, 255, 0.8)', fontSize: 'var(--app-text-basis)' }}>
                   Noch kein Termin gebucht
                 </p>
               )}
@@ -483,72 +453,31 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
           </div>
         </div>
       </div>
-
-      {/* Meine Wrappeds */}
-      {wrappedHistory.length > 0 && (
-        <IonList inset={true} style={{ margin: '16px' }}>
-          <IonListHeader>
-            <div className="app-section-icon app-section-icon--purple">
-              <IonIcon icon={timeOutline} />
-            </div>
-            <IonLabel>Meine Wrappeds</IonLabel>
-          </IonListHeader>
-          <IonCard className="app-card">
-            <IonCardContent style={{ padding: '12px' }}>
-              {wrappedHistory.map((entry) => (
-                <div
-                  key={entry.id}
-                  className="app-list-item app-list-item--purple"
-                  style={{ width: '100%', cursor: 'pointer' }}
-                  onClick={() => openWrapped(entry)}
-                >
-                  <div className="app-list-item__row">
-                    <div className="app-list-item__main">
-                      <div className="app-icon-circle app-icon-circle--purple">
-                        <IonIcon icon={timeOutline} />
-                      </div>
-                      <div className="app-list-item__content">
-                        <div className="app-list-item__title">
-                          {entry.wrapped_type === 'konfi' ? 'Konfi-Wrapped' : 'Teamer-Wrapped'} {entry.year}
-                        </div>
-                        <div className="app-list-item__meta">
-                          <span className="app-list-item__meta-item">
-                            {new Date(entry.computed_at).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric' })}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </IonCardContent>
-          </IonCard>
-        </IonList>
       )}
 
       {/* Next Badge Progress */}
       {profile.progress_overview?.next_badge && (
-        <IonCard style={{ margin: '16px', borderRadius: '8px' }}>
+        <IonCard style={{ margin: 'var(--app-abstand-basis)', borderRadius: 'var(--app-radius-klein)' }}>
           <IonCardContent>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
-              <IonIcon icon={rocket} style={{ fontSize: '1.2rem', color: '#ff6b35', marginRight: '8px' }} />
-              <h3 style={{ margin: '0', fontSize: '1.1rem', fontWeight: '600' }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 'var(--app-abstand-mittel)' }}>
+              <IonIcon icon={ICON_RAKETE} style={{ fontSize: 'var(--app-text-untertitel)', color: 'var(--app-color-rakete)', marginRight: 'var(--app-abstand-eng)' }} />
+              <h3 style={{ margin: '0', fontSize: 'var(--app-text-gross)', fontWeight: 'var(--app-schrift-halbfett)' }}>
                 Nächstes Badge
               </h3>
             </div>
-            <p style={{ margin: '0 0 8px 0', fontSize: '1rem', fontWeight: '500' }}>
+            <p style={{ margin: '0 0 var(--app-abstand-eng) 0', fontSize: 'var(--app-text-standard)', fontWeight: 'var(--app-schrift-mittel)' }}>
               {profile.progress_overview.next_badge.name}
             </p>
             <IonProgressBar 
               value={profile.progress_overview.next_badge.progress_percentage / 100}
               style={{ 
                 height: '8px', 
-                borderRadius: '4px',
-                marginBottom: '8px',
-                '--progress-background': 'linear-gradient(90deg, #ff6b35, #f7931e)'
+                borderRadius: 'var(--app-radius-fein)',
+                marginBottom: 'var(--app-abstand-eng)',
+                '--progress-background': 'var(--app-gradient-rakete-quer)'
               }}
             />
-            <p style={{ margin: '0', fontSize: '0.85rem', color: '#666' }}>
+            <p style={{ margin: '0', fontSize: 'var(--app-text-sekundaer)', color: 'var(--app-text-secondary)' }}>
               Noch {profile.progress_overview.next_badge.points_needed} Punkte bis zum nächsten Badge
               ({Math.round(profile.progress_overview.next_badge.progress_percentage)}%)
             </p>
@@ -558,9 +487,9 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
 
       {/* Recent Activities */}
       {profile.recent_activities && profile.recent_activities.length > 0 && (
-        <IonCard style={{ margin: '16px', borderRadius: '8px' }}>
-          <IonCardContent style={{ padding: '12px' }}>
-            <h3 style={{ margin: '0 0 12px 0', fontSize: '1.1rem', fontWeight: '600' }}>
+        <IonCard style={{ margin: 'var(--app-abstand-basis)', borderRadius: 'var(--app-radius-klein)' }}>
+          <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
+            <h3 style={{ margin: '0 0 var(--app-abstand-mittel) 0', fontSize: 'var(--app-text-gross)', fontWeight: 'var(--app-schrift-halbfett)' }}>
               Letzte Aktivitäten
             </h3>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -598,16 +527,57 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
         onMitmachenOeffnen={() => setShowMitmachenErklaerung(true)}
       />
 
+      {wrappedHistory.length > 0 && (
+        <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
+          <IonListHeader>
+            <div className="app-section-icon app-section-icon--purple">
+              <IonIcon icon={ICON_UHRZEIT} />
+            </div>
+            <IonLabel>Meine Rückblicke</IonLabel>
+          </IonListHeader>
+          <IonCard className="app-card">
+            <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
+              {wrappedHistory.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="app-list-item app-list-item--purple"
+                  style={{ width: '100%', cursor: 'pointer' }}
+                  onClick={() => openWrapped(entry)}
+                >
+                  <div className="app-list-item__row">
+                    <div className="app-list-item__main">
+                      <div className="app-icon-circle app-icon-circle--purple">
+                        <IonIcon icon={ICON_UHRZEIT} />
+                      </div>
+                      <div className="app-list-item__content">
+                        <div className="app-list-item__title">
+                          {entry.titel || `Jahresrückblick ${entry.year}`}
+                        </div>
+                        <div className="app-list-item__meta">
+                          <span className="app-list-item__meta-item">
+                            {new Date(entry.computed_at).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric' })}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </IonCardContent>
+          </IonCard>
+        </IonList>
+      )}
+
       {/* Konto-Einstellungen - iOS26 Pattern wie Admin */}
-      <IonList inset={true} style={{ margin: '16px' }}>
+      <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
         <IonListHeader>
           <div className="app-section-icon app-section-icon--purple">
-            <IonIcon icon={personOutline} />
+            <IonIcon icon={ICON_PERSON} />
           </div>
           <IonLabel>Konto-Einstellungen</IonLabel>
         </IonListHeader>
         <IonCard className="app-card">
-          <IonCardContent style={{ padding: '12px' }}>
+          <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {/* Punkte-Übersicht */}
               <div
@@ -622,7 +592,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                 <div className="app-list-item__row">
                   <div className="app-list-item__main">
                     <div className="app-icon-circle app-icon-circle--purple">
-                      <IonIcon icon={starOutline} />
+                      <IonIcon icon={ICON_STERN} />
                     </div>
                     <div className="app-list-item__content">
                       <div className="app-list-item__title">Punkte-Übersicht</div>
@@ -643,7 +613,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                 <div className="app-list-item__row">
                   <div className="app-list-item__main">
                     <div className="app-icon-circle app-icon-circle--purple">
-                      <IonIcon icon={compassOutline} />
+                      <IonIcon icon={ICON_KOMPASS} />
                     </div>
                     <div className="app-list-item__content">
                       <div className="app-list-item__title">App-Tour ansehen</div>
@@ -668,7 +638,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                 <div className="app-list-item__row">
                   <div className="app-list-item__main">
                     <div className="app-icon-circle app-icon-circle--purple">
-                      <IonIcon icon={mailOutline} />
+                      <IonIcon icon={ICON_MAIL} />
                     </div>
                     <div className="app-list-item__content">
                       <div className="app-list-item__title">E-Mail-Adresse ändern</div>
@@ -695,7 +665,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                 <div className="app-list-item__row">
                   <div className="app-list-item__main">
                     <div className="app-icon-circle app-icon-circle--purple">
-                      <IonIcon icon={keyOutline} />
+                      <IonIcon icon={ICON_SCHLUESSEL} />
                     </div>
                     <div className="app-list-item__content">
                       <div className="app-list-item__title">Passwort ändern</div>
@@ -720,7 +690,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                 <div className="app-list-item__row">
                   <div className="app-list-item__main">
                     <div className="app-icon-circle app-icon-circle--purple">
-                      <IonIcon icon={bookOutline} />
+                      <IonIcon icon={ICON_BUCH} />
                     </div>
                     <div className="app-list-item__content">
                       <div className="app-list-item__title">Bibelübersetzung</div>
@@ -744,7 +714,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                 <div className="app-list-item__row">
                   <div className="app-list-item__main">
                     <div className="app-icon-circle app-icon-circle--purple">
-                      <IonIcon icon={imagesOutline} />
+                      <IonIcon icon={ICON_GALERIE} />
                     </div>
                     <div className="app-list-item__content">
                       <div className="app-list-item__title">Medien-Cache leeren</div>
@@ -761,7 +731,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
       </IonList>
 
       {/* Logout */}
-      <div style={{ padding: '0 16px', marginTop: '16px' }}>
+      <div style={{ padding: '0 var(--app-abstand-basis)', marginTop: 'var(--app-abstand-basis)' }}>
         <IonButton
           expand="block"
           fill="outline"
@@ -769,11 +739,11 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
           onClick={handleLogout}
           style={{
             height: '48px',
-            borderRadius: '12px',
-            fontWeight: '600'
+            borderRadius: 'var(--app-radius-karte)',
+            fontWeight: 'var(--app-schrift-halbfett)'
           }}
         >
-          <IonIcon icon={logOutOutline} slot="start" />
+          <IonIcon icon={ICON_ABMELDEN} slot="start" />
           Abmelden
         </IonButton>
 
@@ -784,12 +754,12 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
           onClick={() => presentDeleteAccount({ presentingElement: pageRef?.current || presentingElement || undefined })}
           style={{
             height: '48px',
-            marginTop: '8px',
-            borderRadius: '12px',
-            fontWeight: '600'
+            marginTop: 'var(--app-abstand-eng)',
+            borderRadius: 'var(--app-radius-karte)',
+            fontWeight: 'var(--app-schrift-halbfett)'
           }}
         >
-          <IonIcon icon={trashOutline} slot="start" />
+          <IonIcon icon={ICON_LOESCHEN} slot="start" />
           Account löschen
         </IonButton>
       </div>
@@ -808,7 +778,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
 
       {/* "Was ist neu?" — derselbe Walkthrough wie nach dem Update */}
       {showUpdateWalkthrough && (
-        <KonfiUpdateWalkthroughModal
+        <KonfiUpdate211WalkthroughModal
           onClose={() => setShowUpdateWalkthrough(false)}
           displayName={(user?.display_name || profile.display_name || '').split(' ')[0]}
         />

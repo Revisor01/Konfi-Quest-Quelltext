@@ -1,0 +1,33 @@
+-- 141_teamer_absage_nach_zusage.sql
+--
+-- Die drei Zustaende selbst brauchen KEINE neue Spalte, sie liegen laengst
+-- in event_bookings.status: keine Zeile = offen, confirmed/waitlist =
+-- zugesagt, opted_out = abgesagt (samt opt_out_reason/opt_out_date). Die
+-- Kapazitaetszaehlung (zaehleBuchungen, View event_booking_stats aus
+-- Migration 136) zaehlt nur confirmed/waitlist -- eine Absage gibt den Platz
+-- also von selbst frei.
+--
+-- Was FEHLT, ist die Vorgeschichte einer Absage: Beim Uebergang nach
+-- opted_out wird der vorherige Status ueberschrieben. Ob jemand "von Anfang
+-- an nicht dabei" war oder NACH einer Zusage abgesprungen ist, laesst sich
+-- hinterher nicht mehr rekonstruieren -- fuer die Leitung ist das aber genau
+-- der Unterschied zwischen "kein Problem" und "kurzfristig umplanen".
+-- Deshalb diese Spalte: Sie haelt im Moment des Uebergangs fest, dass die
+-- Absage eine Zusage (confirmed ODER waitlist) zurueckgenommen hat.
+--
+-- Gesetzt wird sie NUR vom Teamer-Zusage-Weg (utils/bookingUtils.js,
+-- setzeTeamerZusage). Der Konfi-Pflicht-Opt-out setzt sie bewusst NICHT:
+-- Dort stammt die "Zusage" aus dem Auto-Enrollment der Leitung, nicht aus
+-- einer eigenen Aussage der Konfi -- "nach Zusage abgesagt" waere irrefuehrend.
+--
+-- GEGEN PRODUKTION GEMESSEN:
+--   event_bookings gesamt: 566 Zeilen
+--   davon confirmed 556, waitlist 6, opted_out 4
+--   opted_out von Teamer:innen/Leitung: 0 (alle 4 sind Konfi-Pflicht-Opt-outs
+--   mit Grund; opt_out_reason gesetzt: 4)
+-- Der Default false ist damit fuer JEDE Bestandszeile korrekt: Teamer-Absagen
+-- nach Zusage gab es noch keine, und die 4 Konfi-Opt-outs sollen das Flag
+-- laut Regel oben ohnehin nicht tragen. Keine Bestandszeile aendert ihre
+-- Bedeutung, kein Wert wird umgeschrieben.
+ALTER TABLE event_bookings
+  ADD COLUMN IF NOT EXISTS absage_nach_zusage BOOLEAN NOT NULL DEFAULT false;

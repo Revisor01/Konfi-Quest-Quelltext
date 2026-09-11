@@ -39,7 +39,7 @@ const ListSection: React.FC<ListSectionProps> = ({
   const showEmpty = isEmpty === true || (count === 0 && !!emptyIcon);
 
   return (
-    <IonList inset={true} style={{ margin: '16px' }}>
+    <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
       <IonListHeader>
         <div className={`app-section-icon${iconColorClass ? ` app-section-icon--${iconColorClass}` : ''}`}>
           <IonIcon icon={icon} />
@@ -47,7 +47,7 @@ const ListSection: React.FC<ListSectionProps> = ({
         <IonLabel>{title} ({count})</IonLabel>
       </IonListHeader>
       <IonCard className="app-card">
-        <IonCardContent style={{ padding: showEmpty ? '16px' : '12px' }}>
+        <IonCardContent style={{ padding: showEmpty ? 'var(--app-abstand-basis)' : 'var(--app-abstand-mittel)' }}>
           {showEmpty && emptyIcon && emptyTitle && emptyMessage ? (
             <EmptyState
               icon={emptyIcon}

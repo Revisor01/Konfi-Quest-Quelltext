@@ -1,4 +1,6 @@
-import React, { useState, useCallback, useRef } from 'react';
+import { ICON_HINZUFUEGEN_GEFUELLT, ICON_ZURUECK } from '../../shared/icons';
+import { fehlerText } from '../../../utils/fehler';
+import React, { useState, useRef } from 'react';
 import {
   IonPage,
   IonHeader,
@@ -13,7 +15,6 @@ import {
   useIonModal,
   useIonAlert
 } from '@ionic/react';
-import { add, arrowBack } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
@@ -56,7 +57,6 @@ const AdminBadgesPage: React.FC = () => {
   );
 
   // Modal state
-  const [selectedBadge, setSelectedBadge] = useState<Badge | null>(null);
   const [modalBadgeId, setModalBadgeId] = useState<number | null>(null);
 
   // Alert Hook für Bestätigungsdialoge
@@ -73,15 +73,14 @@ const AdminBadgesPage: React.FC = () => {
     onDirtyChange: (dirty: boolean) => { badgeModalDirtyRef.current = dirty; },
     onClose: () => {
       dismissBadgeModalHook();
-      setSelectedBadge(null);
       setModalBadgeId(null);
     },
     onSuccess: () => {
       dismissBadgeModalHook();
-      setSelectedBadge(null);
       setModalBadgeId(null);
       refreshBadges();
-    }
+    },
+    onRefreshList: () => { refreshBadges(); }
   });
 
   // Faengt JEDEN Schliess-Weg ab (Swipe, Backdrop): bei ungespeicherten
@@ -122,12 +121,8 @@ const AdminBadgesPage: React.FC = () => {
             try {
               await api.delete(`/admin/badges/${badge.id}`);
               await refreshBadges();
-            } catch (err: any) {
-              if (err.response?.data?.error) {
-                setError(err.response.data.error);
-              } else {
-                setError('Fehler beim Löschen des Badges');
-              }
+            } catch (err) {
+              setError(fehlerText(err, 'Fehler beim Löschen des Badges'));
             }
           }
         }
@@ -136,7 +131,6 @@ const AdminBadgesPage: React.FC = () => {
   };
 
   const handleSelectBadge = (badge: Badge) => {
-    setSelectedBadge(badge);
     setModalBadgeId(badge.id);
     presentBadgeModalHook({
       presentingElement: presentingElement,
@@ -146,7 +140,6 @@ const AdminBadgesPage: React.FC = () => {
   };
 
   const presentBadgeModal = () => {
-    setSelectedBadge(null);
     setModalBadgeId(null);
     presentBadgeModalHook({
       presentingElement: presentingElement,
@@ -165,13 +158,13 @@ const AdminBadgesPage: React.FC = () => {
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-              <IonIcon icon={arrowBack} />
+              <IonIcon icon={ICON_ZURUECK} />
             </IonButton>
           </IonButtons>
           <IonTitle>Badges</IonTitle>
           <IonButtons slot="end">
             <IonButton aria-label="Neues Badge anlegen" onClick={presentBadgeModal}>
-              <IonIcon icon={add} />
+              <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -195,8 +188,6 @@ const AdminBadgesPage: React.FC = () => {
         ) : (
           <BadgesView
             badges={badges || []}
-            onUpdate={refreshBadges}
-            onAddBadgeClick={presentBadgeModal}
             onSelectBadge={handleSelectBadge}
             onDeleteBadge={handleDeleteBadge}
             targetRole={selectedRole}

@@ -47,15 +47,15 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
           }}>
 
             {/* App Title */}
-            <h1 className="app-auth-hero__title--cosmic" style={{ marginBottom: '20px' }}>
+            <h1 className="app-auth-hero__title--cosmic" style={{ marginBottom: 'var(--app-abstand-gross)' }}>
               KONFI QUEST
             </h1>
 
             {/* Loading Message */}
             <p style={{
-              fontSize: '1.1rem',
+              fontSize: 'var(--app-text-gross)',
               opacity: 0.92,
-              margin: '0 0 32px 0',
+              margin: '0 0 var(--app-abstand-extraweit) 0',
               textShadow: '0 1px 2px rgba(0,0,0,0.25)'
             }}>
               {message}
@@ -73,8 +73,8 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
             {/* Progress Dots */}
             <div style={{
               display: 'flex',
-              gap: '8px',
-              marginTop: '32px'
+              gap: 'var(--app-abstand-eng)',
+              marginTop: 'var(--app-abstand-extraweit)'
             }}>
               {[0, 1, 2].map(i => (
                 <div
@@ -82,7 +82,7 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
                   style={{
                     width: '8px',
                     height: '8px',
-                    borderRadius: '50%',
+                    borderRadius: 'var(--app-radius-kreis)',
                     backgroundColor: 'rgba(255,255,255,0.6)',
                     animation: `pulse 1.5s infinite ${i * 0.2}s`
                   }}
@@ -114,12 +114,12 @@ const LoadingSpinner: React.FC<LoadingSpinnerProps> = ({
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
-      padding: '20px'
+      padding: 'var(--app-abstand-gross)'
     }}>
       <IonSpinner name="crescent" color="primary" />
       {message && (
         <p style={{
-          marginTop: '16px',
+          marginTop: 'var(--app-abstand-basis)',
           color: 'var(--ion-color-medium)',
           textAlign: 'center'
         }}>

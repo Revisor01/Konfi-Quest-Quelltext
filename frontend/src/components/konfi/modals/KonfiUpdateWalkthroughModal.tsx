@@ -1,5 +1,5 @@
 import React from 'react';
-import { flagOutline, swapHorizontalOutline, sparklesOutline } from 'ionicons/icons';
+import { ICON_CHALLENGE, ICON_FUNKELN, ICON_WECHSEL } from '../../shared/icons';
 import OnboardingTour, { OnboardingSlide } from '../../shared/OnboardingTour';
 
 interface KonfiUpdateWalkthroughModalProps {
@@ -16,28 +16,28 @@ interface KonfiUpdateWalkthroughModalProps {
 // SLIDES exportiert für den Textbaustein-Test (onboardingSlides.test.ts).
 export const SLIDES: OnboardingSlide[] = [
   {
-    icon: flagOutline,
+    icon: ICON_CHALLENGE,
     color: 'var(--app-color-challenges)',
     rgb: '--app-color-challenges-rgb',
     title: 'Neu: Challenges',
     text: 'In der Mitte deiner Tab-Leiste gibt es jetzt die Challenges: eine Aufgabe und eine Zeit lang Ruhe, dich damit zu beschäftigen. Du antwortest darauf mit einem Foto, einem Text, einer Aufnahme oder einem Link — so, wie du es willst.',
   },
   {
-    icon: flagOutline,
+    icon: ICON_CHALLENGE,
     color: 'var(--app-color-challenges)',
     rgb: '--app-color-challenges-rgb',
     title: 'Du entscheidest',
-    text: 'Bei jedem Beitrag wählst du selbst, ob er mit deinem Namen, anonym oder nur für die Leitung sichtbar ist. Fürs Mitmachen gibt es einen Stempel — und mit Absicht keine Punkte und keine Rangliste. Hier geht es nicht ums Sammeln, sondern um dich und deinen Glauben. Deine Teamer:innen machen übrigens mit.',
+    text: 'Bei jedem Beitrag wählst du selbst, ob er mit deinem Namen, anonym oder nur für die Leitung sichtbar ist. Fürs Mitmachen gibt es einen Stempel — und mit Absicht keine Punkte und keine Rangliste. Hier geht es nicht ums Sammeln, sondern um dich und deinen Glauben. Dein Team macht übrigens mit.',
   },
   {
-    icon: swapHorizontalOutline,
+    icon: ICON_WECHSEL,
     color: 'var(--app-color-activities)',
     rgb: '--app-color-activities-rgb',
     title: 'Neu: der Mitmachen-Tab',
     text: 'Events und deine bisherigen "Anträge" wohnen jetzt zusammen im Tab "Mitmachen" — mit zwei Reitern oben. Bei Events meldest du dich wie gewohnt vorher an. Aus den Anträgen sind die Aktivitäten geworden: Da meldest du hinterher, dass du dabei warst, und dein Team bestätigt. Einen eigenen Antrags-Tab gibt es nicht mehr.',
   },
   {
-    icon: sparklesOutline,
+    icon: ICON_FUNKELN,
     color: 'var(--app-color-konfis)',
     rgb: '--app-color-konfis-rgb',
     title: 'Dein Jahresrückblick',

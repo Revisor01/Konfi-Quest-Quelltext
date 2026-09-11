@@ -1,3 +1,14 @@
+import {
+  ICON_ABSAGE,
+  ICON_ANHANG_GEFUELLT,
+  ICON_ANTWORTEN,
+  ICON_DIAGRAMM,
+  ICON_GRUPPE_GEFUELLT,
+  ICON_LOESCHEN,
+  ICON_MEHR_VERTIKAL,
+  ICON_SENDEN_GEFUELLT,
+  ICON_ZURUECK,
+} from '../shared/icons';
 import React from 'react';
 import {
   IonHeader,
@@ -10,17 +21,6 @@ import {
   IonFooter,
   IonSpinner
 } from '@ionic/react';
-import {
-  arrowBack,
-  send,
-  attach,
-  barChart,
-  people,
-  returnUpBack,
-  closeCircle,
-  ellipsisVertical,
-  trashOutline
-} from 'ionicons/icons';
 import { Message, ChatUserType } from '../../types/chat';
 import { formatFileSize } from '../../utils/helpers';
 import { Capacitor } from '@capacitor/core';
@@ -70,30 +70,34 @@ export const ChatHeader = React.memo<ChatHeaderProps>(({
       <IonToolbar>
         <IonButtons slot="start">
           <IonButton aria-label="Zurück" onClick={onBack}>
-            <IonIcon icon={arrowBack} />
+            <IonIcon icon={ICON_ZURUECK} />
           </IonButton>
         </IonButtons>
         <IonTitle>{roomName}</IonTitle>
         <IonButtons slot="end">
           {roomType !== 'direct' && (
             <IonButton aria-label="Mitglieder anzeigen" onClick={onOpenMembers}>
-              <IonIcon icon={people} />
+              <IonIcon icon={ICON_GRUPPE_GEFUELLT} />
             </IonButton>
           )}
           {/* Umfragen anlegen bleibt der Leitung vorbehalten. */}
           {isAdmin && (
             <IonButton aria-label="Umfrage erstellen" onClick={onOpenPoll}>
-              <IonIcon icon={barChart} />
+              <IonIcon icon={ICON_DIAGRAMM} />
             </IonButton>
           )}
           {onClearChat && (
-            <IonButton aria-label="Team-Chat leeren" disabled={!isOnline} onClick={onClearChat}>
-              <IonIcon icon={trashOutline} />
+            <IonButton aria-label={isOnline ? "Team-Chat leeren" : "Team-Chat leeren — Ohne Internetverbindung nicht möglich"}
+              title={isOnline ? undefined : "Ohne Internetverbindung nicht möglich"}
+              disabled={!isOnline} onClick={onClearChat}>
+              <IonIcon icon={ICON_LOESCHEN} />
             </IonButton>
           )}
           {canLeave && (
-            <IonButton aria-label="Weitere Chat-Optionen" disabled={!isOnline} onClick={onLeaveChat}>
-              <IonIcon icon={ellipsisVertical} />
+            <IonButton aria-label={isOnline ? "Weitere Chat-Optionen" : "Weitere Chat-Optionen — Ohne Internetverbindung nicht möglich"}
+              title={isOnline ? undefined : "Ohne Internetverbindung nicht möglich"}
+              disabled={!isOnline} onClick={onLeaveChat}>
+              <IonIcon icon={ICON_MEHR_VERTIKAL} />
             </IonButton>
           )}
         </IonButtons>
@@ -112,20 +116,20 @@ export const ReplyPreview = React.memo<ReplyPreviewProps>(({ replyToMessage, onC
   <div style={{
     display: 'flex',
     alignItems: 'center',
-    padding: '8px 16px',
-    backgroundColor: 'rgba(6, 182, 212, 0.08)',
-    borderTop: '1px solid rgba(6, 182, 212, 0.15)',
-    borderLeft: '3px solid #06b6d4',
-    gap: '8px'
+    padding: 'var(--app-abstand-eng) var(--app-abstand-basis)',
+    backgroundColor: 'rgba(var(--app-color-chat-rgb), 0.08)',
+    borderTop: '1px solid rgba(var(--app-color-chat-rgb), 0.15)',
+    borderLeft: '3px solid var(--app-color-chat)',
+    gap: 'var(--app-abstand-eng)'
   }}>
-    <IonIcon icon={returnUpBack} style={{ fontSize: '1.2rem', color: '#06b6d4' }} />
+    <IonIcon icon={ICON_ANTWORTEN} style={{ fontSize: 'var(--app-text-untertitel)', color: 'var(--app-color-chat)' }} />
     <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ fontWeight: '600', fontSize: '0.8rem', color: '#06b6d4' }}>
+      <div style={{ fontWeight: 'var(--app-schrift-halbfett)', fontSize: 'var(--app-text-hinweis)', color: 'var(--app-color-chat)' }}>
         {replyToMessage.sender_name}
       </div>
       <div style={{
-        fontSize: '0.85rem',
-        color: '#666',
+        fontSize: 'var(--app-text-sekundaer)',
+        color: 'var(--app-text-secondary)',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap'
@@ -145,7 +149,7 @@ export const ReplyPreview = React.memo<ReplyPreviewProps>(({ replyToMessage, onC
       onClick={onClear}
       style={{ '--padding-start': '4px', '--padding-end': '4px' }}
     >
-      <IonIcon icon={closeCircle} style={{ fontSize: '1.2rem', color: '#8e8e93' }} />
+      <IonIcon icon={ICON_ABSAGE} style={{ fontSize: 'var(--app-text-untertitel)', color: 'var(--app-text-system)' }} />
     </IonButton>
   </div>
 ));
@@ -161,21 +165,21 @@ export const FilePreviewBar = React.memo<FilePreviewBarProps>(({ selectedFile, s
   <div style={{
     display: 'flex',
     alignItems: 'center',
-    padding: '10px 16px',
-    backgroundColor: 'rgba(6, 182, 212, 0.06)',
-    borderTop: '1px solid rgba(6, 182, 212, 0.12)',
-    borderLeft: '3px solid #06b6d4',
-    gap: '10px'
+    padding: 'var(--app-abstand-schmal) var(--app-abstand-basis)',
+    backgroundColor: 'rgba(var(--app-color-chat-rgb), 0.06)',
+    borderTop: '1px solid rgba(var(--app-color-chat-rgb), 0.12)',
+    borderLeft: '3px solid var(--app-color-chat)',
+    gap: 'var(--app-abstand-schmal)'
   }}>
     {/* Image Preview or File Icon */}
     {selectedFilePreview ? (
       <div style={{
         width: '48px',
         height: '48px',
-        borderRadius: '8px',
+        borderRadius: 'var(--app-radius-klein)',
         overflow: 'hidden',
         flexShrink: 0,
-        border: '2px solid #06b6d4'
+        border: '2px solid var(--app-color-chat)'
       }}>
         <img
           src={getSafePreviewUrl(selectedFilePreview) || ''}
@@ -191,28 +195,28 @@ export const FilePreviewBar = React.memo<FilePreviewBarProps>(({ selectedFile, s
       <div style={{
         width: '44px',
         height: '44px',
-        borderRadius: '8px',
-        backgroundColor: 'rgba(6, 182, 212, 0.15)',
+        borderRadius: 'var(--app-radius-klein)',
+        backgroundColor: 'rgba(var(--app-color-chat-rgb), 0.15)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0
       }}>
-        <IonIcon icon={attach} style={{ fontSize: '1.4rem', color: '#06b6d4' }} />
+        <IonIcon icon={ICON_ANHANG_GEFUELLT} style={{ fontSize: 'var(--app-text-titel-gross)', color: 'var(--app-color-chat)' }} />
       </div>
     )}
     <div style={{ flex: 1, minWidth: 0 }}>
       <div style={{
-        fontWeight: '600',
-        fontSize: '0.9rem',
-        color: '#1a1a1a',
+        fontWeight: 'var(--app-schrift-halbfett)',
+        fontSize: 'var(--app-text-basis)',
+        color: 'var(--app-text-emphasis)',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap'
       }}>
         {selectedFile.name}
       </div>
-      <div style={{ fontSize: '0.75rem', color: '#06b6d4', fontWeight: '500' }}>
+      <div style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-color-chat)', fontWeight: 'var(--app-schrift-mittel)' }}>
         {formatFileSize(selectedFile.size)}
       </div>
     </div>
@@ -222,7 +226,7 @@ export const FilePreviewBar = React.memo<FilePreviewBarProps>(({ selectedFile, s
       onClick={onClear}
       style={{ '--padding-start': '6px', '--padding-end': '6px' }}
     >
-      <IonIcon icon={closeCircle} style={{ fontSize: '1.4rem', color: '#8e8e93' }} />
+      <IonIcon icon={ICON_ABSAGE} style={{ fontSize: 'var(--app-text-titel-gross)', color: 'var(--app-text-system)' }} />
     </IonButton>
   </div>
 ));
@@ -307,7 +311,7 @@ export const MessageInput = React.memo<MessageInputProps>(({
       <div style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '8px',
+        gap: 'var(--app-abstand-eng)',
         width: '100%'
       }}>
         <IonButton aria-label="Datei anhängen"
@@ -317,22 +321,22 @@ export const MessageInput = React.memo<MessageInputProps>(({
           style={{
             '--padding-start': '4px',
             '--padding-end': '4px',
-            '--color': '#06b6d4',
+            '--color': 'var(--app-color-chat)',
             '--height': '38px',
             '--min-height': '38px',
-            fontSize: '22px'
+            fontSize: 'var(--app-icon-chat-anhang)'
           }}
         >
-          <IonIcon icon={attach} />
+          <IonIcon icon={ICON_ANHANG_GEFUELLT} />
         </IonButton>
 
         <div style={{
           flex: 1,
           backgroundColor: 'white',
-          borderRadius: '20px',
-          border: '1.5px solid rgba(6, 182, 212, 0.3)',
+          borderRadius: 'var(--app-radius-gross)',
+          border: '1.5px solid rgba(var(--app-color-chat-rgb), 0.3)',
           overflow: 'hidden',
-          boxShadow: '0 1px 4px rgba(6, 182, 212, 0.1)',
+          boxShadow: '0 1px 4px rgba(var(--app-color-chat-rgb), 0.1)',
           display: 'flex',
           alignItems: 'center'
         }}>
@@ -357,8 +361,8 @@ export const MessageInput = React.memo<MessageInputProps>(({
               '--padding-bottom': '10px',
               '--box-shadow': 'none',
               margin: '0',
-              '--color': '#1a1a1a',
-              '--placeholder-color': '#8e8e93',
+              '--color': 'var(--app-text-emphasis)',
+              '--placeholder-color': 'var(--app-text-system)',
               minHeight: '38px'
               // Hoehe wird manuell in resizeTextarea() gesetzt (KEIN autoGrow —
               // dessen Grid-Replikation verhindert echtes Hochscrollen). Ab ~5
@@ -395,21 +399,21 @@ export const MessageInput = React.memo<MessageInputProps>(({
             textareaRef.current?.setFocus();
           }}
           style={{
-            '--background': '#06b6d4',
-            '--background-activated': '#0891b2',
-            '--background-hover': '#0891b2',
+            '--background': 'var(--app-color-chat)',
+            '--background-activated': 'var(--app-color-chat-dunkel)',
+            '--background-hover': 'var(--app-color-chat-dunkel)',
             '--height': '38px',
             '--min-height': '38px',
             '--border-radius': '19px',
             '--padding-start': '0',
             '--padding-end': '0',
-            '--box-shadow': '0 2px 8px rgba(6, 182, 212, 0.35)',
+            '--box-shadow': '0 2px 8px rgba(var(--app-color-chat-rgb), 0.35)',
             minWidth: '38px',
             maxWidth: '38px',
-            fontSize: '15px'
+            fontSize: 'var(--app-icon-chat-senden)'
           }}
         >
-          {uploading ? <IonSpinner name="dots" /> : <IonIcon icon={send} />}
+          {uploading ? <IonSpinner name="dots" /> : <IonIcon icon={ICON_SENDEN_GEFUELLT} />}
         </IonButton>
 
         <input

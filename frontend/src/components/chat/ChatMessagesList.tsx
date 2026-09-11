@@ -72,7 +72,7 @@ const ChatMessagesList: React.FC<ChatMessagesListProps> = ({
 
   let lastDayKey = '';
   return (
-    <div style={{ paddingBottom: '0px', position: 'relative' }}>
+    <div style={{ paddingBottom: '0', position: 'relative' }}>
       {messages.map((message) => {
         const created = message.created_at ? new Date(message.created_at) : null;
         const dayKey = created && !isNaN(created.getTime()) ? created.toDateString() : '';
@@ -88,25 +88,25 @@ const ChatMessagesList: React.FC<ChatMessagesListProps> = ({
               <div
                 data-day-divider={formatDayDivider(created!)}
                 style={{
-                  display: 'flex', justifyContent: 'center', margin: '12px 0 8px',
+                  display: 'flex', justifyContent: 'center', margin: 'var(--app-abstand-mittel) 0 var(--app-abstand-eng)',
                   // Trenner scrollen normal mit. Der oben SCHWEBENDE Chip
                   // (ein einziger) zeigt den aktuellen Tag -> kein Ueberlagern.
                   pointerEvents: 'none'
                 }}
               >
                 <span style={{
-                  fontSize: '0.72rem', fontWeight: 600, color: '#555',
+                  fontSize: 'var(--app-text-meta)', fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-body)',
                   background: 'rgba(245,245,247,0.95)',
-                  padding: '4px 14px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.12)'
+                  padding: 'var(--app-abstand-mini) var(--app-abstand-mittelweit)', borderRadius: 'var(--app-radius-karte)', boxShadow: 'var(--app-schatten-flach)'
                 }}>
                   {formatDayDivider(created!)}
                 </span>
               </div>
             )}
             {showNewDivider && (
-              <div ref={newDividerRef} style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '10px 12px' }}>
+              <div ref={newDividerRef} style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-eng)', margin: 'var(--app-abstand-schmal) var(--app-abstand-mittel)' }}>
                 <div style={{ flex: 1, height: '1px', background: 'var(--app-color-events)' }} />
-                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--app-color-events)' }}>Neue Nachrichten</span>
+                <span style={{ fontSize: 'var(--app-text-meta)', fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-color-events)' }}>Neue Nachrichten</span>
                 <div style={{ flex: 1, height: '1px', background: 'var(--app-color-events)' }} />
               </div>
             )}

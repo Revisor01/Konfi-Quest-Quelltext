@@ -8,7 +8,7 @@ import {
   IonIcon,
   IonButton,
 } from '@ionic/react';
-import { timeOutline, alertCircleOutline, closeOutline } from 'ionicons/icons';
+import { ICON_SCHLIESSEN, ICON_UHRZEIT, ICON_WARNHINWEIS } from './icons';
 import { QueueItem, FailedAction } from '../../services/writeQueue';
 
 interface WartendeVorgaengeKarteProps {
@@ -44,7 +44,7 @@ const WartendeVorgaengeKarte: React.FC<WartendeVorgaengeKarteProps> = ({
         <IonList inset={true} className="app-segment-wrapper">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--warning">
-              <IonIcon icon={timeOutline} />
+              <IonIcon icon={ICON_UHRZEIT} />
             </div>
             <IonLabel>Wird gesendet...</IonLabel>
           </IonListHeader>
@@ -55,19 +55,19 @@ const WartendeVorgaengeKarte: React.FC<WartendeVorgaengeKarteProps> = ({
                   <div className="app-corner-badges">
                     <div
                       className="app-corner-badge"
-                      style={{ background: 'var(--app-color-warning)', padding: '4px 6px' }}
+                      style={{ background: 'var(--app-color-warning)', padding: 'var(--app-abstand-mini) var(--app-abstand-kompakt)' }}
                       title="Wartend — wird gesendet, sobald du wieder online bist"
                     >
-                      <IonIcon icon={timeOutline} style={{ color: '#fff', fontSize: '0.85rem', display: 'block' }} />
+                      <IonIcon icon={ICON_UHRZEIT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)', display: 'block' }} />
                     </div>
                   </div>
                   <div className="app-list-item__row">
                     <div className="app-list-item__main">
                       <div className="app-icon-circle app-icon-circle--warning">
-                        <IonIcon icon={timeOutline} />
+                        <IonIcon icon={ICON_UHRZEIT} />
                       </div>
                       <div className="app-list-item__content">
-                        <div className="app-list-item__title" style={{ paddingRight: '60px' }}>
+                        <div className="app-list-item__title" style={{ paddingRight: 'var(--app-freiraum-aktion-m)' }}>
                           {qi.metadata.label || 'Aktivität'}
                         </div>
                         <div className="app-list-item__subtitle">
@@ -87,7 +87,7 @@ const WartendeVorgaengeKarte: React.FC<WartendeVorgaengeKarteProps> = ({
         <IonList inset={true} className="app-segment-wrapper">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--danger">
-              <IonIcon icon={alertCircleOutline} />
+              <IonIcon icon={ICON_WARNHINWEIS} />
             </div>
             <IonLabel>Nicht gesendet</IonLabel>
           </IonListHeader>
@@ -98,10 +98,10 @@ const WartendeVorgaengeKarte: React.FC<WartendeVorgaengeKarteProps> = ({
                   <div className="app-list-item__row">
                     <div className="app-list-item__main">
                       <div className="app-icon-circle app-icon-circle--danger">
-                        <IonIcon icon={alertCircleOutline} />
+                        <IonIcon icon={ICON_WARNHINWEIS} />
                       </div>
                       <div className="app-list-item__content">
-                        <div className="app-list-item__title" style={{ paddingRight: '60px' }}>
+                        <div className="app-list-item__title" style={{ paddingRight: 'var(--app-freiraum-aktion-m)' }}>
                           {f.label}
                         </div>
                         <div className="app-list-item__subtitle">
@@ -116,7 +116,7 @@ const WartendeVorgaengeKarte: React.FC<WartendeVorgaengeKarteProps> = ({
                         aria-label={`${f.label} wegwischen`}
                         onClick={() => onVergessen(f.id)}
                       >
-                        <IonIcon icon={closeOutline} slot="icon-only" />
+                        <IonIcon icon={ICON_SCHLIESSEN} slot="icon-only" />
                       </IonButton>
                     )}
                   </div>

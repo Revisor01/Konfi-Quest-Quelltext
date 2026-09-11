@@ -1,3 +1,4 @@
+import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   IonPage,
@@ -20,24 +21,22 @@ import {
   IonSpinner
 } from '@ionic/react';
 import {
-  close,
-  timeOutline,
-  personOutline,
-  documentTextOutline,
-  imageOutline,
-  micOutline,
-  videocamOutline,
-  linkOutline,
-  peopleOutline,
-  addOutline,
-  openOutline,
-  checkmarkOutline,
-  eyeOutline,
-  eyeOffOutline,
-  lockClosedOutline,
-  removeCircleOutline,
-  chatbubbleEllipsesOutline
-} from 'ionicons/icons';
+  ICON_BILD,
+  ICON_ENTFERNEN,
+  ICON_GRUPPE,
+  ICON_HAKEN,
+  ICON_HINZUFUEGEN,
+  ICON_LINK,
+  ICON_MIKROFON,
+  ICON_PERSON,
+  ICON_SCHLIESSEN_GEFUELLT,
+  ICON_SICHTBAR,
+  ICON_VERBORGEN,
+  ICON_SPERRE,
+  ICON_TEXTDOKUMENT,
+  ICON_UHRZEIT,
+  ICON_VIDEO,
+} from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 
 /** Reiter im Challenge-Detail: Gruppen-Feed oder eigene Beitraege. */
@@ -52,6 +51,7 @@ import type {
   KonfiChallenge,
   KonfiChallengeDetail,
   ChallengeSubmission,
+  ChallengeGalerieZeile,
   ChallengeMediaType
 } from '../../../types/challenges';
 
@@ -60,11 +60,11 @@ import type {
 // und die eigenen Beitraege mit Status.
 
 const MEDIA_ICON: Record<ChallengeMediaType, string> = {
-  text: documentTextOutline,
-  photo: imageOutline,
-  audio: micOutline,
-  video: videocamOutline,
-  link: linkOutline
+  text: ICON_TEXTDOKUMENT,
+  photo: ICON_BILD,
+  audio: ICON_MIKROFON,
+  video: ICON_VIDEO,
+  link: ICON_LINK
 };
 
 /**
@@ -79,26 +79,26 @@ const getOwnStatus = (
   challenge: KonfiChallenge
 ): { label: string; icon: string; color: string } => {
   if (submission.moderation_status === 'hidden') {
-    return { label: 'Ausgeblendet', icon: removeCircleOutline, color: 'var(--app-color-danger)' };
+    return { label: 'Ausgeblendet', icon: ICON_ENTFERNEN, color: 'var(--app-color-danger)' };
   }
   if (submission.moderation_status === 'pending') {
-    return { label: 'Wartet auf Freigabe', icon: timeOutline, color: 'var(--app-color-warning)' };
+    return { label: 'Wartet auf Freigabe', icon: ICON_UHRZEIT, color: 'var(--app-color-warning)' };
   }
   // approved
   if (challenge.visibility === 'private') {
-    return { label: 'Nur Leitung', icon: lockClosedOutline, color: '#6b7280' };
+    return { label: 'Nur Leitung', icon: ICON_SPERRE, color: 'var(--app-color-neutral)' };
   }
   if (submission.konfi_consent === 'anonymous') {
-    return { label: 'Anonym', icon: eyeOffOutline, color: '#7c3aed' };
+    return { label: 'Anonym', icon: ICON_VERBORGEN, color: 'var(--app-color-wrapped)' };
   }
   if (challenge.visibility === 'public') {
-    return { label: 'Veröffentlicht', icon: checkmarkOutline, color: 'var(--app-color-success-strong)' };
+    return { label: 'Veröffentlicht', icon: ICON_HAKEN, color: 'var(--app-color-success-strong)' };
   }
   // konfi_choice -> eigene Entscheidung entscheidet
   if (submission.konfi_consent === 'publish') {
-    return { label: 'Veröffentlicht', icon: checkmarkOutline, color: 'var(--app-color-success-strong)' };
+    return { label: 'Veröffentlicht', icon: ICON_HAKEN, color: 'var(--app-color-success-strong)' };
   }
-  return { label: 'Nur Leitung', icon: lockClosedOutline, color: '#6b7280' };
+  return { label: 'Nur Leitung', icon: ICON_SPERRE, color: 'var(--app-color-neutral)' };
 };
 
 const formatDateTime = (value?: string): string => {
@@ -162,7 +162,7 @@ const ChallengeMedia: React.FC<{
 
   if (failed) {
     return (
-      <div style={{ marginTop: '8px', color: '#999', fontSize: '0.82rem' }}>
+      <div style={{ marginTop: 'var(--app-abstand-eng)', color: 'var(--app-text-muted)', fontSize: 'var(--app-text-hinweis)' }}>
         Datei konnte nicht geladen werden
       </div>
     );
@@ -172,9 +172,9 @@ const ChallengeMedia: React.FC<{
     return (
       <div
         style={{
-          marginTop: '8px', minHeight: '80px', borderRadius: '10px', background: '#f0f0f0',
+          marginTop: 'var(--app-abstand-eng)', minHeight: '80px', borderRadius: 'var(--app-radius-knopf)', background: 'var(--app-surface-dim)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-          color: '#666', fontSize: '0.85rem', gap: '8px'
+          color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-sekundaer)', gap: 'var(--app-abstand-eng)'
         }}
       >
         <IonSpinner name="dots" /> wird geladen...
@@ -184,7 +184,7 @@ const ChallengeMedia: React.FC<{
 
   if (mediaType === 'photo') {
     return (
-      <div style={{ marginTop: '8px', borderRadius: '10px', overflow: 'hidden' }}>
+      <div style={{ marginTop: 'var(--app-abstand-eng)', borderRadius: 'var(--app-radius-knopf)', overflow: 'hidden' }}>
         <img
           src={src}
           alt={fileName || 'Beitrag'}
@@ -200,7 +200,7 @@ const ChallengeMedia: React.FC<{
         src={src}
         controls
         playsInline
-        style={{ width: '100%', maxHeight: '320px', marginTop: '8px', borderRadius: '10px', display: 'block' }}
+        style={{ width: '100%', maxHeight: '320px', marginTop: 'var(--app-abstand-eng)', borderRadius: 'var(--app-radius-knopf)', display: 'block' }}
       />
     );
   }
@@ -226,29 +226,29 @@ const SubmissionCard: React.FC<{
       <div className="app-corner-badges">
         <div
           className="app-corner-badge"
-          style={{ backgroundColor: statusBadge.color, padding: '4px 6px' }}
+          style={{ backgroundColor: statusBadge.color, padding: 'var(--app-abstand-mini) var(--app-abstand-kompakt)' }}
           title={statusBadge.label}
         >
-          <IonIcon icon={statusBadge.icon} style={{ color: '#fff', fontSize: '0.85rem', display: 'block' }} />
+          <IonIcon icon={statusBadge.icon} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)', display: 'block' }} />
         </div>
       </div>
     )}
     <div className="app-list-item__row">
       <div className="app-list-item__main" style={{ alignItems: 'flex-start', width: '100%' }}>
         <div className="app-icon-circle app-icon-circle--challenges" style={{ flexShrink: 0 }}>
-          <IonIcon icon={MEDIA_ICON[submission.media_type] || documentTextOutline} />
+          <IonIcon icon={MEDIA_ICON[submission.media_type] || ICON_TEXTDOKUMENT} />
         </div>
-        <div className="app-list-item__content" style={{ minWidth: 0, flex: 1, paddingRight: statusBadge ? '34px' : 0 }}>
+        <div className="app-list-item__content" style={{ minWidth: 0, flex: 1, paddingRight: statusBadge ? 'var(--app-freiraum-aktion-xxs)' : 0 }}>
           <span className="app-list-item__title" style={{ margin: 0, display: 'block' }}>{authorLabel}</span>
-          <div className="app-list-item__subtitle" style={{ marginBottom: '4px' }}>
+          <div className="app-list-item__subtitle" style={{ marginBottom: 'var(--app-abstand-mini)' }}>
             {formatDateTime(submission.created_at)}
           </div>
 
           {submission.text_content && (
             <div
               style={{
-                fontSize: '0.9rem', color: '#3c3c43', lineHeight: 1.45,
-                whiteSpace: 'pre-wrap', marginTop: '4px'
+                fontSize: 'var(--app-text-basis)', color: 'var(--app-text-ios)', lineHeight: 1.45,
+                whiteSpace: 'pre-wrap', marginTop: 'var(--app-abstand-mini)'
               }}
             >
               {submission.text_content}
@@ -265,10 +265,10 @@ const SubmissionCard: React.FC<{
 
           {submission.moderation_status === 'hidden' && submission.moderation_note && (
             <div className="app-reason-box app-reason-box--danger">
-              <span className="app-reason-box__label" style={{ fontSize: '0.7rem' }}>
+              <span className="app-reason-box__label" style={{ fontSize: 'var(--app-text-meta)' }}>
                 Grund der Ablehnung
               </span>
-              <p style={{ margin: '2px 0 0 0', fontSize: '0.8rem', lineHeight: 1.4 }}>
+              <p style={{ margin: 'var(--app-abstand-winzig) 0 0 0', fontSize: 'var(--app-text-hinweis)', lineHeight: 1.4 }}>
                 {submission.moderation_note}
               </p>
             </div>
@@ -294,22 +294,18 @@ interface ChallengeDetailModalProps {
   onClose: () => void;
   /** Oeffnet das Einreich-Modal (wird von der Seite gesteuert). */
   onSubmit?: (challenge: KonfiChallenge) => void;
-  /** Wird gerufen, wenn sich etwas geändert hat. */
-  onChanged?: () => void;
 }
 
 interface ChallengeDetailContentProps {
   challenge: KonfiChallenge;
   onClose: () => void;
   onSubmit?: (challenge: KonfiChallenge) => void;
-  onChanged?: () => void;
 }
 
 const ChallengeDetailContent: React.FC<ChallengeDetailContentProps> = ({
   challenge,
   onClose,
-  onSubmit,
-  onChanged
+  onSubmit
 }) => {
   const { setError } = useApp();
   const [detail, setDetail] = useState<KonfiChallengeDetail | null>(null);
@@ -325,7 +321,7 @@ const ChallengeDetailContent: React.FC<ChallengeDetailContentProps> = ({
       // Die Galerie-Query liefert den Namen als display_name (bei anonymen
       // Beitraegen NULL), das UI liest konfi_name -> hier normalisieren, sonst
       // erscheint JEDER Galerie-Beitrag als "Anonym".
-      const gallery = (data?.gallery || []).map((row: any) => ({
+      const gallery = ((data?.gallery ?? []) as ChallengeGalerieZeile[]).map((row) => ({
         ...row,
         konfi_name: row.konfi_name ?? row.display_name ?? null
       }));
@@ -334,8 +330,8 @@ const ChallengeDetailContent: React.FC<ChallengeDetailContentProps> = ({
           ? { ...data.challenge, gallery, own_submissions: data.own_submissions || [] }
           : null
       );
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Fehler beim Laden der Challenge');
+    } catch (err) {
+      setError(fehlerText(err, 'Fehler beim Laden der Challenge'));
     } finally {
       setLoading(false);
     }
@@ -367,10 +363,6 @@ const ChallengeDetailContent: React.FC<ChallengeDetailContentProps> = ({
   const effektiverReiter: KonfiReiter = current.visibility === 'private' ? 'meins' : reiter;
   const sichtbareBeitraege = effektiverReiter === 'meins' ? ownSubmissions : gallery;
 
-  // Beendete Challenge ohne eigene Beitraege: der Abschnitt "Deine Beitraege"
-  // fällt komplett weg, direkt die Gruppen-Galerie folgt auf die Beschreibung.
-  const showOwnSection = isActive || ownSubmissions.length > 0;
-
   // Kurzform der Sichtbarkeit für den Kopf: EIN knapper Halbsatz neben der
   // Laufzeit, damit beim Mitmachen sofort klar ist, wer den Beitrag zu sehen
   // bekommt (User-Hinweis 10.08.). Dieselbe Angabe steht zusätzlich in der
@@ -397,13 +389,13 @@ const ChallengeDetailContent: React.FC<ChallengeDetailContentProps> = ({
           <IonTitle>Challenge</IonTitle>
           <IonButtons slot="start">
             <IonButton className="app-modal-close-btn" onClick={onClose} aria-label="Schließen">
-              <IonIcon icon={close} />
+              <IonIcon icon={ICON_SCHLIESSEN_GEFUELLT} />
             </IonButton>
           </IonButtons>
           {canSubmitMore && onSubmit && (
             <IonButtons slot="end">
               <IonButton onClick={() => onSubmit(current)} title="Beitrag einreichen" aria-label="Beitrag einreichen">
-                <IonIcon icon={addOutline} slot="icon-only" />
+                <IonIcon icon={ICON_HINZUFUEGEN} slot="icon-only" />
               </IonButton>
             </IonButtons>
           )}
@@ -444,43 +436,46 @@ const ChallengeDetailContent: React.FC<ChallengeDetailContentProps> = ({
         <IonList inset={true} className="app-segment-wrapper">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--challenges">
-              <IonIcon icon={documentTextOutline} />
+              <IonIcon icon={ICON_TEXTDOKUMENT} />
             </div>
             {/* Bei beendeten Challenges in der Vergangenheit formulieren. */}
             <IonLabel>{isActive ? 'Worum geht es?' : 'Worum ging es?'}</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: '14px' }}>
-              <div style={{ fontSize: '0.93rem', lineHeight: 1.5, color: '#3c3c43', whiteSpace: 'pre-wrap' }}>
+            <IonCardContent style={{ padding: 'var(--app-abstand-mittelweit)' }}>
+              <div style={{ fontSize: 'var(--app-text-basis)', lineHeight: 1.5, color: 'var(--app-text-ios)', whiteSpace: 'pre-wrap' }}>
                 {current.description}
               </div>
               <div
                 style={{
-                  display: 'flex', flexWrap: 'wrap', gap: '8px 14px',
-                  marginTop: '12px', fontSize: '0.8rem', color: '#8e8e93'
+                  display: 'flex', flexWrap: 'wrap', gap: 'var(--app-abstand-eng) var(--app-abstand-mittelweit)',
+                  marginTop: 'var(--app-abstand-mittel)', fontSize: 'var(--app-text-hinweis)', color: 'var(--app-text-system)'
                 }}
               >
-                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                  <IonIcon icon={timeOutline} className="app-icon-color--challenges" />
+                <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mini)' }}>
+                  <IonIcon icon={ICON_UHRZEIT} className="app-icon-color--challenges" />
                   {isActive ? formatRemaining(current.ends_at) : 'Beendet'}
                 </span>
                 {/* Urheber deutlich sichtbar in derselben unauffaelligen Meta-Zeile. */}
                 {author && (
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <IonIcon icon={personOutline} className="app-icon-color--challenges" />
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mini)' }}>
+                    <IonIcon icon={ICON_PERSON} className="app-icon-color--challenges" />
                     Gestellt von {author}
                   </span>
                 )}
-                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mini)' }}>
                   <IonIcon
-                    icon={current.visibility === 'private' ? lockClosedOutline : eyeOutline}
+                    // Durchgestrichenes Auge wie in der Leitungsansicht: Es geht
+                    // um Sichtbarkeit, nicht um eine Sperre -- und ICON_SICHTBAR
+                    // daneben ist ja auch ein Auge.
+                    icon={current.visibility === 'private' ? ICON_VERBORGEN : ICON_SICHTBAR}
                     className="app-icon-color--challenges"
                   />
                   {visibilityShort}
                 </span>
                 {moderationShort && (
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <IonIcon icon={checkmarkOutline} className="app-icon-color--challenges" />
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mini)' }}>
+                    <IonIcon icon={ICON_HAKEN} className="app-icon-color--challenges" />
                     {moderationShort}
                   </span>
                 )}
@@ -490,13 +485,13 @@ const ChallengeDetailContent: React.FC<ChallengeDetailContentProps> = ({
         </IonList>
 
         {loading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: '32px' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--app-abstand-extraweit)' }}>
             <IonSpinner name="crescent" />
           </div>
         ) : (
           <>
             {current.visibility !== 'private' && (
-              <div style={{ margin: '16px 16px 8px 16px' }}>
+              <div style={{ margin: 'var(--app-abstand-basis) var(--app-abstand-basis) var(--app-abstand-eng) var(--app-abstand-basis)' }}>
                 <IonSegment value={reiter} onIonChange={(e) => setReiter(e.detail.value as KonfiReiter)}>
                   <IonSegmentButton value="feed"><IonLabel>Feed</IonLabel></IonSegmentButton>
                   <IonSegmentButton value="meins"><IonLabel>Meins</IonLabel></IonSegmentButton>
@@ -507,7 +502,7 @@ const ChallengeDetailContent: React.FC<ChallengeDetailContentProps> = ({
             <IonList inset={true} className="app-segment-wrapper">
               <IonListHeader>
                 <div className="app-section-icon app-section-icon--challenges">
-                  <IonIcon icon={effektiverReiter === 'meins' ? personOutline : peopleOutline} />
+                  <IonIcon icon={effektiverReiter === 'meins' ? ICON_PERSON : ICON_GRUPPE} />
                 </div>
                 <IonLabel>
                   {effektiverReiter === 'meins'
@@ -516,18 +511,24 @@ const ChallengeDetailContent: React.FC<ChallengeDetailContentProps> = ({
                 </IonLabel>
               </IonListHeader>
               <IonCard className="app-card">
-                <IonCardContent style={{ padding: sichtbareBeitraege.length === 0 ? '16px' : '12px' }}>
+                <IonCardContent style={{ padding: sichtbareBeitraege.length === 0 ? 'var(--app-abstand-basis)' : 'var(--app-abstand-mittel)' }}>
                   {sichtbareBeitraege.length === 0 ? (
                     effektiverReiter === 'meins' ? (
                       <EmptyState
-                        icon={documentTextOutline}
+                        icon={ICON_TEXTDOKUMENT}
                         title="Noch kein Beitrag von dir"
-                        message="Tippe oben auf das Plus, um etwas einzureichen."
+                        // Bei beendeter Challenge gibt es das Plus nicht mehr
+                        // (canSubmitMore verlangt isActive) — der Hinweis
+                        // zeigte auf einen Knopf, der nicht existiert
+                        // 
+                        message={isActive
+                          ? 'Tippe oben auf das Plus, um etwas einzureichen.'
+                          : 'Diese Challenge ist beendet — du hattest nichts eingereicht.'}
                         iconColor="var(--app-color-challenges)"
                       />
                     ) : (
                       <EmptyState
-                        icon={peopleOutline}
+                        icon={ICON_GRUPPE}
                         title="Noch keine geteilten Beiträge"
                         message={isActive
                           ? 'Sobald jemand aus deiner Gruppe etwas veröffentlicht, findest du es hier. Vielleicht machst du ja den Anfang.'
@@ -568,8 +569,7 @@ const ChallengeDetailContent: React.FC<ChallengeDetailContentProps> = ({
 const ChallengeDetailModal: React.FC<ChallengeDetailModalProps> = ({
   challenge,
   onClose,
-  onSubmit,
-  onChanged
+  onSubmit
 }) => {
   if (!challenge) {
     return (
@@ -579,13 +579,13 @@ const ChallengeDetailModal: React.FC<ChallengeDetailModalProps> = ({
             <IonTitle>Challenge</IonTitle>
             <IonButtons slot="start">
               <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose}>
-                <IonIcon icon={close} />
+                <IonIcon icon={ICON_SCHLIESSEN_GEFUELLT} />
               </IonButton>
             </IonButtons>
           </IonToolbar>
         </IonHeader>
         <IonContent className="app-gradient-background">
-          <div style={{ display: 'flex', justifyContent: 'center', padding: '40px' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--app-abstand-riesig)' }}>
             <IonSpinner name="crescent" />
           </div>
         </IonContent>
@@ -599,7 +599,6 @@ const ChallengeDetailModal: React.FC<ChallengeDetailModalProps> = ({
       challenge={challenge}
       onClose={onClose}
       onSubmit={onSubmit}
-      onChanged={onChanged}
     />
   );
 };

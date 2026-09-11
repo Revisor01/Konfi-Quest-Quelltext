@@ -1,39 +1,27 @@
 import React, { useState, useRef } from 'react';
+import { IonIcon, IonItem, IonLabel, IonList, IonListHeader, IonItemSliding, IonItemOptions, IonItemOption, IonInput, IonItemGroup, IonSelect, IonSelectOption, IonRefresher, IonRefresherContent } from '@ionic/react';
 import {
-  IonCard,
-  IonCardContent,
-  IonIcon,
-  IonItem,
-  IonLabel,
-  IonList,
-  IonListHeader,
-  IonItemSliding,
-  IonItemOptions,
-  IonItemOption,
-  IonInput,
-  IonItemGroup,
-  IonSelect,
-  IonSelectOption,
-  IonRefresher,
-  IonRefresherContent
-} from '@ionic/react';
-import {
-  trash,
-  business,
-  businessOutline,
-  people,
-  personOutline,
-  createOutline,
-  checkmarkCircle,
-  closeCircle,
-  filterOutline,
-  search,
-  timeOutline,
-  flask
-} from 'ionicons/icons';
+  ICON_ABSAGE,
+  ICON_BEARBEITEN,
+  ICON_EXPERIMENT,
+  ICON_FILTER,
+  ICON_GRUPPE_GEFUELLT,
+  ICON_LOESCHEN_GEFUELLT,
+  ICON_ORGANISATION,
+  ICON_ORGANISATION_GEFUELLT,
+  ICON_PERSON,
+  ICON_SUCHE_GEFUELLT,
+  ICON_UHRZEIT,
+  ICON_ZUSAGE_GEFUELLT,
+} from '../shared/icons';
 import { filterBySearchTerm } from '../../utils/helpers';
 import { SectionHeader, ListSection } from '../shared';
 import { triggerPullHaptic } from '../../utils/haptics';
+import { tageBis } from '../shared/eventFormatting';
+
+// Ionic 9 gibt bei ref an IonItemSliding die React-Komponente zurueck, nicht
+// mehr das DOM-Element. Gebraucht wird hier nur close() — das haben beide.
+type SlidingRef = { close: () => Promise<void> };
 
 interface Organization {
   id: number;
@@ -59,7 +47,6 @@ interface Organization {
 interface OrganizationViewProps {
   organizations: Organization[];
   onUpdate: () => void;
-  onAddOrganizationClick: () => void;
   onSelectOrganization: (organization: Organization) => void;
   onDeleteOrganization: (organization: Organization) => void;
 }
@@ -67,11 +54,10 @@ interface OrganizationViewProps {
 const OrganizationView: React.FC<OrganizationViewProps> = ({
   organizations,
   onUpdate,
-  onAddOrganizationClick,
   onSelectOrganization,
   onDeleteOrganization
 }) => {
-  const slidingRefs = useRef<Map<number, HTMLIonItemSlidingElement>>(new Map());
+  const slidingRefs = useRef<Map<number, SlidingRef>>(new Map());
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedFilter, setSelectedFilter] = useState('alle');
 
@@ -93,7 +79,6 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
     return result;
   })();
 
-  const getActiveOrganizations = () => organizations.filter(org => org.is_active);
   const getTotalKonfis = () => organizations.reduce((sum, org) => sum + org.konfi_count, 0);
   const getTotalUsers = () => organizations.reduce((sum, org) => sum + org.user_count, 0);
 
@@ -124,7 +109,7 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
       <SectionHeader
         title="Organisationen"
         subtitle="Gemeinden verwalten"
-        icon={business}
+        icon={ICON_ORGANISATION_GEFUELLT}
         preset="organizations"
         stats={[
           { value: organizations.length, label: 'Gesamt' },
@@ -134,17 +119,17 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
       />
 
       {/* Suche & Filter — identisches Muster wie KonfisView */}
-      <IonList inset={true} style={{ margin: '16px' }}>
+      <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
         <IonListHeader>
           <div className="app-section-icon app-section-icon--organizations">
-            <IonIcon icon={filterOutline} />
+            <IonIcon icon={ICON_FILTER} />
           </div>
           <IonLabel>Suche & Filter</IonLabel>
         </IonListHeader>
         <IonItemGroup>
           {/* Suchfeld */}
           <IonItem>
-            <IonIcon icon={search} slot="start" style={{ color: '#8e8e93', fontSize: '1rem' }} />
+            <IonIcon icon={ICON_SUCHE_GEFUELLT} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
             <IonInput
               value={searchTerm}
               onIonInput={(e) => setSearchTerm(e.detail.value!)}
@@ -153,7 +138,7 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
           </IonItem>
           {/* Status-Filter */}
           <IonItem>
-            <IonIcon icon={filterOutline} slot="start" style={{ color: '#8e8e93', fontSize: '1rem' }} />
+            <IonIcon icon={ICON_FILTER} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
             <IonSelect
               value={selectedFilter}
               onIonChange={(e) => setSelectedFilter(e.detail.value)}
@@ -171,20 +156,20 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
 
       {/* Organisationen-Liste */}
       <ListSection
-        icon={businessOutline}
+        icon={ICON_ORGANISATION}
         title="Organisationen"
         count={filteredAndSortedOrganizations.length}
         iconColorClass="organizations"
         isEmpty={filteredAndSortedOrganizations.length === 0}
-        emptyIcon={businessOutline}
+        emptyIcon={ICON_ORGANISATION}
         emptyTitle="Keine Organisationen gefunden"
         emptyMessage="Noch keine Gemeinden angelegt"
-        emptyIconColor="#667eea"
+        emptyIconColor="var(--app-color-users)"
       >
         {filteredAndSortedOrganizations.map((organization, index, arr) => (
               <IonItemSliding
                 key={organization.id}
-                style={{ marginBottom: index < arr.length - 1 ? '8px' : '0' }}
+                style={{ marginBottom: index < arr.length - 1 ? 'var(--app-abstand-eng)' : '0' }}
                 ref={(ref) => {
                   if (ref) slidingRefs.current.set(organization.id, ref);
                 }}
@@ -218,12 +203,12 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
                           <div
                             className="app-corner-badge"
                             style={{
-                              backgroundColor: 'var(--app-color-warning, #f59e0b)',
-                              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px'
+                              backgroundColor: 'var(--app-color-warning)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)'
                             }}
                             title="Testversion"
                           >
-                            <IonIcon icon={flask} style={{ color: '#fff', fontSize: '0.85rem' }} />
+                            <IonIcon icon={ICON_EXPERIMENT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                           </div>
                           <div className="app-corner-badges__separator" />
                         </>
@@ -231,18 +216,18 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
                       <div
                         className="app-corner-badge"
                         style={{
-                          backgroundColor: organization.is_active ? 'var(--app-color-users)' : '#6b7280',
-                          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px'
+                          backgroundColor: organization.is_active ? 'var(--app-color-users)' : 'var(--app-color-neutral)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)'
                         }}
                         title={organization.is_active ? 'Aktiv' : 'Inaktiv'}
                       >
-                        <IonIcon icon={organization.is_active ? checkmarkCircle : closeCircle} style={{ color: '#fff', fontSize: '0.85rem' }} />
+                        <IonIcon icon={organization.is_active ? ICON_ZUSAGE_GEFUELLT : ICON_ABSAGE} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                       </div>
                     </div>
 
                     <div className="app-list-item__row">
                       <div className="app-list-item__main">
-                        <div className="app-icon-circle app-icon-circle--lg app-icon-circle--organizations" style={{ color: 'white', fontWeight: '600' }}>
+                        <div className="app-icon-circle app-icon-circle--lg app-icon-circle--organizations" style={{ color: 'white', fontWeight: 'var(--app-schrift-halbfett)' }}>
                           {getInitials(organization.display_name)}
                         </div>
                         <div className="app-list-item__content">
@@ -251,25 +236,25 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
                           </div>
                           <div className="app-list-item__meta">
                             <span className="app-list-item__meta-item">
-                              <IonIcon icon={people} style={{ color: 'var(--app-color-konfis)' }} />
+                              <IonIcon icon={ICON_GRUPPE_GEFUELLT} style={{ color: 'var(--app-color-konfis)' }} />
                               {organization.max_konfis != null
                                 ? `${organization.konfi_count} / ${organization.max_konfis} Konfis`
                                 : `${organization.konfi_count} Konfis`}
                             </span>
                             <span className="app-list-item__meta-item">
-                              <IonIcon icon={personOutline} style={{ color: 'var(--app-color-teamer)' }} />
+                              <IonIcon icon={ICON_PERSON} style={{ color: 'var(--app-color-teamer)' }} />
                               {organization.user_count} Team
                             </span>
                             <span className="app-list-item__meta-item">
                               {(() => {
                                 if (!organization.trial_ends_at) {
-                                  return <><IonIcon icon={timeOutline} style={{ color: '#667eea' }} />unbegrenzt</>;
+                                  return <><IonIcon icon={ICON_UHRZEIT} style={{ color: 'var(--app-color-users)' }} />unbegrenzt</>;
                                 }
                                 const end = new Date(organization.trial_ends_at);
-                                const days = Math.ceil((end.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                                const days = tageBis(end); // Kalendertage, siehe eventFormatting.ts
                                 return (
                                   <>
-                                    <IonIcon icon={timeOutline} style={{ color: days < 0 ? '#dc2626' : '#667eea' }} />
+                                    <IonIcon icon={ICON_UHRZEIT} style={{ color: days < 0 ? 'var(--app-color-events)' : 'var(--app-color-users)' }} />
                                     {end.toLocaleDateString('de-DE')} {days >= 0 ? `(${days} Tag${days === 1 ? '' : 'e'})` : '(abgelaufen)'}
                                   </>
                                 );
@@ -292,7 +277,7 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
                     aria-label="Organisation bearbeiten"
                   >
                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--organizations">
-                      <IonIcon icon={createOutline} />
+                      <IonIcon icon={ICON_BEARBEITEN} />
                     </div>
                   </IonItemOption>
                   <IonItemOption
@@ -304,7 +289,7 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
                     aria-label="Organisation löschen"
                   >
                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
-                      <IonIcon icon={trash} />
+                      <IonIcon icon={ICON_LOESCHEN_GEFUELLT} />
                     </div>
                   </IonItemOption>
                 </IonItemOptions>

@@ -1,5 +1,16 @@
+import {
+  ICON_ABSAGE,
+  ICON_SICHTBAR,
+  ICON_SPERRE,
+  ICON_VERBORGEN,
+  ICON_WARNHINWEIS_GEFUELLT,
+  ICON_ZURUECK,
+  ICON_ZUSAGE_GEFUELLT,
+} from '../shared/icons';
+import { fehlerText } from '../../utils/fehler';
 import React, { useState, useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useAppLocation } from '../../navigation/useAppLocation';
+
 import {
   IonPage,
   IonContent,
@@ -14,27 +25,26 @@ import {
   useIonRouter
 } from '@ionic/react';
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
-import { lockClosedOutline, eye, eyeOff, checkmarkCircle, alertCircle, closeCircle, arrowBack } from 'ionicons/icons';
 import api from '../../services/api';
 
 const PasswordCheckItem: React.FC<{ label: string; checked: boolean }> = ({ label, checked }) => (
   <div style={{
     display: 'flex',
     alignItems: 'center',
-    gap: '6px',
-    color: checked ? '#67e8f9' : 'rgba(255, 255, 255, 0.35)'
+    gap: 'var(--app-abstand-kompakt)',
+    color: checked ? 'var(--app-auth-akzent)' : 'rgba(255, 255, 255, 0.35)'
   }}>
     <IonIcon
-      icon={checked ? checkmarkCircle : closeCircle}
-      style={{ fontSize: '0.9rem' }}
+      icon={checked ? ICON_ZUSAGE_GEFUELLT : ICON_ABSAGE}
+      style={{ fontSize: 'var(--app-text-basis)' }}
     />
-    <span style={{ fontSize: '0.75rem' }}>{label}</span>
+    <span style={{ fontSize: 'var(--app-text-klein)' }}>{label}</span>
   </div>
 );
 
 const ResetPasswordPage: React.FC = () => {
   const router = useIonRouter();
-  const location = useLocation();
+  const location = useAppLocation();
   const [token, setToken] = useState<string | null>(null);
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -67,7 +77,7 @@ const ResetPasswordPage: React.FC = () => {
     hasUppercase: /[A-Z]/.test(password),
     hasLowercase: /[a-z]/.test(password),
     hasNumber: /[0-9]/.test(password),
-    hasSpecial: /[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/~`]/.test(password)
+    hasSpecial: /[!@#$%^&*(),.?":{}|<>_\-+=[\]\\/~`]/.test(password)
   };
 
   const isPasswordValid = Object.values(passwordChecks).every(Boolean);
@@ -98,8 +108,8 @@ const ResetPasswordPage: React.FC = () => {
         newPassword: password
       });
       setSuccess(true);
-    } catch (err: any) {
-      const message = err.response?.data?.error || 'Fehler beim Zurücksetzen des Passworts';
+    } catch (err) {
+      const message = fehlerText(err, 'Fehler beim Zurücksetzen des Passworts');
       if (message.includes('abgelaufen') || message.includes('expired') || message.includes('ungültig')) {
         setError('Dieser Link ist abgelaufen oder ungültig. Bitte fordere einen neuen an.');
       } else {
@@ -126,12 +136,12 @@ const ResetPasswordPage: React.FC = () => {
         <div className="app-auth-container">
 
           {/* Header */}
-          <div className="app-auth-hero" style={{ marginTop: '60px' }}>
+          <div className="app-auth-hero" style={{ marginTop: 'var(--app-freiraum-kopf-m)' }}>
             <div className="app-auth-hero__cosmic-circle">
-              <IonIcon icon={lockClosedOutline} className="app-auth-hero__cosmic-circle-icon" />
+              <IonIcon icon={ICON_SPERRE} className="app-auth-hero__cosmic-circle-icon" />
             </div>
 
-            <h1 className="app-auth-hero__title--cosmic" style={{ fontSize: '2.2rem', letterSpacing: '4px' }}>
+            <h1 className="app-auth-hero__title--cosmic" style={{ fontSize: 'var(--app-anzeige-zahl)', letterSpacing: '4px' }}>
               NEUES<br />PASSWORT
             </h1>
 
@@ -152,24 +162,24 @@ const ResetPasswordPage: React.FC = () => {
                 // Erfolgsmeldung
                 <div style={{ textAlign: 'center' }}>
                   <div className="app-auth-success-circle--small">
-                    <IonIcon icon={checkmarkCircle} className="app-auth-success-circle__icon--small" />
+                    <IonIcon icon={ICON_ZUSAGE_GEFUELLT} className="app-auth-success-circle__icon--small" />
                   </div>
 
                   <h2 style={{
-                    fontFamily: "'Bebas Neue', sans-serif",
-                    fontSize: '1.6rem',
-                    fontWeight: 400,
+                    fontFamily: 'var(--app-schriftart-marke)',
+                    fontSize: 'var(--app-text-ueberschrift-gross)',
+                    fontWeight: 'var(--app-schrift-normal)',
                     letterSpacing: '3px',
-                    margin: '0 0 12px 0',
-                    color: '#5b21b6'
+                    margin: '0 0 var(--app-abstand-mittel) 0',
+                    color: 'var(--app-color-konfis)'
                   }}>
                     PASSWORT GEÄNDERT
                   </h2>
 
                   <p style={{
                     color: 'rgba(0, 0, 0, 0.6)',
-                    fontSize: '0.9rem',
-                    margin: '0 0 24px 0',
+                    fontSize: 'var(--app-text-basis)',
+                    margin: '0 0 var(--app-abstand-weit) 0',
                     lineHeight: '1.5'
                   }}>
                     Dein Passwort wurde erfolgreich geändert. Du kannst dich jetzt mit deinem neuen Passwort anmelden.
@@ -189,32 +199,32 @@ const ResetPasswordPage: React.FC = () => {
                   <div style={{
                     width: '72px',
                     height: '72px',
-                    borderRadius: '22px',
-                    background: 'linear-gradient(135deg, #ec4899 0%, #be185d 100%)',
+                    borderRadius: 'var(--app-radius-modal)',
+                    background: 'var(--app-gradient-auth-fehler)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    margin: '0 auto 20px auto',
+                    margin: '0 auto var(--app-abstand-gross) auto',
                     boxShadow: '0 8px 32px rgba(236, 72, 153, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.1) inset'
                   }}>
-                    <IonIcon icon={alertCircle} style={{ fontSize: '2rem', color: 'white' }} />
+                    <IonIcon icon={ICON_WARNHINWEIS_GEFUELLT} style={{ fontSize: 'var(--app-anzeige-zahl)', color: 'white' }} />
                   </div>
 
                   <h2 style={{
-                    fontFamily: "'Bebas Neue', sans-serif",
-                    fontSize: '1.6rem',
-                    fontWeight: 400,
+                    fontFamily: 'var(--app-schriftart-marke)',
+                    fontSize: 'var(--app-text-ueberschrift-gross)',
+                    fontWeight: 'var(--app-schrift-normal)',
                     letterSpacing: '3px',
-                    margin: '0 0 12px 0',
-                    color: '#5b21b6'
+                    margin: '0 0 var(--app-abstand-mittel) 0',
+                    color: 'var(--app-color-konfis)'
                   }}>
                     UNGÜLTIGER LINK
                   </h2>
 
                   <p style={{
                     color: 'rgba(0, 0, 0, 0.6)',
-                    fontSize: '0.9rem',
-                    margin: '0 0 24px 0',
+                    fontSize: 'var(--app-text-basis)',
+                    margin: '0 0 var(--app-abstand-weit) 0',
                     lineHeight: '1.5'
                   }}>
                     Dieser Link ist ungültig oder abgelaufen. Bitte fordere einen neuen Reset-Link an.
@@ -232,7 +242,7 @@ const ResetPasswordPage: React.FC = () => {
                 // Formular
                 <>
                   <IonItem lines="none" className="app-auth-input app-auth-input--compact">
-                    <IonIcon icon={lockClosedOutline} slot="start" style={{ color: '#67e8f9' }} />
+                    <IonIcon icon={ICON_SPERRE} slot="start" style={{ color: 'var(--app-auth-akzent)' }} />
                     <IonLabel position="stacked" className="app-auth-input__label">
                       Neues Passwort
                     </IonLabel>
@@ -243,11 +253,11 @@ const ResetPasswordPage: React.FC = () => {
                       placeholder="Neues Passwort"
                       className="app-auth-input__value"
                       autocapitalize="none"
-                      autocorrect="off"
+                      autocorrect={false}
                       spellcheck={false}
                     />
                     <IonIcon
-                      icon={showPassword ? eyeOff : eye}
+                      icon={showPassword ? ICON_VERBORGEN : ICON_SICHTBAR}
                       slot="end"
                       onClick={() => setShowPassword(!showPassword)}
                       className="app-auth-input__toggle"
@@ -268,7 +278,7 @@ const ResetPasswordPage: React.FC = () => {
                   )}
 
                   <IonItem lines="none" className="app-auth-input">
-                    <IonIcon icon={lockClosedOutline} slot="start" style={{ color: '#67e8f9' }} />
+                    <IonIcon icon={ICON_SPERRE} slot="start" style={{ color: 'var(--app-auth-akzent)' }} />
                     <IonLabel position="stacked" className="app-auth-input__label">
                       Passwort bestätigen
                     </IonLabel>
@@ -279,11 +289,11 @@ const ResetPasswordPage: React.FC = () => {
                       placeholder="Passwort wiederholen"
                       className="app-auth-input__value"
                       autocapitalize="none"
-                      autocorrect="off"
+                      autocorrect={false}
                       spellcheck={false}
                     />
                     <IonIcon
-                      icon={showConfirmPassword ? eyeOff : eye}
+                      icon={showConfirmPassword ? ICON_VERBORGEN : ICON_SICHTBAR}
                       slot="end"
                       onClick={() => setShowConfirmPassword(!showConfirmPassword)}
                       className="app-auth-input__toggle"
@@ -293,8 +303,8 @@ const ResetPasswordPage: React.FC = () => {
                   {/* Passwörter stimmen nicht überein */}
                   {confirmPassword.length > 0 && !passwordsMatch && (
                     <div className="app-auth-password-match-error">
-                      <IonIcon icon={alertCircle} style={{ fontSize: '1rem', color: '#f9a8d4' }} />
-                      <span style={{ fontSize: '0.8rem', color: '#fce7f3' }}>
+                      <IonIcon icon={ICON_WARNHINWEIS_GEFUELLT} style={{ fontSize: 'var(--app-text-standard)', color: 'var(--app-auth-rosa)' }} />
+                      <span style={{ fontSize: 'var(--app-text-hinweis)', color: 'var(--app-auth-rosa-hell)' }}>
                         Die Passwörter stimmen nicht überein
                       </span>
                     </div>
@@ -302,7 +312,7 @@ const ResetPasswordPage: React.FC = () => {
 
                   {error && (
                     <div className="app-auth-error">
-                      <IonIcon icon={alertCircle} className="app-auth-error__icon" />
+                      <IonIcon icon={ICON_WARNHINWEIS_GEFUELLT} className="app-auth-error__icon" />
                       <span className="app-auth-error__text">{error}</span>
                     </div>
                   )}
@@ -322,7 +332,7 @@ const ResetPasswordPage: React.FC = () => {
 
                   <div className="app-auth-footer">
                     <span onClick={() => router.push('/login')} className="app-auth-link">
-                      <IonIcon icon={arrowBack} />
+                      <IonIcon icon={ICON_ZURUECK} />
                       Zurück zum Login
                     </span>
                   </div>

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useRef, useEffect, useLayoutEffect, useCallback } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useAppLocation } from '../navigation/useAppLocation';
+
 import { modalController } from '@ionic/core';
 
 interface ModalContextType {
@@ -13,14 +14,14 @@ const ModalContext = createContext<ModalContextType | undefined>(undefined);
 
 export const ModalProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [tabPresentingElements, setTabPresentingElements] = useState<Map<string, HTMLElement>>(new Map());
-  const location = useLocation();
+  const location = useAppLocation();
 
   // Modal cleanup function
   const cleanupModals = async () => {
     try {
       // Dismiss all active modals
       await modalController.dismiss();
-    } catch (error) {
+    } catch {
       // Cleanup warning ignored - expected when no modals active
     }
   };

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { Capacitor, registerPlugin } from '@capacitor/core';
+import type { PluginListenerHandle } from '@capacitor/core';
 import { Device } from '@capacitor/device';
 import api from '../services/api';
 import { getUser, setUser as persistUser, getDeviceId, setDeviceId, getPushTokenTimestamp, setPushTokenTimestamp, getActiveOrgId, setActiveOrgId, setToken, getToken } from '../services/tokenStore';
@@ -7,7 +8,7 @@ import { networkMonitor } from '../services/networkMonitor';
 import { ensureSocketConnected, reconnectWithToken } from '../services/websocket';
 import { App } from '@capacitor/app';
 import { PushNotifications } from '@capacitor/push-notifications';
-import { removeDeliveredById, removeAllDelivered } from '../services/notifications';
+import { removeDeliveredById, removeAllDelivered, benachrichtigungskanaeleAnlegen } from '../services/notifications';
 import { writeQueue } from '../services/writeQueue';
 import { offlineCache } from '../services/offlineCache';
 import { logout as performLogout } from '../services/auth';
@@ -64,10 +65,20 @@ const sendTokenToServer = async (token: string, retryCount = 0) => {
     }
   }
 
-  // Gespeicherte Device ID nutzen (wird bei App-Start einmalig persistiert)
+  // Gespeicherte Device ID nutzen (wird bei App-Start einmalig persistiert).
+  //
+  // Deshalb wird der Token jetzt wie im POST-Fehlerpfad gemerkt UND kurz
+  // darauf erneut versucht. `sendTokenToServer` faengt Doppelsendungen selbst
+  // ab, ein Versuch zu viel schadet also nicht.
   const deviceId = getDeviceId();
   if (!deviceId) {
-    console.warn('Keine Device ID verfügbar - Token-Send wird übersprungen');
+    pendingFcmToken = token;
+    const wartezeiten = [500, 2000, 5000];
+    if (retryCount < wartezeiten.length) {
+      setTimeout(() => sendTokenToServer(token, retryCount + 1), wartezeiten[retryCount]);
+    } else {
+      console.warn('Keine Device ID verfügbar - Token bleibt fuer den naechsten Anlauf gemerkt');
+    }
     return;
   }
 
@@ -107,7 +118,6 @@ export interface UserOrganization {
 
 interface AppContextType {
   user: BaseUser | null;
-  loading: boolean;
   error: string;
   success: string;
   isOnline: boolean;
@@ -132,7 +142,6 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<BaseUser | null>(getUser());
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [isOnline, setIsOnline] = useState<boolean>(true);
@@ -458,6 +467,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     pushRegistrationInProgress = true;
 
     try {
+      // Kanaele VOR dem Registrieren anlegen: sonst kann die erste Mitteilung
+      // eintreffen, bevor es den Kanal gibt — sie landet dann im Notfallkanal
+      // "Sonstiges" und bleibt dort, bis sie weggewischt wird. Auf iOS ein
+      // No-op (siehe services/notifications.ts).
+      await benachrichtigungskanaeleAnlegen();
+
       // Check current permission status
       const permStatus = await PushNotifications.checkPermissions();
 
@@ -567,8 +582,9 @@ useEffect(() => {
     return;
   }
 
-  const handleNativeFCMToken = (event: any) => {
-    const token = event.detail;
+  // Eigenes Fenster-Ereignis der nativen Bruecke; der Token steht in detail.
+  const handleNativeFCMToken = (event: Event) => {
+    const token = (event as CustomEvent<string>).detail;
 
     if (token && token.length > 100) {
       // ANTI-SPAM für native Events verwenden
@@ -628,10 +644,32 @@ useEffect(() => {
         if (Capacitor.isNativePlatform()) {
           const lastTokenRefresh = getPushTokenTimestamp();
           const twelveHours = 12 * 60 * 60 * 1000;
-          if (now - lastTokenRefresh > twelveHours) {
+          // ANDROID BRAUCHT DAS BEI JEDER AKTIVIERUNG:
+          // Auf iOS reicht AppDelegate.applicationDidBecomeActive den Token
+          // jedes Mal von sich aus an die Oberflaeche nach. Android hat kein
+          // solches Netz — MainActivity ist eine leere Klasse, und das
+          // 'registration'-Ereignis feuert pro Installation praktisch nur
+          // EINMAL, weil FCM bei unveraenderter Installation immer denselben
+          // Token liefert. Verpuffte dieser eine Token, gab es keinen zweiten
+          // Anlauf: kein Push mehr, dauerhaft, ohne Fehler irgendwo.
+          //
+          // PushNotifications.register() holt auf Android den Token frisch bei
+          // Firebase und feuert 'registration' erneut (siehe register() im
+          // Push-Plugin). Deshalb hier ohne Zeitfenster — der Aufruf ist
+          // billig, und sendTokenToServer faengt ueberfluessige POSTs selbst ab.
+          //
+          // Gemessen vor der Korrektur: 8 Android-Token bei Konfis, 0 bei
+          // Teamer:innen und Admins ausser einem Testkonto; 29 aktive
+          // Nutzer:innen ganz ohne Token.
+          const istAndroid = Capacitor.getPlatform() === 'android';
+          if (istAndroid || now - lastTokenRefresh > twelveHours) {
             try {
+              // NUR registrieren. Den Zeitstempel setzt sendTokenToServer nach
+              // einem ERFOLGREICHEN POST — hier stand er frueher direkt
+              // dahinter und belegte damit bloss, dass registriert wurde, nicht
+              // dass der Token ankam. Ein Token, der es nie zum Server schaffte,
+              // sperrte so den naechsten Anlauf fuer zwoelf Stunden.
               await PushNotifications.register();
-              await setPushTokenTimestamp(now);
             } catch (err) {
               console.warn('Token refresh failed:', err);
             }
@@ -640,7 +678,7 @@ useEffect(() => {
       }
     };
 
-    let stateChangeListener: any = null;
+    let stateChangeListener: PluginListenerHandle | null = null;
 
     // Setup single listener for app state changes
     const setupListener = async () => {
@@ -799,7 +837,6 @@ useEffect(() => {
 
   const value: AppContextType = {
     user,
-    loading,
     error,
     success,
     isOnline,

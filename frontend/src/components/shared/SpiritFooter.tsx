@@ -5,9 +5,9 @@ const SpiritFooter: React.FC = () => {
     <div
       style={{
         textAlign: 'center',
-        padding: '20px 16px',
-        color: 'var(--ion-color-medium, #8e8e93)',
-        fontSize: '0.8rem',
+        padding: 'var(--app-abstand-gross) var(--app-abstand-basis)',
+        color: 'var(--ion-color-medium)',
+        fontSize: 'var(--app-text-hinweis)',
         lineHeight: 1.5
       }}
     >
@@ -15,7 +15,7 @@ const SpiritFooter: React.FC = () => {
         style={{
           display: 'inline-flex',
           alignItems: 'center',
-          gap: '5px',
+          gap: 'var(--app-abstand-mini)',
           flexWrap: 'wrap',
           justifyContent: 'center'
         }}
@@ -28,7 +28,7 @@ const SpiritFooter: React.FC = () => {
         />
         <span>in Hennstedt</span>
       </div>
-      <div style={{ marginTop: '3px', fontStyle: 'italic', opacity: 0.8 }}>
+      <div style={{ marginTop: 'var(--app-abstand-mini)', fontStyle: 'italic', opacity: 0.8 }}>
         Friede. Schalom. Salam.
       </div>
     </div>

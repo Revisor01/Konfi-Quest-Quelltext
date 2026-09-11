@@ -1,3 +1,4 @@
+import { fehlerStatus, fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect } from 'react';
 import {
   IonPage,
@@ -23,13 +24,13 @@ import {
   useIonToast
 } from '@ionic/react';
 import {
-  closeOutline,
-  checkmarkOutline,
-  checkmark,
-  bookOutline,
-  createOutline,
-  cloudOfflineOutline
-} from 'ionicons/icons';
+  ICON_BEARBEITEN,
+  ICON_BUCH,
+  ICON_HAKEN,
+  ICON_HAKEN_GEFUELLT,
+  ICON_OFFLINE,
+  ICON_SCHLIESSEN,
+} from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import api from '../../../services/api';
@@ -154,12 +155,12 @@ const KonfispruchSelectModal: React.FC<KonfispruchSelectModalProps> = ({ onClose
           });
           presentToast({ message: 'Dein Konfispruch wurde gespeichert', duration: 2000, color: 'success', position: 'top' });
           onSuccess();
-        } catch (err: any) {
-          if (err.response?.status === 404) {
+        } catch (err) {
+          if (fehlerStatus(err) === 404) {
             setSelectedSpruchId(null);
             showError('Der gewählte Spruch ist nicht mehr verfügbar. Bitte wähle einen anderen.');
           } else {
-            showError(err.response?.data?.error || 'Der Konfispruch konnte nicht gespeichert werden');
+            showError(fehlerText(err, 'Der Konfispruch konnte nicht gespeichert werden'));
           }
         }
       });
@@ -182,8 +183,8 @@ const KonfispruchSelectModal: React.FC<KonfispruchSelectModalProps> = ({ onClose
           });
           presentToast({ message: 'Dein Konfispruch wurde gespeichert', duration: 2000, color: 'success', position: 'top' });
           onSuccess();
-        } catch (err: any) {
-          showError(err.response?.data?.error || 'Der Konfispruch konnte nicht gespeichert werden');
+        } catch (err) {
+          showError(fehlerText(err, 'Der Konfispruch konnte nicht gespeichert werden'));
         }
       });
     }
@@ -196,7 +197,7 @@ const KonfispruchSelectModal: React.FC<KonfispruchSelectModalProps> = ({ onClose
           <IonTitle>Dein Konfispruch</IonTitle>
           <IonButtons slot="start">
             <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose} disabled={isSubmitting}>
-              <IonIcon icon={closeOutline} />
+              <IonIcon icon={ICON_SCHLIESSEN} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
@@ -206,11 +207,11 @@ const KonfispruchSelectModal: React.FC<KonfispruchSelectModalProps> = ({ onClose
               disabled={isSubmitting || !isOnline}
             >
               {!isOnline ? (
-                <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</>
+                <><IonIcon icon={ICON_OFFLINE} /> Du bist offline</>
               ) : isSubmitting ? (
                 <IonSpinner name="crescent" />
               ) : (
-                <IonIcon icon={checkmarkOutline} />
+                <IonIcon icon={ICON_HAKEN} />
               )}
             </IonButton>
           </IonButtons>
@@ -250,17 +251,17 @@ const KonfispruchSelectModal: React.FC<KonfispruchSelectModalProps> = ({ onClose
             {/* Spruchliste — gleiches Muster wie die Bibelübersetzungs-Liste:
                 Auswahl = lila Strich links + matt-lila Hintergrund + Häkchen-Corner-Badge,
                 kein Icon pro Listenelement, kein Inline-Häkchen. */}
-            <IonList inset={true} style={{ margin: '16px' }}>
+            <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
               <IonListHeader>
                 <div className="app-section-icon app-section-icon--purple">
-                  <IonIcon icon={bookOutline} />
+                  <IonIcon icon={ICON_BUCH} />
                 </div>
                 <IonLabel>Spruch wählen</IonLabel>
               </IonListHeader>
               <IonCard className="app-card">
-                <IonCardContent style={{ padding: loading || loadError || sprueche.length === 0 ? '16px' : '12px' }}>
+                <IonCardContent style={{ padding: loading || loadError || sprueche.length === 0 ? 'var(--app-abstand-basis)' : 'var(--app-abstand-mittel)' }}>
                   {loading ? (
-                    <div style={{ display: 'flex', justifyContent: 'center', padding: '24px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--app-abstand-weit)' }}>
                       <IonSpinner name="crescent" />
                     </div>
                   ) : loadError ? (
@@ -287,24 +288,24 @@ const KonfispruchSelectModal: React.FC<KonfispruchSelectModalProps> = ({ onClose
                               cursor: 'pointer',
                               position: 'relative',
                               overflow: 'hidden',
-                              background: isSelected ? 'rgba(91, 33, 182, 0.08)' : undefined
+                              background: isSelected ? 'rgba(var(--app-color-konfis-rgb), 0.08)' : undefined
                             }}
                           >
                             {isSelected && (
                               <div className="app-corner-badges">
                                 <div
                                   className="app-corner-badge"
-                                  style={{ backgroundColor: '#5b21b6', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '4px 8px' }}
+                                  style={{ backgroundColor: 'var(--app-color-konfis)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
                                   title="Ausgewählt"
                                 >
-                                  <IonIcon icon={checkmark} style={{ color: '#fff', fontSize: '0.85rem' }} />
+                                  <IonIcon icon={ICON_HAKEN_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                                 </div>
                               </div>
                             )}
                             <div className="app-list-item__row">
                               <div className="app-list-item__main">
                                 <div className="app-list-item__content">
-                                  <div className="app-list-item__title" style={{ paddingRight: isSelected ? '40px' : '0' }}>{spruch.reference}</div>
+                                  <div className="app-list-item__title" style={{ paddingRight: isSelected ? 'var(--app-abstand-riesig)' : '0' }}>{spruch.reference}</div>
                                   <div className="app-list-item__subtitle" style={{ whiteSpace: 'normal', lineHeight: '1.4' }}>
                                     {text
                                       ? text
@@ -320,10 +321,10 @@ const KonfispruchSelectModal: React.FC<KonfispruchSelectModalProps> = ({ onClose
                   )}
 
                   <div style={{
-                    marginTop: '12px',
-                    paddingTop: '12px',
-                    borderTop: '1px solid var(--app-border-color, #e0e0e0)',
-                    fontSize: '0.7rem',
+                    marginTop: 'var(--app-abstand-mittel)',
+                    paddingTop: 'var(--app-abstand-mittel)',
+                    borderTop: '1px solid var(--app-border)',
+                    fontSize: 'var(--app-text-meta)',
                     lineHeight: '1.35',
                     color: 'var(--ion-color-medium)'
                   }}>
@@ -334,10 +335,10 @@ const KonfispruchSelectModal: React.FC<KonfispruchSelectModalProps> = ({ onClose
             </IonList>
           </>
         ) : (
-          <IonList inset={true} style={{ margin: '16px' }}>
+          <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
             <IonListHeader>
               <div className="app-section-icon app-section-icon--purple">
-                <IonIcon icon={createOutline} />
+                <IonIcon icon={ICON_BEARBEITEN} />
               </div>
               <IonLabel>Eigener Spruch</IonLabel>
             </IonListHeader>

@@ -1,4 +1,4 @@
-const { validationResult, body, param, query } = require('express-validator');
+const { validationResult, body } = require('express-validator');
 
 /**
  * Middleware: Prüft express-validator Ergebnisse und gibt 400 zurück bei Fehlern.
@@ -34,15 +34,6 @@ function getPointField(type) {
   return field;
 }
 
-// Wiederverwendbar: ID-Parameter validieren
-const validateId = param('id').isInt({ min: 1 }).withMessage('Ungültige ID');
-
-// Wiederverwendbar: Pagination-Parameter
-const validatePagination = [
-  query('page').optional().isInt({ min: 1 }).withMessage('Seitenzahl muss positiv sein'),
-  query('limit').optional().isInt({ min: 1, max: 100 }).withMessage('Limit muss zwischen 1 und 100 liegen')
-];
-
 // Gemeinsame Validierungen für häufige Felder
 const commonValidations = {
   name: body('name').trim().notEmpty().withMessage('Name ist erforderlich')
@@ -69,7 +60,5 @@ const commonValidations = {
 module.exports = {
   handleValidationErrors,
   getPointField,
-  validateId,
-  validatePagination,
   commonValidations
 };

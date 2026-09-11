@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { IonIcon, IonToggle, IonSpinner, useIonAlert } from '@ionic/react';
-import { fingerPrintOutline } from 'ionicons/icons';
+import { ICON_FINGERABDRUCK } from './icons';
 import {
   biometrieVerfuegbar,
   istBiometrieAktiv,
@@ -84,7 +84,7 @@ const BiometrieSchalter: React.FC<Props> = ({ variante }) => {
       <div className="app-list-item__row">
         <div className="app-list-item__main">
           <div className={`app-icon-circle app-icon-circle--${variante}`}>
-            <IonIcon icon={fingerPrintOutline} />
+            <IonIcon icon={ICON_FINGERABDRUCK} />
           </div>
           <div className="app-list-item__content">
             <div className="app-list-item__title">Anmelden mit {bezeichnung}</div>

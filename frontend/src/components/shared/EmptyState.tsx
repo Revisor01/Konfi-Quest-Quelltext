@@ -12,7 +12,7 @@ const EmptyState: React.FC<EmptyStateProps> = ({
   icon,
   title,
   message,
-  iconColor = '#999',
+  iconColor = 'var(--app-text-muted)',
 }) => {
   return (
     <div className="app-empty-state">

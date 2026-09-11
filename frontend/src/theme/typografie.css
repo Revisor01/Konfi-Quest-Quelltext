@@ -1,0 +1,61 @@
+/*
+   Verwendung in Komponenten:  fontSize: 'var(--app-text-basis)'
+   Verwendung in CSS:          font-size: var(--app-text-basis);
+   ========================================================================= */
+
+:root {
+  /* --- Textgroessen (Flusstext, Listen, Titel) --- */
+  --app-text-schmal: 0.55rem;           /* Tab-Beschriftungen im MD3-Look */
+  --app-text-winzig: 0.6rem;            /* kleinste Marker, Tabs im iOS-Look */
+  --app-text-mini: 0.65rem;             /* Zaehler-Badges, Kleinstlabels */
+  --app-text-meta: 0.7rem;              /* Zeitstempel, Metazeilen */
+  --app-text-klein: 0.75rem;            /* Chips, Badges, Fussnoten */
+  --app-text-hinweis: 0.8rem;           /* Hinweise, Zweitinfos */
+  --app-text-sekundaer: 0.85rem;        /* Listen-Untertexte (haeufigster Wert) */
+  --app-text-basis: 0.9rem;             /* Flusstext */
+  --app-text-betont: 0.95rem;           /* leicht hervorgehobener Text */
+  --app-text-standard: 1rem;            /* Standardgroesse, Eingaben */
+  --app-text-gross: 1.1rem;             /* grosse Werte, Item-Titel */
+  --app-text-untertitel: 1.2rem;        /* Untertitel, Kartentitel */
+  --app-text-titel: 1.3rem;             /* Abschnittstitel */
+  --app-text-titel-gross: 1.4rem;       /* grosse Titel, Icons in Titelzeilen */
+  --app-text-ueberschrift: 1.5rem;      /* Seiten-Ueberschriften */
+  --app-text-ueberschrift-gross: 1.6rem;/* Hero-Ueberschriften (Auth-Seiten) */
+
+  /* --- Anzeigegroessen (Emoji, grosse Zahlen, Leerzustaende) --- */
+  /* Von 11 auf 6 Stufen eingedampft: Fuenf Stufen lagen
+     nur 0,1-0,3rem neben einer anderen und wurden 0-3 Mal genutzt --
+     Auswahlaufwand ohne Gegenwert. Zusammengelegt:
+       1,7 -> 1,8 (klein)          2,2 -> 2,0 (mittel)
+       2,9 -> 3,0 (wasserzeichen)  3,2 -> 3,0 (symbol)
+     BEWUSST NICHT zusammengelegt: hero 3,5 mit maximal 4,0 -- ein halber
+     rem an einer Dashboard-Ueberschrift ist sichtbar, und die App soll
+     aussehen wie vorher. */
+  --app-anzeige-basis: 1.8rem;          /* Emoji in Karten, QR-Ueberschrift */
+  --app-anzeige-zahl: 2rem;             /* grosse Statistikzahlen, Auth-Icons */
+  --app-anzeige-gross: 2.5rem;          /* Emoji in Legenden und Modals */
+  --app-anzeige-riesig: 3rem;           /* Leerzustand-Emoji, Avatar-Initialen,
+                                           Wasserzeichen, Onboarding-Kacheln */
+  --app-anzeige-hero: 3.5rem;           /* Auth-Icon-Reihe, Erfolgs-Icon */
+  --app-anzeige-maximal: 4rem;          /* Profil-Avatar-Emoji, Dateivorschau */
+  --app-anzeige-marke: 5.8rem;          /* "KONFI QUEST"-Schriftzug (Bebas) auf Auth */
+
+  /* --- Pixelfeste Groessen ---
+     Bewusst px statt rem: Diese Groessen haengen an px-festen Layouts
+     (38px-Chatknoepfe, 14px-Punkt, Accordion-Chrome) und duerfen bei
+     geaenderter Systemschriftgroesse nicht mitwachsen. */
+  --app-icon-inline: 0.9em;             /* Unendlich-Zeichen im Lauftext (relativ zur Umgebung) */
+  --app-text-hinweispunkt: 10px;        /* "!" im Benachrichtigungspunkt */
+  --app-icon-chat-senden: 15px;         /* Senden-Icon im 38px-Chatknopf */
+  --app-icon-accordion: 18px;           /* Accordion-Toggle-Icon */
+  --app-icon-chat-anhang: 22px;         /* Anhang-Icon im 38px-Chatknopf */
+  --app-icon-leerzustand: 64px;         /* QR-Scanner-Platzhalter-Icon */
+
+  /* --- Schriftschnitte --- */
+  --app-schrift-normal: 400;
+  --app-schrift-mittel: 500;
+  --app-schrift-halbfett: 600;
+  --app-schrift-fett: 700;
+  --app-schrift-extrafett: 800;
+  --app-schrift-schwer: 900;
+}

@@ -1,3 +1,25 @@
+import { CRITERIA_COLORS } from '../../../utils/badgeCriteria';
+import { FARBEN } from '../../../theme/colors';
+import {
+  ICON_BONUS_GEFUELLT,
+  ICON_FLAMME_GEFUELLT,
+  ICON_GRUPPE_GEFUELLT,
+  ICON_HAKEN_GEFUELLT,
+  ICON_HAND_GEFUELLT,
+  ICON_JAHRGANG,
+  ICON_POKAL_GEFUELLT,
+  ICON_PRISMA,
+  ICON_RASTER,
+  ICON_SONNE,
+  ICON_STUFEN,
+  ICON_TERMIN,
+  ICON_TERMIN_GEFUELLT,
+  ICON_UHRZEIT,
+  ICON_UHRZEIT_GEFUELLT,
+  ICON_WUERFEL,
+  ICON_ZURUECK,
+  ICON_ZUSAGE_GEFUELLT,
+} from '../../shared/icons';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   IonPage,
@@ -18,13 +40,6 @@ import {
   useIonModal,
   useIonPopover
 } from '@ionic/react';
-import {
-  trophy,
-  schoolOutline,
-  checkmark,
-  checkmarkCircle,
-  arrowBack
-} from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { useModalPage } from '../../../contexts/ModalContext';
 import api from '../../../services/api';
@@ -55,65 +70,6 @@ interface KonfiData {
   badges: KonfiBadge[];
 }
 
-import {
-  medal,
-  ribbon,
-  star,
-  diamond,
-  shield,
-  flame,
-  flash,
-  rocket,
-  sparkles,
-  thumbsUp,
-  heart,
-  people,
-  personAdd,
-  chatbubbles,
-  gift,
-  book,
-  school,
-  construct,
-  brush,
-  colorPalette,
-  sunny,
-  moon,
-  leaf,
-  rose,
-  calendar,
-  calendarOutline,
-  today,
-  time,
-  timer,
-  stopwatch,
-  restaurant,
-  fitness,
-  bicycle,
-  car,
-  airplane,
-  boat,
-  camera,
-  image,
-  musicalNote,
-  balloon,
-  home,
-  business,
-  location,
-  navigate,
-  compass,
-  pin,
-  flag,
-  informationCircle,
-  helpCircle,
-  alertCircle,
-  hammer,
-  layersOutline,
-  gridOutline,
-  prismOutline,
-  cubeOutline,
-  handLeft,
-  timeOutline
-} from 'ionicons/icons';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { getIconFromString } from '../../../utils/badgeIcons';
 import BadgePopoverContent, { BadgePopoverData } from '../../shared/BadgePopoverContent';
@@ -127,7 +83,7 @@ import BadgePopoverContent, { BadgePopoverData } from '../../shared/BadgePopover
 
 const TeamerKonfiStatsPage: React.FC = () => {
   const { pageRef, presentingElement } = useModalPage('teamer-konfi-stats');
-  const { user, setError } = useApp();
+  const { user } = useApp();
 
   const badgePopoverRef = useRef<BadgePopoverData | null>({ badge: null });
 
@@ -203,14 +159,14 @@ const TeamerKonfiStatsPage: React.FC = () => {
           <IonToolbar>
             <IonButtons slot="start">
               <IonButton onClick={() => window.history.back()} aria-label="Zurück">
-                <IonIcon icon={arrowBack} slot="icon-only" />
+                <IonIcon icon={ICON_ZURUECK} slot="icon-only" />
               </IonButton>
             </IonButtons>
             <IonTitle>Konfi-Historie</IonTitle>
           </IonToolbar>
         </IonHeader>
         <IonContent className="ion-padding">
-          <div style={{ textAlign: 'center', marginTop: '80px' }}>
+          <div style={{ textAlign: 'center', marginTop: 'var(--app-freiraum-kopf-m)' }}>
             <p>Keine Konfi-Daten vorhanden</p>
           </div>
         </IonContent>
@@ -226,7 +182,7 @@ const TeamerKonfiStatsPage: React.FC = () => {
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton onClick={() => window.history.back()} aria-label="Zurück">
-              <IonIcon icon={arrowBack} slot="icon-only" />
+              <IonIcon icon={ICON_ZURUECK} slot="icon-only" />
             </IonButton>
           </IonButtons>
           <IonTitle>Konfi-Historie</IonTitle>
@@ -252,8 +208,8 @@ const TeamerKonfiStatsPage: React.FC = () => {
           <SectionHeader
             title={konfiData.jahrgang_name ? `Jahrgang ${konfiData.jahrgang_name}` : 'Konfi-Zeit'}
             subtitle="Konfi-Punkte-Historie"
-            icon={schoolOutline}
-            colors={{ primary: 'var(--app-color-konfis)', secondary: '#4c1d95' }}
+            icon={ICON_JAHRGANG}
+            colors={{ primary: 'var(--app-color-konfis)', secondary: 'var(--app-color-konfis-dunkel)' }}
             stats={[
               { value: totalPoints, label: 'Gesamt' },
               { value: konfiData.gottesdienst_points || 0, label: 'GD' },
@@ -264,9 +220,9 @@ const TeamerKonfiStatsPage: React.FC = () => {
 
         {/* Konfi-Wrapped Card */}
         {konfiWrapped && (
-          <IonList inset={true} style={{ margin: '16px' }}>
+          <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
             <IonCard className="app-card">
-              <IonCardContent style={{ padding: '16px' }}>
+              <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
                 <div
                   className="app-list-item"
                   style={{ width: '100%', cursor: 'pointer', borderLeftColor: 'var(--app-color-konfis)' }}
@@ -277,7 +233,7 @@ const TeamerKonfiStatsPage: React.FC = () => {
                   <div className="app-list-item__row">
                     <div className="app-list-item__main">
                       <div className="app-icon-circle" style={{ backgroundColor: 'var(--app-color-konfis)' }}>
-                        <IonIcon icon={timeOutline} />
+                        <IonIcon icon={ICON_UHRZEIT} />
                       </div>
                       <div className="app-list-item__content">
                         <div className="app-list-item__title">
@@ -301,21 +257,22 @@ const TeamerKonfiStatsPage: React.FC = () => {
         {konfiData.badges.length > 0 && (() => {
           // Kategorien wie in BadgesView
           const KONFI_BADGE_CATEGORIES: { key: string; title: string; icon: string; color: string }[] = [
-            { key: 'total_points', title: 'Punkte-Sammler', icon: trophy, color: '#ffd700' },
-            { key: 'gottesdienst_points', title: 'Gottesdienst-Held', icon: sunny, color: '#ff9500' },
-            { key: 'gemeinde_points', title: 'Gemeinde-Star', icon: people, color: '#059669' },
-            { key: 'bonus_points', title: 'Bonus-Jäger', icon: gift, color: '#ff6b9d' },
-            { key: 'both_categories', title: 'Allrounder', icon: layersOutline, color: '#5856d6' },
-            { key: 'activity_count', title: 'Aktiv dabei', icon: checkmarkCircle, color: '#3880ff' },
-            { key: 'unique_activities', title: 'Vielseitig', icon: gridOutline, color: '#10dc60' },
-            { key: 'activity_combination', title: 'Kombinier-Profi', icon: prismOutline, color: '#7044ff' },
-            { key: 'category_activities', title: 'Kategorie-Meister', icon: cubeOutline, color: '#0cd1e8' },
-            { key: 'specific_activity', title: 'Spezialist', icon: handLeft, color: '#ffce00' },
-            { key: 'streak', title: 'Serien-Champion', icon: flame, color: '#eb445a' },
-            { key: 'time_based', title: 'Zeitreisender', icon: time, color: 'var(--app-text-system)' },
-            { key: 'event_count', title: 'Event-Champion', icon: calendar, color: '#e63946' },
-            { key: 'collection', title: 'Sammler', icon: trophy, color: '#ffd700' },
-            { key: 'yearly', title: 'Jahres-Badges', icon: calendarOutline, color: 'var(--app-text-system)' }
+            { key: 'total_points', title: 'Punkte-Sammler', icon: ICON_POKAL_GEFUELLT, color: CRITERIA_COLORS.total_points },
+            { key: 'gottesdienst_points', title: 'Gottesdienst-Held', icon: ICON_SONNE, color: CRITERIA_COLORS.gottesdienst_points },
+            { key: 'gemeinde_points', title: 'Gemeinde-Star', icon: ICON_GRUPPE_GEFUELLT, color: CRITERIA_COLORS.gemeinde_points },
+            { key: 'bonus_points', title: 'Bonus-Jäger', icon: ICON_BONUS_GEFUELLT, color: CRITERIA_COLORS.bonus_points },
+            { key: 'both_categories', title: 'Allrounder', icon: ICON_STUFEN, color: CRITERIA_COLORS.both_categories },
+            { key: 'activity_count', title: 'Aktiv dabei', icon: ICON_ZUSAGE_GEFUELLT, color: CRITERIA_COLORS.activity_count },
+            { key: 'unique_activities', title: 'Vielseitig', icon: ICON_RASTER, color: CRITERIA_COLORS.unique_activities },
+            { key: 'activity_combination', title: 'Kombinier-Profi', icon: ICON_PRISMA, color: CRITERIA_COLORS.activity_combination },
+            { key: 'category_activities', title: 'Kategorie-Meister', icon: ICON_WUERFEL, color: CRITERIA_COLORS.category_activities },
+            { key: 'category_combination', title: 'Kategorie-Kombinierer', icon: ICON_PRISMA, color: CRITERIA_COLORS.category_combination },
+            { key: 'specific_activity', title: 'Spezialist', icon: ICON_HAND_GEFUELLT, color: CRITERIA_COLORS.specific_activity },
+            { key: 'streak', title: 'Serien-Champion', icon: ICON_FLAMME_GEFUELLT, color: CRITERIA_COLORS.streak },
+            { key: 'time_based', title: 'Zeitreisender', icon: ICON_UHRZEIT_GEFUELLT, color: FARBEN.textSystem },
+            { key: 'event_count', title: 'Event-Champion', icon: ICON_TERMIN_GEFUELLT, color: CRITERIA_COLORS.event_count },
+            { key: 'collection', title: 'Sammler', icon: ICON_POKAL_GEFUELLT, color: FARBEN.gold },
+            { key: 'yearly', title: 'Jahres-Badges', icon: ICON_TERMIN, color: FARBEN.textSystem }
           ];
 
           const badgesByCategory = KONFI_BADGE_CATEGORIES
@@ -342,7 +299,7 @@ const TeamerKonfiStatsPage: React.FC = () => {
               badgesByCategory.push({
                 key,
                 title: key.charAt(0).toUpperCase() + key.slice(1).replace(/_/g, ' '),
-                icon: trophy,
+                icon: ICON_POKAL_GEFUELLT,
                 color: 'var(--app-color-badges)',
                 badges: badges.sort((a, b) => (a.criteria_value || 0) - (b.criteria_value || 0))
               });
@@ -350,30 +307,30 @@ const TeamerKonfiStatsPage: React.FC = () => {
           }
 
           return (
-            <IonList inset={true} style={{ margin: '16px' }}>
+            <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
               <IonListHeader>
                 <div className="app-section-icon" style={{ backgroundColor: 'var(--app-color-badges)' }}>
-                  <IonIcon icon={trophy} />
+                  <IonIcon icon={ICON_POKAL_GEFUELLT} />
                 </div>
                 <IonLabel>Konfi-Badges ({konfiData.badges.length})</IonLabel>
               </IonListHeader>
 
               {badgesByCategory.map((category, index) => (
-                <IonCard key={category.key} className="app-card" style={{ marginTop: index > 0 ? '8px' : '0' }}>
-                  <IonCardContent style={{ padding: '16px' }}>
+                <IonCard key={category.key} className="app-card" style={{ marginTop: index > 0 ? 'var(--app-abstand-eng)' : '0' }}>
+                  <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
                     {/* Category Header */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)', marginBottom: 'var(--app-abstand-basis)' }}>
                       <div style={{
-                        width: '42px', height: '42px', borderRadius: '12px',
+                        width: '42px', height: '42px', borderRadius: 'var(--app-radius-karte)',
                         background: `linear-gradient(135deg, ${category.color} 0%, ${category.color}cc 100%)`,
                         display: 'flex', alignItems: 'center', justifyContent: 'center',
                         boxShadow: `0 4px 12px ${category.color}40`
                       }}>
-                        <IonIcon icon={category.icon} style={{ fontSize: '1.3rem', color: 'white' }} />
+                        <IonIcon icon={category.icon} style={{ fontSize: 'var(--app-text-titel)', color: 'white' }} />
                       </div>
                       <div>
-                        <h3 style={{ margin: '0', fontSize: '1.1rem', fontWeight: '700', color: '#333' }}>{category.title}</h3>
-                        <span style={{ fontSize: '0.85rem', color: '#888' }}>{category.badges.length} Badge{category.badges.length !== 1 ? 's' : ''}</span>
+                        <h3 style={{ margin: '0', fontSize: 'var(--app-text-gross)', fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-text-primary)' }}>{category.title}</h3>
+                        <span style={{ fontSize: 'var(--app-text-sekundaer)', color: 'var(--app-text-tertiary)' }}>{category.badges.length} Badge{category.badges.length !== 1 ? 's' : ''}</span>
                       </div>
                     </div>
 
@@ -381,10 +338,12 @@ const TeamerKonfiStatsPage: React.FC = () => {
                     <div style={{
                       display: 'grid',
                       gridTemplateColumns: 'repeat(3, 1fr)',
-                      gap: '12px'
+                      gap: 'var(--app-abstand-mittel)'
                     }}>
                       {category.badges.map((badge) => {
-                        const bColor = badge.color || 'var(--app-color-badges)';
+                        // Echte Hexfarbe noetig: unten wird per Alpha-Suffix (`${bColor}40`) gerechnet,
+                        // mit einem var()-String entstuende ungueltiges CSS.
+                        const bColor = badge.color || FARBEN.badges;
                         return (
                           <div
                             key={badge.badge_id}
@@ -393,8 +352,8 @@ const TeamerKonfiStatsPage: React.FC = () => {
                               display: 'flex',
                               flexDirection: 'column',
                               alignItems: 'center',
-                              padding: '12px 8px',
-                              borderRadius: '16px',
+                              padding: 'var(--app-abstand-mittel) var(--app-abstand-eng)',
+                              borderRadius: 'var(--app-radius-gross)',
                               background: `${bColor}10`,
                               border: `2px solid ${bColor}40`,
                               position: 'relative',
@@ -405,18 +364,18 @@ const TeamerKonfiStatsPage: React.FC = () => {
                             <div style={{
                               width: '56px',
                               height: '56px',
-                              borderRadius: '50%',
+                              borderRadius: 'var(--app-radius-kreis)',
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'center',
                               background: `linear-gradient(145deg, ${bColor} 0%, ${bColor}cc 100%)`,
                               boxShadow: `0 4px 12px ${bColor}40`,
                               position: 'relative',
-                              marginBottom: '8px'
+                              marginBottom: 'var(--app-abstand-eng)'
                             }}>
                               <IonIcon
                                 icon={getIconFromString(badge.icon)}
-                                style={{ fontSize: '1.8rem', color: 'white' }}
+                                style={{ fontSize: 'var(--app-anzeige-basis)', color: 'white' }}
                               />
                               {/* Earned Checkmark */}
                               <div style={{
@@ -425,22 +384,22 @@ const TeamerKonfiStatsPage: React.FC = () => {
                                 right: '-2px',
                                 width: '20px',
                                 height: '20px',
-                                borderRadius: '50%',
-                                background: '#22c55e',
+                                borderRadius: 'var(--app-radius-kreis)',
+                                background: 'var(--app-color-success)',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
                                 border: '2px solid white'
                               }}>
-                                <IonIcon icon={checkmark} style={{ fontSize: '0.7rem', color: 'white' }} />
+                                <IonIcon icon={ICON_HAKEN_GEFUELLT} style={{ fontSize: 'var(--app-text-meta)', color: 'white' }} />
                               </div>
                             </div>
 
                             {/* Badge Name */}
                             <span style={{
-                              fontSize: '0.75rem',
-                              fontWeight: '600',
-                              color: '#333',
+                              fontSize: 'var(--app-text-klein)',
+                              fontWeight: 'var(--app-schrift-halbfett)',
+                              color: 'var(--app-text-primary)',
                               textAlign: 'center',
                               lineHeight: '1.2',
                               maxWidth: '100%',
@@ -455,9 +414,9 @@ const TeamerKonfiStatsPage: React.FC = () => {
 
                             {/* Award Date */}
                             <span style={{
-                              fontSize: '0.6rem',
-                              color: '#888',
-                              marginTop: '2px'
+                              fontSize: 'var(--app-text-winzig)',
+                              color: 'var(--app-text-tertiary)',
+                              marginTop: 'var(--app-abstand-winzig)'
                             }}>
                               {new Date(badge.awarded_date).toLocaleDateString('de-DE', {
                                 day: 'numeric',

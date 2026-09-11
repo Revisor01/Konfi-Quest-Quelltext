@@ -1,4 +1,6 @@
+import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useRef } from 'react';
+import { FARBEN } from '../../../theme/colors';
 import {
   IonHeader,
   IonToolbar,
@@ -20,14 +22,14 @@ import {
   useIonAlert
 } from '@ionic/react';
 import {
-  closeOutline,
-  checkmarkOutline,
-  checkmarkCircle,
-  personOutline,
-  shieldOutline,
-  schoolOutline,
-  cloudOfflineOutline
-} from 'ionicons/icons';
+  ICON_HAKEN,
+  ICON_JAHRGANG,
+  ICON_OFFLINE,
+  ICON_PERSON,
+  ICON_SCHILD,
+  ICON_SCHLIESSEN,
+  ICON_ZUSAGE_GEFUELLT,
+} from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import api from '../../../services/api';
@@ -118,11 +120,18 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
   const nameAutomatisch = !isEditMode && !!festeRolle;
 
   // Hierarchie-Check: Kann der aktuelle User diese Rolle zuweisen?
+  // Spiegelt canManageRole im Backend (utils/roleHierarchy.js) — durchgesetzt
+  // wird die Regel dort, hier geht es nur darum, keine Auswahl anzubieten, die
+  // der Server danach mit 403 zurueckweist.
   const canAssignRole = (roleName: string) => {
     const userRole = currentUser?.role_name;
 
-    // Konfis werden über separate KonfiModal erstellt
-    if (roleName === 'konfi') return false;
+    // Konfis werden über separate KonfiModal erstellt || Super-Admin kann via backend nicht vergeben werden, gibt immer 403
+    if (roleName === 'konfi' || roleName === 'super_admin') return false;
+
+    // super_admin ist nie zuweisbar: canManageRole erlaubt diese Rolle
+    // niemandem, auch super_admin nicht sich selbst.
+    if (roleName === 'super_admin') return false;
 
     if (userRole === 'org_admin') {
       return roleName !== 'konfi';
@@ -151,7 +160,24 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
         api.get('/admin/jahrgaenge')
       ]);
       setRoles(rolesResponse.data);
-      setJahrgaenge(jahrgaengeResponse.data);
+
+      // org_admin und super_admin bleiben ausgenommen: Sie sehen ohnehin die
+      // ganze Gemeinde, eine Einschraenkung waere dort falsch.
+      // Ein Admin OHNE Zuweisung bekommt eine leere Liste. Das ist ein
+      // gueltiger Fall (ein Admin, der nur mit den Teamer:innen spricht) --
+      // und ehrlicher als eine Auswahl, aus der jede Wahl scheitert.
+      // Hergeleitet wie in views/KonfiDetailView.tsx (eigeneJahrgangIds).
+      const alleJahrgaenge = jahrgaengeResponse.data;
+      if (currentUser?.role_name === 'admin') {
+        const eigene = new Set(
+          (currentUser.assigned_jahrgaenge || [])
+            .filter((j) => j.can_view !== false)
+            .map((j) => j.id)
+        );
+        setJahrgaenge(alleJahrgaenge.filter((j: Jahrgang) => eigene.has(j.id)));
+      } else {
+        setJahrgaenge(alleJahrgaenge);
+      }
 
       // Feste Rolle direkt setzen — der Dialog zeigt dann keine Auswahl mehr,
       // das Feld muss aber trotzdem befuellt sein (isValid prüft role_id > 0).
@@ -218,7 +244,17 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
 
     await guard(async () => {
       try {
-        const userData: any = {
+        // password wird nur gesetzt, wenn eines eingegeben wurde — deshalb
+        // steht es hier als optionales Feld statt per any.
+        const userData: {
+          username?: string;
+          email: string | null;
+          display_name: string;
+          role_title: string | null;
+          role_id: number;
+          is_active: boolean;
+          password?: string;
+        } = {
           // Leer lassen, wenn der Server ihn erzeugen soll.
           username: nameAutomatisch ? undefined : formData.username.trim(),
           email: formData.email.trim() || null,
@@ -257,8 +293,8 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
 
         setIsDirty(false);
         onSuccess();
-      } catch (err: any) {
-        setError(err.response?.data?.error || 'Fehler beim Speichern des Benutzers');
+      } catch (err) {
+        setError(fehlerText(err, 'Fehler beim Speichern des Benutzers'));
       }
     });
   };
@@ -270,20 +306,19 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
     }));
   };
 
-  const getSelectedRole = () => {
-    return roles.find(role => role.id === formData.role_id);
-  };
 
   const getAllowedRoles = () => {
     return roles.filter(role => canAssignRole(role.name));
   };
 
+  // Echte Hexwerte (theme/colors.ts): Die Rollenfarbe wird teils per
+  // Alpha-Suffix weiterverrechnet, var()-Strings scheiden aus.
   const getRoleColor = (roleName: string) => {
     switch (roleName) {
-      case 'org_admin': return '#667eea';
-      case 'admin': return '#667eea';
-      case 'teamer': return '#be185d';
-      default: return '#6b7280';
+      case 'org_admin': return FARBEN.users;
+      case 'admin': return FARBEN.users;
+      case 'teamer': return FARBEN.teamer;
+      default: return FARBEN.neutral;
     }
   };
 
@@ -301,7 +336,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
     switch (roleName) {
       case 'org_admin': return 'Voller Zugriff auf Konfis, Aktivitäten, Badges und Events – über alle Jahrgänge. Verwaltet zusätzlich die Benutzer:innen und deren Jahrgangs-Zuordnung.';
       case 'admin': return 'Voller Zugriff auf Konfis, Aktivitäten, Badges und Events – nur für die zugewiesenen Jahrgänge.';
-      case 'teamer': return 'Eigenes Dashboard mit eigenen Badges, Team-Material und Team-Chat. Kann sich zu Events anmelden, bei denen Teamer:innen gebraucht werden. Vergibt keine Punkte und genehmigt keine Aktivitäten.';
+      case 'teamer': return 'Eigenes Dashboard mit eigenen Badges, Team-Material und Team-Chat. Kann sich zu Events anmelden, bei denen das Team gebraucht wird. Vergibt keine Punkte und genehmigt keine Aktivitäten.';
       default: return '';
     }
   };
@@ -317,7 +352,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
             <IonTitle>{isEditMode ? 'Benutzer bearbeiten' : (festeRolle === 'teamer' ? 'Neue Teamer:in' : 'Neuer Benutzer')}</IonTitle>
             <IonButtons slot="start">
               <IonButton aria-label="Schließen" onClick={handleClose} className="app-modal-close-btn">
-                <IonIcon icon={closeOutline} />
+                <IonIcon icon={ICON_SCHLIESSEN} />
               </IonButton>
             </IonButtons>
           </IonToolbar>
@@ -338,12 +373,12 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
           <IonTitle>{isEditMode ? 'Benutzer bearbeiten' : (festeRolle === 'teamer' ? 'Neue Teamer:in' : 'Neuer Benutzer')}</IonTitle>
           <IonButtons slot="start">
             <IonButton aria-label="Schließen" onClick={onClose} disabled={isSubmitting} className="app-modal-close-btn">
-              <IonIcon icon={closeOutline} />
+              <IonIcon icon={ICON_SCHLIESSEN} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
             <IonButton aria-label="Benutzer:in speichern" onClick={handleSave} disabled={!isValid || isSubmitting || !isOnline} className={`app-modal-submit-btn app-modal-submit-btn--${festeRolle === "teamer" ? "teamer" : "settings"}`}>
-              {!isOnline ? <><IonIcon icon={cloudOfflineOutline} /> Du bist offline</> : isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} />}
+              {!isOnline ? <><IonIcon icon={ICON_OFFLINE} /> Du bist offline</> : isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={ICON_HAKEN} />}
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -354,7 +389,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className={`app-section-icon app-section-icon--${farbe}`}>
-              <IonIcon icon={personOutline} />
+              <IonIcon icon={ICON_PERSON} />
             </div>
             <IonLabel>Persönliche Daten</IonLabel>
           </IonListHeader>
@@ -409,7 +444,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
 
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">
-                    Passwort {!isEditMode && <span style={{ color: '#ef4444' }}>*</span>}
+                    Passwort {!isEditMode && <span style={{ color: 'var(--app-color-danger)' }}>*</span>}
                   </IonLabel>
                   <IonInput
                     type="password"
@@ -428,21 +463,21 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className={`app-section-icon app-section-icon--${farbe}`}>
-              <IonIcon icon={shieldOutline} />
+              <IonIcon icon={ICON_SCHILD} />
             </div>
             <IonLabel>{festeRolle ? 'Status' : 'Rolle & Status'}</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: '16px 16px 8px 16px' }}>
+            <IonCardContent style={{ padding: 'var(--app-abstand-basis) var(--app-abstand-basis) var(--app-abstand-eng) var(--app-abstand-basis)' }}>
               {/* Rolle - klickbare Liste. Entfaellt, wenn die Rolle von aussen
                   festgelegt ist (festeRolle): Der Dialog heisst dann bereits
                   nach der Rolle, eine Auswahl waere widerspruechlich. */}
               {!festeRolle && (
-              <div style={{ marginBottom: '16px' }}>
-                <IonLabel style={{ fontSize: '0.85rem', color: '#666', marginBottom: '8px', display: 'block' }}>
+              <div style={{ marginBottom: 'var(--app-abstand-basis)' }}>
+                <IonLabel style={{ fontSize: 'var(--app-text-sekundaer)', color: 'var(--app-text-secondary)', marginBottom: 'var(--app-abstand-eng)', display: 'block' }}>
                   Rolle *
                 </IonLabel>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-eng)' }}>
                   {getAllowedRoles().map(role => {
                     const isSelected = formData.role_id === role.id;
                     const roleColor = getRoleColor(role.name);
@@ -463,19 +498,19 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                           background: isSelected ? `${roleColor}15` : undefined
                         }}
                       >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)' }}>
                           <div
                             className="app-icon-circle"
                             style={{ backgroundColor: roleColor, width: '32px', height: '32px' }}
                           >
-                            <IonIcon icon={shieldOutline} style={{ fontSize: '0.9rem' }} />
+                            <IonIcon icon={ICON_SCHILD} style={{ fontSize: 'var(--app-text-basis)' }} />
                           </div>
                           <div>
-                            <span style={{ fontWeight: '500', color: '#333', display: 'block' }}>
+                            <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-primary)', display: 'block' }}>
                               {getRoleDisplayName(role.name)}
                             </span>
                             {getRoleDescription(role.name) && (
-                              <span style={{ fontSize: '0.75rem', color: '#8e8e93', display: 'block', marginTop: '2px', lineHeight: 1.35 }}>
+                              <span style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)', display: 'block', marginTop: 'var(--app-abstand-winzig)', lineHeight: 1.35 }}>
                                 {getRoleDescription(role.name)}
                               </span>
                             )}
@@ -493,12 +528,12 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                padding: '12px 0',
+                padding: 'var(--app-abstand-mittel) 0',
                 borderTop: '1px solid rgba(0,0,0,0.06)'
               }}>
                 <div>
-                  <h3 style={{ fontWeight: '500', margin: '0 0 4px 0', fontSize: '0.95rem' }}>Konto aktiv</h3>
-                  <p style={{ color: '#666', margin: 0, fontSize: '0.8rem' }}>
+                  <h3 style={{ fontWeight: 'var(--app-schrift-mittel)', margin: '0 0 var(--app-abstand-mini) 0', fontSize: 'var(--app-text-betont)' }}>Konto aktiv</h3>
+                  <p style={{ color: 'var(--app-text-secondary)', margin: 0, fontSize: 'var(--app-text-hinweis)' }}>
                     Benutzer kann sich anmelden
                   </p>
                 </div>
@@ -519,16 +554,20 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className={`app-section-icon app-section-icon--${farbe}`}>
-              <IonIcon icon={schoolOutline} />
+              <IonIcon icon={ICON_JAHRGANG} />
             </div>
             <IonLabel>Jahrgang-Zuweisungen</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: '16px' }}>
+            <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
             {jahrgaenge.length === 0 ? (
               <IonItem lines="none" style={{ '--background': 'transparent' }}>
                 <IonLabel style={{ textAlign: 'center' }}>
-                  <p style={{ color: '#999', margin: 0 }}>Keine Jahrgänge verfügbar</p>
+                  <p style={{ color: 'var(--app-text-muted)', margin: 0 }}>
+                    {currentUser?.role_name === 'admin'
+                      ? 'Dir ist kein Jahrgang zugewiesen. Zuweisen kann nur die Gemeindeleitung.'
+                      : 'Keine Jahrgänge verfügbar'}
+                  </p>
                 </IonLabel>
               </IonItem>
             ) : (
@@ -547,11 +586,11 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'space-between',
-                        marginBottom: index < jahrgaenge.length - 1 ? '8px' : '0',
-                        background: isAssigned ? 'rgba(102, 126, 234, 0.08)' : undefined
+                        marginBottom: index < jahrgaenge.length - 1 ? 'var(--app-abstand-eng)' : '0',
+                        background: isAssigned ? 'rgba(var(--app-color-users-rgb), 0.08)' : undefined
                       }}
                     >
-                      <span style={{ fontWeight: '500', color: '#333' }}>{jahrgang.name}</span>
+                      <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-primary)' }}>{jahrgang.name}</span>
                     </div>
                   );
                 })}
@@ -567,13 +606,13 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
           <IonList inset={true} className="app-modal-section">
             <IonListHeader>
               <div className={`app-section-icon app-section-icon--${farbe}`}>
-                <IonIcon icon={checkmarkCircle} />
+                <IonIcon icon={ICON_ZUSAGE_GEFUELLT} />
               </div>
               <IonLabel>Aktuelle Zuweisungen</IonLabel>
             </IonListHeader>
             <IonCard className="app-card">
-              <IonCardContent style={{ padding: '16px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-eng)' }}>
                   {user.assigned_jahrgaenge.map(assignment => (
                     <div
                       key={assignment.id}
@@ -581,15 +620,15 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '10px'
+                        gap: 'var(--app-abstand-schmal)'
                       }}
                     >
-                      <IonIcon icon={checkmarkCircle} style={{ color: '#667eea', fontSize: '1.1rem', flexShrink: 0 }} />
+                      <IonIcon icon={ICON_ZUSAGE_GEFUELLT} style={{ color: 'var(--app-color-users)', fontSize: 'var(--app-text-gross)', flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <span style={{ fontWeight: '500', fontSize: '0.9rem', color: '#333', display: 'block' }}>
+                        <span style={{ fontWeight: 'var(--app-schrift-mittel)', fontSize: 'var(--app-text-basis)', color: 'var(--app-text-primary)', display: 'block' }}>
                           {assignment.name}
                         </span>
-                        <span style={{ fontSize: '0.75rem', color: '#8e8e93' }}>
+                        <span style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)' }}>
                           {assignment.assigned_at && new Date(assignment.assigned_at).toLocaleDateString('de-DE')}
                           {assignment.assigned_by_name && ` von ${assignment.assigned_by_name}`}
                         </span>

@@ -1,3 +1,4 @@
+import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   IonHeader,
@@ -27,31 +28,30 @@ import {
   useIonModal
 } from '@ionic/react';
 import {
-  closeOutline,
-  createOutline,
-  flag,
-  shareOutline,
-  addOutline,
-  personOutline,
-  checkmarkCircleOutline,
-  eyeOffOutline,
-  eyeOutline,
-  documentTextOutline,
-  linkOutline,
-  imageOutline,
-  micOutline,
-  videocamOutline,
-  albumsOutline,
-  timeOutline,
-  checkmarkOutline,
-  lockClosedOutline,
-  removeCircleOutline,
-  chatbubbleEllipsesOutline,
-  trashOutline
-} from 'ionicons/icons';
+  ICON_ALBEN,
+  ICON_BEARBEITEN,
+  ICON_BILD,
+  ICON_CHALLENGE_GEFUELLT,
+  ICON_ENTFERNEN,
+  ICON_HAKEN,
+  ICON_HINZUFUEGEN,
+  ICON_LINK,
+  ICON_LOESCHEN,
+  ICON_MIKROFON,
+  ICON_PERSON,
+  ICON_SCHLIESSEN,
+  ICON_SICHTBAR,
+  ICON_SPERRE,
+  ICON_TEILEN,
+  ICON_TEXTDOKUMENT,
+  ICON_UHRZEIT,
+  ICON_VERBORGEN,
+  ICON_VIDEO,
+  ICON_ZUSAGE,
+} from '../../shared/icons';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
-import { Filesystem, Directory } from '@capacitor/filesystem';
+import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
 import { EmptyState, SectionHeader, AudioPlayer } from '../../shared';
@@ -110,7 +110,7 @@ const ChallengeMedia: React.FC<{
 
   if (failed) {
     return (
-      <div style={{ padding: '12px', color: '#999', fontSize: '0.8rem' }}>
+      <div style={{ padding: 'var(--app-abstand-mittel)', color: 'var(--app-text-muted)', fontSize: 'var(--app-text-hinweis)' }}>
         Datei konnte nicht geladen werden
       </div>
     );
@@ -120,23 +120,23 @@ const ChallengeMedia: React.FC<{
     return (
       <div
         style={{
-          marginTop: '8px',
-          borderRadius: '10px',
-          background: '#f0f0f0',
+          marginTop: 'var(--app-abstand-eng)',
+          borderRadius: 'var(--app-radius-knopf)',
+          background: 'var(--app-surface-dim)',
           minHeight: '80px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center'
         }}
       >
-        <span style={{ color: '#666', fontSize: '0.85rem' }}>Wird geladen...</span>
+        <span style={{ color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-sekundaer)' }}>Wird geladen...</span>
       </div>
     );
   }
 
   if (mediaType === 'photo') {
     return (
-      <div style={{ marginTop: '8px', borderRadius: '10px', overflow: 'hidden' }}>
+      <div style={{ marginTop: 'var(--app-abstand-eng)', borderRadius: 'var(--app-radius-knopf)', overflow: 'hidden' }}>
         <img
           src={src}
           alt={fileName || 'Beitrag'}
@@ -152,7 +152,7 @@ const ChallengeMedia: React.FC<{
         src={src}
         controls
         playsInline
-        style={{ width: '100%', maxHeight: '260px', marginTop: '8px', borderRadius: '10px', display: 'block' }}
+        style={{ width: '100%', maxHeight: '260px', marginTop: 'var(--app-abstand-eng)', borderRadius: 'var(--app-radius-knopf)', display: 'block' }}
       />
     );
   }
@@ -162,28 +162,28 @@ const ChallengeMedia: React.FC<{
 };
 
 const MEDIA_ICON: Record<string, string> = {
-  text: documentTextOutline,
-  photo: imageOutline,
-  audio: micOutline,
-  video: videocamOutline,
-  link: linkOutline
+  text: ICON_TEXTDOKUMENT,
+  photo: ICON_BILD,
+  audio: ICON_MIKROFON,
+  video: ICON_VIDEO,
+  link: ICON_LINK
 };
 
 // Icon/Farb-Zuordnung für Corner-Badges — dieselbe Zuordnung wie in
 // ChallengeModerationModal und getOwnStatus (Konfi-Seite), damit Status
 // ueberall gleich aussieht.
 const STATUS_BADGE: Record<string, { label: string; icon: string; color: string }> = {
-  pending: { label: 'Wartet auf Freigabe', icon: timeOutline, color: 'var(--app-color-warning)' },
-  approved: { label: 'Freigegeben', icon: checkmarkOutline, color: 'var(--app-color-success-strong)' },
-  hidden: { label: 'Ausgeblendet', icon: removeCircleOutline, color: 'var(--app-color-danger)' }
+  pending: { label: 'Wartet auf Freigabe', icon: ICON_UHRZEIT, color: 'var(--app-color-warning)' },
+  approved: { label: 'Freigegeben', icon: ICON_HAKEN, color: 'var(--app-color-success-strong)' },
+  hidden: { label: 'Ausgeblendet', icon: ICON_ENTFERNEN, color: 'var(--app-color-danger)' }
 };
 
 // Konsens NIE mit einem Haken darstellen: der Haken gehört allein dem
 // Freigabe-STATUS; der Konsens spricht in Augen-Metaphorik.
 const CONSENT_BADGE: Record<string, { label: string; icon: string; color: string }> = {
-  publish: { label: 'Mit Namen sichtbar', icon: eyeOutline, color: 'var(--app-color-success-strong)' },
-  private: { label: 'Nur Leitung', icon: lockClosedOutline, color: '#6b7280' },
-  anonymous: { label: 'Anonym sichtbar', icon: eyeOffOutline, color: '#7c3aed' }
+  publish: { label: 'Mit Namen sichtbar', icon: ICON_SICHTBAR, color: 'var(--app-color-success-strong)' },
+  private: { label: 'Nur Leitung', icon: ICON_SPERRE, color: 'var(--app-color-neutral)' },
+  anonymous: { label: 'Anonym sichtbar', icon: ICON_VERBORGEN, color: 'var(--app-color-wrapped)' }
 };
 
 /**
@@ -207,7 +207,7 @@ const getStatusBadge = (
   const bleibtBeiDerLeitung =
     challenge.visibility === 'private' || submission.konfi_consent === 'private';
   if (bleibtBeiDerLeitung) {
-    return { label: 'Freigegeben, nur Leitung', icon: lockClosedOutline, color: '#6b7280' };
+    return { label: 'Freigegeben, nur Leitung', icon: ICON_SPERRE, color: 'var(--app-color-neutral)' };
   }
   return basis;
 };
@@ -279,13 +279,15 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
       // den Konfi-Namen aus display_name normalisieren.
       const raw = Array.isArray(res.data) ? res.data : (res.data?.submissions || []);
       setSubmissions(
-        raw.map((row: any) => ({
+        // display_name ist die Altform des Namensfeldes — deshalb hier
+        // zusaetzlich zum Typ des Beitrags aufgefuehrt.
+        raw.map((row: ChallengeSubmission & { display_name?: string | null }) => ({
           ...row,
           konfi_name: row.konfi_name ?? row.display_name ?? null
         }))
       );
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Fehler beim Laden der Beiträge');
+    } catch (err) {
+      setError(fehlerText(err, 'Fehler beim Laden der Beiträge'));
     } finally {
       setLoading(false);
     }
@@ -340,7 +342,15 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
 
     // Ohne Freigabe-Pflicht bleiben nur zwei Kacheln — die Gesamtzahl fuellt
     // auf und beantwortet zugleich "wie viele Beitraege sind es insgesamt".
-    if (stats.length < 3) stats.splice(1, 0, { value: counts.total, label: 'Beiträge' });
+    // Einzahl korrekt: bei genau einem Beitrag hiess die Kachel "1 Beiträge"
+    // (User-Hinweis). Der Helfer entscheidet, das Label traegt nur das Wort —
+    // die Zahl steht schon als Kachelwert darueber.
+    if (stats.length < 3) {
+      stats.splice(1, 0, {
+        value: counts.total,
+        label: anzahlBeitraege(counts.total).replace(`${counts.total} `, '')
+      });
+    }
 
     // Kacheln, die einem Reiter entsprechen, schalten dorthin. "Gesamt" hat
     // keinen eigenen Reiter (die Reiter sind disjunkt) und bleibt reine Anzeige.
@@ -362,7 +372,12 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
       if (!ziel) return s;
       return { ...s, onClick: () => setStatusFilter(ziel), active: aktiverFilter === ziel };
     });
-  }, [challenge?.moderated, counts, statusFilter]);
+    // challenge?.visibility gehoert in die Abhaengigkeiten: Die Sichtbarkeit
+    // ist im OFFENEN Modal aenderbar (Bearbeiten-Knopf; die ChallengesPage
+    // spiegelt die frische Challenge zurueck). Ohne sie blieb die
+    // "Abgelehnt"-Kachel nach dem Umstellen auf "nur Leitung" stehen,
+    // solange sich counts und Filter nicht aenderten.
+  }, [challenge?.moderated, challenge?.visibility, counts, statusFilter]);
 
   // Abgeleiteter Status — dieselbe Quelle wie die Liste. Vorher wurde hier nur
   // aktiv/inaktiv unterschieden, wodurch Entwürfe und Geplante fälschlich
@@ -420,8 +435,8 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
       });
       await loadSubmissions();
       onChanged?.();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Fehler bei der Moderation');
+    } catch (err) {
+      setError(fehlerText(err, 'Fehler bei der Moderation'));
     } finally {
       setBusyId(null);
     }
@@ -446,8 +461,8 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
       await api.delete(`/challenges/admin/submissions/${submission.id}`);
       await loadSubmissions();
       onChanged?.();
-    } catch (err: any) {
-      setError(err.response?.data?.error || 'Fehler beim Löschen des Beitrags');
+    } catch (err) {
+      setError(fehlerText(err, 'Fehler beim Löschen des Beitrags'));
     } finally {
       setBusyId(null);
     }
@@ -509,15 +524,15 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
 
     if (submission.moderation_status === 'pending') {
       actions.push({
-        key: 'approve', text: 'Freigeben', icon: checkmarkCircleOutline,
+        key: 'approve', text: 'Freigeben', icon: ICON_ZUSAGE,
         color: 'var(--app-color-success-strong)',
         run: () => moderate(submission, 'approve')
       });
     }
     if (submission.konfi_consent !== 'anonymous' && submission.konfi_consent !== 'private') {
       actions.push({
-        key: 'anonymize', text: 'Anonym stellen', icon: eyeOffOutline,
-        color: '#7c3aed',
+        key: 'anonymize', text: 'Anonym stellen', icon: ICON_VERBORGEN,
+        color: 'var(--app-color-wrapped)',
         run: () => confirmAnonymize(submission)
       });
     }
@@ -530,14 +545,14 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
           // Auge = "ohne Namen"). Ausblenden nimmt dasselbe Symbol wie sein
           // Status-Badge, damit Aktion und Zustand zusammenpassen und die beiden
           // Aktionen im Menue unterscheidbar sind (User-Hinweis 11.08.).
-          key: 'hide', text: 'Ausblenden', icon: removeCircleOutline,
+          key: 'hide', text: 'Ausblenden', icon: ICON_ENTFERNEN,
           color: 'var(--app-color-danger)', role: 'destructive',
           run: () => confirmHide(submission)
         });
       }
     } else {
       actions.push({
-        key: 'unhide', text: 'Wieder einblenden', icon: eyeOutline,
+        key: 'unhide', text: 'Wieder einblenden', icon: ICON_SICHTBAR,
         color: 'var(--app-color-challenges)',
         run: () => moderate(submission, 'unhide')
       });
@@ -547,7 +562,7 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
     // verheimlichen, es ist schlicht weg.
     if (user?.type === 'admin') {
       actions.push({
-        key: 'delete', text: 'Endgültig löschen', icon: trashOutline,
+        key: 'delete', text: 'Endgültig löschen', icon: ICON_LOESCHEN,
         color: 'var(--app-color-danger)', role: 'destructive',
         run: () => confirmDelete(submission)
       });
@@ -589,7 +604,7 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
           path: fileName,
           data: text,
           directory: Directory.Cache,
-          encoding: 'utf8' as any
+          encoding: Encoding.UTF8
         });
         const uri = await Filesystem.getUri({ path: fileName, directory: Directory.Cache });
         await Share.share({ title: challenge.title, files: [uri.uri] });
@@ -605,10 +620,10 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
         URL.revokeObjectURL(url);
         setSuccess('Export heruntergeladen');
       }
-    } catch (err: any) {
+    } catch (err) {
       // Abgebrochenes Share-Sheet ist kein Fehler
-      if (err?.message && /cancel/i.test(err.message)) return;
-      setError(err.response?.data?.error || 'Export fehlgeschlagen');
+      if (err instanceof Error && err.message && /cancel/i.test(err.message)) return;
+      setError(fehlerText(err, 'Export fehlgeschlagen'));
     }
   };
 
@@ -624,7 +639,7 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
           <IonTitle>Challenge</IonTitle>
           <IonButtons slot="start">
             <IonButton onClick={onClose} className="app-modal-close-btn" aria-label="Schließen">
-              <IonIcon icon={closeOutline} />
+              <IonIcon icon={ICON_SCHLIESSEN} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
@@ -634,7 +649,7 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
                 title="Challenge bearbeiten"
                 aria-label="Challenge bearbeiten"
               >
-                <IonIcon icon={createOutline} slot="icon-only" />
+                <IonIcon icon={ICON_BEARBEITEN} slot="icon-only" />
               </IonButton>
             )}
             {/* Selbst mitmachen — nur solange die Challenge laeuft */}
@@ -644,11 +659,11 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
                 title="Beitrag einreichen"
                 aria-label="Beitrag einreichen"
               >
-                <IonIcon icon={addOutline} slot="icon-only" />
+                <IonIcon icon={ICON_HINZUFUEGEN} slot="icon-only" />
               </IonButton>
             )}
             <IonButton onClick={handleExport} title="Beiträge exportieren" aria-label="Beiträge exportieren">
-              <IonIcon icon={shareOutline} slot="icon-only" />
+              <IonIcon icon={ICON_TEILEN} slot="icon-only" />
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -667,7 +682,7 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
         <SectionHeader
           title={challenge.title}
           subtitle={buildVisibilitySubtitle(challenge)}
-          icon={flag}
+          icon={ICON_CHALLENGE_GEFUELLT}
           preset="challenges"
           stats={headerStats}
         />
@@ -680,31 +695,31 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
           <IonList inset={true} className="app-segment-wrapper">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--challenges">
-                <IonIcon icon={documentTextOutline} />
+                <IonIcon icon={ICON_TEXTDOKUMENT} />
               </div>
               <IonLabel>{status === 'ended' ? 'Worum ging es?' : 'Worum geht es?'}</IonLabel>
             </IonListHeader>
             <IonCard className="app-card">
-              <IonCardContent style={{ padding: '14px' }}>
-                <div style={{ fontSize: '0.93rem', lineHeight: 1.5, color: '#3c3c43', whiteSpace: 'pre-wrap' }}>
+              <IonCardContent style={{ padding: 'var(--app-abstand-mittelweit)' }}>
+                <div style={{ fontSize: 'var(--app-text-basis)', lineHeight: 1.5, color: 'var(--app-text-ios)', whiteSpace: 'pre-wrap' }}>
                   {challenge.description}
                 </div>
                 <div
                   style={{
-                    display: 'flex', flexWrap: 'wrap', gap: '8px 14px',
-                    marginTop: '12px', fontSize: '0.8rem', color: '#8e8e93'
+                    display: 'flex', flexWrap: 'wrap', gap: 'var(--app-abstand-eng) var(--app-abstand-mittelweit)',
+                    marginTop: 'var(--app-abstand-mittel)', fontSize: 'var(--app-text-hinweis)', color: 'var(--app-text-system)'
                   }}
                 >
-                  <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                    <IonIcon icon={timeOutline} className="app-icon-color--challenges" />
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mini)' }}>
+                    <IonIcon icon={ICON_UHRZEIT} className="app-icon-color--challenges" />
                     {status === 'draft' && 'Entwurf — noch nicht veröffentlicht'}
                     {status === 'scheduled' && 'Startet erst noch'}
                     {status === 'active' && 'Läuft gerade'}
                     {status === 'ended' && 'Beendet'}
                   </span>
                   {(challenge.author_name || challenge.author_freetext) && (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                      <IonIcon icon={personOutline} className="app-icon-color--challenges" />
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mini)' }}>
+                      <IonIcon icon={ICON_PERSON} className="app-icon-color--challenges" />
                       Gestellt von {challenge.author_name || challenge.author_freetext}
                     </span>
                   )}
@@ -714,7 +729,7 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
           </IonList>
         )}
 
-        <div style={{ margin: '16px 16px 8px 16px' }}>
+        <div style={{ margin: 'var(--app-abstand-basis) var(--app-abstand-basis) var(--app-abstand-eng) var(--app-abstand-basis)' }}>
           <IonSegment value={effectiveFilter} onIonChange={(e) => setStatusFilter(e.detail.value as StatusFilter)}>
             {/* "Feed" zeigt nur Freigegebenes — denselben Blick, den die
                 Konfis auf die Galerie haben. Wartendes/Ausgeblendetes steht
@@ -735,22 +750,22 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
         </div>
 
         {loading ? (
-          <div style={{ display: 'flex', justifyContent: 'center', padding: '48px' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--app-abstand-block)' }}>
             <IonSpinner name="crescent" />
           </div>
         ) : (
-          <IonList inset={true} style={{ margin: '16px' }}>
+          <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
             <IonListHeader>
               <div className="app-section-icon app-section-icon--challenges">
-                <IonIcon icon={albumsOutline} />
+                <IonIcon icon={ICON_ALBEN} />
               </div>
               <IonLabel>{anzahlBeitraege(filtered.length)}</IonLabel>
             </IonListHeader>
             <IonCard className="app-card">
-              <IonCardContent style={{ padding: filtered.length === 0 ? '16px' : '12px' }}>
+              <IonCardContent style={{ padding: filtered.length === 0 ? 'var(--app-abstand-basis)' : 'var(--app-abstand-mittel)' }}>
                 {filtered.length === 0 ? (
                   <EmptyState
-                    icon={albumsOutline}
+                    icon={ICON_ALBEN}
                     title="Keine Beiträge"
                     message={
                       effectiveFilter === 'feed' && counts.pending > 0
@@ -759,10 +774,10 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
                           ? 'Sobald Beiträge freigegeben sind, erscheinen sie hier — wie bei den Konfis.'
                           : 'Hier ist gerade nichts.'
                     }
-                    iconColor="#be185d"
+                    iconColor="var(--app-color-teamer)"
                   />
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-schmal)' }}>
                     {filtered.map((submission) => {
                       const status = getStatusBadge(submission, challenge);
                       const consent = submission.konfi_consent ? CONSENT_BADGE[submission.konfi_consent] : null;
@@ -809,27 +824,27 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
                                   <>
                                     <div
                                       className="app-corner-badge"
-                                      style={{ backgroundColor: consent.color, padding: '4px 6px' }}
+                                      style={{ backgroundColor: consent.color, padding: 'var(--app-abstand-mini) var(--app-abstand-kompakt)' }}
                                       title={consent.label}
                                     >
-                                      <IonIcon icon={consent.icon} style={{ color: '#fff', fontSize: '0.85rem', display: 'block' }} />
+                                      <IonIcon icon={consent.icon} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)', display: 'block' }} />
                                     </div>
                                     <div className="app-corner-badges__separator" />
                                   </>
                                 )}
                                 <div
                                   className="app-corner-badge"
-                                  style={{ backgroundColor: status.color, padding: '4px 6px' }}
+                                  style={{ backgroundColor: status.color, padding: 'var(--app-abstand-mini) var(--app-abstand-kompakt)' }}
                                   title={status.label}
                                 >
-                                  <IonIcon icon={status.icon} style={{ color: '#fff', fontSize: '0.85rem', display: 'block' }} />
+                                  <IonIcon icon={status.icon} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)', display: 'block' }} />
                                 </div>
                               </div>
 
                               {/* Kopfzeile: Konfi + Zeit */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px', paddingRight: '60px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-schmal)', marginBottom: 'var(--app-abstand-eng)', paddingRight: 'var(--app-freiraum-aktion-m)' }}>
                                 <div className="app-icon-circle app-icon-circle--lg" style={{ backgroundColor: status.color }}>
-                                  <IonIcon icon={MEDIA_ICON[submission.media_type] || documentTextOutline} />
+                                  <IonIcon icon={MEDIA_ICON[submission.media_type] || ICON_TEXTDOKUMENT} />
                                 </div>
                                 <div style={{ flex: 1, minWidth: 0 }}>
                                   <div className="app-list-item__title">
@@ -841,7 +856,7 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
                                       ("Pastorin Kathrin Moeller · D..."). */}
                                   {istEigener && (
                                     <div style={{
-                                      fontSize: '0.78rem', fontWeight: 700,
+                                      fontSize: 'var(--app-text-hinweis)', fontWeight: 'var(--app-schrift-fett)',
                                       color: 'var(--app-color-challenges)',
                                       textTransform: 'uppercase', letterSpacing: '0.03em'
                                     }}>
@@ -857,7 +872,7 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
 
                               {/* Inhalt */}
                               {submission.text_content && (
-                                <div style={{ fontSize: '0.9rem', color: '#333', whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                                <div style={{ fontSize: 'var(--app-text-basis)', color: 'var(--app-text-primary)', whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
                                   {submission.text_content}
                                 </div>
                               )}
@@ -868,10 +883,10 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
 
                               {submission.moderation_status === 'hidden' && submission.moderation_note && (
                                 <div className="app-reason-box app-reason-box--danger">
-                                  <span className="app-reason-box__label" style={{ fontSize: '0.7rem' }}>
+                                  <span className="app-reason-box__label" style={{ fontSize: 'var(--app-text-meta)' }}>
                                     Grund der Ablehnung
                                   </span>
-                                  <p style={{ margin: '2px 0 0 0', fontSize: '0.8rem', lineHeight: 1.4 }}>
+                                  <p style={{ margin: 'var(--app-abstand-winzig) 0 0 0', fontSize: 'var(--app-text-hinweis)', lineHeight: 1.4 }}>
                                     {submission.moderation_note}
                                   </p>
                                 </div>
@@ -891,7 +906,7 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
                               )}
 
                               {isBusy && (
-                                <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'center', marginTop: 'var(--app-abstand-schmal)' }}>
                                   <IonSpinner name="crescent" />
                                 </div>
                               )}

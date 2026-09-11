@@ -1,7 +1,7 @@
+import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   IonIcon,
-  useIonAlert,
   useIonPopover,
   useIonModal,
   useIonRouter
@@ -9,43 +9,29 @@ import {
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
 import ActivityRings from '../../admin/views/ActivityRings';
 import {
-  calendar,
-  location,
-  eyeOff,
-  helpCircle,
-  chevronForward,
-  time,
-  timeOutline,
-  eyeOutline,
-  megaphoneOutline,
-  constructOutline,
-  flagOutline
-} from 'ionicons/icons';
-import { Badge, DashboardEvent, RankingEntry } from '../../../types/dashboard';
-import {
-  getIconFromString,
-  LevelPopoverContent,
-  DashboardBadgePopoverContent,
-  LevelPopoverData,
-  getGreeting,
-  getFirstName,
-  getInitials,
-  formatTimeUntil,
-  formatEventTime,
-  formatEventDate,
-  getBadgeColor,
-  EventCard,
-  RankingSection,
-  LevelIconsRow,
-  LevelProgress
-} from './DashboardSections';
+  ICON_ANKUENDIGUNG,
+  ICON_CHALLENGE,
+  ICON_HILFE_GEFUELLT,
+  ICON_ORT_GEFUELLT,
+  ICON_SICHTBAR,
+  ICON_TERMIN_GEFUELLT,
+  ICON_UHRZEIT,
+  ICON_VERBORGEN_GEFUELLT,
+  ICON_WEITER_GEFUELLT,
+  ICON_WERKZEUG,
+} from '../../shared/icons';
+import { AlleAbzeichen, ApiBadge, Badge, DashboardEvent, RankingEntry } from '../../../types/dashboard';
+import { getIconFromString, LevelPopoverContent, DashboardBadgePopoverContent, LevelPopoverData, DashboardLevel, getGreeting, getFirstName, formatTimeUntil, formatEventTime, formatEventDate, getBadgeColor, EventCard, RankingSection, LevelIconsRow, LevelProgress } from './DashboardSections';
+import { kalendertag } from '../../shared/eventFormatting';
 import { BadgePopoverData } from '../../shared/BadgePopoverContent';
+import type { KonfiChallenge } from '../../../types/challenges';
 import api from '../../../services/api';
 import { useApp } from '../../../contexts/AppContext';
 import BibleTranslationModal, { getTranslationName } from '../../shared/BibleTranslationModal';
 import { DEFAULT_KONFI_SECTION_ORDER } from '../../../utils/sectionOrder';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../../services/offlineCache';
+import { istVergangen } from '../../shared';
 
 interface DashboardData {
   konfi: {
@@ -136,10 +122,6 @@ interface BadgeStats {
   secretEarned: number;
 }
 
-interface AllBadgesData {
-  available: Badge[];
-  earned: Badge[];
-}
 
 interface DashboardConfig {
   show_konfirmation: boolean;
@@ -154,13 +136,13 @@ const DEFAULT_KONFI_ORDER = DEFAULT_KONFI_SECTION_ORDER;
 
 /** Icon je Challenge-Typ für die Dashboard-Karte (Schlüssel: challenge_type). */
 const CHALLENGE_TYPE_ICON: Record<string, string> = {
-  wahrnehmung: eyeOutline,
-  beitrag: megaphoneOutline,
-  praxis: constructOutline,
-  frei: flagOutline
+  wahrnehmung: ICON_SICHTBAR,
+  beitrag: ICON_ANKUENDIGUNG,
+  praxis: ICON_WERKZEUG,
+  frei: ICON_CHALLENGE
 };
 const getChallengeTypeIcon = (type?: string): string =>
-  CHALLENGE_TYPE_ICON[type || ''] || flagOutline;
+  CHALLENGE_TYPE_ICON[type || ''] || ICON_CHALLENGE;
 
 interface DashboardViewProps {
   dashboardData: DashboardData;
@@ -169,7 +151,7 @@ interface DashboardViewProps {
   // die sie noch setzen.
   dailyVerse?: DailyVerse | null;
   badgeStats: BadgeStats;
-  allBadges: AllBadgesData;
+  allBadges: AlleAbzeichen;
   upcomingEvents: DashboardEvent[];
   targetGottesdienst: number;
   targetGemeinde: number;
@@ -183,7 +165,6 @@ interface DashboardViewProps {
 
 const DashboardView: React.FC<DashboardViewProps> = ({
   dashboardData,
-  dailyVerse,
   badgeStats,
   allBadges,
   upcomingEvents,
@@ -198,7 +179,6 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 }) => {
   const router = useIonRouter();
   const { setError } = useApp();
-  const [presentAlert] = useIonAlert();
   const [actualDailyVerse, setActualDailyVerse] = useState<DailyVerse | null>(null);
   const [loadingVerse, setLoadingVerse] = useState(true);
   const [selectedTranslation, setSelectedTranslation] = useState<string>('LUT');
@@ -229,11 +209,11 @@ const DashboardView: React.FC<DashboardViewProps> = ({
       await api.put('/konfi/bible-translation', { translation: code });
       setSelectedTranslation(code);
       await reloadTageslosung();
-    } catch (err: any) {
+    } catch (err) {
       // Vorher nur console.error: Das Modal schloss, der Text blieb der alte —
       // eine bewusste Auswahl blieb sichtbar folgenlos.
       console.error('Bibeluebersetzung speichern fehlgeschlagen:', err);
-      setError(err.response?.data?.error || 'Übersetzung konnte nicht gespeichert werden');
+      setError(fehlerText(err, 'Übersetzung konnte nicht gespeichert werden'));
     }
   };
 
@@ -261,7 +241,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
         const active = Array.isArray(res.data?.active) ? res.data.active : [];
         setActiveChallenges(
           active
-            .map((c: any) => ({
+            .map((c: KonfiChallenge) => ({
               id: c.id,
               title: c.title,
               ends_at: c.ends_at,
@@ -281,13 +261,13 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
   // Level Popover via useIonPopover
   const levelPopoverRef = useRef<LevelPopoverData>({ level: null, isReached: false });
-  const [presentLevelPopover, dismissLevelPopover] = useIonPopover(LevelPopoverContent, {
+  const [presentLevelPopover] = useIonPopover(LevelPopoverContent, {
     dataRef: levelPopoverRef
   });
 
   // Badge Popover via useIonPopover
   const badgePopoverRef = useRef<BadgePopoverData | null>({ badge: null, isEarned: false });
-  const [presentBadgePopover, dismissBadgePopover] = useIonPopover(DashboardBadgePopoverContent, {
+  const [presentBadgePopover] = useIonPopover(DashboardBadgePopoverContent, {
     dataRef: badgePopoverRef
   });
 
@@ -296,7 +276,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   // laengst mit 24-Std-TTL, die Konfi-Seite nicht.
   const losungAktiv = dashboardConfig?.show_losung !== false;
   const { data: gecachteLosung, loading: losungLaedt } = useOfflineQuery<DailyVerse | null>(
-    'konfi:tageslosung:' + new Date().toISOString().split('T')[0],
+    'konfi:tageslosung:' + kalendertag(),
     async () => {
       const response = await api.get('/konfi/tageslosung');
       if (response.data && response.data.success) {
@@ -335,7 +315,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   // Filter nur Events wo Konfi angemeldet ist (confirmed oder waitlist)
   const myRegisteredEvents = useMemo(() => upcomingEvents
     .filter(e => e.is_registered || e.booking_status === 'waitlist')
-    .filter(e => new Date(e.event_date || e.date || '') >= new Date())
+    // istVergangen(): laufende mehrtaegige Termine bleiben sichtbar.
+    .filter(e => !istVergangen({ event_date: e.event_date || e.date || '', event_end_time: e.event_end_time }))
     .sort((a, b) => new Date(a.event_date || a.date || '').getTime() - new Date(b.event_date || b.date || '').getTime()),
   [upcomingEvents]);
 
@@ -355,19 +336,19 @@ const DashboardView: React.FC<DashboardViewProps> = ({
   const nextConfirmationEvent = confirmationEvents.length > 0 ? confirmationEvents[0] : null;
 
   // Badge-Berechnungen memoisiert
-  const earnedIds = useMemo(() => new Set(allBadges.earned.map((b: Badge) => b.id)), [allBadges.earned]);
+  const earnedIds = useMemo(() => new Set(allBadges.earned.map((b: ApiBadge) => b.id)), [allBadges.earned]);
   const recentBadgeIds = useMemo(() => new Set(dashboardData.recent_badges?.map((b: Badge) => b.id) || []), [dashboardData.recent_badges]);
 
   const visibleBadges = useMemo(() => [
-    ...allBadges.earned.filter((b: Badge) => !b.is_hidden),
-    ...allBadges.available.filter((b: Badge) => !earnedIds.has(b.id) && !b.is_hidden)
+    ...allBadges.earned.filter((b: ApiBadge) => !b.is_hidden),
+    ...allBadges.available.filter((b: ApiBadge) => !earnedIds.has(b.id) && !b.is_hidden)
   ].sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0)), [allBadges, earnedIds]);
 
-  const secretEarned = useMemo(() => allBadges.earned.filter((b: Badge) => b.is_hidden), [allBadges.earned]);
+  const secretEarned = useMemo(() => allBadges.earned.filter((b: ApiBadge) => b.is_hidden), [allBadges.earned]);
   const secretNotEarnedCount = badgeStats.secretAvailable - badgeStats.secretEarned;
 
   const recentSecretCount = useMemo(() =>
-    secretEarned.filter((b: Badge) => recentBadgeIds.has(b.id)).length,
+    secretEarned.filter((b: ApiBadge) => recentBadgeIds.has(b.id)).length,
     [secretEarned, recentBadgeIds]
   );
   const recentVisibleCount = useMemo(() =>
@@ -375,17 +356,17 @@ const DashboardView: React.FC<DashboardViewProps> = ({
     [dashboardData.recent_badges, recentSecretCount]
   );
 
-  const handleLevelClick = (e: React.MouseEvent, level: any, isReached: boolean) => {
+  const handleLevelClick = (e: React.MouseEvent, level: DashboardLevel, isReached: boolean) => {
     levelPopoverRef.current = { level, isReached };
     presentLevelPopover({
-      event: (e as any).nativeEvent,
+      event: e.nativeEvent,
       side: 'top',
       alignment: 'center'
     });
   };
 
   return (
-    <div style={{ padding: '16px' }}>
+    <div style={{ padding: 'var(--app-abstand-basis)' }}>
 
       {/* Header Card mit ActivityRings */}
       <div className="app-dashboard-header">
@@ -419,8 +400,8 @@ const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           {dashboardData.level_info?.current_level && (
-            <div style={{ marginTop: '20px', textAlign: 'center' }}>
-              <div className="app-dashboard-glass-chip" style={{ marginBottom: '12px' }}>
+            <div style={{ marginTop: 'var(--app-abstand-gross)', textAlign: 'center' }}>
+              <div className="app-dashboard-glass-chip" style={{ marginBottom: 'var(--app-abstand-mittel)' }}>
                 {dashboardData.level_info.current_level.title}
               </div>
 
@@ -457,10 +438,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 <div className="app-dashboard-section__content" style={{ textAlign: 'center' }}>
                   {dashboardData.days_to_confirmation !== null && dashboardData.days_to_confirmation !== undefined ? (
                     <>
-                      <div className="app-headline" style={{ fontSize: '3.5rem', fontWeight: '900', color: 'white', lineHeight: '1', marginBottom: '8px' }}>
+                      <div className="app-headline" style={{ fontSize: 'var(--app-anzeige-hero)', fontWeight: 'var(--app-schrift-schwer)', color: 'white', lineHeight: '1', marginBottom: 'var(--app-abstand-eng)' }}>
                         {dashboardData.days_to_confirmation}
                       </div>
-                      <div className="app-headline" style={{ fontSize: '1.1rem', color: 'rgba(255, 255, 255, 0.9)', marginBottom: '12px' }}>
+                      <div className="app-headline" style={{ fontSize: 'var(--app-text-gross)', color: 'rgba(255, 255, 255, 0.9)', marginBottom: 'var(--app-abstand-mittel)' }}>
                         {dashboardData.days_to_confirmation === 1
                           ? `Genau 1 Tag bis zu deiner Konfirmation`
                           : `Noch genau ${dashboardData.days_to_confirmation} Tage bis zu deiner Konfirmation`
@@ -469,18 +450,18 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                     </>
                   ) : nextConfirmationEvent ? (
                     <>
-                      <div className="app-headline" style={{ fontSize: '2.5rem', fontWeight: '900', color: 'white', lineHeight: '1', marginBottom: '8px' }}>
+                      <div className="app-headline" style={{ fontSize: 'var(--app-anzeige-gross)', fontWeight: 'var(--app-schrift-schwer)', color: 'white', lineHeight: '1', marginBottom: 'var(--app-abstand-eng)' }}>
                         {formatTimeUntil(nextConfirmationEvent.event_date || nextConfirmationEvent.date)}
                       </div>
-                      <div className="app-headline" style={{ fontSize: '1.1rem', color: 'rgba(255, 255, 255, 0.9)', marginBottom: '12px' }}>
+                      <div className="app-headline" style={{ fontSize: 'var(--app-text-gross)', color: 'rgba(255, 255, 255, 0.9)', marginBottom: 'var(--app-abstand-mittel)' }}>
                         bis zu deiner Konfirmation
                       </div>
                     </>
                   ) : null}
-                  <div className="app-dashboard-meta" style={{ justifyContent: 'center', flexWrap: 'wrap', fontSize: '0.85rem' }}>
+                  <div className="app-dashboard-meta" style={{ justifyContent: 'center', flexWrap: 'wrap', fontSize: 'var(--app-text-sekundaer)' }}>
                     {nextConfirmationEvent && (
                       <>
-                        <IonIcon icon={calendar} style={{ fontSize: '0.85rem' }} />
+                        <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ fontSize: 'var(--app-text-sekundaer)' }} />
                         <span>{formatEventDate(nextConfirmationEvent.event_date || nextConfirmationEvent.date)} um {formatEventTime(nextConfirmationEvent.event_date || nextConfirmationEvent.date)}</span>
                       </>
                     )}
@@ -489,7 +470,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                     )}
                     {(dashboardData.konfi.confirmation_location || nextConfirmationEvent?.location) && (
                       <>
-                        <IonIcon icon={location} style={{ fontSize: '0.85rem' }} />
+                        <IonIcon icon={ICON_ORT_GEFUELLT} style={{ fontSize: 'var(--app-text-sekundaer)' }} />
                         <span>{dashboardData.konfi.confirmation_location || nextConfirmationEvent?.location}</span>
                       </>
                     )}
@@ -529,31 +510,31 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                   <h2 className="app-dashboard-section__bg-label">CHALLENGE</h2>
                 </div>
                 <div className="app-dashboard-section__content app-dashboard-section__content--compact">
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-mittel)' }}>
                     {visibleChallenges.map((challenge) => (
                       <div
                         key={challenge.id}
                         className="app-dashboard-glass-card"
                         onClick={() => router.push('/konfi/challenges')}
-                        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px' }}
+                        style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)' }}
                       >
                         <div style={{
-                          width: '40px', height: '40px', borderRadius: '50%',
+                          width: '40px', height: '40px', borderRadius: 'var(--app-radius-kreis)',
                           background: 'rgba(255, 255, 255, 0.2)',
                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                           flexShrink: 0
                         }}>
-                          <IonIcon icon={getChallengeTypeIcon(challenge.challenge_type)} style={{ fontSize: '1.2rem', color: 'white' }} />
+                          <IonIcon icon={getChallengeTypeIcon(challenge.challenge_type)} style={{ fontSize: 'var(--app-text-untertitel)', color: 'white' }} />
                         </div>
                         <div style={{ minWidth: 0 }}>
                           <div className="app-headline" style={{
-                            fontSize: '1rem', fontWeight: '700', color: 'white',
-                            marginBottom: '4px', lineHeight: 1.25
+                            fontSize: 'var(--app-text-standard)', fontWeight: 'var(--app-schrift-fett)', color: 'white',
+                            marginBottom: 'var(--app-abstand-mini)', lineHeight: 1.25
                           }}>
                             {challenge.title}
                           </div>
                           <div className="app-dashboard-meta">
-                            <IonIcon icon={timeOutline} style={{ fontSize: '0.9rem' }} />
+                            <IonIcon icon={ICON_UHRZEIT} style={{ fontSize: 'var(--app-text-basis)' }} />
                             <span>{remainingFor(challenge.ends_at)}</span>
                           </div>
                         </div>
@@ -567,10 +548,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '4px'
+                        gap: 'var(--app-abstand-mini)'
                       }}
                     >
-                      Alle Challenges anzeigen <IonIcon icon={chevronForward} />
+                      Alle Challenges anzeigen <IonIcon icon={ICON_WEITER_GEFUELLT} />
                     </div>
                   </div>
                 </div>
@@ -609,10 +590,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                     </>
                   ) : (
                     <div style={{ color: 'rgba(255, 255, 255, 0.9)' }}>
-                      <div className="app-headline" style={{ fontSize: '1.3rem', fontWeight: '800', color: 'white', marginBottom: '8px' }}>
+                      <div className="app-headline" style={{ fontSize: 'var(--app-text-titel)', fontWeight: 'var(--app-schrift-extrafett)', color: 'white', marginBottom: 'var(--app-abstand-eng)' }}>
                         Dein Konfispruch
                       </div>
-                      <div style={{ fontSize: '0.95rem' }}>
+                      <div style={{ fontSize: 'var(--app-text-betont)' }}>
                         Tippe, um deinen Konfirmationsspruch zu wählen
                       </div>
                     </div>
@@ -630,7 +611,7 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
 <div className="app-dashboard-section__content app-dashboard-section__content--compact">
                   {regularEvents.length > 0 ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-mittel)' }}>
                       {regularEvents.map((event) => (
                         <EventCard
                           key={event.id}
@@ -646,23 +627,23 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                           cursor: 'pointer',
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '4px'
+                          gap: 'var(--app-abstand-mini)'
                         }}
                       >
-                        Alle Events anzeigen <IonIcon icon={chevronForward} />
+                        Alle Events anzeigen <IonIcon icon={ICON_WEITER_GEFUELLT} />
                       </div>
                     </div>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-mittel)' }}>
                       <div
                         className="app-dashboard-glass-card"
                         onClick={() => router.push('/konfi/events')}
-                        style={{ cursor: 'pointer', textAlign: 'center', padding: '20px 16px' }}
+                        style={{ cursor: 'pointer', textAlign: 'center', padding: 'var(--app-abstand-gross) var(--app-abstand-basis)' }}
                       >
-                        <div style={{ fontSize: '1rem', fontWeight: '600', color: 'white', marginBottom: '4px' }}>
+                        <div style={{ fontSize: 'var(--app-text-standard)', fontWeight: 'var(--app-schrift-halbfett)', color: 'white', marginBottom: 'var(--app-abstand-mini)' }}>
                           Buche dein nächstes Event
                         </div>
-                        <div style={{ fontSize: '0.85rem', color: 'rgba(255, 255, 255, 0.7)' }}>
+                        <div style={{ fontSize: 'var(--app-text-sekundaer)', color: 'rgba(255, 255, 255, 0.7)' }}>
                           Tippe hier um verfügbare Events zu sehen
                         </div>
                       </div>
@@ -674,10 +655,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                           cursor: 'pointer',
                           display: 'flex',
                           alignItems: 'center',
-                          gap: '4px'
+                          gap: 'var(--app-abstand-mini)'
                         }}
                       >
-                        Alle Events anzeigen <IonIcon icon={chevronForward} />
+                        Alle Events anzeigen <IonIcon icon={ICON_WEITER_GEFUELLT} />
                       </div>
                     </div>
                   )}
@@ -728,22 +709,22 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                   <h2 className="app-dashboard-section__bg-label">DEINE</h2>
                   <h2 className="app-dashboard-section__bg-label">BADGES</h2>
                 </div>
-                <div className="app-dashboard-section__content" style={{ padding: '60px 20px 24px 20px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '20px', flexWrap: 'wrap' }}>
-                    <div className="app-dashboard-glass-chip" style={{ display: 'flex', alignItems: 'center', fontSize: '0.9rem' }}>
-                      <span style={{ fontWeight: '800' }}>{badgeStats.totalEarned}/{badgeStats.totalAvailable}</span>
-                      <span style={{ opacity: 0.8, marginLeft: '4px' }}>sichtbar</span>
+                <div className="app-dashboard-section__content" style={{ padding: 'var(--app-freiraum-kopf-m) var(--app-abstand-gross) var(--app-abstand-weit) var(--app-abstand-gross)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--app-abstand-schmal)', marginBottom: 'var(--app-abstand-gross)', flexWrap: 'wrap' }}>
+                    <div className="app-dashboard-glass-chip" style={{ display: 'flex', alignItems: 'center', fontSize: 'var(--app-text-basis)' }}>
+                      <span style={{ fontWeight: 'var(--app-schrift-extrafett)' }}>{badgeStats.totalEarned}/{badgeStats.totalAvailable}</span>
+                      <span style={{ opacity: 0.8, marginLeft: 'var(--app-abstand-mini)' }}>sichtbar</span>
                       {recentVisibleCount > 0 && (
                         <>
                           <span className="app-dashboard-dot" />
-                          <span style={{ fontWeight: '800' }}>{recentVisibleCount} {recentVisibleCount === 1 ? 'neuer' : 'neue'}</span>
+                          <span style={{ fontWeight: 'var(--app-schrift-extrafett)' }}>{recentVisibleCount} {recentVisibleCount === 1 ? 'neuer' : 'neue'}</span>
                         </>
                       )}
                     </div>
                   </div>
 
                   <>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center', marginBottom: secretEarned.length > 0 || secretNotEarnedCount > 0 ? '16px' : '0' }}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--app-abstand-schmal)', justifyContent: 'center', marginBottom: secretEarned.length > 0 || secretNotEarnedCount > 0 ? 'var(--app-abstand-basis)' : '0' }}>
                       {visibleBadges.map((badge) => {
                         const isEarned = earnedIds.has(badge.id);
                         const isRecent = recentBadgeIds.has(badge.id);
@@ -756,19 +737,19 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                               presentBadgePopover({ event: e.nativeEvent, side: 'top', alignment: 'center', cssClass: 'badge-detail-popover' });
                             }}
                             style={{
-                              width: '44px', height: '44px', borderRadius: '50%',
+                              width: '44px', height: '44px', borderRadius: 'var(--app-radius-kreis)',
                               background: isEarned ? `linear-gradient(135deg, ${badgeClr} 0%, ${badgeClr}dd 100%)` : 'rgba(255, 255, 255, 0.15)',
                               display: 'flex', alignItems: 'center', justifyContent: 'center',
-                              boxShadow: isEarned ? (isRecent ? `0 0 0 3px #10b981, 0 0 20px rgba(16, 185, 129, 0.6)` : `0 4px 12px ${badgeClr}50`) : 'none',
-                              border: isRecent ? '3px solid #10b981' : isEarned ? '2px solid rgba(255, 255, 255, 0.3)' : '2px dashed rgba(255, 255, 255, 0.25)',
+                              boxShadow: isEarned ? (isRecent ? `0 0 0 3px var(--app-color-success-fresh), 0 0 20px rgba(var(--app-color-success-fresh-rgb), 0.6)` : `0 4px 12px ${badgeClr}50`) : 'none',
+                              border: isRecent ? '3px solid var(--app-color-success-fresh)' : isEarned ? '2px solid rgba(255, 255, 255, 0.3)' : '2px dashed rgba(255, 255, 255, 0.25)',
                               transition: 'all 0.3s ease', opacity: isEarned ? 1 : 0.5, cursor: 'pointer',
                               position: 'relative', animation: isRecent ? 'badgePulse 2s ease-in-out infinite' : 'none'
                             }}
                           >
-                            <IonIcon icon={isEarned ? getIconFromString(badge.icon) : eyeOff} style={{ fontSize: isEarned ? '1.4rem' : '1rem', color: isEarned ? 'white' : 'rgba(255, 255, 255, 0.4)', filter: isEarned ? 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' : 'none' }} />
+                            <IonIcon icon={isEarned ? getIconFromString(badge.icon) : ICON_VERBORGEN_GEFUELLT} style={{ fontSize: isEarned ? 'var(--app-text-titel-gross)' : 'var(--app-text-standard)', color: isEarned ? 'white' : 'rgba(255, 255, 255, 0.4)', filter: isEarned ? 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' : 'none' }} />
                             {isRecent && (
-                              <div style={{ position: 'absolute', top: '-6px', right: '-6px', width: '18px', height: '18px', borderRadius: '50%', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', border: '2px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(16, 185, 129, 0.5)' }}>
-                                <span style={{ fontSize: '10px', fontWeight: '800', color: 'white' }}>!</span>
+                              <div style={{ position: 'absolute', top: '-6px', right: '-6px', width: '18px', height: '18px', borderRadius: 'var(--app-radius-kreis)', background: 'var(--app-gradient-success)', border: '2px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--app-schatten-punkt-erfolg)' }}>
+                                <span style={{ fontSize: 'var(--app-text-hinweispunkt)', fontWeight: 'var(--app-schrift-extrafett)', color: 'white' }}>!</span>
                               </div>
                             )}
                           </div>
@@ -778,19 +759,19 @@ const DashboardView: React.FC<DashboardViewProps> = ({
 
                     {(secretEarned.length > 0 || secretNotEarnedCount > 0) && (
                       <>
-                        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '12px' }}>
-                          <div className="app-dashboard-glass-chip" style={{ fontSize: '0.9rem', display: 'flex', alignItems: 'center' }}>
-                            <span style={{ fontWeight: '800' }}>{badgeStats.secretEarned}/{badgeStats.secretAvailable}</span>
-                            <span style={{ opacity: 0.8, marginLeft: '4px' }}>geheim</span>
+                        <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 'var(--app-abstand-mittel)' }}>
+                          <div className="app-dashboard-glass-chip" style={{ fontSize: 'var(--app-text-basis)', display: 'flex', alignItems: 'center' }}>
+                            <span style={{ fontWeight: 'var(--app-schrift-extrafett)' }}>{badgeStats.secretEarned}/{badgeStats.secretAvailable}</span>
+                            <span style={{ opacity: 0.8, marginLeft: 'var(--app-abstand-mini)' }}>geheim</span>
                             {recentSecretCount > 0 && (
                               <>
                                 <span className="app-dashboard-dot" />
-                                <span style={{ fontWeight: '800' }}>{recentSecretCount} {recentSecretCount === 1 ? 'neuer' : 'neue'}</span>
+                                <span style={{ fontWeight: 'var(--app-schrift-extrafett)' }}>{recentSecretCount} {recentSecretCount === 1 ? 'neuer' : 'neue'}</span>
                               </>
                             )}
                           </div>
                         </div>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', justifyContent: 'center' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 'var(--app-abstand-schmal)', justifyContent: 'center' }}>
                           {secretEarned.map((badge) => {
                             const isRecent = recentBadgeIds.has(badge.id);
                             const badgeClr = getBadgeColor(badge);
@@ -801,27 +782,27 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                                   presentBadgePopover({ event: e.nativeEvent, side: 'top', alignment: 'center', cssClass: 'badge-detail-popover' });
                                 }}
                                 style={{
-                                  width: '44px', height: '44px', borderRadius: '50%',
+                                  width: '44px', height: '44px', borderRadius: 'var(--app-radius-kreis)',
                                   background: `linear-gradient(135deg, ${badgeClr} 0%, ${badgeClr}dd 100%)`,
                                   display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                  boxShadow: isRecent ? `0 0 0 3px #10b981, 0 0 20px rgba(16, 185, 129, 0.6)` : `0 4px 12px ${badgeClr}50`,
-                                  border: isRecent ? '3px solid #10b981' : '2px solid rgba(255, 255, 255, 0.3)',
+                                  boxShadow: isRecent ? `0 0 0 3px var(--app-color-success-fresh), 0 0 20px rgba(var(--app-color-success-fresh-rgb), 0.6)` : `0 4px 12px ${badgeClr}50`,
+                                  border: isRecent ? '3px solid var(--app-color-success-fresh)' : '2px solid rgba(255, 255, 255, 0.3)',
                                   cursor: 'pointer', position: 'relative',
                                   animation: isRecent ? 'badgePulse 2s ease-in-out infinite' : 'none'
                                 }}
                               >
-                                <IonIcon icon={getIconFromString(badge.icon)} style={{ fontSize: '1.4rem', color: 'white', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' }} />
+                                <IonIcon icon={getIconFromString(badge.icon)} style={{ fontSize: 'var(--app-text-titel-gross)', color: 'white', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.2))' }} />
                                 {isRecent && (
-                                  <div style={{ position: 'absolute', top: '-6px', right: '-6px', width: '18px', height: '18px', borderRadius: '50%', background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', border: '2px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 6px rgba(16, 185, 129, 0.5)' }}>
-                                    <span style={{ fontSize: '10px', fontWeight: '800', color: 'white' }}>!</span>
+                                  <div style={{ position: 'absolute', top: '-6px', right: '-6px', width: '18px', height: '18px', borderRadius: 'var(--app-radius-kreis)', background: 'var(--app-gradient-success)', border: '2px solid white', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: 'var(--app-schatten-punkt-erfolg)' }}>
+                                    <span style={{ fontSize: 'var(--app-text-hinweispunkt)', fontWeight: 'var(--app-schrift-extrafett)', color: 'white' }}>!</span>
                                   </div>
                                 )}
                               </div>
                             );
                           })}
                           {Array.from({ length: secretNotEarnedCount }).map((_, index) => (
-                            <div key={`secret-placeholder-${index}`} style={{ width: '44px', height: '44px', borderRadius: '50%', background: 'rgba(255, 255, 255, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px dashed rgba(255, 255, 255, 0.35)', opacity: 0.6 }}>
-                              <IonIcon icon={helpCircle} style={{ fontSize: '1.2rem', color: 'rgba(255, 255, 255, 0.5)' }} />
+                            <div key={`secret-placeholder-${index}`} style={{ width: '44px', height: '44px', borderRadius: 'var(--app-radius-kreis)', background: 'rgba(255, 255, 255, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px dashed rgba(255, 255, 255, 0.35)', opacity: 0.6 }}>
+                              <IonIcon icon={ICON_HILFE_GEFUELLT} style={{ fontSize: 'var(--app-text-untertitel)', color: 'rgba(255, 255, 255, 0.5)' }} />
                             </div>
                           ))}
                         </div>
@@ -829,10 +810,10 @@ const DashboardView: React.FC<DashboardViewProps> = ({
                     )}
                   </>
 
-                  <div style={{ display: 'flex', justifyContent: 'center', marginTop: '16px' }}>
-                    <div className="app-dashboard-glass-chip" onClick={() => router.push('/konfi/badges')} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'center', marginTop: 'var(--app-abstand-basis)' }}>
+                    <div className="app-dashboard-glass-chip" onClick={() => router.push('/konfi/badges')} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-kompakt)' }}>
                       <span>Alle Badges anzeigen</span>
-                      <IonIcon icon={chevronForward} style={{ fontSize: '0.9rem' }} />
+                      <IonIcon icon={ICON_WEITER_GEFUELLT} style={{ fontSize: 'var(--app-text-basis)' }} />
                     </div>
                   </div>
                 </div>

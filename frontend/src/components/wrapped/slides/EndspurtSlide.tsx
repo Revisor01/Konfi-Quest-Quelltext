@@ -1,6 +1,6 @@
 import React from 'react';
 import { IonIcon } from '@ionic/react';
-import { flameOutline } from 'ionicons/icons';
+import { ICON_FLAMME } from '../../shared/icons';
 import type { SlideProps, KonfiEndspurtSlide } from '../../../types/wrapped';
 import { useCountUp } from '../../../hooks/useCountUp';
 import SlideBase from './SlideBase';
@@ -16,15 +16,15 @@ const EndspurtSlide: React.FC<EndspurtSlideProps> = ({ isActive, endspurt }) => 
   return (
     <SlideBase isActive={isActive} className="endspurt-slide">
       <div className="wrapped-anim-fly-left">
-        <p className="wrapped-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <IonIcon icon={flameOutline} style={{ fontSize: '1rem' }} />
+        <p className="wrapped-label" style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-kompakt)' }}>
+          <IonIcon icon={ICON_FLAMME} style={{ fontSize: 'var(--app-text-standard)' }} />
           Endspurt!
         </p>
       </div>
       <div className="wrapped-anim-number-pop wrapped-anim-delay-1">
         <p className="wrapped-hero-text" style={{
           textShadow: '0 0 40px rgba(249,115,22,0.4)',
-          color: '#fb923c',
+          color: 'var(--app-wrapped-orange)',
         }}>
           {animatedFehlend}
         </p>
@@ -40,13 +40,13 @@ const EndspurtSlide: React.FC<EndspurtSlideProps> = ({ isActive, endspurt }) => 
               style={{ width: isActive ? `${progressPercent}%` : '0%' }}
             />
           </div>
-          <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: '0.85rem', marginTop: '8px' }}>
+          <p style={{ color: 'rgba(255,255,255,0.6)', fontSize: 'var(--app-text-sekundaer)', marginTop: 'var(--app-abstand-eng)' }}>
             {endspurt.aktuell_total} von {endspurt.ziel_total} Punkten
           </p>
         </div>
       </div>
       <div className="wrapped-anim-bounce wrapped-anim-delay-3">
-        <p style={{ color: '#fbbf24', fontSize: '1.3rem', fontWeight: 700, marginTop: '24px' }}>
+        <p style={{ color: 'var(--app-wrapped-gold)', fontSize: 'var(--app-text-titel)', fontWeight: 'var(--app-schrift-fett)', marginTop: 'var(--app-abstand-weit)' }}>
           Du schaffst das!
         </p>
       </div>

@@ -1,22 +1,22 @@
 import React from 'react';
 import { IonIcon } from '@ionic/react';
 import {
-  ellipseOutline,
-  checkmarkCircle,
-  closeCircle,
-  close,
-  shieldCheckmark,
-  flame,
-  hourglassOutline,
-  checkmark,
-  timeOutline,
-  lockClosed,
-  eye,
-  eyeOff,
-  informationCircle,
-  addCircle,
-  checkmarkDoneCircle
-} from 'ionicons/icons';
+  ICON_ABSAGE,
+  ICON_ANWESEND,
+  ICON_FLAMME_GEFUELLT,
+  ICON_HAKEN_GEFUELLT,
+  ICON_INFO_GEFUELLT,
+  ICON_KREIS_LEER,
+  ICON_PLUS_KREIS_GEFUELLT,
+  ICON_SCHLIESSEN_GEFUELLT,
+  ICON_SCHUTZ_GEFUELLT,
+  ICON_SICHTBAR_GEFUELLT,
+  ICON_SPERRE_GEFUELLT,
+  ICON_UHRZEIT,
+  ICON_VERBORGEN_GEFUELLT,
+  ICON_WARTEND,
+  ICON_ZUSAGE_GEFUELLT,
+} from './icons';
 
 // Mapping: Status-Text -> Icon
 // SINGLE SOURCE OF TRUTH für Event-Status-Icons: dieselbe Map wird sowohl für
@@ -25,35 +25,40 @@ import {
 // Durchgehend "Kreis"-Icons für Event-Status (einheitliche runde Symbole).
 const STATUS_ICON_MAP: Record<string, string> = {
   // Events
-  'Offen': addCircle,        // Plus im Kreis = "anmelden/hinzufuegen"
-  'Verbuchen': ellipseOutline,  // leerer Kreis = "noch offen, muss verbucht werden"
-  'Verbucht': checkmarkCircle,
-  'Pflicht': shieldCheckmark,
-  'Abgesagt': closeCircle,
-  'Konfirmation': flame,
-  'Warteliste': hourglassOutline,
-  'Ausgebucht': lockClosed,  // geschlossenes Schloss = eindeutig "zu / keine Anmeldung"
-  'Bald': timeOutline,
-  'Geschlossen': lockClosed,
-  'Nur Info': informationCircle,
-  'Vergangen': timeOutline,
+  'Offen': ICON_PLUS_KREIS_GEFUELLT,        // Plus im Kreis = "anmelden/hinzufuegen"
+  'Verbuchen': ICON_KREIS_LEER,  // leerer Kreis = "noch offen, muss verbucht werden"
+  'Verbucht': ICON_ZUSAGE_GEFUELLT,
+  'Pflicht': ICON_SCHUTZ_GEFUELLT,
+  'Abgesagt': ICON_ABSAGE,
+  'Konfirmation': ICON_FLAMME_GEFUELLT,
+  'Warteliste': ICON_WARTEND,
+  'Ausgebucht': ICON_SPERRE_GEFUELLT,  // geschlossenes Schloss = eindeutig "zu / keine Anmeldung"
+  'Bald': ICON_UHRZEIT,
+  'Geschlossen': ICON_SPERRE_GEFUELLT,
+  'Nur Info': ICON_INFO_GEFUELLT,
+  'Vergangen': ICON_UHRZEIT,
   // Konfi-/Teamer-Event Status
-  'Angemeldet': checkmarkCircle,
-  'Dabei': checkmarkCircle,  // Teamer "Dabei" = angemeldet
-  'Gebucht': checkmarkCircle,
-  'Anwesend': checkmarkDoneCircle,  // Doppelhaken IM Kreis -> passt zur Kreis-Haken-Familie (Angemeldet/Dabei)
-  'Abwesend': closeCircle,
-  'Gefehlt': closeCircle,
-  'Abgemeldet': closeCircle,
-  'Verpasst': closeCircle,
-  'Ausstehend': hourglassOutline,
-  'Genehmigt': checkmarkCircle,
-  'Abgelehnt': closeCircle,
+  'Angemeldet': ICON_ZUSAGE_GEFUELLT,
+  'Dabei': ICON_ZUSAGE_GEFUELLT,  // Teamer "Dabei" = angemeldet
+  'Gebucht': ICON_ZUSAGE_GEFUELLT,
+  'Anwesend': ICON_ANWESEND,  // Doppelhaken IM Kreis -> passt zur Kreis-Haken-Familie (Angemeldet/Dabei)
+  'Abwesend': ICON_ABSAGE,
+  'Gefehlt': ICON_ABSAGE,
+  'Abgemeldet': ICON_ABSAGE,
+  // Eigene Absage der Teamer:innen. Fehlte hier, deshalb fiel das Badge auf
+  // die Text-Variante zurueck und schrieb "Abgesagt von dir" lang aus, waehrend
+  // jeder andere Zustand ein Symbol zeigt. Gleiches Zeichen
+  // wie 'Abgesagt' und 'Abgemeldet' -- es ist dieselbe Aussage.
+  'Abgesagt von dir': ICON_ABSAGE,
+  'Verpasst': ICON_ABSAGE,
+  'Ausstehend': ICON_WARTEND,
+  'Genehmigt': ICON_ZUSAGE_GEFUELLT,
+  'Abgelehnt': ICON_ABSAGE,
   // Badges / generische Zustände (keine Text-Corner-Badges mehr)
-  'Geheim': eyeOff,
-  'Sichtbar': eye,
-  'Aktiv': checkmark,
-  'Inaktiv': close
+  'Geheim': ICON_VERBORGEN_GEFUELLT,
+  'Sichtbar': ICON_SICHTBAR_GEFUELLT,
+  'Aktiv': ICON_HAKEN_GEFUELLT,
+  'Inaktiv': ICON_SCHLIESSEN_GEFUELLT
 };
 
 export const getStatusIcon = (statusText: string): string | null => {
@@ -85,11 +90,11 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({ statusText, statusColor }) =>
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          padding: '4px 8px'
+          padding: 'var(--app-abstand-mini) var(--app-abstand-eng)'
         }}
         title={statusText}
       >
-        <IonIcon icon={icon} style={{ color: '#fff', fontSize: '0.85rem' }} />
+        <IonIcon icon={icon} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
       </div>
     );
   }

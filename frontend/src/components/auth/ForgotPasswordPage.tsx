@@ -1,3 +1,13 @@
+import {
+  ICON_AKTUALISIEREN,
+  ICON_INFO,
+  ICON_MAIL,
+  ICON_OFFLINE,
+  ICON_WARNHINWEIS_GEFUELLT,
+  ICON_ZURUECK,
+  ICON_ZUSAGE_GEFUELLT,
+} from '../shared/icons';
+import { fehlerStatus, istNetzwerkfehler } from '../../utils/fehler';
 import React, { useState } from 'react';
 import {
   IonPage,
@@ -13,7 +23,6 @@ import {
   useIonRouter
 } from '@ionic/react';
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
-import { mailOutline, arrowBack, checkmarkCircle, alertCircle, informationCircleOutline, refreshOutline, cloudOfflineOutline } from 'ionicons/icons';
 import api from '../../services/api';
 import { useApp } from '../../contexts/AppContext';
 
@@ -45,11 +54,11 @@ const ForgotPasswordPage: React.FC = () => {
     try {
       await api.post('/auth/request-password-reset', { email: email.trim() });
       setSent(true);
-    } catch (err: any) {
-      const status = err.response?.status;
+    } catch (err) {
+      const status = fehlerStatus(err);
       if (status === 500) {
         setError('E-Mail konnte nicht gesendet werden. Bitte versuche es später erneut.');
-      } else if (!err.response) {
+      } else if (istNetzwerkfehler(err)) {
         setError('Verbindung fehlgeschlagen. Bitte prüfe deine Internetverbindung.');
         setIsNetworkError(true);
       } else {
@@ -81,12 +90,12 @@ const ForgotPasswordPage: React.FC = () => {
         <div className="app-auth-container">
 
           {/* Header */}
-          <div className="app-auth-hero" style={{ marginTop: '60px' }}>
+          <div className="app-auth-hero" style={{ marginTop: 'var(--app-freiraum-kopf-m)' }}>
             <div className="app-auth-hero__cosmic-circle">
-              <IonIcon icon={mailOutline} className="app-auth-hero__cosmic-circle-icon" />
+              <IonIcon icon={ICON_MAIL} className="app-auth-hero__cosmic-circle-icon" />
             </div>
 
-            <h1 className="app-auth-hero__title--cosmic" style={{ fontSize: '2.2rem', letterSpacing: '4px' }}>
+            <h1 className="app-auth-hero__title--cosmic" style={{ fontSize: 'var(--app-anzeige-zahl)', letterSpacing: '4px' }}>
               PASSWORT<br />VERGESSEN?
             </h1>
 
@@ -107,24 +116,24 @@ const ForgotPasswordPage: React.FC = () => {
                 // Erfolgsmeldung
                 <div style={{ textAlign: 'center' }}>
                   <div className="app-auth-success-circle--small">
-                    <IonIcon icon={checkmarkCircle} className="app-auth-success-circle__icon--small" />
+                    <IonIcon icon={ICON_ZUSAGE_GEFUELLT} className="app-auth-success-circle__icon--small" />
                   </div>
 
                   <h2 style={{
-                    fontFamily: "'Bebas Neue', sans-serif",
-                    fontSize: '1.6rem',
-                    fontWeight: 400,
+                    fontFamily: 'var(--app-schriftart-marke)',
+                    fontSize: 'var(--app-text-ueberschrift-gross)',
+                    fontWeight: 'var(--app-schrift-normal)',
                     letterSpacing: '3px',
-                    margin: '0 0 12px 0',
-                    color: '#5b21b6'
+                    margin: '0 0 var(--app-abstand-mittel) 0',
+                    color: 'var(--app-color-konfis)'
                   }}>
                     E-MAIL GESENDET
                   </h2>
 
                   <p style={{
                     color: 'rgba(0, 0, 0, 0.6)',
-                    fontSize: '0.9rem',
-                    margin: '0 0 24px 0',
+                    fontSize: 'var(--app-text-basis)',
+                    margin: '0 0 var(--app-abstand-weit) 0',
                     lineHeight: '1.5'
                   }}>
                     Falls ein Konto mit dieser E-Mail-Adresse existiert, erhältst du in Kürze eine E-Mail mit einem Link zum Zurücksetzen deines Passworts.
@@ -142,7 +151,7 @@ const ForgotPasswordPage: React.FC = () => {
                 // Formular
                 <>
                   <IonItem lines="none" className="app-auth-input">
-                    <IonIcon icon={mailOutline} slot="start" style={{ color: '#67e8f9' }} />
+                    <IonIcon icon={ICON_MAIL} slot="start" style={{ color: 'var(--app-auth-akzent)' }} />
                     <IonLabel position="stacked" className="app-auth-input__label">
                       E-Mail-Adresse
                     </IonLabel>
@@ -157,13 +166,13 @@ const ForgotPasswordPage: React.FC = () => {
 
                   {/* Konfi-Hinweis */}
                   <div className="app-auth-konfi-hint">
-                    <IonIcon icon={informationCircleOutline} />
+                    <IonIcon icon={ICON_INFO} />
                     <span>Keine E-Mail-Adresse hinterlegt? Frag deinen Konfi-Leiter -- er kann dein Passwort direkt zurücksetzen.</span>
                   </div>
 
                   {error && (
                     <div className="app-auth-error">
-                      <IonIcon icon={alertCircle} className="app-auth-error__icon" />
+                      <IonIcon icon={ICON_WARNHINWEIS_GEFUELLT} className="app-auth-error__icon" />
                       <span className="app-auth-error__text">{error}</span>
                     </div>
                   )}
@@ -173,9 +182,9 @@ const ForgotPasswordPage: React.FC = () => {
                       expand="full"
                       fill="outline"
                       onClick={() => handleSubmit()}
-                      style={{ marginBottom: '12px', '--border-radius': '8px', height: '36px', fontSize: '0.85rem' }}
+                      style={{ marginBottom: 'var(--app-abstand-mittel)', '--border-radius': '8px', height: '36px', fontSize: 'var(--app-text-sekundaer)' }}
                     >
-                      <IonIcon icon={refreshOutline} slot="start" />
+                      <IonIcon icon={ICON_AKTUALISIEREN} slot="start" />
                       Erneut versuchen
                     </IonButton>
                   )}
@@ -185,12 +194,12 @@ const ForgotPasswordPage: React.FC = () => {
                     onClick={handleSubmit}
                     disabled={loading || !isOnline}
                     className="app-auth-button"
-                    style={{ marginBottom: '16px' }}
+                    style={{ marginBottom: 'var(--app-abstand-basis)' }}
                   >
                     {loading ? (
                       <IonSpinner name="crescent" style={{ '--color': 'white' }} />
                     ) : !isOnline ? (
-                      <><IonIcon icon={cloudOfflineOutline} style={{ marginRight: 4 }} /> Du bist offline</>
+                      <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Du bist offline</>
                     ) : (
                       'Link senden'
                     )}
@@ -201,7 +210,7 @@ const ForgotPasswordPage: React.FC = () => {
                       onClick={() => router.push('/login')}
                       className="app-auth-link"
                     >
-                      <IonIcon icon={arrowBack} />
+                      <IonIcon icon={ICON_ZURUECK} />
                       Zurück zum Login
                     </span>
                   </div>

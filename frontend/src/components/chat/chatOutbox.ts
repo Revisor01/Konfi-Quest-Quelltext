@@ -1,5 +1,5 @@
 import { Filesystem, Directory } from '@capacitor/filesystem';
-import { writeQueue, QueueItem, FailedChatMessage } from '../../services/writeQueue';
+import { writeQueue, QueueBody, QueueItem, FailedChatMessage } from '../../services/writeQueue';
 import { Message, ChatUserType } from '../../types/chat';
 
 /**
@@ -103,7 +103,7 @@ export async function chatNachrichtEinreihen(
   roomId: number,
   opts: { clientId: string; content: string; file?: File | null; replyToId?: number | null }
 ): Promise<void> {
-  const queueBody: Record<string, any> = { content: opts.content, client_id: opts.clientId };
+  const queueBody: QueueBody = { content: opts.content, client_id: opts.clientId };
   let hasFileUpload = false;
 
   if (opts.file) {
@@ -157,7 +157,7 @@ export function mergeMitLokalen(server: Message[], vorher: Message[]): Message[]
 
   // Ist die Server-Kopie inzwischen da, fällt die lokale Fassung weg.
   const serverClientIds = new Set(
-    server.map(m => (m as any).client_id || m.localId).filter(Boolean)
+    server.map(m => m.client_id || m.localId).filter(Boolean)
   );
   const nochOffen = offen.filter(m => !serverClientIds.has(m.localId));
   if (nochOffen.length === 0) return server;

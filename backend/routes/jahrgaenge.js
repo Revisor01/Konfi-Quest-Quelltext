@@ -5,9 +5,11 @@ const { handleValidationErrors, commonValidations } = require('../middleware/val
 const liveUpdate = require('../utils/liveUpdate');
 const emailService = require('../services/emailService');
 const { syncJahrgangChat } = require('../utils/jahrgangChat');
+const { darfJahrgang } = require('../utils/jahrgangsZugriff');
+const { canManageRole } = require('../utils/roleHierarchy');
 
-// Jahrgänge: Teamer darf ansehen, Admin darf bearbeiten
-module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
+// Jahrgänge: Teamer darf ansehen, Admin darf bearbeiten, NUR org_admin darf anlegen
+module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin, requireTeamer }) => {
 
   // Schema-Migrationen: siehe backend/migrations/064_consolidate_inline_schemas.sql
 
@@ -19,6 +21,14 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
     body('konfspruch_enabled').optional().isBoolean().withMessage('konfspruch_enabled muss Boolean sein'),
     body('target_gottesdienst').optional().isInt({ min: 0 }).withMessage('target_gottesdienst muss >= 0 sein'),
     body('target_gemeinde').optional().isInt({ min: 0 }).withMessage('target_gemeinde muss >= 0 sein'),
+    // Direkt-Zuweisung beim Anlegen: OPTIONAL, damit ausgelieferte
+    // Apps (die das Feld nicht senden) sich exakt wie bisher verhalten.
+    // Form wie bei POST /users/:id/jahrgaenge, nur gespiegelt: dort Jahrgaenge
+    // pro Person, hier Personen pro Jahrgang.
+    body('user_assignments').optional().isArray().withMessage('user_assignments muss ein Array sein'),
+    body('user_assignments.*.user_id').isInt({ min: 1 }).withMessage('user_id muss eine positive Ganzzahl sein'),
+    body('user_assignments.*.can_view').optional().isBoolean().withMessage('can_view muss Boolean sein'),
+    body('user_assignments.*.can_edit').optional().isBoolean().withMessage('can_edit muss Boolean sein'),
     handleValidationErrors
   ];
 
@@ -41,12 +51,28 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
   // GET all jahrgaenge for the admin's organization
   router.get('/', rbacVerifier, requireTeamer, async (req, res) => {
     try {
+      let jahrgangFilter = '';
+      const params = [req.user.organization_id];
+      if (!req.user.is_super_admin && req.user.role_name !== 'org_admin') {
+        const sichtbare = (req.user.assigned_jahrgaenge || [])
+          .filter(j => j.can_view)
+          .map(j => j.id);
+        if (sichtbare.length === 0) {
+          // Grund der leeren Liste mitliefern (dasselbe Muster wie GET
+          // /admin/konfis): keine Zuweisung, nicht "keine Jahrgaenge".
+          res.set('X-Kein-Jahrgang-Zugewiesen', 'true');
+          return res.json([]);
+        }
+        params.push(sichtbare);
+        jahrgangFilter = ' AND j.id = ANY($2::int[])';
+      }
+
       const query = `SELECT j.*,
         (SELECT COUNT(*) FROM konfi_profiles kp JOIN users u ON kp.user_id = u.id WHERE kp.jahrgang_id = j.id AND u.organization_id = j.organization_id)::int as konfi_count,
         (SELECT COALESCE(SUM(kp.gottesdienst_points), 0) FROM konfi_profiles kp WHERE kp.jahrgang_id = j.id AND kp.gottesdienst_points > 0)::int as gottesdienst_points_total,
         (SELECT COALESCE(SUM(kp.gemeinde_points), 0) FROM konfi_profiles kp WHERE kp.jahrgang_id = j.id AND kp.gemeinde_points > 0)::int as gemeinde_points_total
-      FROM jahrgaenge j WHERE j.organization_id = $1 ORDER BY j.name DESC`;
-      const { rows: jahrgaenge } = await db.query(query, [req.user.organization_id]);
+      FROM jahrgaenge j WHERE j.organization_id = $1${jahrgangFilter} ORDER BY j.name DESC`;
+      const { rows: jahrgaenge } = await db.query(query, params);
       res.json(jahrgaenge);
     } catch (err) {
  console.error('Database error in GET /api/jahrgaenge:', err);
@@ -55,13 +81,28 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
   });
 
   // POST a new jahrgang
-  router.post('/', rbacVerifier, requireAdmin, validateCreateJahrgang, async (req, res) => {
-    const { name, gottesdienst_enabled, gemeinde_enabled, konfspruch_enabled, target_gottesdienst, target_gemeinde } = req.body;
+  //
+  // Direkt-Zuweisung: user_assignments = [{ user_id, can_view?, can_edit? }]
+  // ist OPTIONAL — fehlt das Feld, verhaelt sich die Route exakt wie bisher
+  // (ausgelieferte Apps senden es nicht und duerfen nicht brechen). Wen der
+  // org_admin zuweisen darf, entscheidet dieselbe Regel wie bei POST
+  // /users/:id/jahrgaenge: canManageRole (roleHierarchy.js) — keine zweite
+  // Rechte-Erfindung. Defaults can_view=true/can_edit=false und assigned_by
+  // ebenfalls wie dort. Anlage + Zuweisungen laufen in EINER Transaktion:
+  // Wird eine Zuweisung abgewiesen, bleibt kein halb angelegter Jahrgang
+  // zurueck.
+  router.post('/', rbacVerifier, requireOrgAdmin, validateCreateJahrgang, async (req, res) => {
+    const { name, gottesdienst_enabled, gemeinde_enabled, konfspruch_enabled, target_gottesdienst, target_gemeinde, user_assignments } = req.body;
     if (!name) {
       return res.status(400).json({ error: 'Name ist erforderlich' });
     }
 
+    const zuweisungen = Array.isArray(user_assignments) ? user_assignments : [];
+
+    const client = await db.getClient();
     try {
+      await client.query('BEGIN');
+
       // Das Konfirmationsdatum ist ab Phase 119 kein Pflichtfeld mehr und
       // wird bei der Anlage nicht mehr beschrieben (Spalte seit Migration 094
       // nullable). konfspruch_enabled defaultet auf true.
@@ -77,28 +118,90 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
         target_gottesdienst !== undefined ? target_gottesdienst : 10,
         target_gemeinde !== undefined ? target_gemeinde : 10
       ];
-      const { rows: [newJahrgang] } = await db.query(query, params);
+      const { rows: [newJahrgang] } = await client.query(query, params);
+
+      const assignedUserIds = [];
+      if (zuweisungen.length > 0) {
+        const userIds = zuweisungen.map(z => parseInt(z.user_id, 10));
+
+        // Doppelt geschickte Personen mit 400 abweisen statt am UNIQUE-Index
+        // (user_id, jahrgang_id) mit 500 zu scheitern — dasselbe Muster wie
+        // der Laengenvergleich in POST /users/:id/jahrgaenge.
+        if (new Set(userIds).size !== userIds.length) {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Mindestens eine Person ist doppelt angegeben' });
+        }
+
+        // Zielpersonen org-gescopt laden: eine fremde oder unbekannte Person
+        // ist ein 404 — dieselbe Antwort wie checkUserHierarchy fuer
+        // Zielbenutzer ausserhalb der eigenen Organisation.
+        const { rows: zielUsers } = await client.query(
+          `SELECT u.id, r.name AS role_name
+           FROM users u JOIN roles r ON u.role_id = r.id
+           WHERE u.id = ANY($1::int[]) AND u.organization_id = $2`,
+          [userIds, req.user.organization_id]
+        );
+        if (zielUsers.length !== userIds.length) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: 'Benutzer in dieser Organisation nicht gefunden' });
+        }
+
+        // Rollen-Grenze: canManageRole ist DIE Quelle (fuer org_admin heisst
+        // das: alle Rollen der eigenen Org, aber kein super_admin). Verletzung
+        // ist ein 403 — und dank Transaktion entsteht dabei auch kein Jahrgang.
+        const verboten = zielUsers.find(u => !canManageRole(req.user.role_name, u.role_name));
+        if (verboten) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: `Du kannst Benutzer mit der Rolle '${verboten.role_name}' nicht bearbeiten.` });
+        }
+
+        for (const zuweisung of zuweisungen) {
+          const { user_id, can_view = true, can_edit = false } = zuweisung;
+          await client.query(
+            `INSERT INTO user_jahrgang_assignments (user_id, jahrgang_id, can_view, can_edit, assigned_by)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [user_id, newJahrgang.id, can_view, can_edit, req.user.id]
+          );
+          assignedUserIds.push(parseInt(user_id, 10));
+        }
+      }
+
+      await client.query('COMMIT');
+
+      // Die Zuweisungen haengen im rbac-Cache der betroffenen Benutzer (30 s
+      // TTL) — ohne Invalidierung waere der frische Jahrgang fuer sie bis zu
+      // eine halbe Minute unsichtbar.
+      for (const userId of assignedUserIds) {
+        require('../middleware/rbac').invalidateUserCache(userId);
+      }
 
       // Jahrgangs-Chat sofort anlegen + Mitglieder synchronisieren (Org-Admins,
-      // zugewiesene Admins/Teamer, Konfis). Frueher entstand der Chat erst lazy
-      // beim ersten Chat-Tab-Aufruf eines Konfis — neue Orgs/Jahrgänge hatten
-      // dadurch gar keinen Chat. Fehler hier darf die Anlage nicht scheitern lassen.
+      // zugewiesene Admins/Teamer, Konfis — die eben geschriebenen Zuweisungen
+      // sind zu diesem Zeitpunkt committed und kommen direkt mit in den Raum).
+      // Frueher entstand der Chat erst lazy beim ersten Chat-Tab-Aufruf eines
+      // Konfis — neue Orgs/Jahrgänge hatten dadurch gar keinen Chat. Fehler
+      // hier darf die Anlage nicht scheitern lassen.
       try {
         await syncJahrgangChat(db, newJahrgang.id, req.user.organization_id, req.user.id);
       } catch (chatErr) {
         console.error('Jahrgangs-Chat konnte nicht angelegt werden:', chatErr.message);
       }
 
-      res.status(201).json(newJahrgang);
+      // Antwortform: unveraendert die volle Jahrgangs-Zeile; assigned_user_ids
+      // kommt ADDITIV dazu (ausgelieferte Apps lesen es schlicht nicht).
+      res.status(201).json({ ...newJahrgang, assigned_user_ids: assignedUserIds });
 
       // Live-Update an alle Admins senden
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'jahrgaenge', 'create');
     } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
       if (err.code === '23505') {
         return res.status(409).json({ error: 'Jahrgang-Name existiert bereits in dieser Organisation' });
       }
  console.error('Database error in POST /api/jahrgaenge:', err);
       res.status(500).json({ error: 'Datenbankfehler' });
+    } finally {
+      client.release();
     }
   });
 
@@ -118,6 +221,10 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
 
       if (!currentJahrgang) {
         return res.status(404).json({ error: 'Jahrgang nicht gefunden' });
+      }
+
+      if (!darfJahrgang(req, req.params.id, { edit: true })) {
+        return res.status(403).json({ error: 'Kein Zugriff auf diesen Jahrgang' });
       }
 
       // Warnungen sammeln bei Deaktivierung mit bestehenden Punkten
@@ -204,6 +311,17 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
     const forceDelete = req.query.force === 'true';
 
     try {
+      const { rows: [jahrgangDa] } = await db.query(
+        'SELECT id FROM jahrgaenge WHERE id = $1 AND organization_id = $2',
+        [jahrgangId, req.user.organization_id]
+      );
+      if (!jahrgangDa) {
+        return res.status(404).json({ error: 'Jahrgang nicht gefunden' });
+      }
+      if (!darfJahrgang(req, jahrgangId, { edit: true })) {
+        return res.status(403).json({ error: 'Kein Zugriff auf diesen Jahrgang' });
+      }
+
       // Blockieren NUR AKTIVE Konfis (Rolle = konfi). Beförderte Ex-Konfis
       // (jetzt teamer/admin) behalten beim Befördern bewusst ihr konfi_profiles
       // (Punkte-Historie), sind aber keine aktiven Konfis mehr und duerfen die
@@ -326,6 +444,10 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
       );
       if (!jahrgang) return res.status(404).json({ error: 'Jahrgang nicht gefunden' });
 
+      if (!darfJahrgang(req, jahrgangId)) {
+        return res.status(403).json({ error: 'Kein Zugriff auf diesen Jahrgang' });
+      }
+
       const { rows: konfis } = await db.query(`
         SELECT u.id AS user_id, u.display_name, u.username
         FROM users u
@@ -404,21 +526,50 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
       ORDER BY u.display_name ASC
     `, [jahrgangId, organizationId]);
 
+    // Alle Listen-Sprueche der Konfis in EINER Abfrage holen statt pro Konfi
+    // einzeln (N+1). Vorbild: material.js laedt Events/Jahrgaenge fuer alle
+    // Materialien gebuendelt und ordnet sie danach im Speicher zu.
+    // Die Uebersetzung haengt am Konfi, nicht am Spruch -> das Paar
+    // (spruch_id, translation) ist der Schluessel; deshalb wird das
+    // Uebersetzungs-JOIN ueber genau die vorkommenden Paare gefuehrt.
+    const spruchPaare = [];
+    const paarGesehen = new Set();
+    for (const konfi of konfis) {
+      if (!konfi.konfspruch_id) continue;
+      const translation = konfi.konfspruch_translation || 'luther2017';
+      const schluessel = `${konfi.konfspruch_id}|${translation}`;
+      if (paarGesehen.has(schluessel)) continue;
+      paarGesehen.add(schluessel);
+      spruchPaare.push({ id: konfi.konfspruch_id, translation });
+    }
+
+    const spruecheNachSchluessel = new Map();
+    if (spruchPaare.length > 0) {
+      const { rows: geladeneSprueche } = await db.query(`
+        SELECT ks.id, ks.reference, ku.text, paar.translation
+        FROM unnest($1::int[], $2::text[]) AS paar(spruch_id, translation)
+        JOIN konfsprueche ks ON ks.id = paar.spruch_id
+        LEFT JOIN konfspruch_uebersetzungen ku
+          ON ku.spruch_id = ks.id AND ku.translation = paar.translation
+        WHERE ks.is_active = true
+          AND (ks.organization_id IS NULL OR ks.organization_id = $3)
+      `, [
+        spruchPaare.map(p => p.id),
+        spruchPaare.map(p => p.translation),
+        organizationId
+      ]);
+      for (const spruch of geladeneSprueche) {
+        spruecheNachSchluessel.set(`${spruch.id}|${spruch.translation}`, spruch);
+      }
+    }
+
     const result = [];
     for (const konfi of konfis) {
       let konfspruch = null;
       if (konfi.konfspruch_id) {
-        // Listen-Wahl: gewaehlte Konfispruch-Uebersetzung nachladen (org-gescopt, is_active).
+        // Listen-Wahl: gewaehlte Konfispruch-Uebersetzung aus der Sammel-Abfrage.
         const spruchTranslation = konfi.konfspruch_translation || 'luther2017';
-        const { rows: [spruch] } = await db.query(`
-          SELECT ks.id, ks.reference, ku.text
-          FROM konfsprueche ks
-          LEFT JOIN konfspruch_uebersetzungen ku
-            ON ku.spruch_id = ks.id AND ku.translation = $2
-          WHERE ks.id = $1
-            AND ks.is_active = true
-            AND (ks.organization_id IS NULL OR ks.organization_id = $3)
-        `, [konfi.konfspruch_id, spruchTranslation, organizationId]);
+        const spruch = spruecheNachSchluessel.get(`${konfi.konfspruch_id}|${spruchTranslation}`);
         if (spruch) {
           konfspruch = {
             source: 'liste',
@@ -457,6 +608,10 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
       );
       if (!jahrgang) return res.status(404).json({ error: 'Jahrgang nicht gefunden' });
 
+      if (!darfJahrgang(req, jahrgangId)) {
+        return res.status(403).json({ error: 'Kein Zugriff auf diesen Jahrgang' });
+      }
+
       const sprueche = await buildSpruecheList(jahrgangId, req.user.organization_id);
       res.json(sprueche);
     } catch (err) {
@@ -482,6 +637,12 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
         [jahrgangId, req.user.organization_id]
       );
       if (!jahrgang) return res.status(404).json({ error: 'Jahrgang nicht gefunden' });
+
+      // Jahrgangs-Bindung: Der Versand schickt dieselben Daten
+      // wie Matrix bzw. Sprueche-Liste — gleiche Schranke (view) wie dort.
+      if (!darfJahrgang(req, jahrgangId)) {
+        return res.status(403).json({ error: 'Kein Zugriff auf diesen Jahrgang' });
+      }
 
       // E-Mail-Adresse der Admin:in laden (req.user enthält KEINE email -> aus users-Tabelle).
       const { rows: [adminRow] } = await db.query(

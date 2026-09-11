@@ -1,3 +1,4 @@
+import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   IonPage,
@@ -9,7 +10,7 @@ import {
   IonButton,
   IonIcon
 } from '@ionic/react';
-import { closeOutline, cameraOutline } from 'ionicons/icons';
+import { ICON_KAMERA, ICON_SCHLIESSEN } from '../../shared/icons';
 import QrScanner from 'qr-scanner';
 import QrScannerWorkerPath from 'qr-scanner/qr-scanner-worker.min.js?url';
 import api from '../../../services/api';
@@ -48,7 +49,7 @@ const QRScannerModal: React.FC<QRScannerModalProps> = ({ onClose, onSuccess }) =
 
     scannerRef.current = scanner;
 
-    scanner.start().catch((err: any) => {
+    scanner.start().catch((err: unknown) => {
       console.error('Scanner start error:', err);
       if (String(err).toLowerCase().includes('permission') || String(err).toLowerCase().includes('denied') || String(err).toLowerCase().includes('not allowed')) {
         setPermissionDenied(true);
@@ -89,8 +90,8 @@ const QRScannerModal: React.FC<QRScannerModalProps> = ({ onClose, onSuccess }) =
       } else {
         onSuccess(event_id, event_name);
       }
-    } catch (err: any) {
-      const errorMessage = err.response?.data?.error || 'QR-Code konnte nicht verarbeitet werden';
+    } catch (err) {
+      const errorMessage = fehlerText(err, 'QR-Code konnte nicht verarbeitet werden');
       setBanner({ type: 'error', message: errorMessage });
       setTimeout(() => {
         setBanner(null);
@@ -107,7 +108,7 @@ const QRScannerModal: React.FC<QRScannerModalProps> = ({ onClose, onSuccess }) =
           <IonToolbar>
             <IonButtons slot="start">
               <IonButton onClick={onClose} aria-label="Schließen">
-                <IonIcon icon={closeOutline} slot="icon-only" />
+                <IonIcon icon={ICON_SCHLIESSEN} slot="icon-only" />
               </IonButton>
             </IonButtons>
             <IonTitle>QR-Code scannen</IonTitle>
@@ -120,15 +121,15 @@ const QRScannerModal: React.FC<QRScannerModalProps> = ({ onClose, onSuccess }) =
             alignItems: 'center',
             justifyContent: 'center',
             height: '100%',
-            padding: '32px',
+            padding: 'var(--app-abstand-extraweit)',
             textAlign: 'center'
           }}>
             <IonIcon
-              icon={cameraOutline}
-              style={{ fontSize: '64px', color: 'var(--ion-color-medium)', marginBottom: '24px' }}
+              icon={ICON_KAMERA}
+              style={{ fontSize: 'var(--app-icon-leerzustand)', color: 'var(--ion-color-medium)', marginBottom: 'var(--app-abstand-weit)' }}
             />
-            <h2 style={{ margin: '0 0 12px 0', fontSize: '1.2rem' }}>Kamera-Zugriff verweigert</h2>
-            <p style={{ color: 'var(--ion-color-medium)', margin: '0 0 24px 0', lineHeight: '1.5' }}>
+            <h2 style={{ margin: '0 0 var(--app-abstand-mittel) 0', fontSize: 'var(--app-text-untertitel)' }}>Kamera-Zugriff verweigert</h2>
+            <p style={{ color: 'var(--ion-color-medium)', margin: '0 0 var(--app-abstand-weit) 0', lineHeight: '1.5' }}>
               Um QR-Codes zu scannen, wird Zugriff auf die Kamera ben&ouml;tigt. Bitte erlaube den Kamera-Zugriff in den Einstellungen deines Ger&auml;ts.
             </p>
           </div>
@@ -143,7 +144,7 @@ const QRScannerModal: React.FC<QRScannerModalProps> = ({ onClose, onSuccess }) =
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton onClick={onClose} aria-label="Schließen">
-              <IonIcon icon={closeOutline} slot="icon-only" />
+              <IonIcon icon={ICON_SCHLIESSEN} slot="icon-only" />
             </IonButton>
           </IonButtons>
           <IonTitle>QR-Code scannen</IonTitle>
@@ -158,14 +159,14 @@ const QRScannerModal: React.FC<QRScannerModalProps> = ({ onClose, onSuccess }) =
               top: '12px',
               left: '16px',
               right: '16px',
-              padding: '12px',
-              borderRadius: '8px',
+              padding: 'var(--app-abstand-mittel)',
+              borderRadius: 'var(--app-radius-klein)',
               zIndex: 10,
               backgroundColor: banner.type === 'error' ? 'var(--ion-color-danger)' : 'var(--ion-color-primary)',
               color: 'white',
-              fontWeight: '600',
+              fontWeight: 'var(--app-schrift-halbfett)',
               textAlign: 'center',
-              fontSize: '0.95rem'
+              fontSize: 'var(--app-text-betont)'
             }}>
               {banner.message}
             </div>

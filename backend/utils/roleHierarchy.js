@@ -145,27 +145,11 @@ const filterRolesByHierarchy = (roles, userRole) => {
   return roles.filter(role => canManageRole(userRole, role.name));
 };
 
-/**
- * Gibt die Hierarchie-Stufe einer Rolle zurück
- */
-const getRoleLevel = (roleName) => {
-  return ROLE_HIERARCHY[roleName] || 0;
-};
-
-/**
- * Prüft ob eine Rolle mindestens das angegebene Level hat
- */
-const hasMinimumLevel = (roleName, minLevel) => {
-  return getRoleLevel(roleName) >= minLevel;
-};
-
 module.exports = {
   ROLE_HIERARCHY,
   canManageRole,
   canCreateRole,
   checkUserHierarchy,
   filterUsersByHierarchy,
-  filterRolesByHierarchy,
-  getRoleLevel,
-  hasMinimumLevel
+  filterRolesByHierarchy
 };

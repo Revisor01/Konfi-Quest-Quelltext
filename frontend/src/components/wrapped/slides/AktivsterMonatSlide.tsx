@@ -19,7 +19,7 @@ const AktivsterMonatSlide: React.FC<AktivsterMonatSlideProps> = ({ isActive, akt
         <p className="wrapped-hero-text">{aktivsterMonat.monat_name}</p>
       </div>
       <div className="wrapped-anim-fade wrapped-anim-delay-2" style={{ opacity: 0 }}>
-        <p className="wrapped-subtitle">{animatedCount} Aktivitaeten</p>
+        <p className="wrapped-subtitle">{animatedCount} Aktivitäten</p>
       </div>
       <div className="monat-bar-container wrapped-anim-fade wrapped-anim-delay-3" style={{ opacity: 0 }}>
         <div className="monat-bar">

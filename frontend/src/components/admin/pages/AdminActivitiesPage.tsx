@@ -1,4 +1,6 @@
-import React, { useState, useCallback } from 'react';
+import { ICON_HINZUFUEGEN_GEFUELLT, ICON_ZURUECK } from '../../shared/icons';
+import { fehlerText } from '../../../utils/fehler';
+import React, { useState } from 'react';
 import {
   IonPage,
   IonHeader,
@@ -13,7 +15,6 @@ import {
   useIonModal,
   useIonAlert
 } from '@ionic/react';
-import { add, arrowBack } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
@@ -39,7 +40,7 @@ interface Activity {
 
 const AdminActivitiesPage: React.FC = () => {
   const { user, setError, isOnline } = useApp();
-  const { pageRef, presentingElement, cleanupModals } = useModalPage('admin-activities');
+  const { pageRef, presentingElement } = useModalPage('admin-activities');
   
   // State
   const [selectedRole, setSelectedRole] = useState<'konfi' | 'teamer'>('konfi');
@@ -86,8 +87,8 @@ const AdminActivitiesPage: React.FC = () => {
             try {
               await api.delete(`/admin/activities/${activity.id}`);
               await refreshActivities();
-            } catch (err: any) {
-              const errorMessage = err.response?.data?.error || 'Fehler beim Löschen der Aktivität';
+            } catch (err) {
+              const errorMessage = fehlerText(err, 'Fehler beim Löschen der Aktivität');
               setError(errorMessage);
             }
           }
@@ -128,14 +129,14 @@ const AdminActivitiesPage: React.FC = () => {
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-              <IonIcon icon={arrowBack} />
+              <IonIcon icon={ICON_ZURUECK} />
             </IonButton>
           </IonButtons>
           <IonTitle>Aktivitäten</IonTitle>
           {canCreate && (
             <IonButtons slot="end">
               <IonButton aria-label="Neue Aktivität anlegen" onClick={presentActivityModal}>
-                <IonIcon icon={add} />
+                <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
               </IonButton>
             </IonButtons>
           )}
@@ -160,8 +161,6 @@ const AdminActivitiesPage: React.FC = () => {
         ) : (
           <ActivitiesView
             activities={activities || []}
-            onUpdate={refreshActivities}
-            onAddActivityClick={presentActivityModal}
             onSelectActivity={handleSelectActivity}
             onDeleteActivity={handleDeleteActivity}
             canEdit={canEdit}

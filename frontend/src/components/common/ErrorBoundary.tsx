@@ -4,6 +4,12 @@ import {
   IonContent,
   IonButton
 } from '@ionic/react';
+// Statisch statt dynamisch importiert: Beide Module haengen ohnehin im
+// Einstiegs-Bundle (api.ts u.a. importieren sie statisch) — der fruehere
+// import() hier brachte also nichts und produzierte nur die
+// INEFFECTIVE_DYNAMIC_IMPORT-Warnung im Build.
+import { clearAuth } from '../../services/tokenStore';
+import { offlineCache } from '../../services/offlineCache';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -36,8 +42,8 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
   // Token rendert die App garantiert die Login-Route.
   private handleBackToLogin = () => {
     Promise.allSettled([
-      import('../../services/tokenStore').then((m) => m.clearAuth()),
-      import('../../services/offlineCache').then((m) => m.offlineCache.clearAll()),
+      Promise.resolve().then(() => clearAuth()),
+      Promise.resolve().then(() => offlineCache.clearAll()),
     ]).finally(() => { window.location.reload(); });
   };
 
@@ -65,7 +71,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
             <div className="app-auth-star app-auth-star--pink" style={{ bottom: '100px', left: '50px', width: '80px', height: '80px' }} />
 
             <div className="app-auth-container">
-              <div className="app-auth-hero" style={{ marginTop: '90px' }}>
+              <div className="app-auth-hero" style={{ marginTop: 'var(--app-freiraum-kopf-m)' }}>
                 <h1 className="app-auth-hero__title app-auth-hero__title--cosmic">
                   KONFI<br />QUEST
                 </h1>
@@ -77,7 +83,7 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
                 </p>
               </div>
 
-              <div style={{ padding: '0 32px', marginTop: '32px' }}>
+              <div style={{ padding: '0 var(--app-abstand-extraweit)', marginTop: 'var(--app-abstand-extraweit)' }}>
                 <IonButton
                   expand="block"
                   className="app-auth-button"

@@ -1,3 +1,4 @@
+import { ICON_ZURUECK } from '../../shared/icons';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   IonPage,
@@ -11,10 +12,10 @@ import {
   IonRefresher,
   IonRefresherContent
 } from '@ionic/react';
-import { arrowBack } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
+import { normalisiereTeamerBadges } from '../teamerBadges';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import { useBadge } from '../../../contexts/BadgeContext';
 import { CACHE_TTL } from '../../../services/offlineCache';
@@ -51,13 +52,19 @@ const TeamerBadgesPage: React.FC = () => {
   const { user } = useApp();
   const [selectedFilter, setSelectedFilter] = useState('alle');
 
-  // Schluessel mit v2: Im Zwischenspeicher koennen noch flache Arrays der
-  // alten Antwortform liegen — die sollen nicht als neue Form gelesen werden.
+  // Abzeichen-Generation v2: GET /teamer/badges/v2 liefert
+  // dieselbe Huelle wie die Konfi-Route — { available, earned, stats } — und
+  // ohne die Verwaltungsfelder, die diese Seite nie gelesen hat.
+  //
+  // Der Zwischenspeicher-Schluessel wandert auf v3, weil dort noch Eintraege
+  // der alten Formen liegen koennen (flaches Array bzw. Objekt MIT den
+  // Verwaltungsfeldern). normalisiereTeamerBadges bleibt trotzdem davor: Ein
+  // alter Eintrag aus dem Zwischenspeicher kaeme sonst ungeprueft durch.
   const { data: badgesData, loading, refresh, refreshLive } = useOfflineQuery<TeamerBadgeResponse>(
-    'teamer:badges:v2:' + user?.id,
+    'teamer:badges:v3:' + user?.id,
     async () => {
-      const res = await api.get('/teamer/badges');
-      return res.data;
+      const res = await api.get('/teamer/badges/v2');
+      return normalisiereTeamerBadges<TeamerBadgeAPI>(res.data, res.headers);
     },
     { ttl: CACHE_TTL.BADGES }
   );
@@ -82,7 +89,7 @@ const TeamerBadgesPage: React.FC = () => {
 
     if (!networkMonitor.isOnline) {
       writeQueue.enqueue({
-        method: 'PUT',
+        method: 'POST',
         url: '/teamer/badges/mark-seen',
         maxRetries: 3,
         hasFileUpload: false,
@@ -90,7 +97,7 @@ const TeamerBadgesPage: React.FC = () => {
       });
       return;
     }
-    api.put('/teamer/badges/mark-seen')
+    api.post('/teamer/badges/mark-seen')
       .then(() => { refreshAllCounts(); })
       .catch((markError) => {
         console.warn('Abzeichen konnten nicht als gesehen markiert werden:', markError);
@@ -134,7 +141,7 @@ const TeamerBadgesPage: React.FC = () => {
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton onClick={() => window.history.back()} aria-label="Zurück">
-              <IonIcon icon={arrowBack} slot="icon-only" />
+              <IonIcon icon={ICON_ZURUECK} slot="icon-only" />
             </IonButton>
           </IonButtons>
           <IonTitle>Teamer-Badges</IonTitle>

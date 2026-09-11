@@ -1,7 +1,8 @@
 import React from 'react';
 import { IonIcon } from '@ionic/react';
-import { checkmarkCircle, lockClosed, time } from 'ionicons/icons';
+import { ICON_SPERRE_GEFUELLT, ICON_UHRZEIT_GEFUELLT, ICON_ZUSAGE_GEFUELLT } from './icons';
 import { getIconFromString } from '../../utils/badgeIcons';
+import { FARBEN } from '../../theme/colors';
 
 /**
  * Gemeinsamer Abzeichen-Popover fuer alle fuenf Stellen, an denen er vorkommt:
@@ -28,15 +29,19 @@ export interface BadgePopoverBadge {
   color?: string;
   criteria_type?: string;
   criteria_value?: number;
-  criteria_extra?: string | Record<string, unknown>;
+  /** In der Datenbank nullbar (custom_badges.criteria_extra). */
+  criteria_extra?: string | Record<string, unknown> | null;
   is_hidden?: boolean;
   /** Konfi-Abzeichen fuehren den Status am Abzeichen selbst … */
   is_earned?: boolean;
   /** … das Teamer-Dashboard unter anderem Namen. */
   earned?: boolean;
-  /** Zwei Namen fuer dasselbe Datum, je nach Endpunkt. */
-  earned_at?: string;
-  awarded_date?: string;
+  /**
+   * Zwei Namen fuer dasselbe Datum, je nach Endpunkt. Null bei einem noch
+   * nicht erreichten Abzeichen (LEFT JOIN auf user_badges).
+   */
+  earned_at?: string | null;
+  awarded_date?: string | null;
   progress_points?: number;
   progress_percentage?: number;
 }
@@ -69,11 +74,11 @@ export const getBadgeColor = (badge: BadgePopoverBadge): string => {
   if (badge.color) return badge.color;
   if (badge.criteria_type === 'total_points') {
     const wert = badge.criteria_value || 0;
-    if (wert <= 5) return '#cd7f32';
-    if (wert <= 15) return '#c0c0c0';
-    return '#ffd700';
+    if (wert <= 5) return FARBEN.bronze;
+    if (wert <= 15) return FARBEN.silber;
+    return FARBEN.gold;
   }
-  return '#667eea';
+  return FARBEN.abzeichenFallback;
 };
 
 /**
@@ -106,13 +111,13 @@ const getTimeWindowHint = (badge: BadgePopoverBadge): string | null => {
 const chipStil = (hintergrund: string): React.CSSProperties => ({
   display: 'inline-flex',
   alignItems: 'center',
-  gap: '4px',
+  gap: 'var(--app-abstand-mini)',
   background: hintergrund,
   color: 'white',
-  padding: '3px 8px',
-  borderRadius: '8px',
-  fontSize: '0.7rem',
-  fontWeight: 600,
+  padding: 'var(--app-abstand-mini) var(--app-abstand-eng)',
+  borderRadius: 'var(--app-radius-klein)',
+  fontSize: 'var(--app-text-meta)',
+  fontWeight: 'var(--app-schrift-halbfett)',
 });
 
 const BadgePopoverContent: React.FC<{
@@ -143,63 +148,63 @@ const BadgePopoverContent: React.FC<{
   const zeitfenster = daten.showProgress ? getTimeWindowHint(badge) : null;
 
   return (
-    <div style={{ padding: '12px', background: 'white', maxWidth: '100%', overflow: 'hidden' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+    <div style={{ padding: 'var(--app-abstand-mittel)', background: 'white', maxWidth: '100%', overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)' }}>
         <div style={{
           width: '48px',
           height: '48px',
-          borderRadius: '50%',
+          borderRadius: 'var(--app-radius-kreis)',
           flexShrink: 0,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           background: erreicht
             ? `linear-gradient(145deg, ${farbe} 0%, ${farbe}cc 100%)`
-            : 'linear-gradient(145deg, #d0d0d0 0%, #b8b8b8 100%)',
+            : 'var(--app-gradient-badge-gesperrt)',
           boxShadow: erreicht
             ? `0 2px 8px ${farbe}40`
             : '0 1px 4px rgba(0,0,0,0.1)',
         }}>
           <IonIcon
-            icon={maskiert ? lockClosed : getIconFromString(badge.icon)}
-            style={{ fontSize: '1.4rem', color: erreicht ? 'white' : '#999' }}
+            icon={maskiert ? ICON_SPERRE_GEFUELLT : getIconFromString(badge.icon)}
+            style={{ fontSize: 'var(--app-text-titel-gross)', color: erreicht ? 'white' : 'var(--app-text-muted)' }}
           />
         </div>
 
         <div style={{ flex: 1, minWidth: 0 }}>
           <h3 style={{
-            margin: '0 0 4px 0',
-            fontSize: '0.95rem',
-            fontWeight: 700,
-            color: '#333',
+            margin: '0 0 var(--app-abstand-mini) 0',
+            fontSize: 'var(--app-text-betont)',
+            fontWeight: 'var(--app-schrift-fett)',
+            color: 'var(--app-text-primary)',
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
           }}>
             {maskiert ? '???' : badge.name}
           </h3>
-          <p style={{ margin: 0, fontSize: '0.8rem', color: '#666', lineHeight: '1.3' }}>
+          <p style={{ margin: 0, fontSize: 'var(--app-text-hinweis)', color: 'var(--app-text-secondary)', lineHeight: '1.3' }}>
             {maskiert ? 'Bleibt geheim, bis du es hast' : (badge.description || 'Keine Beschreibung')}
           </p>
         </div>
       </div>
 
       <div style={{
-        marginTop: '10px',
-        paddingTop: '10px',
-        borderTop: '1px solid #eee',
+        marginTop: 'var(--app-abstand-schmal)',
+        paddingTop: 'var(--app-abstand-schmal)',
+        borderTop: '1px solid var(--app-border-soft)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
       }}>
         {erreicht ? (
           <>
-            <div style={chipStil('#22c55e')}>
-              <IonIcon icon={checkmarkCircle} style={{ fontSize: '0.75rem' }} />
+            <div style={chipStil('var(--app-color-success)')}>
+              <IonIcon icon={ICON_ZUSAGE_GEFUELLT} style={{ fontSize: 'var(--app-text-klein)' }} />
               Erreicht
             </div>
             {datum && (
-              <span style={{ fontSize: '0.7rem', color: '#888' }}>
+              <span style={{ fontSize: 'var(--app-text-meta)', color: 'var(--app-text-tertiary)' }}>
                 {new Date(datum).toLocaleDateString('de-DE', {
                   day: 'numeric', month: 'short', year: 'numeric',
                 })}
@@ -208,16 +213,16 @@ const BadgePopoverContent: React.FC<{
           </>
         ) : fortschritt > 0 ? (
           <>
-            <div style={chipStil('#667eea')}>
+            <div style={chipStil('var(--app-color-users)')}>
               {Math.round(fortschritt)}% - In Arbeit
             </div>
-            <span style={{ fontSize: '0.7rem', color: '#888' }}>
+            <span style={{ fontSize: 'var(--app-text-meta)', color: 'var(--app-text-tertiary)' }}>
               {badge.progress_points || 0} / {badge.criteria_value}
             </span>
           </>
         ) : (
-          <div style={chipStil('#8e8e93')}>
-            <IonIcon icon={lockClosed} style={{ fontSize: '0.7rem' }} />
+          <div style={chipStil('var(--app-text-system)')}>
+            <IonIcon icon={ICON_SPERRE_GEFUELLT} style={{ fontSize: 'var(--app-text-meta)' }} />
             Noch nicht erreicht
           </div>
         )}
@@ -225,17 +230,17 @@ const BadgePopoverContent: React.FC<{
 
       {zeitfenster && (
         <div style={{
-          marginTop: '8px',
-          paddingTop: '8px',
-          borderTop: '1px solid #eee',
+          marginTop: 'var(--app-abstand-eng)',
+          paddingTop: 'var(--app-abstand-eng)',
+          borderTop: '1px solid var(--app-border-soft)',
           display: 'flex',
           alignItems: 'flex-start',
-          gap: '6px',
-          fontSize: '0.72rem',
-          color: '#888',
+          gap: 'var(--app-abstand-kompakt)',
+          fontSize: 'var(--app-text-meta)',
+          color: 'var(--app-text-tertiary)',
           lineHeight: '1.35',
         }}>
-          <IonIcon icon={time} style={{ fontSize: '0.85rem', marginTop: '1px', flexShrink: 0 }} />
+          <IonIcon icon={ICON_UHRZEIT_GEFUELLT} style={{ fontSize: 'var(--app-text-sekundaer)', marginTop: 'var(--app-abstand-haar)', flexShrink: 0 }} />
           <span>{zeitfenster}</span>
         </div>
       )}

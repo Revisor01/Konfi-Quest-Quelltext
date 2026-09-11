@@ -1,3 +1,4 @@
+import { ICON_ZURUECK } from '../../shared/icons';
 import React from 'react';
 import {
   IonPage,
@@ -11,7 +12,6 @@ import {
   IonButton,
   IonIcon
 } from '@ionic/react';
-import { arrowBack } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
@@ -73,7 +73,7 @@ interface ProgressOverview {
 }
 
 const KonfiProfilePage: React.FC = () => {
-  const { user, setError } = useApp();
+  const { user } = useApp();
   const { pageRef, presentingElement } = useModalPage('profile');
 
   // --- useOfflineQuery: Profile ---
@@ -97,7 +97,7 @@ const KonfiProfilePage: React.FC = () => {
     return (
       <IonPage>
         <IonContent>
-          <p style={{ textAlign: 'center', marginTop: '50px' }}>
+          <p style={{ textAlign: 'center', marginTop: 'var(--app-freiraum-kopf-m)' }}>
             Fehler beim Laden des Profils
           </p>
         </IonContent>
@@ -111,7 +111,7 @@ const KonfiProfilePage: React.FC = () => {
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton onClick={() => window.history.back()} aria-label="Zurück">
-              <IonIcon icon={arrowBack} slot="icon-only" />
+              <IonIcon icon={ICON_ZURUECK} slot="icon-only" />
             </IonButton>
           </IonButtons>
           <IonTitle>Profil</IonTitle>

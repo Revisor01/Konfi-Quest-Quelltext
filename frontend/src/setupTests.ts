@@ -14,11 +14,18 @@ window.matchMedia = window.matchMedia || function() {
 };
 
 // Mock navigator.setAppBadge / clearAppBadge (jsdom hat das nicht — @capawesome/capacitor-badge ruft es im Web-Fallback auf)
+// Badging API (https://w3c.github.io/badging/), in den lib.dom-Typen noch nicht enthalten
+interface NavigatorMitBadging extends Navigator {
+  setAppBadge?: (contents?: number) => Promise<void>;
+  clearAppBadge?: () => Promise<void>;
+}
+
 if (typeof navigator !== 'undefined') {
-  if (typeof (navigator as any).setAppBadge !== 'function') {
-    (navigator as any).setAppBadge = () => Promise.resolve();
+  const nav = navigator as NavigatorMitBadging;
+  if (typeof nav.setAppBadge !== 'function') {
+    nav.setAppBadge = () => Promise.resolve();
   }
-  if (typeof (navigator as any).clearAppBadge !== 'function') {
-    (navigator as any).clearAppBadge = () => Promise.resolve();
+  if (typeof nav.clearAppBadge !== 'function') {
+    nav.clearAppBadge = () => Promise.resolve();
   }
 }

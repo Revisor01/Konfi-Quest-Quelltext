@@ -1,3 +1,4 @@
+import { fehlerStatus, fehlerText } from '../../utils/fehler';
 import React, { useState } from 'react';
 import { useActionGuard } from '../../hooks/useActionGuard';
 import {
@@ -20,14 +21,14 @@ import {
   IonText
 } from '@ionic/react';
 import {
-  closeOutline,
-  trashOutline,
-  warningOutline,
-  lockClosedOutline,
-  eyeOutline,
-  eyeOffOutline,
-  cloudOfflineOutline
-} from 'ionicons/icons';
+  ICON_LOESCHEN,
+  ICON_OFFLINE,
+  ICON_SCHLIESSEN,
+  ICON_SICHTBAR,
+  ICON_SPERRE,
+  ICON_VERBORGEN,
+  ICON_WARNUNG,
+} from './icons';
 import { useApp } from '../../contexts/AppContext';
 import api from '../../services/api';
 
@@ -58,11 +59,11 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({ onClose, onDele
         onDeleted?.();
         onClose();
         await signOut();
-      } catch (err: any) {
-        if (err.response?.status === 400) {
+      } catch (err) {
+        if (fehlerStatus(err) === 400) {
           setInlineError('Passwort ist falsch');
         } else {
-          setError(err.response?.data?.error || 'Fehler beim Löschen des Accounts');
+          setError(fehlerText(err, 'Fehler beim Löschen des Accounts'));
         }
       }
     });
@@ -77,7 +78,7 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({ onClose, onDele
           <IonTitle>Account löschen</IonTitle>
           <IonButtons slot="start">
             <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose} disabled={isSubmitting}>
-              <IonIcon icon={closeOutline} />
+              <IonIcon icon={ICON_SCHLIESSEN} />
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -88,14 +89,14 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({ onClose, onDele
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--danger">
-              <IonIcon icon={warningOutline} />
+              <IonIcon icon={ICON_WARNUNG} />
             </div>
             <IonLabel>Achtung</IonLabel>
           </IonListHeader>
-          <IonCard className="app-card" style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-            <IonCardContent style={{ padding: '16px' }}>
+          <IonCard className="app-card" style={{ background: 'rgba(var(--app-color-danger-rgb), 0.08)', border: '1px solid rgba(var(--app-color-danger-rgb), 0.2)' }}>
+            <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
               <IonText color="danger">
-                <p style={{ margin: 0, fontSize: '0.9rem', lineHeight: 1.5 }}>
+                <p style={{ margin: 0, fontSize: 'var(--app-text-basis)', lineHeight: 1.5 }}>
                   Dein Account wird endgültig gelöscht. Dieser Vorgang kann NICHT
                   rückgängig gemacht werden. Alle deine Daten (Punkte, Badges,
                   Einträge) werden entfernt.
@@ -109,7 +110,7 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({ onClose, onDele
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--danger">
-              <IonIcon icon={lockClosedOutline} />
+              <IonIcon icon={ICON_SPERRE} />
             </div>
             <IonLabel>Passwort bestätigen</IonLabel>
           </IonListHeader>
@@ -133,7 +134,7 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({ onClose, onDele
                     fill="clear"
                     onClick={() => setShowPassword(prev => !prev)}
                   >
-                    <IonIcon icon={showPassword ? eyeOffOutline : eyeOutline} />
+                    <IonIcon icon={showPassword ? ICON_VERBORGEN : ICON_SICHTBAR} />
                   </IonButton>
                 </IonItem>
               </IonList>
@@ -144,10 +145,10 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({ onClose, onDele
         {/* Inline-Fehler */}
         {inlineError && (
           <IonList inset={true} className="app-modal-section">
-            <IonCard className="app-card" style={{ background: 'rgba(239, 68, 68, 0.08)', border: '1px solid rgba(239, 68, 68, 0.2)' }}>
-              <IonCardContent style={{ padding: '12px 16px' }}>
+            <IonCard className="app-card" style={{ background: 'rgba(var(--app-color-danger-rgb), 0.08)', border: '1px solid rgba(var(--app-color-danger-rgb), 0.2)' }}>
+              <IonCardContent style={{ padding: 'var(--app-abstand-mittel) var(--app-abstand-basis)' }}>
                 <IonText color="danger">
-                  <p style={{ margin: 0, fontSize: '0.85rem' }}>{inlineError}</p>
+                  <p style={{ margin: 0, fontSize: 'var(--app-text-sekundaer)' }}>{inlineError}</p>
                 </IonText>
               </IonCardContent>
             </IonCard>
@@ -163,11 +164,11 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({ onClose, onDele
             disabled={isSubmitting || !isValid || !isOnline}
           >
             {!isOnline ? (
-              <><IonIcon slot="start" icon={cloudOfflineOutline} /> Du bist offline</>
+              <><IonIcon slot="start" icon={ICON_OFFLINE} /> Du bist offline</>
             ) : isSubmitting ? (
               <IonSpinner name="crescent" />
             ) : (
-              <><IonIcon slot="start" icon={trashOutline} /> Account endgültig löschen</>
+              <><IonIcon slot="start" icon={ICON_LOESCHEN} /> Account endgültig löschen</>
             )}
           </IonButton>
         </IonList>

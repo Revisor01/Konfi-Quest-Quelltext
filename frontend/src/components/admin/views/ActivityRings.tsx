@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { RING_FARBEN } from '../../../theme/colors';
 
 interface ActivityRingsProps {
   totalPoints: number;
@@ -111,19 +112,9 @@ const ActivityRings: React.FC<ActivityRingsProps> = ({
     outerRadius - 2 * (strokeWidth + gap)
   ];
 
-  // Farben
-  const colors = {
-    total: '#f59e0b',
-    totalDark: '#b45309',
-    totalBright: '#fbbf24',
-    gottesdienst: '#3b82f6',
-    gottesdienstDark: '#1d4ed8',
-    gottesdienstBright: '#60a5fa',
-    gemeinde: '#059669',
-    gemeindeDark: '#047857',
-    gemeindeBright: '#34d399',
-    background: 'rgba(255, 255, 255, 0.12)'
-  };
+  // Farben: zentral in theme/colors.ts — SVG-stroke-Attribute koennen
+  // keine CSS-Variablen aufloesen, deshalb dort echte Hexwerte.
+  const colors = RING_FARBEN;
 
   // Ring Component
   const Ring: React.FC<{
@@ -230,7 +221,7 @@ const ActivityRings: React.FC<ActivityRingsProps> = ({
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'center',
-      gap: '12px'
+      gap: 'var(--app-abstand-mittel)'
     }}>
       {/* SVG Rings */}
       <div style={{
@@ -308,7 +299,7 @@ const ActivityRings: React.FC<ActivityRingsProps> = ({
           ) : (
             <div style={{
               fontSize: size * 0.22,
-              fontWeight: '800',
+              fontWeight: 'var(--app-schrift-extrafett)',
               lineHeight: 1
             }}>
               {showTotal ? totalPoints : (gottesdienstEnabled ? gottesdienstPoints : gemeindePoints)}
@@ -321,7 +312,7 @@ const ActivityRings: React.FC<ActivityRingsProps> = ({
       {activeTypes.length > 0 && (
         <div style={{
           display: 'flex',
-          gap: '12px',
+          gap: 'var(--app-abstand-mittel)',
           justifyContent: 'center',
           flexWrap: 'wrap'
         }}>
@@ -373,23 +364,23 @@ const LegendItem: React.FC<{
   <div style={{
     display: 'flex',
     alignItems: 'center',
-    gap: '5px'
+    gap: 'var(--app-abstand-mini)'
   }}>
     <div style={{
       width: '8px',
       height: '8px',
-      borderRadius: '50%',
+      borderRadius: 'var(--app-radius-kreis)',
       backgroundColor: color,
       boxShadow: `0 0 4px ${color}60`
     }} />
     <span style={{
       color: 'rgba(255, 255, 255, 0.9)',
-      fontSize: '0.7rem'
+      fontSize: 'var(--app-text-meta)'
     }}>
       {label}: <strong>{value}</strong>
       {hasGoal && `/${goal}`}
       {percent > 100 && (
-        <span style={{ color: '#10b981', marginLeft: '4px' }}>
+        <span style={{ color: 'var(--app-color-success-fresh)', marginLeft: 'var(--app-abstand-mini)' }}>
           ({Math.round(percent)}%)
         </span>
       )}

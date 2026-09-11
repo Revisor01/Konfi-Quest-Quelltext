@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   IonPage,
   IonHeader,
@@ -13,12 +13,13 @@ import {
   useIonModal,
   useIonRouter
 } from '@ionic/react';
-import { sparkles, chevronForward, personCircleOutline } from 'ionicons/icons';
+import { ICON_FUNKELN_GEFUELLT, ICON_PROFIL, ICON_SCHLIESSEN } from '../../shared/icons';
 import KonfiOnboardingModal from '../modals/KonfiOnboardingModal';
-import KonfiUpdateWalkthroughModal from '../modals/KonfiUpdateWalkthroughModal';
+import KonfiUpdate211WalkthroughModal from '../modals/KonfiUpdate211WalkthroughModal';
 import { useOnboardingWithUpdateOnce } from '../../../hooks/useOnboardingOnce';
 import NeuerungenBanner from '../../shared/NeuerungenBanner';
 import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
+import { Preferences } from '@capacitor/preferences';
 import { useApp } from '../../../contexts/AppContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
@@ -30,9 +31,10 @@ import PointsHistoryModal from '../modals/PointsHistoryModal';
 import KonfispruchSelectModal from '../modals/KonfispruchSelectModal';
 import WrappedModal from '../../wrapped/WrappedModal';
 import { Event } from '../../../types/event';
+import type { AlleAbzeichen, Badge, BadgeUebersicht, DashboardEvent, RankingEntry } from '../../../types/dashboard';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { mergeSectionOrder, DEFAULT_KONFI_SECTION_ORDER } from '../../../utils/sectionOrder';
-import { TrialBanner } from '../../shared';
+import { TrialBanner, StoreUpdateBanner, istVergangen } from '../../shared';
 import { track } from '../../../services/analytics';
 
 interface PointConfig {
@@ -63,16 +65,18 @@ interface DashboardData {
     confirmation_location?: string;
   };
   total_points: number;
-  recent_badges: any[];
+  recent_badges: Badge[];
   badge_count: number;
-  recent_events: any[];
+  recent_events: DashboardEvent[];
   event_count: number;
-  ranking: any[];
+  ranking: RankingEntry[];
   days_to_confirmation?: number;
   confirmation_date?: string;
   point_config?: PointConfig;
   dashboard_config?: DashboardConfig;
   has_wrapped?: boolean;
+  wrapped_ausgabe_id?: number | null;
+  wrapped_titel?: string | null;
   konfspruch_visible?: boolean;
   konfspruch?: {
     source: 'liste' | 'freitext';
@@ -102,26 +106,11 @@ interface BadgeStats {
   secretEarned: number;
 }
 
-interface AllBadgesData {
-  available: any[];
-  earned: any[];
-}
 
-interface DailyVerse {
-  losungstext: string;
-  losungsvers: string;
-  lehrtext: string;
-  lehrtextvers: string;
-  date?: string;
-  translation?: string;
-  fallback?: boolean;
-  cached?: boolean;
-}
 
 const KonfiDashboardPage: React.FC = () => {
-  const { user, setError } = useApp();
+  const { user } = useApp();
   const router = useIonRouter();
-  const [showLehrtext, setShowLehrtext] = useState(false);
   const pageRef = useRef<HTMLElement>(null);
 
   // Anonyme Messung der Scroll-Tiefe: Sehen die Konfis die unteren Abschnitte
@@ -130,7 +119,9 @@ const KonfiDashboardPage: React.FC = () => {
   const scrollMarken = useRef<Set<number>>(new Set());
   const handleScrollTiefe = useCallback((ev: CustomEvent) => {
     const el = ev.target as HTMLIonContentElement & { scrollHeight?: number; clientHeight?: number };
-    const detail: any = ev.detail || {};
+    // ion-content liefert im scroll-Ereignis { scrollTop, scrollLeft };
+    // ein eigener Ionic-Typ dafuer ist nicht exportiert.
+    const detail = (ev.detail || {}) as { scrollTop?: number };
     const hoehe = (el?.scrollHeight || 0) - (el?.clientHeight || 0);
     if (hoehe <= 0) return;
     const anteil = Math.round(((detail.scrollTop || 0) / hoehe) * 100);
@@ -164,32 +155,49 @@ const KonfiDashboardPage: React.FC = () => {
     () => api.get('/konfi/events').then(r => r.data),
     {
       ttl: CACHE_TTL.EVENTS,
-      select: (events) => events.filter((event: any) =>
-        new Date(event.event_date || event.date) >= new Date() &&
+      // istVergangen(): Ein laufender mehrtaegiger Termin bleibt im Teaser,
+      // bis er wirklich vorbei ist (event_end_time), nicht nur bis zum Start.
+      select: (events) => events.filter((event) =>
+        !istVergangen({ event_date: event.event_date || event.date || '', event_end_time: event.event_end_time }) &&
         (event.is_registered || event.booking_status === 'confirmed' || event.booking_status === 'waitlist')
       )
     }
   );
 
-  // --- useOfflineQuery: Badges ---
-  const { data: badgesRaw, refresh: refreshBadges, refreshLive: refreshBadgesLive } = useOfflineQuery<any>(
-    'konfi:badges:' + user?.id,
-    () => api.get('/konfi/badges').then(r => r.data),
-    { ttl: CACHE_TTL.BADGES }
+  // Die Abzeichen-Sektion der Startseite braucht die Daten wirklich (sie
+  // zeichnet jedes Abzeichen als Kreis, nicht nur eine Zahl) — ersatzlos
+  // streichen geht also nicht. Stattdessen wartet die Anfrage, bis die
+  // Startseite steht: `enabled` springt erst nach dem ersten Rendern der
+  // fertigen Startseite auf true. Aus dem Cache (30 Min TTL) ist die Sektion
+  // beim naechsten Oeffnen ohnehin sofort da; nur beim allerersten Start
+  // erscheint sie einen Wimpernschlag spaeter.
+  const [abzeichenAktiv, setAbzeichenAktiv] = useState(false);
+  const { data: badgesRaw, refresh: refreshBadges, refreshLive: refreshBadgesLive } = useOfflineQuery<BadgeUebersicht>(
+    // Abzeichen-Generation v2 — siehe KonfiBadgesPage.
+    'konfi:badges:v2:' + user?.id,
+    () => api.get('/konfi/badges/v2').then(r => r.data),
+    { ttl: CACHE_TTL.BADGES, enabled: abzeichenAktiv }
   );
+
+  // Erst wenn die Startseite ihre eigenen Daten hat, die Abzeichen nachholen.
+  // dashboardData ist der Marker: bis dahin zeigt die Seite den Ladebildschirm,
+  // die Abzeichen-Sektion ist also noch gar nicht sichtbar.
+  useEffect(() => {
+    if (dashboardData && !abzeichenAktiv) setAbzeichenAktiv(true);
+  }, [dashboardData, abzeichenAktiv]);
 
   // Derived state from badges
   const badgeStats: BadgeStats = (() => {
     if (!badgesRaw) return { totalAvailable: 0, totalEarned: 0, secretAvailable: 0, secretEarned: 0 };
-    const { available, earned, stats } = badgesRaw;
-    const visibleEarned = earned?.filter((badge: any) => !badge.is_hidden).length || 0;
+    const { earned, stats } = badgesRaw;
+    const visibleEarned = earned?.filter((badge) => !badge.is_hidden).length || 0;
     const visibleTotal = stats?.totalVisible || 0;
-    const secretEarned = earned?.filter((badge: any) => badge.is_hidden === true).length || 0;
+    const secretEarned = earned?.filter((badge) => badge.is_hidden === true).length || 0;
     const secretTotal = stats?.totalSecret || 0;
     return { totalAvailable: visibleTotal, totalEarned: visibleEarned, secretAvailable: secretTotal, secretEarned: secretEarned };
   })();
 
-  const allBadges: AllBadgesData = {
+  const allBadges: AlleAbzeichen = {
     available: badgesRaw?.available || [],
     earned: badgesRaw?.earned || []
   };
@@ -219,6 +227,25 @@ const KonfiDashboardPage: React.FC = () => {
 
   const openWrapped = () => {
     presentWrappedModal({ cssClass: 'wrapped-modal-fullscreen' });
+  };
+
+  // Weggeklickter Rueckblick-Hinweis, gemerkt PRO AUSGABE: Der naechste
+  // Rueckblick meldet sich wieder. Alt-Snapshots ohne Ausgabe-Id bekommen
+  // den Schluessel "alt", damit auch sie sich wegklicken lassen.
+  const [wrappedHinweisWeg, setWrappedHinweisWeg] = useState(false);
+  const wrappedHinweisKey = `wrapped_hinweis_${user?.id ?? 'x'}_${dashboardData?.wrapped_ausgabe_id ?? 'alt'}`;
+
+  useEffect(() => {
+    if (!dashboardData?.has_wrapped) return;
+    Preferences.get({ key: wrappedHinweisKey })
+      .then(({ value }) => setWrappedHinweisWeg(value === '1'))
+      .catch(() => { /* Preferences nicht verfuegbar -> Hinweis zeigen */ });
+  }, [wrappedHinweisKey, dashboardData?.has_wrapped]);
+
+  const wrappedHinweisAusblenden = () => {
+    setWrappedHinweisWeg(true);
+    Preferences.set({ key: wrappedHinweisKey, value: '1' })
+      .catch(() => { /* beim naechsten Start erneut */ });
   };
 
   // Konfispruch Modal
@@ -281,7 +308,7 @@ const KonfiDashboardPage: React.FC = () => {
           </IonToolbar>
         </IonHeader>
         <IonContent>
-          <p style={{ textAlign: 'center', marginTop: '50px' }}>
+          <p style={{ textAlign: 'center', marginTop: 'var(--app-freiraum-kopf-m)' }}>
             Deine Startseite konnte nicht geladen werden. Zieh die Seite nach unten, um es erneut zu versuchen.
           </p>
         </IonContent>
@@ -330,7 +357,7 @@ const KonfiDashboardPage: React.FC = () => {
           <IonTitle>Konfi Quest</IonTitle>
           <IonButtons slot="end">
             <IonButton onClick={() => router.push('/konfi/profile')} aria-label="Profil öffnen">
-              <IonIcon slot="icon-only" icon={personCircleOutline} style={{ color: '#7c3aed', fontSize: '1.7rem' }} />
+              <IonIcon slot="icon-only" icon={ICON_PROFIL} style={{ color: 'var(--app-color-wrapped)', fontSize: 'var(--app-anzeige-basis)' }} />
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -341,7 +368,7 @@ const KonfiDashboardPage: React.FC = () => {
         scrollEvents={true}
         onIonScroll={handleScrollTiefe}
         style={{
-          '--background': '#f8f9fa'
+          '--background': 'var(--app-surface-soft)'
         }}
       >
         <IonHeader collapse="condense">
@@ -356,10 +383,14 @@ const KonfiDashboardPage: React.FC = () => {
           <IonRefresherContent />
         </IonRefresher>
 
-        <TrialBanner style={{ marginTop: '8px' }} />
+        <TrialBanner style={{ marginTop: 'var(--app-abstand-eng)' }} />
+
+        {/* Dezenter Hinweis, wenn im Store eine neuere Version liegt.
+            Prueft selbst und rendert sonst nichts (StoreUpdateBanner). */}
+        <StoreUpdateBanner style={{ margin: 'var(--app-abstand-eng) var(--app-abstand-basis) 0' }} />
 
         <NeuerungenBanner
-          style={{ margin: '8px 16px 0' }}
+          style={{ margin: 'var(--app-abstand-eng) var(--app-abstand-basis) 0' }}
           updateSichtbar={showUpdateHinweis}
           mitmachenSichtbar={showMitmachenHinweis}
           onUpdateOeffnen={() => { markUpdateHinweisGesehen(); setShowUpdateWalkthrough(true); }}
@@ -368,24 +399,62 @@ const KonfiDashboardPage: React.FC = () => {
           onMitmachenAusblenden={markMitmachenHinweisGesehen}
         />
 
-        {dashboardData.has_wrapped && (
+        {/* Hinweis auf den Jahresrueckblick:
+            - "Wrapped" heisst in der Oberflaeche ueberall "Jahresrueckblick";
+              der Name der Ausgabe ("Zwischenstand September") kommt aus
+              wrapped_titel, den die Leitung vergibt. Fehlt er (Alt-Snapshots
+              ohne Ausgabe), bleibt es beim allgemeinen Text.
+            - Wegklickbar wie die uebrigen Hinweiskarten. Gemerkt wird PRO
+              AUSGABE (wrapped_ausgabe_id): Der naechste Rueckblick meldet
+              sich wieder, ein weggeklickter bleibt weg. Erreichbar bleibt er
+              im Profil unter "Meine Rueckblicke". */}
+        {dashboardData.has_wrapped && !wrappedHinweisWeg && (
           <div onClick={openWrapped} style={{
-            margin: '0 16px 16px',
-            padding: '20px',
-            borderRadius: '16px',
-            background: 'linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #c084fc 100%)',
+            margin: '0 var(--app-abstand-basis) var(--app-abstand-basis)',
+            padding: 'var(--app-abstand-gross)',
+            borderRadius: 'var(--app-radius-gross)',
+            background: 'var(--app-gradient-wrapped)',
             color: 'white',
             cursor: 'pointer',
             position: 'relative',
             overflow: 'hidden'
           }}>
-            <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <IonIcon icon={sparkles} style={{ fontSize: '2rem' }} />
-              <div>
-                <h3 className="app-headline" style={{ margin: 0, fontSize: '1.1rem', fontWeight: '700' }}>Dein Wrapped ist da!</h3>
-                <p style={{ margin: '4px 0 0', fontSize: '0.85rem', opacity: 0.9 }}>Schau dir deinen Konfi-Jahresrückblick an</p>
+            <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)' }}>
+              <IonIcon icon={ICON_FUNKELN_GEFUELLT} style={{ fontSize: 'var(--app-anzeige-zahl)' }} />
+              <div style={{ minWidth: 0 }}>
+                <h3 className="app-headline" style={{ margin: 0, fontSize: 'var(--app-text-gross)', fontWeight: 'var(--app-schrift-fett)' }}>
+                  {dashboardData.wrapped_titel || 'Dein Jahresrückblick ist da!'}
+                </h3>
+                <p style={{ margin: 'var(--app-abstand-mini) 0 0', fontSize: 'var(--app-text-sekundaer)', opacity: 0.9 }}>
+                  {/* "Dein Rückblick - bis jetzt!" statt "Jahresrückblick":
+                      Eine Ausgabe kann ein Zwischenstand
+                      mitten im Jahr sein, kein Jahresabschluss. */}
+                  {dashboardData.wrapped_titel
+                    ? 'Dein Rückblick - bis jetzt! Hier tippen.'
+                    : 'Schau ihn dir an'}
+                </p>
               </div>
-              <IonIcon icon={chevronForward} style={{ fontSize: '1.2rem', marginLeft: 'auto' }} />
+              <button
+                type="button"
+                aria-label="Hinweis ausblenden"
+                onClick={(e) => { e.stopPropagation(); wrappedHinweisAusblenden(); }}
+                style={{
+                  marginLeft: 'auto',
+                  background: 'rgba(255,255,255,0.18)',
+                  border: 'none',
+                  borderRadius: 'var(--app-radius-kreis)',
+                  width: '32px',
+                  height: '32px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'white',
+                  cursor: 'pointer',
+                  flexShrink: 0
+                }}
+              >
+                <IonIcon icon={ICON_SCHLIESSEN} style={{ fontSize: 'var(--app-text-gross)' }} aria-hidden="true" />
+              </button>
             </div>
           </div>
         )}
@@ -416,7 +485,7 @@ const KonfiDashboardPage: React.FC = () => {
 
       {/* "Was ist neu"-Walkthrough — geöffnet über die Neuigkeiten-Karte */}
       {showUpdateWalkthrough && (
-        <KonfiUpdateWalkthroughModal
+        <KonfiUpdate211WalkthroughModal
           onClose={() => setShowUpdateWalkthrough(false)}
         />
       )}

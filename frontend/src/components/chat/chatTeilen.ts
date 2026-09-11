@@ -1,3 +1,4 @@
+import { fehlerStatus } from '../../utils/fehler';
 import { Capacitor } from '@capacitor/core';
 import { Share } from '@capacitor/share';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
@@ -101,8 +102,8 @@ export async function chatVerlaufExportieren(
       a.click();
       URL.revokeObjectURL(url);
     }
-  } catch (err: any) {
-    if (err?.response?.status === 403) {
+  } catch (err) {
+    if (fehlerStatus(err) === 403) {
       setError('Nur die Leitung darf Chats exportieren');
     } else {
       setError('Export fehlgeschlagen');

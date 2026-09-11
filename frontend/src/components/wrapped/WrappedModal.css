@@ -1,3 +1,89 @@
+/*
+   Die Werte sind NICHT geschaetzt, sondern aus dem Entwurf uebernommen:
+   Typo-Skala 104/76/40/20/12/11 px, Zeilenhoehe 0.85-0.9 bei den grossen
+   Zahlen, Bebas Neue als Akzent, Laufweite 0.13em bei den Labels.
+
+   Warum als Token und nicht direkt in den Seiten: Die Skala gilt fuer
+   ALLE Seiten, auch die 20 neuen. Zwei Pflegestellen liefen sonst
+   auseinander -- genau wie es beim Farbverlauf schon passiert ist.
+   ======================================== */
+
+.wrapped-overlay {
+  /* Grosse Zahl -- traegt die Seite (Entwurf: 104px) */
+  --w-zahl: clamp(72px, 22vw, 104px);
+  --w-zahl-lh: 0.85;
+  /* Grosse Wortmarke ("DEIN KONFI-JAHR", Bebas, 76px) */
+  --w-schlagzeile: clamp(52px, 16vw, 76px);
+  --w-schlagzeile-lh: 0.88;
+  /* Mittlere Zahl (40px) */
+  --w-zahl-klein: clamp(32px, 10vw, 40px);
+  /* Fliesstext und Labels */
+  --w-text: 17px;
+  --w-label: 12px;
+  --w-marke: 11px;
+  --w-label-ls: 0.13em;
+  --w-akzent: 'Bebas Neue', system-ui, sans-serif;
+}
+
+/* Die grosse Zahl einer Seite. */
+.w-zahl {
+  font-family: var(--w-akzent);
+  font-size: var(--w-zahl);
+  line-height: var(--w-zahl-lh);
+  letter-spacing: 0.01em;
+  color: #fff;
+}
+
+.w-schlagzeile {
+  font-family: var(--w-akzent);
+  font-size: var(--w-schlagzeile);
+  line-height: var(--w-schlagzeile-lh);
+  letter-spacing: 0.01em;
+  color: #fff;
+  text-transform: uppercase;
+}
+
+/* Kleines Label ueber oder unter der Zahl. */
+.w-label {
+  font-size: var(--w-label);
+  font-weight: var(--app-schrift-halbfett);
+  letter-spacing: var(--w-label-ls);
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.w-text {
+  font-size: var(--w-text);
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+/* ========================================
+   Fortschrittsleiste (Entwurf: Segmente, 3px, radius 99px)
+
+   Ersetzt die runden Swiper-Punkte: Bei 13 Seiten sagen Punkte nichts
+   mehr ueber den Fortschritt, Segmente schon.
+   ======================================== */
+
+.wrapped-fortschritt {
+  display: flex;
+  gap: var(--app-abstand-mini);
+  flex: 1;
+  align-items: center;
+}
+
+.wrapped-fortschritt span {
+  flex: 1;
+  height: 3px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.25);
+  transition: background 0.3s ease;
+}
+
+.wrapped-fortschritt span.ist-aktiv {
+  background: rgba(255, 255, 255, 0.9);
+}
+
 /* ========================================
    Wrapped Modal - Ionic Modal Fullscreen
    ======================================== */
@@ -36,7 +122,7 @@ ion-modal.wrapped-modal-fullscreen {
   z-index: 10;
   display: flex;
   align-items: center;
-  padding: 12px 16px;
+  padding: var(--app-abstand-mittel) var(--app-abstand-basis);
   padding-top: calc(env(safe-area-inset-top, 0px) + 12px);
 }
 
@@ -44,7 +130,7 @@ ion-modal.wrapped-modal-fullscreen {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--app-abstand-mini);
 }
 
 .wrapped-close-btn {
@@ -56,11 +142,11 @@ ion-modal.wrapped-modal-fullscreen {
   color: #fff;
   width: 36px;
   height: 36px;
-  border-radius: 50%;
+  border-radius: var(--app-radius-kreis);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.3rem;
+  font-size: var(--app-text-titel);
   cursor: pointer;
   z-index: 11;
   -webkit-tap-highlight-color: transparent;
@@ -84,11 +170,11 @@ ion-modal.wrapped-modal-fullscreen {
   color: #fff;
   width: 36px;
   height: 36px;
-  border-radius: 50%;
+  border-radius: var(--app-radius-kreis);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.3rem;
+  font-size: var(--app-text-titel);
   cursor: pointer;
   z-index: 11;
   -webkit-tap-highlight-color: transparent;
@@ -102,6 +188,20 @@ ion-modal.wrapped-modal-fullscreen {
 .wrapped-share-btn:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+/* Waehrend das Bild entsteht, dreht sich der Knopf. Er behaelt seine
+   Groesse, damit der Kopfbereich nicht springt. */
+.wrapped-share-spinner {
+  width: 18px;
+  height: 18px;
+  color: #fff;
+}
+
+/* Die Meldung zum Teilen liegt ueber dem Rueckblick (z-index 9999), sonst
+   waere sie hinter dem Overlay unsichtbar. */
+.wrapped-overlay ion-toast {
+  z-index: 10000;
 }
 
 /* ========================================
@@ -126,14 +226,14 @@ ion-modal.wrapped-modal-fullscreen {
   opacity: 1;
   width: 8px;
   height: 8px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-fein);
   transition: width 0.3s ease, background 0.3s ease;
 }
 
 .wrapped-pagination .swiper-pagination-bullet-active {
   background: #fff;
   width: 24px;
-  border-radius: 4px;
+  border-radius: var(--app-radius-fein);
 }
 
 /* ========================================
@@ -146,13 +246,16 @@ ion-modal.wrapped-modal-fullscreen {
   align-items: flex-start;
   justify-content: center;
   min-height: 100vh;
-  padding: 80px 32px 40px;
+  padding: var(--app-freiraum-kopf-xl) var(--app-abstand-extraweit) var(--app-abstand-riesig);
   text-align: left;
   color: #fff;
   position: relative;
   overflow: hidden;
-  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
+  --seiten-verlauf: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #a78bfa 100%);
+  background: var(--seiten-verlauf);
 }
+
+
 
 /* ========================================
    Dekorative Elemente
@@ -173,7 +276,7 @@ ion-modal.wrapped-modal-fullscreen {
 
 .wrapped-big-number {
   font-size: clamp(4rem, 15vw, 8rem);
-  font-weight: 900;
+  font-weight: var(--app-schrift-schwer);
   line-height: 1.1;
   margin: 0;
   letter-spacing: -0.02em;
@@ -181,18 +284,18 @@ ion-modal.wrapped-modal-fullscreen {
 
 .wrapped-label {
   font-size: clamp(1rem, 3.5vw, 1.2rem);
-  font-weight: 500;
+  font-weight: var(--app-schrift-mittel);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: rgba(255, 255, 255, 0.7);
-  margin: 0 0 8px 0;
+  margin: 0 0 var(--app-abstand-eng) 0;
 }
 
 .wrapped-subtitle {
   font-size: clamp(1.2rem, 5vw, 2rem);
-  font-weight: 600;
+  font-weight: var(--app-schrift-halbfett);
   color: rgba(255, 255, 255, 0.9);
-  margin: 8px 0 0 0;
+  margin: var(--app-abstand-eng) 0 0 0;
   line-height: 1.4;
 }
 
@@ -236,7 +339,7 @@ ion-modal.wrapped-modal-fullscreen {
 /* Hero Text - Massive Typography */
 .wrapped-hero-text {
   font-size: clamp(2.5rem, 10vw, 5rem);
-  font-weight: 900;
+  font-weight: var(--app-schrift-schwer);
   line-height: 1.1;
   letter-spacing: -0.02em;
   margin: 0;
@@ -245,7 +348,7 @@ ion-modal.wrapped-modal-fullscreen {
 /* Slide Decoration - Visual Flair Circles */
 .wrapped-slide-decoration {
   position: absolute;
-  border-radius: 50%;
+  border-radius: var(--app-radius-kreis);
   background: rgba(255, 255, 255, 0.04);
   pointer-events: none;
 }
@@ -354,7 +457,7 @@ ion-modal.wrapped-modal-fullscreen {
   align-items: center;
   justify-content: center;
   color: #fff;
-  font-size: 1.1rem;
+  font-size: var(--app-text-gross);
 }
 
 .wrapped-loading ion-spinner {
@@ -372,6 +475,7 @@ ion-modal.wrapped-modal-fullscreen {
    ======================================== */
 
 .intro-slide {
+  --seiten-verlauf: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%);
   background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%);
 }
 
@@ -381,9 +485,9 @@ ion-modal.wrapped-modal-fullscreen {
 
 .punkte-split {
   display: flex;
-  gap: 24px;
+  gap: var(--app-abstand-weit);
   align-items: center;
-  margin-top: 24px;
+  margin-top: var(--app-abstand-weit);
 }
 
 .punkte-split-item {
@@ -394,14 +498,14 @@ ion-modal.wrapped-modal-fullscreen {
 
 .punkte-split-value {
   font-size: clamp(1.5rem, 6vw, 2.5rem);
-  font-weight: 700;
+  font-weight: var(--app-schrift-fett);
   color: #fff;
 }
 
 .punkte-split-label {
-  font-size: 0.85rem;
+  font-size: var(--app-text-sekundaer);
   color: rgba(255, 255, 255, 0.7);
-  margin-top: 4px;
+  margin-top: var(--app-abstand-mini);
 }
 
 .punkte-split-divider {
@@ -415,10 +519,10 @@ ion-modal.wrapped-modal-fullscreen {
    ======================================== */
 
 .events-highlight {
-  margin-top: 32px;
-  padding: 16px 24px;
+  margin-top: var(--app-abstand-extraweit);
+  padding: var(--app-abstand-basis) var(--app-abstand-weit);
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
+  border-radius: var(--app-radius-gross);
   border: 1px solid rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(8px);
 }
@@ -430,8 +534,8 @@ ion-modal.wrapped-modal-fullscreen {
 .badges-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-  margin-top: 24px;
+  gap: var(--app-abstand-basis);
+  margin-top: var(--app-abstand-weit);
   max-width: 280px;
 }
 
@@ -439,22 +543,22 @@ ion-modal.wrapped-modal-fullscreen {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 6px;
+  gap: var(--app-abstand-kompakt);
 }
 
 .badge-icon {
   width: 60px;
   height: 60px;
-  border-radius: 50%;
+  border-radius: var(--app-radius-kreis);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.4rem;
+  font-size: var(--app-text-titel-gross);
   color: #fff;
 }
 
 .badge-name {
-  font-size: 0.75rem;
+  font-size: var(--app-text-klein);
   color: rgba(255, 255, 255, 0.8);
   max-width: 80px;
   overflow: hidden;
@@ -466,14 +570,15 @@ ion-modal.wrapped-modal-fullscreen {
    AktivsterMonat Slide - Hintergrund + Balken
    ======================================== */
 
-.monat-slide { background: linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%); }
+.monat-slide { --seiten-verlauf: linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%);
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 50%, #b45309 100%); }
 
 .monat-bar-container { width: 100%; max-width: 300px; margin-top: 32px; }
 .monat-bar { height: 8px; background: rgba(255,255,255,0.25); border-radius: 4px; overflow: hidden; }
 .monat-bar-fill {
   height: 100%;
   background: rgba(255, 255, 255, 0.9);
-  border-radius: 4px;
+  border-radius: var(--app-radius-fein);
   transition: width 1.5s ease-out;
 }
 
@@ -481,14 +586,15 @@ ion-modal.wrapped-modal-fullscreen {
    Endspurt Slide - Progress-Bar
    ======================================== */
 
-.endspurt-slide { background: linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%); }
+.endspurt-slide { --seiten-verlauf: linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%);
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 50%, #b91c1c 100%); }
 
 .endspurt-progress { width: 100%; max-width: 300px; margin-top: 24px; }
 .endspurt-progress-bar { height: 12px; background: rgba(255,255,255,0.25); border-radius: 6px; overflow: hidden; }
 .endspurt-progress-fill {
   height: 100%;
   background: rgba(255, 255, 255, 0.9);
-  border-radius: 6px;
+  border-radius: var(--app-radius-klein);
   transition: width 2s ease-out;
 }
 
@@ -496,21 +602,22 @@ ion-modal.wrapped-modal-fullscreen {
    Abschluss Slide - Zusammenfassung
    ======================================== */
 
-.abschluss-slide { background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%); }
+.abschluss-slide { --seiten-verlauf: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%);
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 50%, #5b21b6 100%); }
 
 .abschluss-summary {
   display: flex;
-  gap: 24px;
-  margin-top: 32px;
-  padding: 20px 24px;
+  gap: var(--app-abstand-weit);
+  margin-top: var(--app-abstand-extraweit);
+  padding: var(--app-abstand-gross) var(--app-abstand-weit);
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
+  border-radius: var(--app-radius-gross);
   border: 1px solid rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(8px);
 }
 .abschluss-stat { display: flex; flex-direction: column; align-items: flex-start; flex: 1; }
-.abschluss-stat-value { font-size: 1.5rem; font-weight: 700; color: #fff; }
-.abschluss-stat-label { font-size: 0.75rem; color: rgba(255,255,255,0.7); margin-top: 4px; }
+.abschluss-stat-value { font-size: var(--app-text-ueberschrift); font-weight: var(--app-schrift-fett); color: #fff; }
+.abschluss-stat-label { font-size: var(--app-text-klein); color: rgba(255,255,255,0.7); margin-top: 4px; }
 .abschluss-cta { margin-top: 32px; text-align: left; }
 
 /* ========================================
@@ -519,7 +626,7 @@ ion-modal.wrapped-modal-fullscreen {
 
 @media (max-height: 600px) {
   .wrapped-slide {
-    padding: 60px 16px 24px;
+    padding: var(--app-freiraum-kopf-m) var(--app-abstand-basis) var(--app-abstand-weit);
   }
 
   .wrapped-big-number {
@@ -531,33 +638,38 @@ ion-modal.wrapped-modal-fullscreen {
    Teamer Slides - Rosa Farbschema
    ======================================== */
 
-.teamer-intro-slide { background: linear-gradient(135deg, #e11d48 0%, #be123c 50%, #9f1239 100%); }
-.teamer-konfis-slide { background: linear-gradient(135deg, #e11d48 0%, #be123c 50%, #9f1239 100%); }
-.teamer-zertifikate-slide { background: linear-gradient(135deg, #db2777 0%, #be185d 50%, #9d174d 100%); }
-.teamer-jahre-slide { background: linear-gradient(135deg, #f43f5e 0%, #e11d48 50%, #be123c 100%); }
-.teamer-abschluss-slide { background: linear-gradient(135deg, #e11d48 0%, #be123c 50%, #9f1239 100%); }
+.teamer-intro-slide { --seiten-verlauf: linear-gradient(135deg, #e11d48 0%, #be123c 50%, #9f1239 100%);
+  background: linear-gradient(135deg, #e11d48 0%, #be123c 50%, #9f1239 100%); }
+.teamer-konfis-slide { --seiten-verlauf: linear-gradient(135deg, #e11d48 0%, #be123c 50%, #9f1239 100%);
+  background: linear-gradient(135deg, #e11d48 0%, #be123c 50%, #9f1239 100%); }
+.teamer-zertifikate-slide { --seiten-verlauf: linear-gradient(135deg, #db2777 0%, #be185d 50%, #9d174d 100%);
+  background: linear-gradient(135deg, #db2777 0%, #be185d 50%, #9d174d 100%); }
+.teamer-jahre-slide { --seiten-verlauf: linear-gradient(135deg, #f43f5e 0%, #e11d48 50%, #be123c 100%);
+  background: linear-gradient(135deg, #f43f5e 0%, #e11d48 50%, #be123c 100%); }
+.teamer-abschluss-slide { --seiten-verlauf: linear-gradient(135deg, #e11d48 0%, #be123c 50%, #9f1239 100%);
+  background: linear-gradient(135deg, #e11d48 0%, #be123c 50%, #9f1239 100%); }
 
 /* Teamer Abschluss Summary */
 .teamer-abschluss-summary {
   display: flex;
-  gap: 24px;
-  margin-top: 32px;
-  padding: 20px 24px;
+  gap: var(--app-abstand-weit);
+  margin-top: var(--app-abstand-extraweit);
+  padding: var(--app-abstand-gross) var(--app-abstand-weit);
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
+  border-radius: var(--app-radius-gross);
   border: 1px solid rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(8px);
 }
-.teamer-abschluss-stat-value { font-size: 1.5rem; font-weight: 700; color: #fff; }
+.teamer-abschluss-stat-value { font-size: var(--app-text-ueberschrift); font-weight: var(--app-schrift-fett); color: #fff; }
 
 /* Teamer Konfis Tags */
 .teamer-konfis-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; justify-content: flex-start; }
 .teamer-konfis-tag {
   background: rgba(255, 255, 255, 0.15);
   border: 1px solid rgba(255, 255, 255, 0.3);
-  border-radius: 12px;
-  padding: 4px 12px;
-  font-size: 0.85rem;
+  border-radius: var(--app-radius-karte);
+  padding: var(--app-abstand-mini) var(--app-abstand-mittel);
+  font-size: var(--app-text-sekundaer);
   color: rgba(255, 255, 255, 0.9);
 }
 
@@ -565,8 +677,8 @@ ion-modal.wrapped-modal-fullscreen {
 .teamer-zertifikat-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 24px;
+  gap: var(--app-abstand-eng);
+  margin-top: var(--app-abstand-weit);
   width: 100%;
   max-width: 300px;
 }
@@ -574,18 +686,18 @@ ion-modal.wrapped-modal-fullscreen {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 16px;
+  padding: var(--app-abstand-mittel) var(--app-abstand-basis);
   background: rgba(255, 255, 255, 0.1);
-  border-radius: 12px;
+  border-radius: var(--app-radius-karte);
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 .teamer-zertifikat-name {
-  font-size: 0.9rem;
-  font-weight: 500;
+  font-size: var(--app-text-basis);
+  font-weight: var(--app-schrift-mittel);
   color: rgba(255, 255, 255, 0.9);
 }
 .teamer-zertifikat-date {
-  font-size: 0.75rem;
+  font-size: var(--app-text-klein);
   color: rgba(255, 255, 255, 0.5);
 }
 
@@ -601,19 +713,21 @@ ion-modal.wrapped-modal-fullscreen {
    Kategorie Slide - Balkendiagramm
    ======================================== */
 
-.kategorie-slide { background: linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%); }
+.kategorie-slide { --seiten-verlauf: linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%);
+  background: linear-gradient(135deg, #10b981 0%, #059669 50%, #047857 100%); }
 .kategorie-bars { width: 100%; max-width: 340px; margin-top: 24px; display: flex; flex-direction: column; gap: 12px; }
 .kategorie-bar-row { display: flex; align-items: center; gap: 8px; }
-.kategorie-bar-name { font-size: 0.85rem; color: rgba(255,255,255,0.8); min-width: 80px; text-align: left; }
+.kategorie-bar-name { font-size: var(--app-text-sekundaer); color: rgba(255,255,255,0.8); min-width: 80px; text-align: left; }
 .kategorie-bar-track { flex: 1; height: 8px; background: rgba(255,255,255,0.25); border-radius: 4px; overflow: hidden; }
 .kategorie-bar-fill { height: 100%; background: rgba(255, 255, 255, 0.9); border-radius: 4px; transition: width 1.5s ease-out; }
-.kategorie-bar-count { font-size: 0.85rem; color: rgba(255,255,255,0.7); min-width: 30px; }
+.kategorie-bar-count { font-size: var(--app-text-sekundaer); color: rgba(255,255,255,0.7); min-width: 30px; }
 
 /* ========================================
    Ueber-das-Ziel Slide - Gold + Konfetti
    ======================================== */
 
 .ueber-das-ziel-slide {
+  --seiten-verlauf: linear-gradient(135deg, #f59e0b 0%, #eab308 50%, #ca8a04 100%);
   background: linear-gradient(135deg, #f59e0b 0%, #eab308 50%, #ca8a04 100%);
   position: relative;
   overflow: hidden;
@@ -675,11 +789,14 @@ ion-modal.wrapped-modal-fullscreen {
 .konfetti-piece:nth-child(30) { left: 98%; width: 13px; height: 13px; animation-duration: 3.4s; animation-delay: 1.4s; background: #f472b6; }
 
 /* Events + Badges Slide Hintergr. */
-.events-slide { background: linear-gradient(135deg, #2563eb 0%, #3b82f6 50%, #60a5fa 100%); }
-.badges-slide { background: linear-gradient(135deg, #d946ef 0%, #a855f7 50%, #7c3aed 100%); }
+.events-slide { --seiten-verlauf: linear-gradient(135deg, #2563eb 0%, #3b82f6 50%, #60a5fa 100%);
+  background: linear-gradient(135deg, #2563eb 0%, #3b82f6 50%, #60a5fa 100%); }
+.badges-slide { --seiten-verlauf: linear-gradient(135deg, #d946ef 0%, #a855f7 50%, #7c3aed 100%);
+  background: linear-gradient(135deg, #d946ef 0%, #a855f7 50%, #7c3aed 100%); }
 
 /* Neue Slide Backgrounds */
-.konfirmation-slide { background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #d946ef 100%); }
+.konfirmation-slide { --seiten-verlauf: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #d946ef 100%);
+  background: linear-gradient(135deg, #7c3aed 0%, #a855f7 50%, #d946ef 100%); }
 
 /* ========================================
    Challenge-Momente Slide
@@ -687,28 +804,29 @@ ion-modal.wrapped-modal-fullscreen {
    ======================================== */
 
 .challenge-momente-slide {
+  --seiten-verlauf: linear-gradient(135deg, var(--app-color-challenges, #be185d) 0%, #9d174d 50%, #831843 100%);
   background: linear-gradient(135deg, var(--app-color-challenges, #be185d) 0%, #9d174d 50%, #831843 100%);
   justify-content: flex-start;
 }
 
 .challenge-momente-liste {
   width: 100%;
-  margin-top: 20px;
+  margin-top: var(--app-abstand-gross);
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: var(--app-abstand-mittel);
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   /* Der Slide-Inhalt darf scrollen, ohne den Swiper zu sprengen. */
   max-height: 50vh;
-  padding-right: 4px;
+  padding-right: var(--app-abstand-mini);
 }
 
 .challenge-moment {
   background: rgba(255, 255, 255, 0.12);
   border: 1px solid rgba(255, 255, 255, 0.2);
-  border-radius: 16px;
-  padding: 12px 14px;
+  border-radius: var(--app-radius-gross);
+  padding: var(--app-abstand-mittel) var(--app-abstand-mittelweit);
   backdrop-filter: blur(8px);
   text-align: left;
 }
@@ -716,26 +834,26 @@ ion-modal.wrapped-modal-fullscreen {
 .challenge-moment-kopf {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--app-abstand-eng);
 }
 
 .challenge-moment-abzeichen {
   width: 30px;
   height: 30px;
   min-width: 30px;
-  border-radius: 50%;
+  border-radius: var(--app-radius-kreis);
   background: rgba(255, 255, 255, 0.9);
   color: var(--app-color-challenges, #be185d);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1rem;
+  font-size: var(--app-text-standard);
 }
 
 .challenge-moment-titel {
   flex: 1;
-  font-size: 0.85rem;
-  font-weight: 600;
+  font-size: var(--app-text-sekundaer);
+  font-weight: var(--app-schrift-halbfett);
   color: rgba(255, 255, 255, 0.95);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -743,33 +861,33 @@ ion-modal.wrapped-modal-fullscreen {
 }
 
 .challenge-moment-medienart {
-  font-size: 1rem;
+  font-size: var(--app-text-standard);
   color: rgba(255, 255, 255, 0.55);
 }
 
 .challenge-moment-text {
-  font-size: 0.9rem;
+  font-size: var(--app-text-basis);
   line-height: 1.4;
   color: rgba(255, 255, 255, 0.9);
-  margin: 8px 0 0 0;
+  margin: var(--app-abstand-eng) 0 0 0;
   font-style: italic;
 }
 
 .challenge-moment-foto {
-  margin-top: 10px;
-  border-radius: 12px;
+  margin-top: var(--app-abstand-schmal);
+  border-radius: var(--app-radius-karte);
   overflow: hidden;
   background: rgba(0, 0, 0, 0.2);
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 120px;
-  max-height: 180px;
+  min-height: 140px;
+  max-height: 240px;
 }
 
 .challenge-moment-foto img {
   width: 100%;
-  max-height: 180px;
+  max-height: 240px;
   object-fit: cover;
   display: block;
 }
@@ -780,7 +898,7 @@ ion-modal.wrapped-modal-fullscreen {
 
 .challenge-moment-foto--leer {
   color: rgba(255, 255, 255, 0.4);
-  font-size: 1.6rem;
+  font-size: var(--app-text-ueberschrift-gross);
 }
 
 @keyframes challenge-foto-puls {
@@ -789,16 +907,1078 @@ ion-modal.wrapped-modal-fullscreen {
 }
 
 .challenge-moment-link {
-  margin-top: 10px;
+  margin-top: var(--app-abstand-schmal);
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: var(--app-abstand-eng);
+  padding: var(--app-abstand-eng) var(--app-abstand-mittel);
   background: rgba(0, 0, 0, 0.2);
-  border-radius: 10px;
-  font-size: 0.85rem;
+  border-radius: var(--app-radius-knopf);
+  font-size: var(--app-text-sekundaer);
   color: rgba(255, 255, 255, 0.85);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* ========================================
+   Highlight Slide - persoenliches Highlight (ab Snapshot-Version 3)
+   ======================================== */
+
+.highlight-slide { --seiten-verlauf: linear-gradient(135deg, #0ea5e9 0%, #0369a1 50%, #1e3a8a 100%);
+  background: linear-gradient(135deg, #0ea5e9 0%, #0369a1 50%, #1e3a8a 100%); }
+
+/* ========================================
+   Challenges-Seite (die ZAHL, nicht die Bilder)
+   Derselbe Rosa-Ton wie die Momente-Seite -- beide erzaehlen von den
+   Challenges und gehoeren sichtbar zusammen, stehen aber im Rueckblick
+   nacheinander (erst die Zahl, dann die Bilder gross).
+   ======================================== */
+.warteliste-slide { --seiten-verlauf: linear-gradient(135deg, #10b981 0%, #059669 55%, #065f46 100%);
+  background: var(--seiten-verlauf); }
+
+/* Zeit-/Rhythmus-Seiten und der Vielseitige. */
+.langer-atem-slide { --seiten-verlauf: linear-gradient(135deg, #0d9488 0%, #0f766e 55%, #134e4a 100%);
+  background: var(--seiten-verlauf); }
+.wochentag-slide { --seiten-verlauf: linear-gradient(135deg, #3b82f6 0%, #2563eb 55%, #1e40af 100%);
+  background: var(--seiten-verlauf); }
+.vielseitig-slide { --seiten-verlauf: linear-gradient(135deg, #f59e0b 0%, #ea580c 55%, #9a3412 100%);
+  background: var(--seiten-verlauf); }
+
+.vielseitig-icons {
+  display: flex;
+  gap: var(--app-abstand-eng);
+  margin-bottom: var(--app-abstand-mittel);
+}
+
+.vielseitig-icons__kreis {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--app-radius-kreis);
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--app-text-gross, 28px);
+  color: #fff;
+}
+
+.challenges-slide {
+  --seiten-verlauf: linear-gradient(135deg, var(--app-color-challenges, #be185d) 0%, #a21456 50%, #7d1240 100%);
+  background: linear-gradient(135deg, var(--app-color-challenges, #be185d) 0%, #a21456 50%, #7d1240 100%);
+}
+
+.challenges-top {
+  margin-top: var(--app-abstand-mittel);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--app-abstand-eng);
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--app-radius-karte);
+  padding: var(--app-abstand-eng) var(--app-abstand-mittelweit);
+  backdrop-filter: blur(8px);
+}
+
+.challenges-top__abzeichen {
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  border-radius: var(--app-radius-kreis);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--app-color-challenges, #be185d);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: var(--app-text-standard);
+}
+
+.challenges-top__text {
+  font-size: var(--app-text-betont);
+  color: rgba(255, 255, 255, 0.9);
+  text-align: left;
+}
+
+.highlight-zahl {
+  font-size: 5rem;
+  font-weight: var(--app-schrift-extrafett);
+  line-height: 1;
+  margin: var(--app-abstand-eng) 0 0 0;
+  color: #fff;
+}
+
+.highlight-detail {
+  margin-top: var(--app-abstand-basis);
+  font-size: var(--app-text-betont);
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: var(--app-radius-karte);
+  padding: var(--app-abstand-eng) var(--app-abstand-mittelweit);
+  display: inline-block;
+}
+
+.highlight-vergleich {
+  margin-top: var(--app-abstand-schmal);
+  font-size: var(--app-text-sekundaer);
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.challenge-momente-liste--wenige .challenge-moment-foto,
+.challenge-momente-liste--wenige .challenge-moment-foto img {
+  max-height: 300px;
+}
+
+/* Grosses Hintergrund-Symbol der Highlight-Seite (IonIcon, kein Emoji). */
+.highlight-bg-icon {
+  position: absolute;
+  font-size: 16rem;
+  color: rgba(255, 255, 255, 0.06);
+  bottom: -40px;
+  right: -50px;
+  transform: rotate(-12deg);
+  pointer-events: none;
+}
+
+.abschluss-motto {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-abstand-winzig);
+  margin: 0;
+  font-size: clamp(1.4rem, 5.5vw, 2.2rem);
+  font-weight: var(--app-schrift-extrafett);
+  line-height: 1.15;
+  letter-spacing: -0.02em;
+  color: #fff;
+}
+.abschluss-motto span:nth-child(2) { color: rgba(255, 255, 255, 0.85); }
+.abschluss-motto span:nth-child(3) { color: #fbbf24; }
+
+
+/*
+   Der Entwurf löst das klüger als ein flächiges Foto: Die Bilder liegen
+   NICHT über die ganze Seite, sondern als zwei weich maskierte, unscharfe
+   Formen in gegenüberliegenden Ecken, die langsam driften. Darüber der
+   Farbschleier der Seite (rund 0.86) und ein Lichtfleck.
+
+   Warum das besser ist: Ein flächiges Foto zwingt zu einer harten
+   Abdunklung, sonst wird weißer Text auf hellen Stellen unlesbar — und dann
+   sieht man vom Bild ohnehin nichts mehr. Als maskierte Form in der Ecke
+   trägt das Bild Textur und Tiefe, ohne je hinter den Text zu geraten.
+   Reihenfolge (z-index): Bildformen -1 -> Schleier -> Lichtfleck -> Inhalt. */
+
+.wrapped-bg {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+}
+
+/* Die beiden Bildformen. Groß, weich, angeschnitten. */
+/* VOLLBILD statt Eckenform.
+
+   Er hatte recht, und der Grund stand im CSS: Das Motiv lag als 340px grosse
+   Form in der Ecke, mit 10px Weichzeichner, darunter ein Farbschleier mit
+   86 % Deckkraft. Technisch war das Bild geladen (im Browser nachgewiesen),
+   zu sehen war praktisch nichts.
+
+   Jetzt fuellt das Foto die ganze Seite. Lesbarkeit kommt nicht mehr aus
+   einer flaechigen Abdunklung, sondern aus einem Verlauf, der nach unten
+   dichter wird -- genau dort, wo Slogan und Text stehen. Oben bleibt das
+   Bild offen. */
+.wrapped-bg-form {
+  position: absolute;
+  background-size: cover;
+  background-position: center;
+}
+
+.wrapped-bg-form--oben {
+  inset: 0;
+  opacity: 1;
+  /* Leichter Weichzeichner: Das Motiv bleibt erkennbar, konkurriert aber
+     nicht mit der Schrift um die Schaerfe. */
+  filter: blur(1.5px) saturate(1.05);
+  transform: scale(1.06);
+  animation: wrapped-drift 24s ease-in-out infinite;
+}
+
+/* Das zweite Motiv als ruhiger Akzent oben rechts -- gibt Tiefe, ohne dem
+   Hauptbild die Flaeche zu nehmen. */
+.wrapped-bg-form--unten {
+  top: -40px;
+  right: -50px;
+  width: 300px;
+  height: 300px;
+  border-radius: 64px;
+  opacity: 0.28;
+  filter: blur(6px);
+  mask-image: radial-gradient(closest-side, #000 40%, transparent 100%);
+  -webkit-mask-image: radial-gradient(closest-side, #000 40%, transparent 100%);
+  animation: wrapped-drift 30s ease-in-out infinite reverse;
+}
+
+/* Farbschleier: derselbe Verlauf wie die Seite, nur transparent. Er hält
+   den Text lesbar und bindet die Bilder farblich ein. */
+.wrapped-bg-schleier,
+.wrapped-bg-licht {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Lichtfleck in der oberen Bildmitte — gibt der Fläche Tiefe. */
+.wrapped-bg-licht {
+  background: radial-gradient(120% 70% at 50% 40%, rgba(255, 255, 255, 0.12) 0%, rgba(0, 0, 0, 0) 65%);
+}
+
+@keyframes wrapped-drift {
+  0%, 100% { transform: translate(0, 0) scale(1.08); }
+  50% { transform: translate(-10px, -14px) scale(1.14); }
+}
+
+/* Wer Bewegung reduziert haben will, bekommt die Bilder ruhig gestellt.
+   Die Drift ist Zierde, kein Inhalt. */
+@media (prefers-reduced-motion: reduce) {
+  .wrapped-bg-form--oben,
+  .wrapped-bg-form--unten {
+    animation: none;
+  }
+}
+
+/* Bildplätze für die Momente-Fotos (image-slot im Entwurf). */
+.wrapped-bildplatz {
+  border-radius: var(--app-radius-gross);
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
+}
+
+.wrapped-bildplatz img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.wrapped-bildplatz-reihe {
+  display: grid;
+  gap: var(--app-abstand-schmal);
+  width: 100%;
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.wrapped-bildplatz-reihe--eins { grid-template-columns: 1fr; }
+.wrapped-bildplatz-reihe--zwei { grid-template-columns: repeat(2, 1fr); }
+
+.wrapped-bildplatz-reihe--eins .wrapped-bildplatz { aspect-ratio: 4 / 3; }
+.wrapped-bildplatz-reihe--zwei .wrapped-bildplatz { aspect-ratio: 3 / 4; }
+.wrapped-bildplatz-reihe .wrapped-bildplatz { aspect-ratio: 1 / 1; }
+
+/* ========================================
+   Farbverlaeufe der Kategorie- und Datums-Seiten
+
+   WARUM JE SEITE EIGENE FARBEN: Ohne sie liefen alle 20 neuen Seiten im
+   selben Standard-Verlauf und der Rueckblick saehe monoton aus. SlideBase
+   liest den Verlauf aus dem CSS und legt ihn als Schleier ueber die Fotos
+   -- Farbe und Bild gehoeren damit zusammen.
+   ======================================== */
+
+.kategorie-seite-slide,
+.punkte-slide,
+.events-slide,
+.badges-slide,
+.abschluss-slide,
+.konfirmation-slide {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: 0 30px calc(90px + env(safe-area-inset-bottom, 0px));
+  background-image: linear-gradient(135deg, #6366f1 0%, #8b5cf6 55%, #a78bfa 100%);
+}
+
+/* Kleines Label ganz oben ueber der Zahl. */
+.kat-auge {
+  font-size: 12px;
+  font-weight: var(--app-schrift-fett);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+  margin-bottom: var(--app-abstand-mittelweit);
+}
+
+/* Der Name der Kirchengemeinde auf der Abschluss-Seite.
+   */
+.kat-gemeinde {
+  font-size: 17px;
+  font-weight: var(--app-schrift-halbfett);
+  line-height: 1.3;
+  color: rgba(255, 255, 255, 0.88);
+  margin-bottom: var(--app-abstand-schmal);
+}
+
+.kat-zahl {
+  font-family: var(--w-akzent);
+  font-size: 40px;
+  line-height: 0.9;
+  color: rgba(255, 255, 255, 0.9);
+  margin-bottom: var(--app-abstand-kompakt);
+}
+
+.kat-zahl__mal {
+  font-size: 22px;
+  opacity: 0.65;
+  margin-left: var(--app-abstand-mini);
+}
+
+/* Der Slogan traegt die Seite. Zeilenumbrueche kommen aus dem Text. */
+.kat-slogan {
+  font-family: var(--w-akzent);
+  font-size: clamp(38px, 12vw, 58px);
+  line-height: 0.96;
+  letter-spacing: 0.005em;
+  color: #fff;
+  text-transform: uppercase;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.28);
+  margin-bottom: var(--app-abstand-basis);
+}
+
+.kat-nachsatz {
+  font-size: 17px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.93);
+  max-width: 22em;
+}
+
+.kat-fussnote {
+  margin-top: var(--app-abstand-schmal);
+  font-size: 12px;
+  font-weight: var(--app-schrift-halbfett);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+/* ========================================
+   AUFTRITT DER SCHRIFT
+
+   WARUM GESTAFFELT: Die Slogans sind bewusst in Zeilen gebrochen, sie
+   geben einen Rhythmus vor ("Du hast / gesammelt / wie andere /
+   Sticker."). Erscheinen alle Zeilen auf einmal, geht dieser Rhythmus
+   verloren. Jetzt kommt zuerst das Auge, dann die Zahl, dann der Slogan
+   Zeile fuer Zeile, zuletzt der Nachsatz -- die Seite liest sich in der
+   Reihenfolge, in der sie gemeint ist.
+
+   WARUM KEINE NEUEN KEYFRAMES: wrapped-fade-in und wrapped-slide-up gab
+   es schon. wrapped-slide-up war sogar definiert, aber nirgends benutzt --
+   es traegt jetzt die Slogan-Zeilen.
+
+   WARUM NUR UNTER .wrapped-slide--active: Die Seiten liegen im
+   Seitenkarussell schon im Hintergrund bereit, bevor sie sichtbar werden.
+   Ohne diese Bedingung waere die Bewegung abgelaufen, bevor jemand
+   hinsieht -- die Seite erschiene dann fertig und tot. (Der Grundbau
+   haengt die Kinder ohnehin erst beim Aktivwerden ein, aber die Regel
+   haelt auch dann, wenn eine Seite das einmal anders macht.)
+
+   MASS: 0.45 bis 0.5 s je Teil, Versatz 60 ms zwischen den Slogan-Zeilen.
+   Es ist ein Rueckblick, kein Werbespot -- nach gut einer halben Sekunde
+   steht die Seite.
+   ======================================== */
+
+.wrapped-slide--active .kat-auge,
+.wrapped-slide--active .kat-gemeinde,
+.wrapped-slide--active .kat-zahl,
+.wrapped-slide--active .kat-slogan > span,
+.wrapped-slide--active .kat-nachsatz,
+.wrapped-slide--active .kat-fussnote,
+.wrapped-slide--active .w-aufteilung,
+.wrapped-slide--active .w-merkzettel,
+.wrapped-slide--active .w-bilanz,
+.wrapped-slide--active .w-einladung,
+.wrapped-slide--active .vielseitig-icons {
+  animation-fill-mode: both;
+}
+
+.wrapped-slide--active .kat-auge {
+  animation: wrapped-fade-in 0.45s ease-out both;
+}
+
+.wrapped-slide--active .kat-gemeinde {
+  animation: wrapped-fade-in 0.45s ease-out 0.08s both;
+}
+
+/* Die Zahl blendet KURZ und FRUEH ein (0.35 s, kein Versatz).
+   Grund: Auf den Zahl-Seiten laeuft sie ueber 1,6 s hoch (useCountUp).
+   Ein spaeter oder langer Auftritt wuerde den Anfang des Hochzaehlens
+   verschlucken -- man saehe nur noch das Ende. So ist die Zahl da,
+   bevor sie zu laufen beginnt. */
+.wrapped-slide--active .kat-zahl {
+  animation: wrapped-fade-in 0.35s ease-out both;
+}
+
+/* Der Slogan: Zeile fuer Zeile von unten herein. Der Versatz folgt den
+   Zeilenumbruechen, die im Text stehen und Absicht sind. */
+.wrapped-slide--active .kat-slogan > span {
+  animation: wrapped-slide-up 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: 0.14s;
+}
+.wrapped-slide--active .kat-slogan > span:nth-child(2) { animation-delay: 0.20s; }
+.wrapped-slide--active .kat-slogan > span:nth-child(3) { animation-delay: 0.26s; }
+.wrapped-slide--active .kat-slogan > span:nth-child(4) { animation-delay: 0.32s; }
+.wrapped-slide--active .kat-slogan > span:nth-child(5) { animation-delay: 0.38s; }
+.wrapped-slide--active .kat-slogan > span:nth-child(n + 6) { animation-delay: 0.44s; }
+
+/* Der Nachsatz kommt zuletzt -- er ordnet ein, was der Slogan gesagt hat. */
+.wrapped-slide--active .kat-nachsatz {
+  animation: wrapped-fade-in 0.5s ease-out 0.46s both;
+}
+
+.wrapped-slide--active .kat-fussnote {
+  animation: wrapped-fade-in 0.45s ease-out 0.56s both;
+}
+
+/* Was UNTER dem Nachsatz steht, kommt zuletzt: die Aufteilung der Punkte,
+   der Merkzettel ("Zuletzt", "Dein groesster Termin"), die Bilanz der
+   Abschluss-Seiten und die Einladung. Alles im selben Takt -- so schliesst
+   die Seite ab, statt in mehreren Wellen nachzuklappern. */
+.wrapped-slide--active .w-aufteilung,
+.wrapped-slide--active .w-merkzettel,
+.wrapped-slide--active .w-bilanz,
+.wrapped-slide--active .w-einladung {
+  animation: wrapped-fade-in 0.45s ease-out 0.56s both;
+}
+
+.wrapped-slide--active .vielseitig-icons {
+  animation: wrapped-fade-in 0.45s ease-out 0.1s both;
+}
+
+/* ========================================
+   BEWEGUNG REDUZIEREN (Barrierefreiheit)
+
+   Wer im System "Bewegung reduzieren" gesetzt hat, bekommt den Rueckblick
+   ohne Auftritt: Alle Inhalte stehen sofort und vollstaendig da.
+   */
+@media (prefers-reduced-motion: reduce) {
+  .wrapped-anim-fade,
+  .wrapped-anim-scale,
+  .wrapped-anim-slide-up,
+  .wrapped-anim-bounce,
+  .wrapped-anim-fly-left,
+  .wrapped-anim-fly-right,
+  .wrapped-anim-number-pop,
+  .wrapped-slide--active .wrapped-anim-fade,
+  .wrapped-slide--active .wrapped-anim-scale,
+  .wrapped-slide--active .wrapped-anim-slide-up,
+  .wrapped-slide--active .wrapped-anim-bounce,
+  .wrapped-slide--active .wrapped-anim-fly-left,
+  .wrapped-slide--active .wrapped-anim-fly-right,
+  .wrapped-slide--active .wrapped-anim-number-pop,
+  .wrapped-slide--active .kat-auge,
+  .wrapped-slide--active .kat-gemeinde,
+  .wrapped-slide--active .kat-zahl,
+  .wrapped-slide--active .kat-slogan > span,
+  .wrapped-slide--active .kat-nachsatz,
+  .wrapped-slide--active .kat-fussnote,
+  .wrapped-slide--active .w-aufteilung,
+  .wrapped-slide--active .w-merkzettel,
+  .wrapped-slide--active .w-bilanz,
+  .wrapped-slide--active .w-einladung,
+  .wrapped-slide--active .vielseitig-icons {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* --- Kategorien --- */
+.kategorie-seite-slide.k-fest            { --seiten-verlauf: linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #b45309 100%);
+  background-image: linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #b45309 100%); }
+.kategorie-seite-slide.k-senioren        { --seiten-verlauf: linear-gradient(135deg, #0ea5e9 0%, #0284c7 55%, #075985 100%);
+  background-image: linear-gradient(135deg, #0ea5e9 0%, #0284c7 55%, #075985 100%); }
+.kategorie-seite-slide.k-jugend          { --seiten-verlauf: linear-gradient(135deg, #f43f5e 0%, #e11d48 55%, #9f1239 100%);
+  background-image: linear-gradient(135deg, #f43f5e 0%, #e11d48 55%, #9f1239 100%); }
+.kategorie-seite-slide.k-oeffentlichkeit { --seiten-verlauf: linear-gradient(135deg, #14b8a6 0%, #0d9488 55%, #115e59 100%);
+  background-image: linear-gradient(135deg, #14b8a6 0%, #0d9488 55%, #115e59 100%); }
+.kategorie-seite-slide.k-freizeit        { --seiten-verlauf: linear-gradient(135deg, #22c55e 0%, #16a34a 55%, #15803d 100%);
+  background-image: linear-gradient(135deg, #22c55e 0%, #16a34a 55%, #15803d 100%); }
+.kategorie-seite-slide.k-weihnachten     { --seiten-verlauf: linear-gradient(135deg, #b91c1c 0%, #991b1b 55%, #7f1d1d 100%);
+  background-image: linear-gradient(135deg, #b91c1c 0%, #991b1b 55%, #7f1d1d 100%); }
+.kategorie-seite-slide.k-konzert         { --seiten-verlauf: linear-gradient(135deg, #a855f7 0%, #9333ea 55%, #6b21a8 100%);
+  background-image: linear-gradient(135deg, #a855f7 0%, #9333ea 55%, #6b21a8 100%); }
+.kategorie-seite-slide.k-kinder          { --seiten-verlauf: linear-gradient(135deg, #fbbf24 0%, #f59e0b 55%, #d97706 100%);
+  background-image: linear-gradient(135deg, #fbbf24 0%, #f59e0b 55%, #d97706 100%); }
+.kategorie-seite-slide.k-kreativ         { --seiten-verlauf: linear-gradient(135deg, #ec4899 0%, #db2777 55%, #9d174d 100%);
+  background-image: linear-gradient(135deg, #ec4899 0%, #db2777 55%, #9d174d 100%); }
+.kategorie-seite-slide.k-seelsorge       { --seiten-verlauf: linear-gradient(135deg, #64748b 0%, #475569 55%, #334155 100%);
+  background-image: linear-gradient(135deg, #64748b 0%, #475569 55%, #334155 100%); }
+/* Kasualien bewusst ruhig und dunkel: Taufe, Trauung, Abschied sind kein
+   Anlass fuer laute Farben. */
+.kategorie-seite-slide.k-kasualien       { --seiten-verlauf: linear-gradient(135deg, #475569 0%, #334155 55%, #1e293b 100%);
+  background-image: linear-gradient(135deg, #475569 0%, #334155 55%, #1e293b 100%); }
+.kategorie-seite-slide.k-gottesdienst    { --seiten-verlauf: linear-gradient(135deg, #6366f1 0%, #4f46e5 55%, #3730a3 100%);
+  background-image: linear-gradient(135deg, #6366f1 0%, #4f46e5 55%, #3730a3 100%); }
+.kategorie-seite-slide.k-gemeinde        { --seiten-verlauf: linear-gradient(135deg, #f97316 0%, #ea580c 55%, #c2410c 100%);
+  background-image: linear-gradient(135deg, #f97316 0%, #ea580c 55%, #c2410c 100%); }
+
+/* --- Datums-Seiten --- */
+.kategorie-seite-slide.d-weihnachten     { --seiten-verlauf: linear-gradient(135deg, #7f1d1d 0%, #991b1b 55%, #450a0a 100%);
+  background-image: linear-gradient(135deg, #7f1d1d 0%, #991b1b 55%, #450a0a 100%); }
+.kategorie-seite-slide.d-advent          { --seiten-verlauf: linear-gradient(135deg, #5b21b6 0%, #4c1d95 55%, #2e1065 100%);
+  background-image: linear-gradient(135deg, #5b21b6 0%, #4c1d95 55%, #2e1065 100%); }
+.kategorie-seite-slide.d-jahreswechsel   { --seiten-verlauf: linear-gradient(135deg, #1e3a8a 0%, #1e40af 55%, #172554 100%);
+  background-image: linear-gradient(135deg, #1e3a8a 0%, #1e40af 55%, #172554 100%); }
+.kategorie-seite-slide.d-ostern          { --seiten-verlauf: linear-gradient(135deg, #fbbf24 0%, #f59e0b 55%, #b45309 100%);
+  background-image: linear-gradient(135deg, #fbbf24 0%, #f59e0b 55%, #b45309 100%); }
+.kategorie-seite-slide.d-erntedank       { --seiten-verlauf: linear-gradient(135deg, #ca8a04 0%, #a16207 55%, #713f12 100%);
+  background-image: linear-gradient(135deg, #ca8a04 0%, #a16207 55%, #713f12 100%); }
+.kategorie-seite-slide.d-sommer          { --seiten-verlauf: linear-gradient(135deg, #06b6d4 0%, #0891b2 55%, #155e75 100%);
+  background-image: linear-gradient(135deg, #06b6d4 0%, #0891b2 55%, #155e75 100%); }
+
+/* ========================================
+   Das seltenste Abzeichen — die Seite zum Teilen
+
+   Deshalb ist diese Seite mittig aufgebaut statt unten ausgerichtet wie die
+   Bereichsseiten: Das Abzeichen steht in der Mitte, die Prozentzahl
+   darunter. Wer davon einen Screenshot macht, hat ein Bild mit einem
+   Mittelpunkt — kein Textblock am unteren Rand.
+   ======================================== */
+
+.seltenstes-slide {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  text-align: center;
+  padding: 0 28px calc(60px + env(safe-area-inset-bottom, 0px));
+  background-image: linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #b45309 100%);
+}
+
+.seltenstes-slide .selt-auge {
+  font-size: 12px;
+  font-weight: var(--app-schrift-fett);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.8);
+  margin-bottom: 22px;
+}
+
+/* Das Abzeichen als Held der Seite. */
+.seltenstes-slide .selt-abzeichen {
+  width: 104px;
+  height: 104px;
+  border-radius: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.32);
+  margin-bottom: var(--app-abstand-basis);
+}
+
+.seltenstes-slide .selt-abzeichen ion-icon {
+  font-size: 54px;
+  color: #fff;
+}
+
+.seltenstes-slide .selt-name {
+  font-family: var(--w-akzent);
+  font-size: clamp(28px, 8vw, 38px);
+  line-height: 1.05;
+  text-transform: uppercase;
+  color: #fff;
+  margin-bottom: 26px;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.3);
+}
+
+/* Die Prozentzahl traegt die Aussage. */
+.seltenstes-slide .selt-prozent {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  color: #fff;
+  text-shadow: 0 3px 26px rgba(0, 0, 0, 0.34);
+}
+
+.seltenstes-slide .selt-prozent__zahl {
+  font-family: var(--w-akzent);
+  font-size: clamp(88px, 30vw, 132px);
+  line-height: 0.82;
+  letter-spacing: 0.01em;
+}
+
+.seltenstes-slide .selt-prozent__zeichen {
+  font-family: var(--w-akzent);
+  font-size: clamp(38px, 12vw, 54px);
+  margin-left: var(--app-abstand-mini);
+  opacity: 0.85;
+}
+
+.seltenstes-slide .selt-satz {
+  font-family: var(--w-akzent);
+  font-size: clamp(22px, 7vw, 30px);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.95);
+  margin-top: var(--app-abstand-winzig);
+  margin-bottom: 18px;
+}
+
+.seltenstes-slide .selt-nachsatz {
+  font-size: 16px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.9);
+  max-width: 20em;
+}
+
+
+/* ========================================
+   Bausteine der uebrigen Seiten
+
+   Punkte, Termine, Abzeichen und Abschluss tragen seit heute dieselbe
+   Gestaltung wie die Bereichsseiten: Slogan gross, Zahl klein. Diese
+   Bausteine ergaenzen, was nur dort vorkommt.
+   ======================================== */
+
+/* Aufteilung der Punkte (Gottesdienst / Gemeinde / Bonus). */
+.w-aufteilung {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: var(--app-abstand-basis);
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.w-aufteilung b {
+  font-family: var(--w-akzent);
+  font-size: 22px;
+  margin-right: var(--app-abstand-mini);
+  color: #fff;
+}
+
+/* Ein hervorgehobener Einzelwert, z. B. der letzte Termin. */
+.w-merkzettel {
+  margin-top: 18px;
+  padding: var(--app-abstand-mittel) var(--app-abstand-basis);
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--app-radius-weich);
+  backdrop-filter: blur(6px);
+  max-width: 100%;
+}
+
+.w-merkzettel__label {
+  display: block;
+  font-size: 11px;
+  font-weight: var(--app-schrift-fett);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.w-merkzettel__wert {
+  display: block;
+  margin-top: var(--app-abstand-mini);
+  font-size: 17px;
+  font-weight: var(--app-schrift-fett);
+  color: #fff;
+}
+
+/* Die Abzeichen als Reihe -- sie sind Bilder und tragen mit. */
+.w-abzeichenreihe {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--app-abstand-schmal);
+  margin-top: 18px;
+}
+
+.w-abzeichen {
+  width: 46px;
+  height: 46px;
+  border-radius: var(--app-radius-weich);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.26);
+}
+
+.w-abzeichen ion-icon {
+  font-size: 24px;
+  color: #fff;
+}
+
+/* Die Bilanz auf der Abschluss-Seite. */
+.w-bilanz {
+  display: flex;
+  flex-direction: column;
+  gap: var(--app-abstand-schmal);
+  margin-top: 18px;
+}
+
+.w-bilanz__zeile {
+  display: flex;
+  align-items: center;
+  gap: var(--app-abstand-mittel);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 15px;
+}
+
+.w-bilanz__zeile ion-icon {
+  font-size: 18px;
+  opacity: 0.8;
+}
+
+.w-bilanz__zeile b {
+  font-family: var(--w-akzent);
+  font-size: 30px;
+  color: #fff;
+  min-width: 46px;
+}
+
+.w-einladung {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-top: var(--app-abstand-gross);
+  font-size: 15px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.w-einladung ion-icon {
+  font-size: 20px;
+  color: #f9a8d4;
+  flex-shrink: 0;
+}
+
+/* ========================================
+   Momente als PINNWAND
+
+   Er hatte recht: Vorher lagen die Beiträge als gleich große Kärtchen
+   untereinander in einer scrollenden Spalte — eine Tabelle mit runden Ecken.
+   Jetzt liegen sie übereinander, leicht gedreht, mit Klebestreifen: wie
+   Fotos, die jemand an eine Wand gepinnt hat.
+
+   Die Drehung hängt an der Position (feste Werte in der Komponente), nicht
+   am Zufall — ein geteilter Rückblick muss jedes Mal gleich aussehen.
+   ======================================== */
+
+.challenge-momente-slide {
+  justify-content: flex-start;
+  padding-top: calc(54px + env(safe-area-inset-top, 0px));
+}
+
+.momente-pinnwand {
+  position: relative;
+  width: 100%;
+  /* Die Karten überlappen sich: negativer Abstand statt Liste. */
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0;
+  margin-top: var(--app-abstand-kompakt);
+  perspective: 900px;
+}
+
+.moment-polaroid {
+  position: relative;
+  width: 46%;
+  max-width: 190px;
+  margin: -10px -14px;
+  padding: 9px 9px 0;
+  background: #fdfcf8;
+  border-radius: 3px;
+  box-shadow:
+    0 10px 26px rgba(0, 0, 0, 0.34),
+    0 2px 6px rgba(0, 0, 0, 0.2);
+  transform: rotate(var(--dreh)) translate(var(--versatz-x), var(--versatz-y));
+  /* Erst ankommen, dann leicht schweben. */
+  animation:
+    moment-ankommen 0.5s cubic-bezier(0.2, 1.1, 0.4, 1) var(--auftritt) both,
+    moment-schweben 7s ease-in-out infinite;
+}
+
+/* Die Karte fliegt an die Wand: von unten, größer, gerade — und dreht sich
+   dabei in ihre endgültige Schräglage. */
+@keyframes moment-ankommen {
+  from {
+    opacity: 0;
+    transform: rotate(0deg) translate(0, 26px) scale(1.08);
+  }
+  to {
+    opacity: 1;
+    transform: rotate(var(--dreh)) translate(var(--versatz-x), var(--versatz-y)) scale(1);
+  }
+}
+
+/* Danach ein ruhiges Atmen — die Wand lebt, ohne zu zappeln. */
+@keyframes moment-schweben {
+  0%, 100% {
+    transform: rotate(var(--dreh)) translate(var(--versatz-x), var(--versatz-y));
+  }
+  50% {
+    transform:
+      rotate(calc(var(--dreh) + 1.2deg))
+      translate(var(--versatz-x), calc(var(--versatz-y) - 5px));
+  }
+}
+
+/* Klebestreifen oben in der Mitte. */
+.moment-klebeband {
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  width: 52px;
+  height: 18px;
+  transform: translateX(-50%) rotate(-2deg);
+  background: rgba(255, 255, 255, 0.42);
+  border-left: 1px solid rgba(255, 255, 255, 0.55);
+  border-right: 1px solid rgba(255, 255, 255, 0.55);
+  backdrop-filter: blur(2px);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+}
+
+.moment-polaroid__bild {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  overflow: hidden;
+  background: #e8e4dc;
+}
+
+.moment-polaroid__bild img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* ChallengeFoto rendert einen eigenen Wrapper (.challenge-moment-foto) --
+   der muss die Flaeche fuellen, sonst behaelt er seine alten Listenmasse. */
+.moment-polaroid__bild .challenge-moment-foto {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  border-radius: 0;
+  max-height: none;
+}
+
+.moment-polaroid__bild .challenge-moment-foto--laedt,
+.moment-polaroid__bild .challenge-moment-foto--leer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e8e4dc;
+  color: rgba(0, 0, 0, 0.3);
+  font-size: 24px;
+}
+
+/* Beiträge ohne Foto (Text, Audio, Link) bekommen dieselbe Fläche --
+   sonst stünden Polaroids und Zettel unterschiedlich hoch auf der Wand. */
+.moment-polaroid__inhalt {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: var(--app-abstand-schmal);
+  background: linear-gradient(150deg, #fef9c3 0%, #fef08a 100%);
+  text-align: center;
+}
+
+.moment-polaroid__medienicon {
+  font-size: 26px;
+  color: rgba(0, 0, 0, 0.42);
+}
+
+.moment-polaroid__text {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.35;
+  color: rgba(0, 0, 0, 0.72);
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.moment-polaroid__link {
+  font-size: 11px;
+  font-weight: var(--app-schrift-halbfett);
+  color: rgba(0, 0, 0, 0.6);
+  word-break: break-word;
+}
+
+/* Der weiße Rand unten, wie beim echten Polaroid. */
+.moment-polaroid__fuss {
+  display: flex;
+  align-items: center;
+  gap: var(--app-abstand-kompakt);
+  padding: 7px 2px 9px;
+}
+
+.moment-polaroid__abzeichen {
+  width: 19px;
+  height: 19px;
+  min-width: 19px;
+  border-radius: var(--app-radius-kreis);
+  background: var(--app-color-challenges, #be185d);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+
+.moment-polaroid__titel {
+  flex: 1;
+  font-size: 10.5px;
+  font-weight: var(--app-schrift-halbfett);
+  color: rgba(0, 0, 0, 0.66);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* Handschrift-Anmutung ohne zusätzliche Schriftdatei. */
+  letter-spacing: 0.01em;
+}
+
+/* Bei nur ein oder zwei Beiträgen dürfen sie größer sein -- dann trägt
+   das einzelne Bild die Seite. */
+.momente-pinnwand:has(.moment-polaroid:nth-child(2):last-child) .moment-polaroid,
+.momente-pinnwand:has(.moment-polaroid:only-child) .moment-polaroid {
+  width: 62%;
+  max-width: 240px;
+  margin: -6px -8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .moment-polaroid {
+    animation: moment-ankommen 0.4s ease-out var(--auftritt) both;
+  }
+}
+
+
+/* ========================================
+   GANZ AM ENDE: Seiten mit Foto bekommen KEINEN eigenen Hintergrund
+
+   Diese Regel muss die LETZTE der Datei sein. Beim ersten Versuch stand sie
+   oben bei .wrapped-slide -- die Verlaeufe der einzelnen Seiten
+   (.intro-slide, .kategorie-seite-slide.k-gottesdienst, ...) stehen weiter
+   unten und haben sie damit ueberschrieben. Ergebnis: Die Intro-Seite zeigte
+   ihr Foto, die Kategorie-Seiten nicht. Gleiche Spezifitaet -> die spaetere
+   Regel gewinnt.
+
+   WARUM UEBERHAUPT: Der Bild-Container (.wrapped-bg) liegt auf z-index:-1,
+   also HINTER dem Element. Jeder Hintergrund auf dem Element selbst --
+   Verlauf ODER Farbe -- uebermalt das Foto vollstaendig. Genau daran sind
+   drei Anlaeufe gescheitert: Ich habe das Bild vergroessert und den Schleier
+   abgestuft, aber an Schichten gearbeitet, die gar nicht oben lagen.
+
+   Die Farbe der Seite kommt weiterhin an -- aus dem Schleier INNERHALB des
+   Containers (WrappedHintergrund liest --seiten-verlauf).
+   ======================================== */
+/* Die Einladung ins Team -- letzte Seite eines Konfi-Rueckblicks. */
+.werde-teamer-slide {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: 0 30px calc(90px + env(safe-area-inset-bottom, 0px));
+  --seiten-verlauf: linear-gradient(135deg, #ec4899 0%, #db2777 55%, #9d174d 100%);
+  background: var(--seiten-verlauf);
+}
+
+/* Sommerfreizeit 2026, Stavanger (Norwegen).
+   Kaltes Nordmeerblau -- das Bild dahinter zeigt den Preikestolen ueber dem
+   Lysefjord, und ein warmer Verlauf darauf saehe aus wie ein Suedseeurlaub.
+   Aufbau wie bei allen Slogan-Seiten: linksbuendig am unteren Rand, KEINE
+   Zahl (die 14 Tage sind fester Text im Nachsatz). */
+.stavanger-slide {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: 0 30px calc(90px + env(safe-area-inset-bottom, 0px));
+  --seiten-verlauf: linear-gradient(135deg, #0e7490 0%, #155e75 55%, #082f49 100%);
+  background: var(--seiten-verlauf);
+}
+
+
+.teamer-intro-slide,
+.teamer-events-slide,
+.teamer-konfis-slide,
+.teamer-badges-slide,
+.teamer-zertifikate-slide,
+.teamer-team-slide,
+.teamer-neu-dabei-slide,
+.teamer-anfang-slide,
+.teamer-erstes-abzeichen-slide,
+.teamer-antworten-slide,
+.teamer-jahre-slide,
+.teamer-konfi-zeit-slide,
+.teamer-challenges-slide,
+.teamer-segen-slide,
+.teamer-segen-abschluss-slide,
+.teamer-abschluss-slide {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  padding: 0 30px calc(90px + env(safe-area-inset-bottom, 0px));
+}
+
+.teamer-intro-slide      { --seiten-verlauf: linear-gradient(135deg, #0891b2 0%, #0e7490 55%, #155e75 100%); background: var(--seiten-verlauf); }
+.teamer-events-slide     { --seiten-verlauf: linear-gradient(135deg, #6366f1 0%, #4f46e5 55%, #3730a3 100%); background: var(--seiten-verlauf); }
+.teamer-konfis-slide     { --seiten-verlauf: linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #b45309 100%); background: var(--seiten-verlauf); }
+.teamer-badges-slide     { --seiten-verlauf: linear-gradient(135deg, #a855f7 0%, #9333ea 55%, #6b21a8 100%); background: var(--seiten-verlauf); }
+.teamer-zertifikate-slide{ --seiten-verlauf: linear-gradient(135deg, #14b8a6 0%, #0d9488 55%, #115e59 100%); background: var(--seiten-verlauf); }
+.teamer-jahre-slide      { --seiten-verlauf: linear-gradient(135deg, #22c55e 0%, #16a34a 55%, #15803d 100%); background: var(--seiten-verlauf); }
+.teamer-team-slide { --seiten-verlauf: linear-gradient(135deg, #06b6d4 0%, #0891b2 55%, #0e7490 100%); background: var(--seiten-verlauf); }
+.teamer-neu-dabei-slide { --seiten-verlauf: linear-gradient(135deg, #84cc16 0%, #65a30d 55%, #3f6212 100%); background: var(--seiten-verlauf); }
+.teamer-anfang-slide { --seiten-verlauf: linear-gradient(135deg, #f97316 0%, #ea580c 55%, #c2410c 100%); background: var(--seiten-verlauf); }
+.teamer-erstes-abzeichen-slide { --seiten-verlauf: linear-gradient(135deg, #d946ef 0%, #c026d3 55%, #86198f 100%); background: var(--seiten-verlauf); }
+
+/* Der Abzeichen-Kreis: dieselbe Form wie auf der Seite des seltensten
+   Abzeichens im Konfi-Rueckblick, damit beide erkennbar zusammengehoeren. */
+.teamer-erstes-abzeichen__kreis {
+  width: 132px;
+  height: 132px;
+  border-radius: var(--app-radius-kreis);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 64px;
+  color: #fff;
+  margin-bottom: var(--app-abstand-mittel);
+}
+
+.teamer-antworten-slide { --seiten-verlauf: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 55%, #5b21b6 100%); background: var(--seiten-verlauf); }
+/* Warmes Bernstein-Blau: der Blick zurueck auf die eigene Konfi-Zeit. */
+.teamer-konfi-zeit-slide { --seiten-verlauf: linear-gradient(135deg, #0ea5e9 0%, #0369a1 55%, #075985 100%); background: var(--seiten-verlauf); }
+.teamer-abschluss-slide  { --seiten-verlauf: linear-gradient(135deg, #e11d48 0%, #be123c 55%, #9f1239 100%); background: var(--seiten-verlauf); }
+/* Was du dem Jahrgang aufgegeben hast -- dieselbe Familie wie
+   die Moderationsseite daneben, aber heller: Es ist der froehlichere Teil. */
+.teamer-challenges-slide { --seiten-verlauf: linear-gradient(135deg, #f59e0b 0%, #d97706 55%, #b45309 100%); background: var(--seiten-verlauf); }
+
+/* Der Zuspruch statt eines leeren Rueckblicks. Ruhigere,
+   waermere Toene als der uebrige Teamer-Rueckblick: Die Seite traegt keine
+   Zahl, sondern einen Satz -- sie darf leiser sein. */
+.teamer-segen-slide { --seiten-verlauf: linear-gradient(135deg, #7c3aed 0%, #6d28d9 55%, #4c1d95 100%); background: var(--seiten-verlauf); }
+.teamer-segen-abschluss-slide { --seiten-verlauf: linear-gradient(135deg, #e11d48 0%, #be123c 55%, #9f1239 100%); background: var(--seiten-verlauf); }
+
+/* Der Segensspruch selbst. Groesser als ein Nachsatz, kleiner als eine
+   Schlagzeile -- er will gelesen, nicht verkuendet werden. */
+.teamer-segen-slide__spruch {
+  font-size: var(--app-text-untertitel);
+  font-weight: var(--app-schrift-mittel);
+  line-height: 1.45;
+  margin: var(--app-abstand-basis) 0;
+  max-width: 22em;
+}
+
+.wrapped-slide:has(.wrapped-bg-form),
+.wrapped-slide.wrapped-slide--active:has(.wrapped-bg-form) {
+  background: none !important;
 }

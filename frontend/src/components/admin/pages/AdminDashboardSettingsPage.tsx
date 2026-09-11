@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { ICON_APPS, ICON_ZURUECK } from '../../shared/icons';
+import React, { useState } from 'react';
+import { FARBEN } from '../../../theme/colors';
 import {
   IonPage,
   IonHeader,
@@ -22,7 +24,6 @@ import {
   IonReorder,
   IonReorderGroup
 } from '@ionic/react';
-import { arrowBack, appsOutline, reorderThreeOutline } from 'ionicons/icons';
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
@@ -79,12 +80,36 @@ const TEAMER_LABELS: Record<string, string> = {
 
 // Gemeinsame Default-Reihenfolgen (utils/sectionOrder) — sonst driften die
 // Listen zwischen Einstellungen und Dashboards auseinander.
+/**
+ * Die Dashboard-Felder aus GET /settings, soweit diese Seite sie liest.
+ *
+ * Alle optional: Eine Organisation, die nie etwas eingestellt hat, hat die
+ * Felder nicht — die Anzeige faellt dann ueberall auf `?? true` zurueck.
+ */
+interface DashboardEinstellungen {
+  dashboard_show_konfirmation?: boolean;
+  dashboard_show_challenges?: boolean;
+  dashboard_show_konfispruch?: boolean;
+  dashboard_show_events?: boolean;
+  dashboard_show_losung?: boolean;
+  dashboard_show_badges?: boolean;
+  dashboard_show_ranking?: boolean;
+  dashboard_section_order?: string[] | null;
+  teamer_dashboard_show_zertifikate?: boolean;
+  teamer_dashboard_show_challenges?: boolean;
+  teamer_dashboard_show_konfispruch?: boolean;
+  teamer_dashboard_show_events?: boolean;
+  teamer_dashboard_show_badges?: boolean;
+  teamer_dashboard_show_losung?: boolean;
+  teamer_dashboard_section_order?: string[] | null;
+}
+
 const DEFAULT_KONFI_ORDER = DEFAULT_KONFI_SECTION_ORDER;
 const DEFAULT_TEAMER_ORDER = DEFAULT_TEAMER_SECTION_ORDER;
 
 
 const AdminDashboardSettingsPage: React.FC = () => {
-  const { user, setSuccess, setError } = useApp();
+  const { user, setError } = useApp();
   const [dashboardSegment, setDashboardSegment] = useState<'konfi' | 'teamer'>('konfi');
 
   const [dashboardConfig, setDashboardConfig] = useState<DashboardConfig>({
@@ -129,12 +154,12 @@ const AdminDashboardSettingsPage: React.FC = () => {
   };
 
   // Offline-Query: Settings
-  const { loading, refresh: refreshSettings } = useOfflineQuery<any>(
+  const { loading, refresh: refreshSettings } = useOfflineQuery<DashboardEinstellungen>(
     'admin:settings:' + user?.organization_id,
     async () => { const res = await api.get('/settings'); return res.data; },
     {
       ttl: CACHE_TTL.SETTINGS,
-      onSuccess: (data: any) => {
+      onSuccess: (data: DashboardEinstellungen) => {
         setDashboardConfig({
           show_konfirmation: data.dashboard_show_konfirmation ?? true,
           show_challenges: data.dashboard_show_challenges ?? true,
@@ -233,7 +258,7 @@ const AdminDashboardSettingsPage: React.FC = () => {
         <IonToolbar>
           <IonButtons slot="start">
             <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-              <IonIcon icon={arrowBack} />
+              <IonIcon icon={ICON_ZURUECK} />
             </IonButton>
           </IonButtons>
           <IonTitle>Dashboard</IonTitle>
@@ -257,8 +282,8 @@ const AdminDashboardSettingsPage: React.FC = () => {
         <SectionHeader
           title="Dashboard"
           subtitle="Sichtbare Bereiche konfigurieren"
-          icon={appsOutline}
-          colors={{ primary: '#667eea', secondary: '#5a67d8' }}
+          icon={ICON_APPS}
+          colors={{ primary: FARBEN.users, secondary: FARBEN.usersDunkel }}
           stats={[
             // Die Kacheln entsprechen den beiden Reitern und schalten dorthin.
             { value: Object.values(dashboardConfig).filter(Boolean).length, label: 'Konfi', onClick: () => setDashboardSegment('konfi'), active: dashboardSegment === 'konfi' },
@@ -275,7 +300,7 @@ const AdminDashboardSettingsPage: React.FC = () => {
               <IonLabel>Konfi</IonLabel>
             </IonSegmentButton>
             <IonSegmentButton value="teamer">
-              <IonLabel>Teamer:innen</IonLabel>
+              <IonLabel>Team</IonLabel>
             </IonSegmentButton>
           </IonSegment>
         </div>
@@ -284,7 +309,7 @@ const AdminDashboardSettingsPage: React.FC = () => {
           <IonList inset={true} className="app-segment-wrapper">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--settings">
-                <IonIcon icon={appsOutline} />
+                <IonIcon icon={ICON_APPS} />
               </div>
               <IonLabel>Konfi-Dashboard</IonLabel>
             </IonListHeader>
@@ -326,9 +351,9 @@ const AdminDashboardSettingsPage: React.FC = () => {
           <IonList inset={true} className="app-segment-wrapper">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--settings">
-                <IonIcon icon={appsOutline} />
+                <IonIcon icon={ICON_APPS} />
               </div>
-              <IonLabel>Teamer:innen-Dashboard</IonLabel>
+              <IonLabel>Team-Dashboard</IonLabel>
             </IonListHeader>
             <IonCard className="app-card">
               <IonCardContent>

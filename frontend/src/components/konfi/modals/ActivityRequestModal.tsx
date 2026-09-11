@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { fehlerText, fehlerTextOderMessage } from '../../../utils/fehler';
+import React, { useState, useRef } from 'react';
 import {
   IonPage,
   IonHeader,
@@ -24,25 +25,26 @@ import {
   useIonAlert
 } from '@ionic/react';
 import {
-  close,
-  checkmark,
-  camera,
-  trash,
-  checkmarkCircle,
-  calendarOutline,
-  textOutline,
-  starOutline,
-  homeOutline,
-  peopleOutline,
-  imageOutline,
-  pricetag,
-  chevronDownOutline
-} from 'ionicons/icons';
+  ICON_AUFKLAPPEN,
+  ICON_BILD,
+  ICON_GEMEINDE,
+  ICON_GOTTESDIENST,
+  ICON_HAKEN_GEFUELLT,
+  ICON_KAMERA_GEFUELLT,
+  ICON_KATEGORIE_GEFUELLT,
+  ICON_LOESCHEN_GEFUELLT,
+  ICON_SCHLIESSEN_GEFUELLT,
+  ICON_STERN,
+  ICON_TERMIN,
+  ICON_TEXT,
+  ICON_ZUSAGE_GEFUELLT,
+} from '../../shared/icons';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import api from '../../../services/api';
-import { writeQueue } from '../../../services/writeQueue';
+import { writeQueue, QueueBody } from '../../../services/writeQueue';
+import { AktivitaetMelden } from '../../../types/request';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
 import { compressForUpload } from '../../../services/mediaCompression';
@@ -67,7 +69,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
   onClose,
   onSuccess
 }) => {
-  const { setSuccess, setError, isOnline, user } = useApp();
+  const { setSuccess, setError, user } = useApp();
   const [presentAlert] = useIonAlert();
 
   const { isSubmitting, guard } = useActionGuard();
@@ -120,8 +122,8 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
         setPhotoPreview(e.target?.result as string);
       };
       reader.readAsDataURL(prepared);
-    } catch (err: any) {
-      setError(err?.message || 'Foto konnte nicht verarbeitet werden');
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : 'Foto konnte nicht verarbeitet werden');
     }
   };
 
@@ -147,8 +149,8 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
       });
 
       return response.data.filename;
-    } catch (error: any) {
-      throw new Error(error.response?.data?.error || 'Fehler beim Hochladen des Fotos');
+    } catch (error) {
+      throw new Error(fehlerText(error, 'Fehler beim Hochladen des Fotos'), { cause: error });
     }
   };
 
@@ -188,7 +190,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
             photoFilename = await uploadPhoto();
           }
 
-          const requestData: any = {
+          const requestData: AktivitaetMelden = {
             activity_id: parseInt(formData.activity_id),
             description: formData.description.trim(),
             requested_date: formData.requested_date,
@@ -200,15 +202,15 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
 
           setSuccess('Aktivität erfolgreich eingereicht!');
           onSuccess();
-        } catch (error: any) {
-          setError(error.response?.data?.error || error.message || 'Fehler beim Einreichen der Aktivität');
+        } catch (error) {
+          setError(fehlerTextOderMessage(error, 'Fehler beim Einreichen der Aktivität'));
         } finally {
           setUploadProgress(0);
         }
       } else {
         // Offline-Pfad: Queue-Fallback
         let hasFileUpload = false;
-        const queueBody: any = {
+        const queueBody: QueueBody & AktivitaetMelden = {
           activity_id: parseInt(formData.activity_id),
           description: formData.description.trim(),
           requested_date: formData.requested_date,
@@ -233,7 +235,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
             });
             queueBody._localPhotoPath = `queue-uploads/${fileName}`;
             queueBody._photoFileName = formData.photo_file.name;
-          } catch (err) {
+          } catch {
             setError('Foto konnte nicht lokal gespeichert werden');
             return;
           }
@@ -274,12 +276,12 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
           <IonTitle>Neue Aktivität</IonTitle>
           <IonButtons slot="start">
             <IonButton aria-label="Schließen" className="app-modal-close-btn" onClick={onClose} disabled={isSubmitting}>
-              <IonIcon icon={close} />
+              <IonIcon icon={ICON_SCHLIESSEN_GEFUELLT} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
             <IonButton aria-label="Aktivität absenden" className="app-modal-submit-btn app-modal-submit-btn--konfi" onClick={handleSubmit} disabled={isSubmitting || loading}>
-              <IonIcon icon={checkmark} />
+              <IonIcon icon={ICON_HAKEN_GEFUELLT} />
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -293,14 +295,14 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
         <IonList inset={true} className="app-segment-wrapper">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--requests">
-              <IonIcon icon={starOutline} />
+              <IonIcon icon={ICON_STERN} />
             </div>
             <IonLabel>Aktivität wählen</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
             <IonCardContent style={{ padding: '0' }}>
               <IonAccordionGroup ref={accordionGroupRef}>
-                <IonAccordion value="activity-picker" toggleIcon={chevronDownOutline} toggleIconSlot="end">
+                <IonAccordion value="activity-picker" toggleIcon={ICON_AUFKLAPPEN} toggleIconSlot="end">
                   <IonItem slot="header" lines="none" style={{ '--padding-start': '16px', '--inner-padding-end': '12px' }}>
                     {selectedActivity ? (
                       // Gewaehlt: schlichte Header-Zeile (Icon + Name + Kategorie,
@@ -310,27 +312,27 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                         const isGodi = selectedActivity.type === 'gottesdienst';
                         const accent = isGodi ? 'var(--app-color-gottesdienst)' : 'var(--app-color-gemeinde)';
                         return (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', width: '100%', pointerEvents: 'none' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)', width: '100%', pointerEvents: 'none' }}>
                             <div
                               className={`app-icon-circle app-icon-circle--${isGodi ? 'info' : 'activities'}`}
                               style={{ flexShrink: 0 }}
                             >
-                              <IonIcon icon={isGodi ? homeOutline : peopleOutline} />
+                              <IonIcon icon={isGodi ? ICON_GOTTESDIENST : ICON_GEMEINDE} />
                             </div>
                             <div style={{ flex: 1, minWidth: 0 }}>
-                              <div style={{ fontSize: '1rem', fontWeight: 600, color: '#1a1a1a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                              <div style={{ fontSize: 'var(--app-text-standard)', fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-emphasis)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                 {selectedActivity.name}
                               </div>
                               {selectedActivity.category_names && (
-                                <div style={{ fontSize: '0.78rem', color: '#8e8e93', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                <div style={{ fontSize: 'var(--app-text-hinweis)', color: 'var(--app-text-system)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                                   {selectedActivity.category_names}
                                 </div>
                               )}
                             </div>
                             <span style={{
-                              flexShrink: 0, fontSize: '0.8rem', fontWeight: 700, color: accent,
-                              background: isGodi ? 'rgba(59,130,246,0.12)' : 'rgba(4,120,87,0.12)',
-                              padding: '3px 10px', borderRadius: '10px', whiteSpace: 'nowrap'
+                              flexShrink: 0, fontSize: 'var(--app-text-hinweis)', fontWeight: 'var(--app-schrift-fett)', color: accent,
+                              background: isGodi ? 'rgba(var(--app-color-gottesdienst-rgb), 0.12)' : 'rgba(var(--app-color-activities-rgb), 0.12)',
+                              padding: 'var(--app-abstand-mini) var(--app-abstand-schmal)', borderRadius: 'var(--app-radius-knopf)', whiteSpace: 'nowrap'
                             }}>
                               +{selectedActivity.points}P
                             </span>
@@ -345,7 +347,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                       </IonLabel>
                     )}
                   </IonItem>
-                  <div slot="content" style={{ padding: '0 12px 12px' }}>
+                  <div slot="content" style={{ padding: '0 var(--app-abstand-mittel) var(--app-abstand-mittel)' }}>
                     {/* Aktivitäten Liste */}
                     <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
                       {filteredActivities.length === 0 ? (
@@ -379,19 +381,19 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                               <div className="app-list-item__row">
                                 <div className="app-list-item__main">
                                   {/* Icon — gottesdienst=info(blau), gemeinde=activities(gruen) */}
-                                  <div className={`app-icon-circle app-icon-circle--${activity.type === 'gottesdienst' ? 'info' : 'activities'}`}>
-                                    <IonIcon icon={activity.type === 'gottesdienst' ? homeOutline : peopleOutline} />
+                                  <div className={`app-icon-circle app-icon-circle--${activity.type === 'gottesdienst' ? 'gottesdienst' : 'activities'}`}>
+                                    <IonIcon icon={activity.type === 'gottesdienst' ? ICON_GOTTESDIENST : ICON_GEMEINDE} />
                                   </div>
 
                                   {/* Content */}
                                   <div className="app-list-item__content">
-                                    <div className="app-list-item__title" style={{ paddingRight: '50px' }}>
+                                    <div className="app-list-item__title" style={{ paddingRight: 'var(--app-freiraum-aktion-s)' }}>
                                       {activity.name}
                                     </div>
                                     {activity.category_names && (
                                       <div className="app-list-item__meta">
                                         <span className="app-list-item__meta-item">
-                                          <IonIcon icon={pricetag} className="app-icon-color--category" />
+                                          <IonIcon icon={ICON_KATEGORIE_GEFUELLT} className="app-icon-color--category" />
                                           {activity.category_names}
                                         </span>
                                       </div>
@@ -415,12 +417,12 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
         <IonList inset={true} className="app-segment-wrapper">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--requests">
-              <IonIcon icon={calendarOutline} />
+              <IonIcon icon={ICON_TERMIN} />
             </div>
             <IonLabel>Datum wählen</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: '12px' }}>
+            <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
               <IonItem lines="none" style={{ '--background': 'transparent' }}>
                 <IonDatetimeButton datetime="date-picker" />
                 <IonModal keepContentsMounted={true}>
@@ -442,12 +444,12 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
         <IonList inset={true} className="app-segment-wrapper">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--requests">
-              <IonIcon icon={textOutline} />
+              <IonIcon icon={ICON_TEXT} />
             </div>
             <IonLabel>Anmerkungen (optional)</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: '12px' }}>
+            <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
               <IonItem lines="none" style={{ '--background': 'transparent' }}>
                 <IonTextarea
                   value={formData.description}
@@ -465,32 +467,32 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
         <IonList inset={true} className="app-segment-wrapper">
           <IonListHeader>
             <div className="app-section-icon app-section-icon--requests">
-              <IonIcon icon={imageOutline} />
+              <IonIcon icon={ICON_BILD} />
             </div>
             <IonLabel>Foto als Nachweis (optional)</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: '12px' }}>
+            <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
               <div
                 onClick={handlePhotoSelect}
                 style={{
-                  padding: '16px',
+                  padding: 'var(--app-abstand-basis)',
                   backgroundColor: photoPreview ? 'rgba(var(--app-color-gemeinde-rgb), 0.08)' : 'transparent',
-                  borderRadius: '10px',
-                  border: photoPreview ? '1px solid rgba(var(--app-color-gemeinde-rgb), 0.2)' : '1px dashed #c7c7cc',
+                  borderRadius: 'var(--app-radius-knopf)',
+                  border: photoPreview ? '1px solid rgba(var(--app-color-gemeinde-rgb), 0.2)' : '1px dashed var(--app-border-strong)',
                   cursor: 'pointer',
                   transition: 'all 0.2s ease'
                 }}
               >
                 {photoPreview ? (
                   <div className="app-settings-item" style={{ justifyContent: 'space-between' }}>
-                    <div className="app-settings-item" style={{ gap: '8px' }}>
+                    <div className="app-settings-item" style={{ gap: 'var(--app-abstand-eng)' }}>
                       <IonIcon
-                        icon={checkmarkCircle}
+                        icon={ICON_ZUSAGE_GEFUELLT}
                         className="app-icon-color--gemeinde"
-                        style={{ fontSize: '1.2rem' }}
+                        style={{ fontSize: 'var(--app-text-untertitel)' }}
                       />
-                      <span style={{ fontWeight: '600', color: 'var(--app-color-gemeinde)' }}>
+                      <span style={{ fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-color-gemeinde)' }}>
                         Foto ausgewählt
                       </span>
                     </div>
@@ -503,17 +505,17 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                         removePhoto();
                       }}
                     >
-                      <IonIcon icon={trash} />
+                      <IonIcon icon={ICON_LOESCHEN_GEFUELLT} />
                     </IonButton>
                   </div>
                 ) : (
                   <div className="app-settings-item" style={{ justifyContent: 'center' }}>
                     <IonIcon
-                      icon={camera}
+                      icon={ICON_KAMERA_GEFUELLT}
                       className="app-icon-color--gemeinde"
-                      style={{ fontSize: '1.2rem' }}
+                      style={{ fontSize: 'var(--app-text-untertitel)' }}
                     />
-                    <span style={{ fontWeight: '500', color: '#666' }}>
+                    <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-secondary)' }}>
                       Foto hinzufügen
                     </span>
                   </div>

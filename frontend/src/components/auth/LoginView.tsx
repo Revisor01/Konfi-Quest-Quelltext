@@ -13,7 +13,17 @@ import {
   useIonRouter
 } from '@ionic/react';
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
-import { key, person, arrowForward, alertCircle, closeCircle, eye, eyeOff, refreshOutline, fingerPrintOutline } from 'ionicons/icons';
+import {
+  ICON_ABSAGE,
+  ICON_AKTUALISIEREN,
+  ICON_FINGERABDRUCK,
+  ICON_PERSON_GEFUELLT,
+  ICON_PFEIL_WEITER_GEFUELLT,
+  ICON_SCHLUESSEL_GEFUELLT,
+  ICON_SICHTBAR,
+  ICON_VERBORGEN,
+  ICON_WARNHINWEIS_GEFUELLT,
+} from '../shared/icons';
 import { useApp } from '../../contexts/AppContext';
 import { loginWithAutoDetection, mitBiometrieAnmelden } from '../../services/auth';
 import { biometrieVerfuegbar, istBiometrieAktiv } from '../../services/biometrics';
@@ -179,17 +189,25 @@ const LoginView: React.FC = () => {
     try {
       const user = await loginWithAutoDetection(username, password);
       weiterNachAnmeldung(user);
-    } catch (err: any) {
+    } catch (err) {
+      // Typisierte Sicht auf den axios-Fehler (rateLimitMessage setzt der
+      // Response-Interceptor in services/api.ts bei 429ern).
+      const fehler = (typeof err === 'object' && err !== null ? err : {}) as {
+        response?: { status?: number; data?: { error?: string; error_code?: string } };
+        message?: string;
+        code?: string;
+        rateLimitMessage?: string;
+      };
       // Defensiv: errorMessage immer ein String, sonst werfen die .includes()-Checks unten
-      const errorMessage: string = err?.response?.data?.error || err?.message || '';
-      const errorCode: string = err?.response?.data?.error_code || '';
+      const errorMessage: string = fehler.response?.data?.error || fehler.message || '';
+      const errorCode: string = fehler.response?.data?.error_code || '';
       let displayError: string;
 
       // Rate-Limit (429) ZUERST prüfen — ein 429 ist KEINE fehlende Verbindung.
       // Sonst zeigt die App bei "zu viele Versuche" faelschlich "Keine Verbindung".
-      if (err.response?.status === 429 || err.rateLimitMessage) {
-        displayError = err.rateLimitMessage || err?.response?.data?.error || 'Zu viele Login-Versuche. Bitte warte einen Moment.';
-      } else if (!err.response || err.code === 'ERR_NETWORK') {
+      if (fehler.response?.status === 429 || fehler.rateLimitMessage) {
+        displayError = fehler.rateLimitMessage || fehler.response?.data?.error || 'Zu viele Login-Versuche. Bitte warte einen Moment.';
+      } else if (!fehler.response || fehler.code === 'ERR_NETWORK') {
         // Netzwerkfehler erkennen
         displayError = 'Keine Verbindung zum Server. Bitte prüfe deine Internetverbindung.';
         setIsNetworkError(true);
@@ -251,7 +269,7 @@ const LoginView: React.FC = () => {
         <div className="app-auth-container">
 
           {/* Hero Section */}
-          <div className="app-auth-hero" style={{ marginTop: '60px' }}>
+          <div className="app-auth-hero" style={{ marginTop: 'var(--app-freiraum-kopf-m)' }}>
             <h1 className="app-auth-hero__title app-auth-hero__title--cosmic">
               KONFI<br />QUEST
             </h1>
@@ -277,7 +295,7 @@ const LoginView: React.FC = () => {
               </div>
 
               <IonItem lines="none" className="app-auth-input">
-                <IonIcon icon={person} slot="start" color="medium" />
+                <IonIcon icon={ICON_PERSON_GEFUELLT} slot="start" color="medium" />
                 <IonLabel position="stacked" className="app-auth-input__label">
                   Benutzername
                 </IonLabel>
@@ -287,13 +305,13 @@ const LoginView: React.FC = () => {
                   placeholder="Dein Nutzername"
                   className="app-auth-input__value"
                   autocapitalize="none"
-                  autocorrect="off"
+                  autocorrect={false}
                   spellcheck={false}
                 />
               </IonItem>
 
-              <IonItem lines="none" className="app-auth-input" style={{ marginBottom: '24px' }}>
-                <IonIcon icon={key} slot="start" color="medium" />
+              <IonItem lines="none" className="app-auth-input" style={{ marginBottom: 'var(--app-abstand-weit)' }}>
+                <IonIcon icon={ICON_SCHLUESSEL_GEFUELLT} slot="start" color="medium" />
                 <IonLabel position="stacked" className="app-auth-input__label">
                   Passwort
                 </IonLabel>
@@ -304,11 +322,11 @@ const LoginView: React.FC = () => {
                   placeholder="Dein Passwort"
                   className="app-auth-input__value"
                   autocapitalize="none"
-                  autocorrect="off"
+                  autocorrect={false}
                   spellcheck={false}
                 />
                 <IonIcon
-                  icon={showPassword ? eyeOff : eye}
+                  icon={showPassword ? ICON_VERBORGEN : ICON_SICHTBAR}
                   slot="end"
                   onClick={() => setShowPassword(!showPassword)}
                   className="app-auth-input__toggle"
@@ -326,7 +344,7 @@ const LoginView: React.FC = () => {
                 ) : (
                   <>
                     Anmelden
-                    <IonIcon icon={arrowForward} slot="end" />
+                    <IonIcon icon={ICON_PFEIL_WEITER_GEFUELLT} slot="end" />
                   </>
                 )}
               </IonButton>
@@ -340,13 +358,13 @@ const LoginView: React.FC = () => {
                   onClick={() => handleBiometrie(false)}
                   disabled={loading || biometrieLaeuft}
                   className="app-auth-biometrie-button"
-                  style={{ marginTop: '12px' }}
+                  style={{ marginTop: 'var(--app-abstand-mittel)' }}
                 >
                   {biometrieLaeuft ? (
                     <IonSpinner name="crescent" />
                   ) : (
                     <>
-                      <IonIcon icon={fingerPrintOutline} slot="start" />
+                      <IonIcon icon={ICON_FINGERABDRUCK} slot="start" />
                       Mit {biometrieBezeichnung} anmelden
                     </>
                   )}
@@ -366,9 +384,9 @@ const LoginView: React.FC = () => {
 
               {/* Fehlermeldung */}
               {loginError && (
-                <div className="app-auth-error app-auth-error--with-badge" style={{ gap: '12px' }}>
+                <div className="app-auth-error app-auth-error--with-badge" style={{ gap: 'var(--app-abstand-mittel)' }}>
                   <div className="app-auth-error__badge">
-                    <IonIcon icon={alertCircle} className="app-auth-error__badge-icon" />
+                    <IonIcon icon={ICON_WARNHINWEIS_GEFUELLT} className="app-auth-error__badge-icon" />
                   </div>
                   <div style={{ flex: 1 }}>
                     <div className="app-auth-error__title">
@@ -379,7 +397,7 @@ const LoginView: React.FC = () => {
                     </div>
                   </div>
                   <IonIcon
-                    icon={closeCircle}
+                    icon={ICON_ABSAGE}
                     onClick={() => { setLoginError(null); setIsNetworkError(false); }}
                     className="app-auth-error__close"
                     style={{ opacity: 0.7 }}
@@ -393,7 +411,7 @@ const LoginView: React.FC = () => {
                   className="app-auth-retry-button"
                   onClick={handleLogin}
                 >
-                  <IonIcon icon={refreshOutline} slot="start" />
+                  <IonIcon icon={ICON_AKTUALISIEREN} slot="start" />
                   Erneut versuchen
                 </IonButton>
               )}
@@ -403,7 +421,7 @@ const LoginView: React.FC = () => {
                 <span
                   onClick={() => router.push('/register')}
                   className="app-auth-link"
-                  style={{ fontSize: '0.85rem', display: 'block', lineHeight: 1.5 }}
+                  style={{ fontSize: 'var(--app-text-sekundaer)', display: 'block', lineHeight: 1.5 }}
                 >
                   Noch keinen Account?<br /><strong>Mit Einladungscode registrieren</strong>
                 </span>

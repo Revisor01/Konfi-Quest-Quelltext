@@ -376,6 +376,9 @@ const orgLimiter = rateLimit({
 const { createApp } = require('./createApp');
 
 const app = createApp(db, {
+  // Dieselbe Liste wie Socket.IO oben. Wirkt nur, wenn CORS_ORIGINS gesetzt
+  // ist — in Produktion liegen Oberflaeche und API auf derselben Domain.
+  corsOrigins: process.env.CORS_ORIGINS ? ALLOWED_ORIGINS : null,
   transporter,
   smtpConfig: SMTP_CONFIG,
   io,

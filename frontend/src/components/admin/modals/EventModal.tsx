@@ -1,11 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton, IonItem, IonLabel, IonDatetime, IonIcon, IonSpinner, IonList, IonListHeader, IonToggle, IonCard, IonCardContent, IonModal, IonDatetimeButton, IonRange } from '@ionic/react';
 import {
-  IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonButtons, IonButton,
-  IonItem, IonLabel, IonInput, IonDatetime, IonIcon, IonSpinner,
-  IonList, IonListHeader, IonToggle, IonCard, IonCardContent, IonModal,
-  IonDatetimeButton, IonRange
-} from '@ionic/react';
-import { checkmarkOutline, closeOutline, add, trash, time, calendar } from 'ionicons/icons';
+  ICON_HAKEN,
+  ICON_HINZUFUEGEN_GEFUELLT,
+  ICON_LOESCHEN_GEFUELLT,
+  ICON_SCHLIESSEN,
+  ICON_TERMIN_GEFUELLT,
+  ICON_UHRZEIT_GEFUELLT,
+} from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import api from '../../../services/api';
@@ -19,6 +21,7 @@ import {
 } from './EventFormSections';
 import type { EventFormData } from './EventFormSections';
 import { safeUUID } from '../../../utils/uuid';
+import { fehlerDaten } from '../../../utils/fehler';
 
 interface EventModalProps {
   event?: Event | null;
@@ -31,7 +34,7 @@ interface EventModalProps {
 }
 
 const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dismiss, onDirtyChange }) => {
-  const { setSuccess, setError, isOnline } = useApp();
+  const { setSuccess, setError } = useApp();
   const { isSubmitting, guard } = useActionGuard();
   const [loading, setLoading] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -71,13 +74,6 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
     if (initializedRef.current) setIsDirty(true);
   }, [formData]);
 
-  const formatTime = (dateString: string) => {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return '';
-    return date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
-  };
-
   useEffect(() => {
     loadCategories();
     loadJahrgaenge();
@@ -116,7 +112,6 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
       else setTeamerAccess('normal');
       if (event.has_timeslots) loadTimeslots(event.id);
     } else {
-      const now = new Date();
       const roundToHalfHour = (date: Date) => {
         const rounded = new Date(date);
         const minutes = rounded.getMinutes();
@@ -191,7 +186,7 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
   };
 
   const removeTimeslot = (index: number) => { setTimeslots(timeslots.filter((_, i) => i !== index)); };
-  const updateTimeslot = (index: number, field: keyof Timeslot, value: any) => {
+  const updateTimeslot = (index: number, field: keyof Timeslot, value: string | number | boolean) => {
     const updated = [...timeslots]; updated[index] = { ...updated[index], [field]: value }; setTimeslots(updated);
   };
 
@@ -268,7 +263,11 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
 
       if (networkMonitor.isOnline) {
         if (event && event.id && event.id > 0) {
-          const { is_series, series_count, series_interval, ...updatePayload } = payload;
+          // Serienfelder gehoeren nicht in ein Update einzelner Events.
+          const updatePayload = { ...payload } as Record<string, unknown>;
+          delete updatePayload.is_series;
+          delete updatePayload.series_count;
+          delete updatePayload.series_interval;
           await api.put(`/events/${event.id}`, updatePayload);
         } else {
           if (formData.is_series) {
@@ -280,7 +279,10 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
         }
       } else {
         if (event && event.id && event.id > 0) {
-          const { is_series, series_count, series_interval, ...updatePayload } = payload;
+          const updatePayload = { ...payload } as Record<string, unknown>;
+          delete updatePayload.is_series;
+          delete updatePayload.series_count;
+          delete updatePayload.series_interval;
           await writeQueue.enqueue({ method: 'PUT', url: `/events/${event.id}`, body: updatePayload, maxRetries: 5, hasFileUpload: false, metadata: { type: 'admin', clientId: safeUUID(), label: 'Event bearbeiten' } });
           setSuccess('Event wird aktualisiert sobald du wieder online bist');
         } else if (formData.is_series) {
@@ -294,16 +296,17 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
       // Dirty-Stand SYNCHRON nach aussen melden, bevor onSuccess/doClose über
       // canDismiss schließt (sonst blockiert canDismiss -> Modal bleibt offen).
       setIsDirty(false); onDirtyChange?.(false); onSuccess(); doClose();
-    } catch (error: any) {
+    } catch (error) {
       // Validierungsfehler des Backends kommen als { error, details: [...] } —
       // ohne die details liest man nur "Validierungsfehler" und weiß nicht,
       // welches Feld gemeint ist.
-      const data = error.response?.data;
-      const details = Array.isArray(data?.details)
-        ? data.details.map((d: any) => d.message).filter(Boolean).join(', ')
-        : '';
+      const data = fehlerDaten(error);
+      const details = (Array.isArray(data?.details) ? data.details : [])
+        .map((d: unknown) => (typeof d === 'object' && d !== null ? (d as { message?: unknown }).message : undefined))
+        .filter((m): m is string => typeof m === 'string' && m !== '')
+        .join(', ');
       if (details) setError(details);
-      else if (data?.error) setError(data.error);
+      else if (typeof data?.error === 'string' && data.error) setError(data.error);
       else setError('Fehler beim Speichern des Events');
     } finally { setLoading(false); }
       });
@@ -326,13 +329,13 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
                 Die Rueckfrage bei ungespeicherten Aenderungen laeuft
                 ueber canDismiss der Seite. */}
             <IonButton aria-label="Schließen" onClick={handleClose} className="app-modal-close-btn">
-              <IonIcon icon={closeOutline} />
+              <IonIcon icon={ICON_SCHLIESSEN} />
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
             <IonButton aria-label="Event speichern" onClick={handleSubmit} disabled={!isFormValid || loading || isSubmitting}
               className="app-modal-submit-btn app-modal-submit-btn--events">
-              {loading ? <IonSpinner name="crescent" /> : <IonIcon icon={checkmarkOutline} />}
+              {loading ? <IonSpinner name="crescent" /> : <IonIcon icon={ICON_HAKEN} />}
             </IonButton>
           </IonButtons>
         </IonToolbar>
@@ -356,7 +359,7 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
         {/* DATUM & ZEIT */}
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
-            <div className="app-section-icon app-section-icon--events"><IonIcon icon={calendar} /></div>
+            <div className="app-section-icon app-section-icon--events"><IonIcon icon={ICON_TERMIN_GEFUELLT} /></div>
             <IonLabel>Datum & Zeit</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
@@ -383,20 +386,20 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
                       Ueberschrift wie im UserManagementModal. */}
                   <div
                     style={{
-                      marginTop: '8px',
-                      paddingTop: '14px',
+                      marginTop: 'var(--app-abstand-eng)',
+                      paddingTop: 'var(--app-abstand-mittelweit)',
                       borderTop: '1px solid rgba(0,0,0,0.06)'
                     }}
                   >
                     <h3
                       style={{
-                        fontWeight: 600, margin: '0 0 2px 16px',
-                        fontSize: '0.95rem', color: '#3c3c43'
+                        fontWeight: 'var(--app-schrift-halbfett)', margin: '0 0 var(--app-abstand-winzig) var(--app-abstand-basis)',
+                        fontSize: 'var(--app-text-betont)', color: 'var(--app-text-ios)'
                       }}
                     >
                       Anmeldung
                     </h3>
-                    <p style={{ color: '#8e8e93', margin: '0 16px 4px 16px', fontSize: '0.8rem', lineHeight: 1.4 }}>
+                    <p style={{ color: 'var(--app-text-system)', margin: '0 var(--app-abstand-basis) var(--app-abstand-mini) var(--app-abstand-basis)', fontSize: 'var(--app-text-hinweis)', lineHeight: 1.4 }}>
                       {formData.registration_opens_at
                         ? 'Konfis können sich ab dem gewählten Zeitpunkt anmelden.'
                         : 'Konfis können sich sofort anmelden.'}
@@ -454,7 +457,7 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
         {!formData.mandatory && !formData.is_konfirmation && teamerAccess !== 'teamer_only' && (<>
         <IonList inset={true} className="app-modal-section">
           <IonListHeader>
-            <div className="app-section-icon app-section-icon--events"><IonIcon icon={time} /></div>
+            <div className="app-section-icon app-section-icon--events"><IonIcon icon={ICON_UHRZEIT_GEFUELLT} /></div>
             <IonLabel>Zeitfenster (optional)</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
@@ -470,14 +473,14 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
                   }} disabled={loading} />
               </IonItem>
               {formData.has_timeslots && (
-                <div className="app-event-detail__add-button-wrapper" style={{ padding: '0 16px' }}>
+                <div className="app-event-detail__add-button-wrapper" style={{ padding: '0 var(--app-abstand-basis)' }}>
                   <IonButton
                     expand="block"
                     fill="outline"
                     onClick={addTimeslot}
                     disabled={loading}
                   >
-                    <IonIcon icon={add} slot="start" />
+                    <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} slot="start" />
                     Zeitfenster hinzufügen
                   </IonButton>
                 </div>
@@ -491,11 +494,11 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
           <IonList key={index} inset={true} className="app-modal-section">
             <IonListHeader>
               <div className="app-section-icon app-section-icon--events">
-                <span style={{ fontSize: '0.7rem', fontWeight: 'bold', color: 'white' }}>{index + 1}</span>
+                <span style={{ fontSize: 'var(--app-text-meta)', fontWeight: 'var(--app-schrift-fett)', color: 'white' }}>{index + 1}</span>
               </div>
               <IonLabel style={{ flex: 1 }}>Zeitfenster {index + 1}</IonLabel>
               <IonButton aria-label="Zeitfenster entfernen" fill="clear" color="danger" onClick={() => removeTimeslot(index)} disabled={loading} size="small">
-                <IonIcon icon={trash} />
+                <IonIcon icon={ICON_LOESCHEN_GEFUELLT} />
               </IonButton>
             </IonListHeader>
             <IonCard className="app-card">
@@ -527,7 +530,7 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
                   </IonItem>
                   {timeslot.max_participants !== 0 && (
                     <IonItem lines="none">
-                      <IonLabel position="stacked" style={{ marginBottom: '8px' }}>Max. Teilnehmer:innen pro Slot</IonLabel>
+                      <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Max. Teilnehmer:innen pro Slot</IonLabel>
                       <div className="app-range-row">
                         <span className="app-range-row__min">1</span>
                         <IonRange
@@ -588,28 +591,28 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
             });
           }}
           presentation="date-time" minuteValues="0,15,30,45" firstDayOfWeek={1}
-          style={{ '--background': '#f8f9fa', '--border-radius': '12px', '--box-shadow': '0 4px 16px rgba(0,0,0,0.1)' }} />
+          style={{ '--background': 'var(--app-surface-soft)', '--border-radius': '12px', '--box-shadow': '0 4px 16px rgba(0,0,0,0.1)' }} />
       </IonModal>
       <IonModal keepContentsMounted={true}>
         <IonDatetime id="end-time-picker" value={formData.event_end_time || formData.event_date}
           max={datePickerMax}
           onIonChange={(e) => setFormData({ ...formData, event_end_time: e.detail.value as string })}
           presentation="date-time" minuteValues="0,15,30,45" firstDayOfWeek={1}
-          style={{ '--background': '#f8f9fa', '--border-radius': '12px', '--box-shadow': '0 4px 16px rgba(0,0,0,0.1)' }} />
+          style={{ '--background': 'var(--app-surface-soft)', '--border-radius': '12px', '--box-shadow': '0 4px 16px rgba(0,0,0,0.1)' }} />
       </IonModal>
       <IonModal keepContentsMounted={true}>
         <IonDatetime id="registration-opens-picker" value={formData.registration_opens_at}
           max={datePickerMax}
           onIonChange={(e) => setFormData({ ...formData, registration_opens_at: e.detail.value as string })}
           presentation="date-time" minuteValues="0,15,30,45" firstDayOfWeek={1}
-          style={{ '--background': '#f8f9fa', '--border-radius': '12px', '--box-shadow': '0 4px 16px rgba(0,0,0,0.1)' }} />
+          style={{ '--background': 'var(--app-surface-soft)', '--border-radius': '12px', '--box-shadow': '0 4px 16px rgba(0,0,0,0.1)' }} />
       </IonModal>
       <IonModal keepContentsMounted={true}>
         <IonDatetime id="registration-closes-picker" value={formData.registration_closes_at}
           max={datePickerMax}
           onIonChange={(e) => setFormData({ ...formData, registration_closes_at: e.detail.value as string })}
           presentation="date-time" minuteValues="0,15,30,45" firstDayOfWeek={1}
-          style={{ '--background': '#f8f9fa', '--border-radius': '12px', '--box-shadow': '0 4px 16px rgba(0,0,0,0.1)' }} />
+          style={{ '--background': 'var(--app-surface-soft)', '--border-radius': '12px', '--box-shadow': '0 4px 16px rgba(0,0,0,0.1)' }} />
       </IonModal>
     </IonPage>
   );

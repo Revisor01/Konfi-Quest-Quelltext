@@ -20,6 +20,12 @@
 // badges.js (checkAndAwardBadges / checkAndAwardTeamerBadges) passen. Sonst
 // zeigt die App 10/10, ohne dass das Abzeichen kommt.
 
+// category_combination zaehlt an vier Stellen gleich (Wertung Konfi, Wertung
+// Teamer, Fortschritt Konfi, Fortschritt Teamer) -- die Zaehlfunktion steht
+// deshalb einmal in utils/badgeKategorieRegel.js, wo auch die zugehoerigen
+// Queries liegen.
+const { zaehleAbgedeckteKategorien } = require('./badgeKategorieRegel');
+
 /**
  * Liest `criteria_extra` robust — egal ob als JSON-Text oder als Objekt.
  *
@@ -67,6 +73,10 @@ function bedingungFehlt(badge) {
       return !Array.isArray(extra.required_activities) || extra.required_activities.length === 0;
     case 'category_activities':
       return !extra.required_category;
+    case 'category_combination':
+      // Ohne Kategorien wertet die Wertung nichts (gefordert === 0) -- das
+      // Abzeichen waere still unerreichbar.
+      return !Array.isArray(extra.required_categories) || extra.required_categories.length === 0;
     default:
       return false;
   }
@@ -89,6 +99,10 @@ function bedingungFehlt(badge) {
  *   - beideKategorien {number|null}   fuer 'both_categories'; null heisst
  *     "nicht anwendbar" und ergibt 0
  *   - proKategorie {Map}              Kategoriename -> Anzahl
+ *   - abgedeckteKategorien {Set}      fuer 'category_combination': Namen der
+ *     Kategorien, aus denen mindestens ein Eintrag vorliegt. Bewusst ein Set
+ *     und nicht `proKategorie`: dort steht die ANZAHL, hier zaehlt jede
+ *     Kategorie hoechstens einmal.
  *   - proAktivitaetsname {Map}        Aktivitaetsname -> Anzahl
  *   - erfuellteEventTitel {Set}       fuer 'activity_combination', optional:
  *     zaehlt required_events mit (nur der Teamer-Pfad nutzt das)
@@ -153,6 +167,17 @@ function berechneBadgeProgress(badge, z) {
         current = extra.required_category
           ? (z.proKategorie?.get(extra.required_category) || 0)
           : 0;
+        break;
+      }
+      case 'category_combination': {
+        // Wie viele der geforderten Kategorien sind abgedeckt -- jede
+        // hoechstens einmal. Gerechnet wird mit derselben Funktion wie in der
+        // Wertung (routes/badges.js, beide Rollen-Zweige), damit der
+        // Konsistenz-Vertrag oben nicht nur ein Kommentar bleibt.
+        const { extra } = liesCriteriaExtra(badge.criteria_extra);
+        current = zaehleAbgedeckteKategorien(
+          extra.required_categories, z.abgedeckteKategorien
+        );
         break;
       }
       case 'activity_combination': {
