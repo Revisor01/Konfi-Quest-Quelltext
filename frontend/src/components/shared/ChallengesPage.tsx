@@ -22,7 +22,7 @@ import { useOfflineQuery } from '../../hooks/useOfflineQuery';
 import { useChallengeDelete } from '../../hooks/useChallengeDelete';
 import { CACHE_TTL } from '../../services/offlineCache';
 import LoadingSpinner from '../common/LoadingSpinner';
-import ChallengesManageView from '../admin/views/ChallengesManageView';
+import ChallengesManageView, { getChallengeStatus } from '../admin/views/ChallengesManageView';
 import ChallengeManageModal from '../admin/modals/ChallengeManageModal';
 import ChallengeLeitungModal from '../admin/modals/ChallengeLeitungModal';
 import { triggerPullHaptic } from '../../utils/haptics';
@@ -38,6 +38,29 @@ interface ChallengesPageProps {
   // Eigene Modal-Seiten-ID je Rolle (useModalPage verwaltet den Stapel).
   modalPageId: string;
 }
+
+/**
+ * WIE DER FEHLER ENTSTAND: Die Ableitung darunter hat die Rechnung aus
+ * GET /challenges/konfi uebernommen (`has_badge` -> erhalten, sonst mit
+ * badge_name -> offen), aber nicht deren VORBEDINGUNG. Dort steht im SQL
+ * `is_draft = false AND starts_at <= NOW()`; die Konfi-Ansicht bekommt also
+ * nie einen Entwurf zu sehen. GET /challenges/admin liefert dagegen
+ * absichtlich JEDE Challenge der Gemeinde -- die Verwaltung muss Entwuerfe
+ * bearbeiten koennen. Dieselbe Datei zeigte eine Challenge damit oben
+ * korrekt im Reiter "Geplant" und unten gleichzeitig als Stempel, den es zu
+ * holen gaebe.
+ *
+ * 'active' | 'ended' ist genau das Gegenstueck zum SQL-WHERE: 'draft' und
+ * 'scheduled' sind die einzigen anderen Werte (siehe deriveStatus im
+ * Backend bzw. getChallengeStatus nebenan).
+ */
+export const gehoertInsStempelraster = (
+  c: Pick<AdminChallenge, 'is_draft' | 'starts_at' | 'ends_at'>,
+  jetzt: number = Date.now()
+): boolean => {
+  const status = getChallengeStatus(c as AdminChallenge, jetzt);
+  return status === 'active' || status === 'ended';
+};
 
 const ChallengesPage: React.FC<ChallengesPageProps> = ({ cacheKey, modalPageId }) => {
   const { refreshAllCounts } = useBadge();
@@ -62,12 +85,39 @@ const ChallengesPage: React.FC<ChallengesPageProps> = ({ cacheKey, modalPageId }
   // braucht es keinen zweiten Endpunkt für die Teilnehmer-Sicht.
   const marks = useMemo(
     () => (Array.isArray(challenges) ? challenges : [])
-      .filter((c) => c.has_badge)
+      .filter((c) => c.has_badge && gehoertInsStempelraster(c))
       .map((c) => ({
         challenge_id: c.id,
         badge_icon: c.badge_icon,
         badge_name: c.badge_name,
-        title: c.title
+        title: c.title,
+        // earned_at und description gehoeren zum Stempel, nicht nur zur
+        // Kachel: Das Popover zeigt daraus "Erhalten am ..." und den Text.
+        // Ohne sie stand dort eine leere Karte.
+        earned_at: c.earned_at ?? null,
+        description: c.description ?? null
+      })),
+    [challenges]
+  );
+
+  // Die NOCH NICHT erhaltenen Stempel — dieselbe Rechnung wie in der
+  // Konfi-Liste (backend/routes/challenges.js, GET /challenges/konfi:
+  // `if (has_badge) marks.push(...) else if (badge_name) offene.push(...)`).
+  //
+  // Angezeigt wird das Ergebnis von ChallengeStempelSektion — DERSELBEN
+  // Komponente, aus der auch Konfi-Ansicht (konfi/views/ChallengesView.tsx)
+  // und Leitungs-Detailansicht (admin/views/KonfiDetailView.tsx) lesen.
+  const offeneStempel = useMemo(
+    () => (Array.isArray(challenges) ? challenges : [])
+      .filter((c) => !c.has_badge && !!c.badge_name && gehoertInsStempelraster(c))
+      .map((c) => ({
+        challenge_id: c.id,
+        badge_icon: c.badge_icon,
+        badge_name: c.badge_name,
+        title: c.title,
+        description: c.description ?? null,
+        status: c.status,
+        ends_at: c.ends_at ?? null
       })),
     [challenges]
   );
@@ -197,6 +247,7 @@ const ChallengesPage: React.FC<ChallengesPageProps> = ({ cacheKey, modalPageId }
             challenges={challenges || []}
             ohneJahrgang={ohneJahrgang}
             marks={marks}
+            offeneStempel={offeneStempel}
             onSelectChallenge={openModeration}
             onEditChallenge={openEdit}
             onDeleteChallenge={handleDelete}

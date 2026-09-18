@@ -8,6 +8,7 @@ const validator = require('validator');
 const { handleValidationErrors, commonValidations } = require('../middleware/validation');
 const { validatePassword } = require('../utils/passwordUtils');
 const { deleteKonfiCascade } = require('../utils/konfiDeletion');
+const { meldeNachrueckern } = require('../utils/nachrueckMeldung');
 const { checkKonfiLimit } = require('../utils/konfiLimit');
 const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
@@ -410,9 +411,10 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
 
       // Gesamte Kaskade in einer Transaktion (T-114-06): alles oder nichts.
       const client = await db.getClient();
+      let nachgerueckt = [];
       try {
         await client.query('BEGIN');
-        await deleteKonfiCascade(client, userId, user.organization_id);
+        nachgerueckt = await deleteKonfiCascade(client, userId, user.organization_id);
         await client.query('COMMIT');
       } catch (txErr) {
         await client.query('ROLLBACK');
@@ -422,6 +424,10 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       }
 
       res.json({ message: 'Account erfolgreich gelöscht' });
+
+      // Benachrichtigung NACH dem COMMIT und fehlertolerant — die Loeschung
+      // ist festgeschrieben, ein Push-Fehler darf sie nicht mehr kippen.
+      await meldeNachrueckern(db, user.organization_id, nachgerueckt);
 
       // Admin-Liste aktualisieren und den Socket des geloeschten Kontos trennen —
       // sonst empfing er weiter Org-Updates und die Liste blieb stehen

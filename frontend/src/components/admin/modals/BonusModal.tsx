@@ -37,6 +37,7 @@ import {
   type Punkteart,
   type PunkteartFlags,
 } from '../../../utils/punktearten';
+import { trackHandlung } from '../../../services/analytics';
 
 interface BonusModalProps {
   konfiId: number;
@@ -92,6 +93,9 @@ const BonusModal: React.FC<BonusModalProps> = ({ konfiId, onClose, onSave, dismi
       if (networkMonitor.isOnline) {
         try {
           await api.post(`/admin/konfis/${konfiId}/bonus-points`, body);
+          // Anonyme Messung NACH der erfolgreichen Antwort. Nur der Weg und
+          // die Punkteart — nicht die Punktzahl, nicht der eingegebene Grund.
+          trackHandlung('punkte-vergeben', { weg: 'bonus', punkteart: type });
           await onSave();
           handleClose();
         } catch (err) {

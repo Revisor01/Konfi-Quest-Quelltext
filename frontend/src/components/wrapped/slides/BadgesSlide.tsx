@@ -1,7 +1,7 @@
 import React from 'react';
 import { IonIcon } from '@ionic/react';
 import SlideBase from './SlideBase';
-import { getIconFromString } from '../../../utils/badgeIcons';
+import { getIconFromString, istEmojiIcon } from '../../../utils/badgeIcons';
 import { useCountUp } from '../../../hooks/useCountUp';
 import type { SlideProps, KonfiBadgesSlide } from '../../../types/wrapped';
 
@@ -99,7 +99,16 @@ const BadgesSlide: React.FC<BadgesSlideProps> = ({ isActive, badges }) => {
               style={{ background: badge.color || 'var(--app-color-wrapped)', animationDelay: `${0.3 + i * 0.1}s` }}
               title={badge.name}
             >
-              <IonIcon icon={getIconFromString(badge.icon)} />
+              {/* Emoji-Abzeichen als Text. Dieselbe
+                  Behandlung wie in SeltenstesAbzeichenSlide: In der Datenbank
+                  stehen neben Ionicons-Namen auch Emoji, und
+                  getIconFromString kennt sie nicht -- sie landeten
+                  ausnahmslos in der Trophaee. Ausgerechnet hier, auf der
+                  Seite der gesammelten Abzeichen, sahen damit alle
+                  Emoji-Abzeichen gleich aus. */}
+              {istEmojiIcon(badge.icon)
+                ? <span className="w-abzeichen-emoji">{badge.icon}</span>
+                : <IonIcon icon={getIconFromString(badge.icon)} />}
             </div>
           ))}
         </div>

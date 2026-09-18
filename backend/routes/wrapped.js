@@ -70,28 +70,58 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
    *
    * @returns {Promise<number>} der gelesene Wert, oder 0 wenn die Spalte fehlt
    */
-  async function zahlAusNeuerSpalte(client, sql, params, was) {
-    // DER SAVEPOINT DARF NUR IN EINER TRANSAKTION GESETZT WERDEN.
-    //
-    // Deshalb wird der SAVEPOINT versucht und sein Scheitern hingenommen.
-    // Im Autocommit braucht es ihn nicht: Dort reisst ein fehlgeschlagenes
-    // Statement nichts mit sich, es gibt keine Transaktion zum Abbrechen.
-    let mitSavepoint = false;
+  /**
+   * Fuehrt `fn` so aus, dass ein Fehler darin die umgebende Transaktion NICHT
+   * mitreisst: SAVEPOINT davor, RELEASE danach, ROLLBACK TO SAVEPOINT im
+   * Fehlerfall. Der Fehler selbst fliegt weiter -- wer ihn schlucken will,
+   * faengt ihn beim Aufrufer.
+   *
+   * DAS IST DER KERN DER SACHE (siehe den Kommentar an zahlAusNeuerSpalte):
+   * In PostgreSQL bricht EIN fehlgeschlagenes Statement die ganze Transaktion
+   * ab. Ein blosses try/catch schluckt zwar den Fehler, aber jede weitere
+   * Query scheitert danach mit "current transaction is aborted" -- und die
+   * Schleife darueber zaehlt fuer JEDE folgende Person einen Fehler.
+   *
+   * DER SAVEPOINT DARF NUR IN EINER TRANSAKTION GESETZT WERDEN.
+   *
+   * Deshalb wird der SAVEPOINT versucht und sein Scheitern hingenommen. Im
+   * Autocommit braucht es ihn nicht: Dort reisst ein fehlgeschlagenes
+   * Statement nichts mit sich, es gibt keine Transaktion zum Abbrechen.
+   *
+   * @param {object} client  Datenbank-Client
+   * @param {string} name    Name des SAVEPOINTs (muss ein Bezeichner sein,
+   *   kein Nutzereingabe-Wert -- er geht unparametrisiert ins SQL)
+   * @param {Function} fn    was abgesichert laufen soll
+   * @returns {Promise<*>} was `fn` liefert
+   */
+  async function mitSavepoint(client, name, fn) {
+    let gesetzt = false;
     try {
-      await client.query('SAVEPOINT neue_spalte');
-      mitSavepoint = true;
+      await client.query(`SAVEPOINT ${name}`);
+      gesetzt = true;
     } catch {
       // Kein Transaktionsblock -- dann eben ohne.
     }
 
     try {
-      const { rows: [row] } = await client.query(sql, params);
-      if (mitSavepoint) await client.query('RELEASE SAVEPOINT neue_spalte');
-      return row ? (row.anzahl || 0) : 0;
+      const ergebnis = await fn();
+      if (gesetzt) await client.query(`RELEASE SAVEPOINT ${name}`);
+      return ergebnis;
     } catch (err) {
-      if (mitSavepoint) {
-        await client.query('ROLLBACK TO SAVEPOINT neue_spalte').catch(() => {});
+      if (gesetzt) {
+        await client.query(`ROLLBACK TO SAVEPOINT ${name}`).catch(() => {});
       }
+      throw err;
+    }
+  }
+
+  async function zahlAusNeuerSpalte(client, sql, params, was) {
+    try {
+      return await mitSavepoint(client, 'neue_spalte', async () => {
+        const { rows: [row] } = await client.query(sql, params);
+        return row ? (row.anzahl || 0) : 0;
+      });
+    } catch (err) {
       if (err.code !== '42703' && err.code !== '42P01') throw err;
       // Alt-Deployment ohne die Migration. Der Rueckfall ist 0, und die
       // zugehoerige Seite faellt damit ueber ihre Bedingung in
@@ -1525,12 +1555,6 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
 
     // DIE CHALLENGE-BEGLEITERIN -- wie viele Beitraege jemand freigegeben hat.
     //
-    // NUR DIE EIGENE LEISTUNG, NIE EINE ABLEHNUNGSQUOTE:
-    // Gezaehlt wird ausschliesslich, was
-    // diese Person FREIGEGEBEN hat. Eine Quote "x % abgelehnt" waere eine
-    // Bewertung der Moderation und hat im Rueckblick nichts verloren --
-    // deshalb wird hidden_by hier gar nicht erst gelesen.
-    //
     // approved_by ist NULL bei Bestandszeilen (vor Migration 146) UND bei
     // unmoderierten Challenges, die automatisch auf 'approved' stehen. In
     // beiden Faellen hat niemand hingesehen -- niemand bekommt sie
@@ -1551,40 +1575,54 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
     // Bewusst DIESELBE Abfrage und DIESELBE Komponente wie im Konfi-Zweig:
     // Es ist dieselbe Sache -- jemand hat mitgemacht. Eine zweite, leicht
     // abweichende Fassung waere die alte Kopie mit einem `if` davor.
+    //
+    // MIT SAVEPOINT, nicht mit blossem try/catch: Beide Abfragen
+    // stehen im Teamer-Zweig in einer Transaktion. Ohne SAVEPOINT liess ein
+    // Fehler hier den Rest der Transaktion abgebrochen zurueck -- die
+    // Schleife darueber zaehlte danach fuer JEDE weitere Person einen Fehler
+    // ("current transaction is aborted"), und der ganze Team-Rueckblick fiel
+    // aus, waehrend die Route trotzdem 200 meldete und pushte.
     let teamerChallengeBeitraege = 0;
     let teamerTopChallenge = null;
     try {
-      const { rows: [beitragRow] } = await client.query(
-        `SELECT COUNT(*) as count FROM challenge_submissions cs
-         WHERE cs.user_id = $1 AND cs.organization_id = $2
-           AND cs.moderation_status <> 'hidden'
-           AND cs.created_at >= $3::date
-           AND cs.created_at < ($4::date + INTERVAL '1 day')`,
-        [userId, orgId, zeitraumStart, zeitraumEnde]
-      );
-      teamerChallengeBeitraege = parseInt(beitragRow.count, 10) || 0;
+      await mitSavepoint(client, 'teamer_challenges', async () => {
+        const { rows: [beitragRow] } = await client.query(
+          `SELECT COUNT(*) as count FROM challenge_submissions cs
+           WHERE cs.user_id = $1 AND cs.organization_id = $2
+             AND cs.moderation_status <> 'hidden'
+             AND cs.created_at >= $3::date
+             AND cs.created_at < ($4::date + INTERVAL '1 day')`,
+          [userId, orgId, zeitraumStart, zeitraumEnde]
+        );
+        teamerChallengeBeitraege = parseInt(beitragRow.count, 10) || 0;
 
-      const { rows: topRows } = await client.query(
-        `SELECT c.title, c.badge_icon, COUNT(*) as count
-         FROM challenge_submissions cs
-         JOIN challenges c ON cs.challenge_id = c.id
-         WHERE cs.user_id = $1 AND cs.organization_id = $2
-           AND cs.moderation_status <> 'hidden'
-           AND cs.created_at >= $3::date
-           AND cs.created_at < ($4::date + INTERVAL '1 day')
-         GROUP BY c.id, c.title, c.badge_icon
-         ORDER BY count DESC, c.title
-         LIMIT 1`,
-        [userId, orgId, zeitraumStart, zeitraumEnde]
-      );
-      if (topRows.length > 0) {
-        teamerTopChallenge = {
-          title: topRows[0].title,
-          badge_icon: topRows[0].badge_icon,
-          count: parseInt(topRows[0].count, 10)
-        };
-      }
+        const { rows: topRows } = await client.query(
+          `SELECT c.title, c.badge_icon, COUNT(*) as count
+           FROM challenge_submissions cs
+           JOIN challenges c ON cs.challenge_id = c.id
+           WHERE cs.user_id = $1 AND cs.organization_id = $2
+             AND cs.moderation_status <> 'hidden'
+             AND cs.created_at >= $3::date
+             AND cs.created_at < ($4::date + INTERVAL '1 day')
+           GROUP BY c.id, c.title, c.badge_icon
+           ORDER BY count DESC, c.title
+           LIMIT 1`,
+          [userId, orgId, zeitraumStart, zeitraumEnde]
+        );
+        if (topRows.length > 0) {
+          teamerTopChallenge = {
+            title: topRows[0].title,
+            badge_icon: topRows[0].badge_icon,
+            count: parseInt(topRows[0].count, 10)
+          };
+        }
+      });
     } catch (challengeErr) {
+      // Ein Teilerfolg waere eine Luege: Scheitert die zweite Abfrage, ist
+      // die erste per ROLLBACK TO SAVEPOINT ohnehin zurueckgenommen. Beide
+      // Werte gehen deshalb gemeinsam auf den Rueckfall.
+      teamerChallengeBeitraege = 0;
+      teamerTopChallenge = null;
       console.warn('Wrapped: Teamer-Challenge-Zahlen konnten nicht geladen werden:', challengeErr.message);
     }
 
@@ -1608,20 +1646,25 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
 
     let gestellteTitel = [];
     if (gestellteChallenges > 0) {
+      // SAVEPOINT wie oben -- sonst nimmt ein Fehler hier die ganze
+      // Transaktion und damit jeden weiteren Teamer-Rueckblick mit.
       try {
-        const { rows } = await client.query(
-          `SELECT c.title FROM challenges c
-            WHERE c.created_by = $1
-              AND c.organization_id = $2
-              AND c.is_draft = false
-              AND c.created_at >= $3::date
-              AND c.created_at < ($4::date + INTERVAL '1 day')
-            ORDER BY c.created_at DESC
-            LIMIT 3`,
-          [userId, orgId, zeitraumStart, zeitraumEnde]
-        );
-        gestellteTitel = rows.map(r => r.title);
+        gestellteTitel = await mitSavepoint(client, 'gestellte_titel', async () => {
+          const { rows } = await client.query(
+            `SELECT c.title FROM challenges c
+              WHERE c.created_by = $1
+                AND c.organization_id = $2
+                AND c.is_draft = false
+                AND c.created_at >= $3::date
+                AND c.created_at < ($4::date + INTERVAL '1 day')
+              ORDER BY c.created_at DESC
+              LIMIT 3`,
+            [userId, orgId, zeitraumStart, zeitraumEnde]
+          );
+          return rows.map(r => r.title);
+        });
       } catch (titelErr) {
+        gestellteTitel = [];
         console.warn('Wrapped: Titel gestellter Challenges nicht ladbar:', titelErr.message);
       }
     }
@@ -1698,17 +1741,22 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
     if (teamerSeit) {
       teamerStartJahr = new Date(teamerSeit).getFullYear();
     } else {
+      // SAVEPOINT wie oben -- der Rueckfall ist "unbekannt", und der darf
+      // nicht die Transaktion kosten.
       try {
-        const { rows: [ersteAkt] } = await client.query(
-          `SELECT MIN(ua.completed_date) AS min_date FROM user_activities ua
-             JOIN activities a ON ua.activity_id = a.id
-            WHERE ua.user_id = $1 AND a.target_role = 'teamer'`,
-          [userId]
-        );
-        if (ersteAkt && ersteAkt.min_date) {
-          teamerStartJahr = new Date(ersteAkt.min_date).getFullYear();
-        }
+        teamerStartJahr = await mitSavepoint(client, 'teamer_startjahr', async () => {
+          const { rows: [ersteAkt] } = await client.query(
+            `SELECT MIN(ua.completed_date) AS min_date FROM user_activities ua
+               JOIN activities a ON ua.activity_id = a.id
+              WHERE ua.user_id = $1 AND a.target_role = 'teamer'`,
+            [userId]
+          );
+          return (ersteAkt && ersteAkt.min_date)
+            ? new Date(ersteAkt.min_date).getFullYear()
+            : null;
+        });
       } catch (startErr) {
+        teamerStartJahr = null;
         console.warn('Wrapped: Teamer-Startjahr nicht ermittelbar:', startErr.message);
       }
     }
@@ -2207,22 +2255,51 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
         let generated = 0;
         let errors = 0;
 
+        // ZWEITE VERTEIDIGUNGSLINIE: ein SAVEPOINT je Person.
+        //
+        // Die einzelnen Abfragen im Snapshot sind abgesichert, aber jede
+        // kuenftige, die es nicht ist, wuerde sonst wieder ALLES mitreissen:
+        // Ein Fehler bei Person 1 laesst die Transaktion abgebrochen zurueck,
+        // und Person 2 bis n scheitern nur noch an "current transaction is
+        // aborted". Der SAVEPOINT hier begrenzt jeden Fehler auf die Person,
+        // bei der er auftritt -- die anderen bekommen ihren Rueckblick.
         for (const teamer of teamers) {
           try {
-            const snapshot = await generateTeamerSnapshot(client, teamer.user_id, req.user.organization_id, jahr, zeitraumVorgabe, null);
+            await mitSavepoint(client, 'teamer_snapshot', async () => {
+              const snapshot = await generateTeamerSnapshot(client, teamer.user_id, req.user.organization_id, jahr, zeitraumVorgabe, null);
 
-            await client.query(
-              `INSERT INTO wrapped_snapshots (user_id, organization_id, wrapped_type, year, ausgabe_id, data, computed_at)
-               VALUES ($1, $2, 'teamer', $3, $4, $5, NOW())
-               ON CONFLICT (user_id, wrapped_type, year, COALESCE(jahrgang_id, 0), COALESCE(ausgabe_id, 0))
-               DO UPDATE SET data = EXCLUDED.data, computed_at = NOW(), organization_id = EXCLUDED.organization_id`,
-              [teamer.user_id, req.user.organization_id, jahr, teamerAusgabe.id, JSON.stringify(snapshot)]
-            );
+              await client.query(
+                `INSERT INTO wrapped_snapshots (user_id, organization_id, wrapped_type, year, ausgabe_id, data, computed_at)
+                 VALUES ($1, $2, 'teamer', $3, $4, $5, NOW())
+                 ON CONFLICT (user_id, wrapped_type, year, COALESCE(jahrgang_id, 0), COALESCE(ausgabe_id, 0))
+                 DO UPDATE SET data = EXCLUDED.data, computed_at = NOW(), organization_id = EXCLUDED.organization_id`,
+                [teamer.user_id, req.user.organization_id, jahr, teamerAusgabe.id, JSON.stringify(snapshot)]
+              );
+            });
             generated++;
           } catch (err) {
             console.error(`Wrapped generation error for teamer ${teamer.user_id}:`, err.message);
             errors++;
           }
+        }
+
+        // TOTALAUSFALL WIRD NICHT ALS ERFOLG GEMELDET.
+        //
+        // Bis hierher lief der Code bei generated=0 geradeaus weiter: COMMIT
+        // auf einer abgebrochenen Transaktion wirkt wie ROLLBACK und wirft
+        // NICHT -- die Route meldete 200 mit benachrichtigt:true und einer
+        // ausgabe_id, die es in der Datenbank gar nicht mehr gab. Das ganze
+        // Team bekam "Dein Teamerjahr ist da!" fuer einen Rueckblick, den es
+        // nicht gibt, und weil keine Ausgabe geschrieben wurde, griff beim
+        // naechsten Versuch auch die Idempotenz-Sperre nicht: der zweite
+        // Klick pushte erneut.
+        //
+        // Kein Push, kein 200, keine halbe Ausgabe: zurueckrollen und sagen,
+        // dass es schiefging.
+        if (teamers.length > 0 && generated === 0) {
+          await client.query('ROLLBACK').catch(() => {});
+          console.error(`Teamer-Wrapped ${jahr}: kein einziger Snapshot erzeugt (${errors} Fehler), Ausgabe zurückgenommen`);
+          return res.status(500).json({ error: 'Fehler beim Generieren der Teamer-Wrapped-Snapshots' });
         }
 
         await client.query('COMMIT');
@@ -2727,21 +2804,37 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       let generated = 0;
       let errors = 0;
 
+      // Ein SAVEPOINT je Person -- dieselbe zweite Verteidigungslinie wie im
+      // manuellen Weg (POST /generate-teamer). Ohne ihn reisst ein Fehler bei
+      // der ersten Person alle folgenden mit.
       for (const teamer of teamers) {
         try {
-          const snapshot = await generateTeamerSnapshot(client, teamer.user_id, orgId, jahr, zeitraum, null);
-          await client.query(
-            `INSERT INTO wrapped_snapshots (user_id, organization_id, wrapped_type, year, ausgabe_id, data, computed_at)
-             VALUES ($1, $2, 'teamer', $3, $4, $5, NOW())
-             ON CONFLICT (user_id, wrapped_type, year, COALESCE(jahrgang_id, 0), COALESCE(ausgabe_id, 0))
-             DO UPDATE SET data = EXCLUDED.data, computed_at = NOW(), organization_id = EXCLUDED.organization_id`,
-            [teamer.user_id, orgId, jahr, ausgabe.id, JSON.stringify(snapshot)]
-          );
+          await mitSavepoint(client, 'teamer_snapshot', async () => {
+            const snapshot = await generateTeamerSnapshot(client, teamer.user_id, orgId, jahr, zeitraum, null);
+            await client.query(
+              `INSERT INTO wrapped_snapshots (user_id, organization_id, wrapped_type, year, ausgabe_id, data, computed_at)
+               VALUES ($1, $2, 'teamer', $3, $4, $5, NOW())
+               ON CONFLICT (user_id, wrapped_type, year, COALESCE(jahrgang_id, 0), COALESCE(ausgabe_id, 0))
+               DO UPDATE SET data = EXCLUDED.data, computed_at = NOW(), organization_id = EXCLUDED.organization_id`,
+              [teamer.user_id, orgId, jahr, ausgabe.id, JSON.stringify(snapshot)]
+            );
+          });
           generated++;
         } catch (err) {
           console.error(`Wrapped-Cron: Teamer ${teamer.user_id} Fehler:`, err.message);
           errors++;
         }
+      }
+
+      // Kein Snapshot, kein Rueckblick: zurueckrollen statt eine leere
+      // Ausgabe festzuschreiben und das ganze Team zu benachrichtigen. Der
+      // Cron hat kein res -- er wirft, damit der Aufrufer (backgroundService)
+      // den Fehlschlag protokolliert, statt ihn als Erfolg zu buchen. Und
+      // weil nichts geschrieben wurde, kann der naechste Lauf es erneut
+      // versuchen.
+      if (teamers.length > 0 && generated === 0) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw new Error(`Team-Rückblick ${jahr} (Organisation ${orgId}): kein einziger Snapshot erzeugt, ${errors} Fehler`);
       }
 
       await client.query('COMMIT');

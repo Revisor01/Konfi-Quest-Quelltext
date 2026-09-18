@@ -69,13 +69,30 @@ interface GespeicherteSitzung {
   gespeichertAm: number;
 }
 
-export type BiometrieArt = 'faceId' | 'touchId' | 'fingerabdruck' | 'biometrie';
+export type BiometrieArt =
+  | 'faceId'
+  | 'touchId'
+  | 'fingerabdruck'
+  | 'gesichtserkennung'
+  | 'biometrie';
+
+/**
+ * Welches Sinnbild zum erkannten Verfahren gehoert.
+ *
+ * Bewusst KEIN Ionicons-Name, sondern eine eigene kleine Menge: die
+ * Oberflaechen (Sperrbildschirm, Schalter, Anmeldung) uebersetzen sie in ihre
+ * Icons. So steht die Zuordnung "Gesicht -> Gesichts-Symbol" an genau einer
+ * Stelle und der Dienst bleibt frei von Ionic.
+ */
+export type BiometrieSinnbild = 'gesicht' | 'finger' | 'schloss';
 
 export interface BiometrieVerfuegbarkeit {
   verfuegbar: boolean;
   art: BiometrieArt;
   /** Anzeigename fuer die Oberflaeche, z.B. "Face ID". */
   bezeichnung: string;
+  /** Passendes Sinnbild — nie geraten, im Zweifel das neutrale Schloss. */
+  sinnbild: BiometrieSinnbild;
 }
 
 // Fehler, die ein normaler Bedienvorgang ausloest (Abbrechen, Fehlversuch) —
@@ -112,14 +129,37 @@ const bezeichnungFuer = (art: BiometrieArt): string => {
     case 'faceId': return 'Face ID';
     case 'touchId': return 'Touch ID';
     case 'fingerabdruck': return 'Fingerabdruck';
+    case 'gesichtserkennung': return 'Gesichtserkennung';
     default: return 'Biometrie';
+  }
+};
+
+/**
+ * Sinnbild zur erkannten Art.
+ *
+ * Im Zweifel das SCHLOSS, nicht der Finger: Ein falsches Symbol ist schlimmer
+ * als ein neutrales. Wer ein Fingerabdruck-Symbol sieht und das Gesicht
+ * hinhalten soll, glaubt eher an einen Fehler der App als an das eigene
+ * Missverstaendnis.
+ */
+const sinnbildFuer = (art: BiometrieArt): BiometrieSinnbild => {
+  switch (art) {
+    case 'faceId':
+    case 'gesichtserkennung':
+      return 'gesicht';
+    case 'touchId':
+    case 'fingerabdruck':
+      return 'finger';
+    default:
+      return 'schloss';
   }
 };
 
 const NICHT_VERFUEGBAR: BiometrieVerfuegbarkeit = {
   verfuegbar: false,
   art: 'biometrie',
-  bezeichnung: 'Biometrie'
+  bezeichnung: 'Biometrie',
+  sinnbild: 'schloss'
 };
 
 // Gemeinsame Schreib-Optionen, damit Aktivieren und Auffrischen NICHT
@@ -158,6 +198,15 @@ export const biometrieVerfuegbar = async (): Promise<BiometrieVerfuegbarkeit> =>
     const ergebnis = await NativeBiometric.isAvailable({ useFallback: false });
     if (!ergebnis?.isAvailable) return NICHT_VERFUEGBAR;
 
+    // Welche Werte hier ankommen koennen, steht in den Plugin-Typen
+    // (@capgo/capacitor-native-biometric, BiometryType): NONE, TOUCH_ID,
+    // FACE_ID (beide nur iOS), FINGERPRINT, FACE_AUTHENTICATION,
+    // IRIS_AUTHENTICATION, MULTIPLE, DEVICE_CREDENTIAL (alle nur Android).
+    //
+    // MULTIPLE und IRIS_AUTHENTICATION bleiben bewusst beim neutralen Rueckfall:
+    // Bei MULTIPLE weiss das Geraet selbst nicht, womit entsperrt wird, und ein
+    // Iris-Scan ist weder Gesicht noch Finger. Lieber "Biometrie" und ein
+    // Schloss als ein Symbol, das die falsche Geste nahelegt.
     let art: BiometrieArt = 'biometrie';
     switch (ergebnis.biometryType) {
       case BiometryType.FACE_ID:
@@ -169,10 +218,18 @@ export const biometrieVerfuegbar = async (): Promise<BiometrieVerfuegbarkeit> =>
       case BiometryType.FINGERPRINT:
         art = 'fingerabdruck';
         break;
+      case BiometryType.FACE_AUTHENTICATION:
+        art = 'gesichtserkennung';
+        break;
       default:
         art = 'biometrie';
     }
-    return { verfuegbar: true, art, bezeichnung: bezeichnungFuer(art) };
+    return {
+      verfuegbar: true,
+      art,
+      bezeichnung: bezeichnungFuer(art),
+      sinnbild: sinnbildFuer(art)
+    };
   } catch {
     // Kein Hard-Fail: ohne verlaessliche Auskunft gilt "nicht verfuegbar",
     // dann erscheint der Schalter gar nicht erst.

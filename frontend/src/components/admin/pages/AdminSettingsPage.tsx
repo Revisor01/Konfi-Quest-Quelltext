@@ -40,7 +40,7 @@ import {
 } from '../../shared/icons';
 import InfoModal from '../../shared/InfoModal';
 import AdminOnboardingModal from '../modals/AdminOnboardingModal';
-import AdminUpdate211WalkthroughModal from '../modals/AdminUpdate211WalkthroughModal';
+import AdminUpdate220WalkthroughModal from '../modals/AdminUpdate220WalkthroughModal';
 import { useApp } from '../../../contexts/AppContext';
 // logout/clearAuth werden jetzt zentral über useApp().signOut() abgewickelt
 import { useModalPage } from '../../../contexts/ModalContext';
@@ -543,7 +543,7 @@ const AdminSettingsPage: React.FC = () => {
       )}
 
       {showUpdateWalkthrough && (
-        <AdminUpdate211WalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
+        <AdminUpdate220WalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
       )}
 
       {showMitmachenErklaerung && (

@@ -15,13 +15,13 @@ import {
   useIonPopover
 } from '@ionic/react';
 import { SectionHeader, EmptyState } from '../../shared';
+import KachelRaster from '../../shared/KachelRaster';
 import {
   ICON_ABZEICHEN_GEFUELLT,
   ICON_BONUS_GEFUELLT,
   ICON_FILTER,
   ICON_FLAMME_GEFUELLT,
   ICON_GRUPPE_GEFUELLT,
-  ICON_HAKEN_GEFUELLT,
   ICON_HAND_GEFUELLT,
   ICON_POKAL,
   ICON_POKAL_GEFUELLT,
@@ -29,7 +29,6 @@ import {
   ICON_RASTER,
   ICON_SCHILD_GEFUELLT,
   ICON_SONNE,
-  ICON_SPERRE_GEFUELLT,
   ICON_STUFEN,
   ICON_SUCHE_GEFUELLT,
   ICON_TERMIN,
@@ -273,159 +272,60 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                     </div>
                   </div>
 
-                  {/* 3-Column Badge Grid */}
-                  <div style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(3, 1fr)',
-                    gap: 'var(--app-abstand-mittel)'
-                  }}>
-                    {category.badges.map((badge) => {
+                  {/* Das gemeinsame Kachelraster (shared/KachelRaster) —
+                      dieselbe Optik wie die Stempel und wie die Abzeichen in
+                      der Detailansicht der Leitung. Die Besonderheiten dieser
+                      Ansicht bleiben: gesperrte Abzeichen, Fortschrittsring,
+                      Prozentzahl, Eselsohr fuer geheime Abzeichen. */}
+                  <KachelRaster
+                    eintraege={category.badges.map((badge) => {
                       const badgeColor = getBadgeColor(badge);
                       const isEarned = badge.is_earned;
                       const hasProgress = !isEarned && (badge.progress_percentage ?? 0) > 0;
 
-                      return (
-                        <div
-                          key={badge.id}
-                          onClick={(e) => handleBadgeClick(badge, e)}
-                          style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'center',
-                            padding: 'var(--app-abstand-mittel) var(--app-abstand-eng)',
-                            borderRadius: 'var(--app-radius-gross)',
-                            background: isEarned ? `${badgeColor}10` : 'var(--app-surface-muted)',
-                            border: isEarned ? `2px solid ${badgeColor}40` : '2px solid transparent',
-                            cursor: 'pointer',
-                            transition: 'transform 0.2s',
-                            position: 'relative',
-                            minHeight: '110px',
-                            justifyContent: 'flex-start',
-                            minWidth: 0,
-                            overflow: 'hidden'
-                          }}
-                        >
-                          {/* Badge Icon */}
-                          <div style={{
-                            width: '56px',
-                            height: '56px',
-                            borderRadius: 'var(--app-radius-kreis)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            background: isEarned
-                              ? `linear-gradient(145deg, ${badgeColor} 0%, ${badgeColor}cc 100%)`
-                              : 'var(--app-gradient-badge-gesperrt)',
-                            boxShadow: isEarned ? `0 4px 12px ${badgeColor}40` : '0 2px 8px rgba(0,0,0,0.1)',
-                            position: 'relative',
-                            marginBottom: 'var(--app-abstand-eng)'
-                          }}>
-                            {/* Progress Ring */}
-                            {hasProgress && (
-                              <svg style={{ position: 'absolute', top: '-4px', left: '-4px', width: '64px', height: '64px', transform: 'rotate(-90deg)' }}>
-                                <circle cx="32" cy="32" r="28" fill="none" stroke="rgba(0,0,0,0.1)" strokeWidth="3" />
-                                <circle cx="32" cy="32" r="28" fill="none" stroke={FARBEN.abzeichenFallback} strokeWidth="3" strokeLinecap="round" strokeDasharray={`${(badge.progress_percentage || 0) * 1.76} 176`} />
-                              </svg>
-                            )}
-
-                            <IonIcon
-                              icon={getIconFromString(badge.icon)}
+                      return {
+                        schluessel: badge.id,
+                        icon: getIconFromString(badge.icon),
+                        name: badge.name || '',
+                        farbe: badgeColor,
+                        verdient: isEarned,
+                        fortschritt: badge.progress_percentage,
+                        // Haken bei erreicht, Schloss bei gesperrt — aber
+                        // NICHT waehrend ein Fortschritt laeuft, dort traegt
+                        // der Ring die Aussage.
+                        zeichen: isEarned || !hasProgress,
+                        // Fortschrittsring um das Symbol.
+                        symbolZusatz: hasProgress ? (
+                          <svg style={{ position: 'absolute', top: '-4px', left: '-4px', width: '60px', height: '60px', transform: 'rotate(-90deg)' }}>
+                            <circle cx="30" cy="30" r="26" fill="none" stroke="rgba(0,0,0,0.1)" strokeWidth="3" />
+                            <circle cx="30" cy="30" r="26" fill="none" stroke={FARBEN.abzeichenFallback} strokeWidth="3" strokeLinecap="round" strokeDasharray={`${(badge.progress_percentage || 0) * 1.63} 163`} />
+                          </svg>
+                        ) : undefined,
+                        // Eselsohr fuer geheime, bereits erreichte Abzeichen.
+                        zusatz: badge.is_hidden && badge.is_earned ? (
+                          <div className="app-corner-badges">
+                            <div
+                              className="app-corner-badge"
                               style={{
-                                fontSize: 'var(--app-anzeige-basis)',
-                                color: isEarned ? 'white' : 'var(--app-text-muted)'
+                                background: 'var(--app-gradient-rakete)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                padding: 'var(--app-abstand-mini) var(--app-abstand-eng)'
                               }}
-                            />
-
-                            {/* Earned Checkmark */}
-                            {isEarned && (
-                              <div style={{
-                                position: 'absolute',
-                                bottom: '-2px',
-                                right: '-2px',
-                                width: '20px',
-                                height: '20px',
-                                borderRadius: 'var(--app-radius-kreis)',
-                                background: 'var(--app-color-success)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                border: '2px solid white'
-                              }}>
-                                <IonIcon icon={ICON_HAKEN_GEFUELLT} style={{ fontSize: 'var(--app-text-meta)', color: 'white' }} />
-                              </div>
-                            )}
-
-                            {/* Lock for not earned */}
-                            {!isEarned && !hasProgress && (
-                              <div style={{
-                                position: 'absolute',
-                                bottom: '-2px',
-                                right: '-2px',
-                                width: '20px',
-                                height: '20px',
-                                borderRadius: 'var(--app-radius-kreis)',
-                                background: 'var(--app-text-system)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                border: '2px solid white'
-                              }}>
-                                <IonIcon icon={ICON_SPERRE_GEFUELLT} style={{ fontSize: 'var(--app-text-winzig)', color: 'white' }} />
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Badge Name */}
-                          <span style={{
-                            fontSize: 'var(--app-text-klein)',
-                            fontWeight: 'var(--app-schrift-halbfett)',
-                            color: isEarned ? 'var(--app-text-primary)' : 'var(--app-text-muted)',
-                            textAlign: 'center',
-                            lineHeight: '1.2',
-                            maxWidth: '100%',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            display: '-webkit-box',
-                            WebkitLineClamp: 1,
-                            WebkitBoxOrient: 'vertical'
-                          }}>
-                            {badge.name || ''}
-                          </span>
-
-                          {/* Progress percentage for in-progress badges */}
-                          {hasProgress && (
-                            <span style={{
-                              fontSize: 'var(--app-text-mini)',
-                              fontWeight: 'var(--app-schrift-fett)',
-                              color: 'var(--app-color-users)',
-                              marginTop: 'var(--app-abstand-winzig)'
-                            }}>
-                              {Math.round(badge.progress_percentage || 0)}%
-                            </span>
-                          )}
-
-                          {/* Secret Badge Eselsohr */}
-                          {badge.is_hidden && badge.is_earned && (
-                            <div className="app-corner-badges">
-                              <div
-                                className="app-corner-badge"
-                                style={{
-                                  background: 'var(--app-gradient-rakete)',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  padding: 'var(--app-abstand-mini) var(--app-abstand-eng)'
-                                }}
-                                title="Geheimes Badge"
-                              >
-                                <IonIcon icon={ICON_VERBORGEN_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
-                              </div>
+                              title="Geheimes Badge"
+                            >
+                              <IonIcon icon={ICON_VERBORGEN_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                             </div>
-                          )}
-                        </div>
-                      );
+                          </div>
+                        ) : undefined
+                      };
                     })}
-                  </div>
+                    onKachelClick={(schluessel, e) => {
+                      const badge = category.badges.find((b) => b.id === schluessel);
+                      if (badge) handleBadgeClick(badge, e);
+                    }}
+                  />
                 </IonCardContent>
               </IonCard>
             );

@@ -24,7 +24,6 @@ import { Message, ChatRoomProps as ChatRoomComponentProps } from '../../types/ch
 import ChatMessagesList from './ChatMessagesList';
 import PollModal from './modals/PollModal';
 import MembersModal from './modals/MembersModal';
-import { Haptics, ImpactStyle } from '@capacitor/haptics';
 import { writeQueue, onItemFailed } from '../../services/writeQueue';
 import {
   ergaenzeLokaleBubbles,
@@ -36,7 +35,7 @@ import {
 import { safeUUID } from '../../utils/uuid';
 import { networkMonitor } from '../../services/networkMonitor';
 import { ChatHeader, MessageInput, autoCapitalize } from './ChatRoomSections';
-import { triggerPullHaptic } from '../../utils/haptics';
+import { haptik, triggerPullHaptic, ImpactStyle } from '../../utils/haptics';
 import { useChatScroll } from './useChatScroll';
 import { useChatSocket } from './useChatSocket';
 import { useUmfragenUndReaktionen } from './useUmfragenUndReaktionen';
@@ -519,7 +518,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   const handleLongPress = async (message: Message) => {
     try {
       // Native haptic feedback
-      await Haptics.impact({ style: ImpactStyle.Medium });
+      await haptik(ImpactStyle.Medium);
 
       // Toggle selection - zeige Inline-Aktionsleiste
       if (selectedMessage?.id === message.id) {

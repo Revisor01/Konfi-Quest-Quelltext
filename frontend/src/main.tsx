@@ -1,23 +1,20 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { Capacitor } from '@capacitor/core';
 import App from './App';
 import { migrateToPreferences } from './services/migrateStorage';
 import { initTokenStore } from './services/tokenStore';
+import { tempDateienAufraeumen } from './utils/nativeFileViewer';
 
-// Umami-Reichweitenmessung NUR im Web laden, niemals im nativen App-Build.
-// Die native App (iOS/Android) erhebt damit selbst keine Analytics-Daten —
-// das vermeidet Store-Datenerhebungs-Angaben und schuetzt minderjaehrige Konfis.
-const loadWebAnalytics = () => {
-  if (Capacitor.isNativePlatform()) {
-    return;
-  }
-  const script = document.createElement('script');
-  script.defer = true;
-  script.src = 'https://t.godsapp.de/script.js';
-  script.setAttribute('data-website-id', 'dfd37276-5ad4-474d-8306-bf3ed9a3a5d3');
-  document.head.appendChild(script);
-};
+// KEINE Messung an dieser Stelle — und das ist Absicht.
+//
+// Jetzt sauber getrennt:
+//   Anwendung   -> services/analytics.ts, eigene Kennung, ohne Personenbezug
+//   Werbeseiten -> eigene <script>-Zeile in public/landing.html und den drei
+//                  weiteren statischen Seiten, unveraendert
+//
+// Die Werbeseiten brauchen von hier nichts: sie sind statisches HTML und
+// laden ihr Script selbst. Die native App misst weiterhin ueber
+// analytics.ts, das zur Laufzeit ohnehin nur in Produktion sendet.
 
 const container = document.getElementById('root');
 const root = createRoot(container!);
@@ -30,7 +27,6 @@ const mitZeitlimit = <T,>(p: Promise<T>, ms: number): Promise<T | void> =>
   Promise.race([p, new Promise<void>((r) => setTimeout(r, ms))]);
 
 (async () => {
-  loadWebAnalytics();
   try {
     await mitZeitlimit(migrateToPreferences(), 4000);
   } catch (err) {
@@ -46,4 +42,6 @@ const mitZeitlimit = <T,>(p: Promise<T>, ms: number): Promise<T | void> =>
       <App />
     // </React.StrictMode>
   );
+
+  void tempDateienAufraeumen();
 })();

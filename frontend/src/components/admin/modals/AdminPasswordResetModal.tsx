@@ -34,6 +34,7 @@ import {
 } from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
+import { generateStrongPassword } from '../../../utils/passwortVorschlag';
 
 interface AdminPasswordResetModalProps {
   adminId: number;
@@ -63,40 +64,6 @@ const PasswordCheckItem: React.FC<{ label: string; checked: boolean }> = ({ labe
     <span>{label}</span>
   </div>
 );
-
-// Kryptographisch sicherer Zufallswert in [0, max) — Rejection-Sampling
-// gegen Modulo-Bias (Math.random ist für Passwoerter nicht geeignet)
-const randomInt = (max: number): number => {
-  const limit = Math.floor(0x100000000 / max) * max;
-  const buf = new Uint32Array(1);
-  let x: number;
-  do {
-    crypto.getRandomValues(buf);
-    x = buf[0];
-  } while (x >= limit);
-  return x % max;
-};
-
-// Starkes Passwort generieren (erfuellt garantiert alle Anforderungen)
-const generateStrongPassword = (length = 14): string => {
-  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
-  const lower = 'abcdefghijkmnpqrstuvwxyz';
-  const digits = '23456789';
-  const special = '!@#$%&*?-_+=';
-  const all = upper + lower + digits + special;
-  // Mindestens je ein Zeichen aus jeder Kategorie
-  const pick = (set: string) => set[randomInt(set.length)];
-  const chars = [pick(upper), pick(lower), pick(digits), pick(special)];
-  for (let i = chars.length; i < length; i++) {
-    chars.push(pick(all));
-  }
-  // Mischen (Fisher-Yates)
-  for (let i = chars.length - 1; i > 0; i--) {
-    const j = randomInt(i + 1);
-    [chars[i], chars[j]] = [chars[j], chars[i]];
-  }
-  return chars.join('');
-};
 
 const AdminPasswordResetModal: React.FC<AdminPasswordResetModalProps> = ({ adminId, adminName, onClose, onSuccess }) => {
   const { setSuccess, setError, isOnline } = useApp();

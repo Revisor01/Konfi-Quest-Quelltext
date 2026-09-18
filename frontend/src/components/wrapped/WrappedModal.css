@@ -1480,6 +1480,14 @@ ion-modal.wrapped-modal-fullscreen {
   color: #fff;
 }
 
+/* Emoji statt Ionicon: In der Datenbank stehen beide Formen. Gleiche Groesse
+   wie das Icon daneben, damit die Kachel nicht je nach Abzeichen anders
+   aussieht. Keine Farbe setzen — Emoji bringen ihre eigene mit. */
+.seltenstes-slide .selt-abzeichen-emoji {
+  font-size: 54px;
+  line-height: 1;
+}
+
 .seltenstes-slide .selt-name {
   font-family: var(--w-akzent);
   font-size: clamp(28px, 8vw, 38px);
@@ -1605,6 +1613,14 @@ ion-modal.wrapped-modal-fullscreen {
 .w-abzeichen ion-icon {
   font-size: 24px;
   color: #fff;
+}
+
+/* Emoji statt Ionicon, wie in .selt-abzeichen-emoji: Dieselbe
+   Groesse wie das Icon daneben, damit die Reihe gleichmaessig bleibt. Keine
+   Farbe setzen -- Emoji bringen ihre eigene mit. */
+.w-abzeichen-emoji {
+  font-size: 24px;
+  line-height: 1;
 }
 
 /* Die Bilanz auf der Abschluss-Seite. */

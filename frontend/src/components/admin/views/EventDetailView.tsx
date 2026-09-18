@@ -3,18 +3,25 @@ import {
   ICON_ABSAGE,
   ICON_ANTWORTEN,
   ICON_BEARBEITEN,
+  ICON_KOPIEREN_GEFUELLT,
   ICON_CHAT,
+  ICON_ENTFERNEN_GEFUELLT,
   ICON_GESPERRT,
   ICON_GRUPPE_GEFUELLT,
   ICON_HAKEN_GEFUELLT,
   ICON_LOESCHEN_GEFUELLT,
   ICON_PERSON_HINZUFUEGEN_GEFUELLT,
   ICON_QRCODE,
+  ICON_RUECKGAENGIG,
   ICON_TERMIN_GEFUELLT,
+  ICON_TEXTDOKUMENT,
   ICON_ZURUECK,
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
 import { fehlerText } from '../../../utils/fehler';
+import { darfTermineVerwalten } from '../../../utils/terminRechte';
+import { kopiereTermin } from '../../../utils/terminVorbelegung';
+import { welcheKnoepfe, zusageBeschriftung, absageBeschriftung, absageBrauchtGrund } from '../../../utils/zusageKnoepfe';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   IonPage, IonHeader, IonToolbar, IonTitle, IonContent,
@@ -28,14 +35,16 @@ import type { ActionSheetButton } from '@ionic/react';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineCache } from '../../../services/offlineCache';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
+import { absageZuruecknehmenFragen } from '../../../utils/absageZuruecknehmen';
 import OfflinePlatzhalter from '../../shared/OfflinePlatzhalter';
 import api from '../../../services/api';
-import { SectionHeader, formatEventDateLong as formatDate, formatEventTime as formatTime, istVergangen } from '../../shared';
+import { SectionHeader, AbsageBlock, formatEventDateLong as formatDate, formatEventTime as formatTime, istVergangen, istAbgesagt } from '../../shared';
 import { getStatusIcon } from '../../shared/StatusBadge';
 import EventModal from '../modals/EventModal';
 import ParticipantManagementModal from '../modals/ParticipantManagementModal';
 import QRDisplayModal from '../../shared/QRDisplayModal';
 import TeamerMaterialDetailPage from '../../teamer/pages/TeamerMaterialDetailPage';
+import TeamerAbsageModal from '../../teamer/modals/TeamerAbsageModal';
 import { useLiveUpdate, useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import {
   EventInfoCard, DescriptionSection, SeriesEventsSection,
@@ -43,10 +52,16 @@ import {
   TimeslotsSection
 } from './EventDetailSections';
 import type { Participant, Unregistration, EventData } from './EventDetailSections';
-import type { EventMaterial } from '../../../types/event';
+import type { EventMaterial, Timeslot, Event as VollerEvent } from '../../../types/event';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
+import { urheberZeile, notizUrheberZeile, checkinZeile } from '../../../utils/anwesenheitUrheber';
+import { teilnahmeDarstellung, zaehltAlsAbgemeldet, listItemKlasse, iconKreisKlasse, eckBadgeKlasse } from '../../../utils/teilnahmeStatus';
+import AnwesenheitNotizModal from '../modals/AnwesenheitNotizModal';
+import AbmeldungNachtragenModal from '../modals/AbmeldungNachtragenModal';
+import TerminAbsagenModal from '../modals/TerminAbsagenModal';
 import LoadingSpinner from '../../common/LoadingSpinner';
+import { trackHandlung } from '../../../services/analytics';
 
 // Ionic 9 gibt bei ref an IonItemSliding die React-Komponente zurueck, nicht
 // mehr das DOM-Element. Gebraucht wird hier nur close() — das haben beide.
@@ -96,15 +111,57 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
   // die Absagen ANDERER, ohne sich selbst melden zu koennen.
   const [zusageLaeuft, setZusageLaeuft] = useState(false);
 
-  /** Eigene Teilnahme am Team-Kontingent, falls vorhanden. */
-  const eigeneTeilnahme = participants.find(p => p.user_id === user?.id);
+  /**
+   * Der eigene Zusage-Stand an diesem Termin.
+   *
+   * HIER STAND BIS DAHIN:
+   *   participants.find(p => p.user_id === user?.id)
+   *
+   * Gegen Produktion gemessen: Nach einer Zusage der Leitung ueber
+   * POST /teamer/events/:id/zusage liefert GET /events/:id zwar
+   * booking_status 'confirmed' -- die Leitung steht aber NICHT in
+   * participants, weder nach der Zusage noch nach der Absage (beide Male
+   * leeres Array). find() gab also immer undefined, welcheKnoepfe(undefined)
+   * heisst 'beide', und deshalb standen dauerhaft beide Knoepfe da, egal was
+   * gewaehlt war -- ununterscheidbar von "noch nichts entschieden".
+   *
+   * booking_status ist derselbe Wert, aus dem auch die Teamer-Seite ihre
+   * Knoepfe ableitet (TeamerEventsPage, ZusageKnoepfe). Damit ist die
+   * Entscheidung nicht nur in derselben Funktion, sondern auf derselben
+   * Datengrundlage -- vorher war nur die halbe Angleichung passiert.
+   */
+  const eigeneZusage = eventData?.booking_status;
 
   /** Nimmt dieses Event ueberhaupt Team-Anmeldungen? */
   const nimmtTeamAn = !!(eventData?.teamer_needed || eventData?.teamer_only);
 
   /** Darf die angemeldete Person sich selbst melden? Alle ausser Konfis. */
   const darfSichMelden = user?.role_name !== 'konfi' && nimmtTeamAn
-    && !eventData?.cancelled && !istVergangen(eventData);
+    && !istAbgesagt(eventData) && !istVergangen(eventData);
+
+  /**
+   * Darf hier ueberhaupt noch jemand eingetragen werden?
+   *
+   * ZWEI GRUENDE, WARUM NICHT:
+   *
+   * 2. Als Teamer:in. Teilnehmerverwaltung haengt im Backend an
+   *    requireAdmin. Diese Ansicht steht auch dem Team offen, bot aber
+   *    "Konfi hinzufuegen", "Team hinzufuegen" und "Leitung hinzufuegen" an —
+   *    das Auswahl-Fenster lud sogar sauber und brach erst beim Speichern mit
+   *    403 ab, also nach getaner Arbeit.
+   *
+   * istAbgesagt() statt eventData.cancelled von Hand: Es prueft beide Felder,
+   * weil die Listen- und die Detail-Route verschiedene liefern.
+   */
+  const darfEintragen = !istAbgesagt(eventData) && darfTermineVerwalten(user);
+
+  /**
+   * Darf diese Person den Termin verwalten — absagen, Anwesenheit verbuchen,
+   * Teilnehmende verschieben oder entfernen? Im Backend alles requireAdmin.
+   * Anders als darfEintragen gilt das auch an abgesagten Terminen: Die Absage
+   * zuruecknehmen ist ja gerade dort die Aufgabe.
+   */
+  const darfVerwalten = darfTermineVerwalten(user);
 
   const setzeEigeneZusage = async (dabei: boolean, grund?: string) => {
     if (!eventData || zusageLaeuft) return;
@@ -122,8 +179,28 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
       setZusageLaeuft(false);
     }
   };
+
   const [eventMaterials, setEventMaterials] = useState<EventMaterial[]>([]);
   const [presentingElement, setPresentingElement] = useState<HTMLElement | null>(null);
+
+  // HIER STAND BIS DAHIN window.prompt() -- das einzige im ganzen Frontend.
+  // In der nativen App ist das ein System-Dialog ausserhalb des App-Designs,
+  // ohne mitwachsendes Feld und ohne den Hinweis, warum ein Grund noetig ist.
+  // Jetzt derselbe Dialog wie beim Team: TeamerAbsageModal, mit derselben
+  // Grund-Regel aus utils/zusageKnoepfe.ts.
+  // Namen mit "Eigene": presentAbsageModal weiter unten sagt den TERMIN ab
+  // (TerminAbsagenModal, Leitungssache). Hier geht es nur um die eigene
+  // Teilnahme -- zwei verschiedene Dinge am selben Termin.
+  const [presentEigeneAbsageModal, dismissEigeneAbsageModal] = useIonModal(TeamerAbsageModal, {
+    eventName: eventData?.name || '',
+    grundPflicht: absageBrauchtGrund(eigeneZusage),
+    onAbsage: (grund: string) => { setzeEigeneZusage(false, grund); },
+    dismiss: (data?: string, role?: string) => dismissEigeneAbsageModal(data, role)
+  });
+
+  const oeffneEigeneAbsage = () => {
+    presentEigeneAbsageModal({ presentingElement: presentingElement || undefined });
+  };
 
   // Material Detail Modal (wie Teamer)
   const materialIdRef = useRef<number | null>(null);
@@ -150,6 +227,52 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     dismiss: () => dismissEventModalHook()
   });
 
+  // KOPIEREN braucht ein EIGENES Modal: Das Hook oben ist fest an
+  // eventData gebunden und wuerde diesen Termin BEARBEITEN. Die Kopie ist eine
+  // Neuanlage (id 0), deshalb ein zweiter Einstieg mit der Vorlage.
+  const [kopierVorlage, setKopierVorlage] = useState<VollerEvent | null>(null);
+  const [kopierteTimeslots, setKopierteTimeslots] = useState<Timeslot[]>([]);
+
+  const [presentKopierModal, dismissKopierModal] = useIonModal(EventModal, {
+    event: kopierVorlage,
+    vorbelegteTimeslots: kopierteTimeslots,
+    onDirtyChange: (dirty: boolean) => { eventModalDirtyRef.current = dirty; },
+    onClose: () => dismissKopierModal(),
+    onSuccess: () => {
+      dismissKopierModal();
+      onBack();
+    },
+    dismiss: () => dismissKopierModal()
+  });
+
+  /**
+   * Termin kopieren: oeffnet das Anlege-Formular vorbefuellt. Angelegt wird
+   * nichts, bis gespeichert wird. Regel siehe utils/terminVorbelegung.ts.
+   */
+  const handleKopieren = async () => {
+    if (!eventData) return;
+    if (offlineBlockiert(isOnline, setError)) return;
+
+    let slots: Timeslot[] = [];
+    if (eventData.has_timeslots) {
+      try {
+        const res = await api.get(`/events/${eventData.id}/timeslots`);
+        slots = res.data || [];
+      } catch (err) {
+        setError('Die Zeitfenster konnten nicht geladen werden — die Kopie hat keine.');
+      }
+    }
+
+    const { event: vorlage, timeslots: neueSlots } = kopiereTermin(eventData as unknown as VollerEvent, slots);
+    setKopierteTimeslots(neueSlots);
+    setKopierVorlage(vorlage);
+    presentKopierModal({
+      presentingElement: presentingElement || undefined,
+      canDismiss: eventModalCanDismiss,
+      backdropDismiss: false
+    });
+  };
+
   // Faengt JEDEN Schliess-Weg ab (Swipe, Backdrop): bei ungespeicherten
   // Änderungen erst nachfragen, sonst direkt schliessen lassen.
   const eventModalCanDismiss = async (): Promise<boolean> => {
@@ -170,6 +293,108 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
       });
     });
   };
+
+  // Vorher lief die Notiz-Eingabe ueber useIonAlert und fiel damit aus dem
+  // Muster: Der Absagegrund der Konfi laeuft ueber UnregisterModal, alle
+  // Texteingaben der Leitung sind Modals. Der Alert bot ausserdem keinen
+  // Loeschen-Knopf.
+  //
+  // Ref-Getter wie beim Material-Modal darueber: Welche Person gemeint ist,
+  // steht erst beim Oeffnen fest, die Props werden aber schon beim Rendern
+  // deklariert.
+  const notizTeilnehmerRef = useRef<Participant | null>(null);
+  const [presentNotizModal, dismissNotizModal] = useIonModal(AnwesenheitNotizModal, {
+    get teilnehmerName() { return notizTeilnehmerRef.current?.participant_name ?? ''; },
+    get notiz() { return notizTeilnehmerRef.current?.attendance_note ?? null; },
+    onSave: async (neueNotiz: string) => {
+      const teilnehmer = notizTeilnehmerRef.current;
+      if (!teilnehmer?.attendance_status) return;
+      await handleAttendanceUpdate(teilnehmer, teilnehmer.attendance_status, {
+        // Der Grund bleibt, was er war: Bei 'excused' wuerde ein fehlendes
+        // Feld ihn sonst loeschen (die Route setzt ihn bei jedem
+        // 'excused'-Schreiben neu).
+        ...(teilnehmer.attendance_status === 'excused'
+          ? { excuse_reason: teilnehmer.excuse_reason || '' }
+          : {}),
+        // Leerer String heisst loeschen — die Route unterscheidet "Feld
+        // fehlt" (Notiz bleibt) von "Feld ist leer" (Notiz weg).
+        attendance_note: neueNotiz
+      });
+    },
+    dismiss: () => dismissNotizModal()
+  });
+
+  // ABMELDUNGS-MODAL
+  //
+  // WO ALERT, WO MODAL — die Linie, damit sie nicht wieder auseinanderlaeuft:
+  //
+  //   TEXTEINGABE  -> Modal. Grund und Notiz sind Freitext, der bleibt und den
+  //     andere lesen. Ein Modal gibt ihm ein mitwachsendes Feld, eine
+  //     Kopfzeile mit Schliessen links und Speichern rechts, und auf kleinen
+  //     Geraeten genug Platz. So laufen alle Texteingaben in dieser App
+  //     (UnregisterModal, BonusModal, MaterialFormModal).
+  //
+  //   JA/NEIN-RUECKFRAGE -> Alert. "Alle bestätigen?", "Auf die Warteliste
+  //     setzen?", "Anmeldung entfernen?" fragen nichts ab, sie holen eine
+  //     Bestaetigung fuer etwas, das sonst still passiert waere (die beiden
+  //     letzten haengen an einer Wisch-Geste, ein Fehlwisch soll nicht
+  //     durchgehen). Daraus ein Modal zu machen, waere ein Seitenwechsel fuer
+  //     eine Frage, die in zwei Zeilen beantwortet ist — und zwei der drei
+  //     muessen die Wisch-Geste beim Abbrechen wieder zurueckfahren, was im
+  //     Alert-Handler direkt danebensteht.
+  //
+  // Kurz: Wer etwas SCHREIBT, bekommt ein Modal. Wer nur BESTAETIGT, einen
+  // Alert.
+  const abmeldungTeilnehmerRef = useRef<Participant | null>(null);
+  const [presentAbmeldungModal, dismissAbmeldungModal] = useIonModal(AbmeldungNachtragenModal, {
+    get teilnehmerName() { return abmeldungTeilnehmerRef.current?.participant_name ?? ''; },
+    get grund() { return abmeldungTeilnehmerRef.current?.excuse_reason ?? null; },
+    get notiz() { return abmeldungTeilnehmerRef.current?.attendance_note ?? null; },
+    onSave: async (neuerGrund: string, neueNotiz: string) => {
+      const teilnehmer = abmeldungTeilnehmerRef.current;
+      if (!teilnehmer) return;
+      await handleAttendanceUpdate(teilnehmer, 'excused', {
+        excuse_reason: neuerGrund,
+        attendance_note: neueNotiz
+      });
+    },
+    dismiss: () => dismissAbmeldungModal()
+  });
+
+  // Kein Ref-Getter noetig wie bei den Teilnehmer-Modals: Welcher Termin
+  // gemeint ist, steht in dieser Ansicht von vornherein fest.
+  const [presentAbsageModal, dismissAbsageModal] = useIonModal(TerminAbsagenModal, {
+    get terminName() { return eventData?.name ?? ''; },
+    get terminDatum() {
+      if (!eventData?.event_date) return '';
+      return new Date(eventData.event_date).toLocaleDateString('de-DE', {
+        weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric'
+      });
+    },
+    // DIESELBE REGEL WIE UEBERALL SONST: Abgemeldete sind keine
+    // Teilnehmenden -- weder die Selbstabmeldung ('opted_out') noch die
+    // Abmeldung durch die Leitung ('excused'). `status === 'confirmed'` deckt
+    // beide ab, weil beide Vorgaenge den Buchungsstatus verlassen; es ist
+    // genau die Bedingung, aus der die View konfi_confirmed bildet, und
+    // dieselbe, die die Kachel darueber benutzt.
+    get konfiAnzahl() {
+      return participants.filter(p => p.role_name === 'konfi' && p.status === 'confirmed').length;
+    },
+    onSave: async (grund: string) => {
+      if (!eventData) return;
+      await api.put(`/events/${eventData.id}/cancel`, {
+        notification_message: 'Das Event wurde leider abgesagt.',
+        cancelled_reason: grund
+      });
+      setSuccess('Event wurde abgesagt');
+      onBack();
+    },
+    dismiss: () => dismissAbsageModal()
+  });
+
+  // Der ABSAGEGRUND wird nur ueber den Wisch an der Zeile in der Terminliste
+  // (AdminEventsPage) bearbeitet -- die Absage-Karte hier bleibt reine
+  // Auskunft.
 
   // QR Display Modal
   const [presentQRDisplayModal, dismissQRDisplayModal] = useIonModal(QRDisplayModal, {
@@ -313,8 +538,8 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
       } catch {
         if (gilt()) setEventMaterials([]);
       }
-    } catch {
-      if (gilt()) setError('Fehler beim Laden der Event-Daten');
+    } catch (err) {
+      if (gilt()) setError('Fehler beim Laden der Event-Daten', { ort: 'event-detail-laden', fehler: err });
     } finally {
       if (gilt()) setLoading(false);
     }
@@ -364,7 +589,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     if (!eventData) return events;
     const isPastEvent = istVergangen(eventData);
     const isKonfirmationEvent = eventData.is_konfirmation;
-    const isCancelledStatus = eventData.registration_status === 'cancelled' as string;
+    const isCancelledStatus = istAbgesagt(eventData);
     const hasUnprocessedBookings = isPastEvent && eventData.registered_count > 0 &&
       participants.some(p => p.status === 'confirmed' && !p.attendance_status);
 
@@ -391,7 +616,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     if (!eventData) return 'Event';
     const isPastEvent = istVergangen(eventData);
     const isKonfirmationEvent = eventData.is_konfirmation;
-    const isCancelledStatus = eventData.registration_status === 'cancelled' as string;
+    const isCancelledStatus = istAbgesagt(eventData);
     const hasUnprocessedBookings = isPastEvent && eventData.registered_count > 0 &&
       participants.some(p => p.status === 'confirmed' && !p.attendance_status);
 
@@ -413,25 +638,111 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     return 'Termin';
   };
 
-  const handleAttendanceUpdate = async (participant: Participant, status: 'present' | 'absent') => {
+  // Grund und Notiz gehen mit derselben Route mit. Der Grund gehoert zu
+  // 'excused' und wird vom Backend beim Wechsel auf einen anderen Status
+  // geleert; die Notiz ("ging um 14 Uhr") haengt NICHT am Status und bleibt
+  // stehen, solange nichts Neues geschickt wird. Kommt sie LEER mit, wird sie
+  // geloescht — die Route unterscheidet "Feld fehlt" von "Feld ist leer".
+  //
+  // status = null setzt den Eintrag ZURUECK: Die Person steht danach wieder
+  // als unverbucht in der Liste, Grund und Urheber sind weg, Punkte kommen
+  // zurueck. Die NOTIZ bleibt -- sie haengt nicht am Status (dieselbe Regel
+  // wie beim Wechsel zwischen anwesend und abwesend) und wird ueber ihren
+  // eigenen Weg geloescht.
+  const handleAttendanceUpdate = async (
+    participant: Participant,
+    status: 'present' | 'absent' | 'excused' | null,
+    texte?: { excuse_reason?: string; attendance_note?: string }
+  ) => {
     if (offlineBlockiert(isOnline, setError)) return;
+    const grund = status === 'excused' ? (texte?.excuse_reason || null) : null;
+    const notizMitgeschickt = texte?.attendance_note !== undefined;
+    const notiz = notizMitgeschickt
+      ? (texte!.attendance_note!.trim() || null)
+      : (participant.attendance_note ?? null);
     setParticipants(prev => prev.map(p =>
-      p.id === participant.id ? { ...p, attendance_status: status } : p
+      p.id === participant.id
+        ? {
+            ...p,
+            attendance_status: status,
+            excuse_reason: grund,
+            attendance_note: notiz,
+            // Die Urheber-Zeilen zeigen ab sofort die eigene Person: Der
+            // Status wird bei jedem Aufruf geschrieben, die Notiz nur, wenn
+            // sie mitkam. Der genaue Zeitstempel kommt mit dem naechsten
+            // Laden nach; hier zaehlt, dass die Zeile nicht weiter jemand
+            // anderen nennt, waehrend gerade die eigene Aenderung dasteht.
+            // Beim Zuruecksetzen faellt die Urheber-Zeile mit weg: Es gibt
+            // keinen Eintrag mehr, dessen Urheberschaft festzuhalten waere.
+            attendance_set_by_name: status === null ? null : (user?.display_name ?? p.attendance_set_by_name),
+            attendance_set_at: status === null ? null : new Date().toISOString(),
+            ...(status === null ? { excuse_reason: null } : {}),
+            ...(notizMitgeschickt
+              ? {
+                  note_set_by_name: notiz ? (user?.display_name ?? null) : null,
+                  note_set_at: notiz ? new Date().toISOString() : null
+                }
+              : {})
+          }
+        : p
     ));
     try {
       await api.put(`/events/${eventId}/participants/${participant.id}/attendance`, {
-        attendance_status: status
+        attendance_status: status,
+        ...(texte?.excuse_reason !== undefined ? { excuse_reason: texte.excuse_reason } : {}),
+        ...(notizMitgeschickt ? { attendance_note: texte!.attendance_note } : {})
+      });
+      // Anonyme Messung NACH der erfolgreichen Antwort: die Anwesenheit ist
+      // wirklich verbucht. Nur Umfang und Gruppe — keine Person, kein Termin,
+      // kein Status-Detail, kein Grund und keine Notiz.
+      trackHandlung('anwesenheit-erfasst', {
+        umfang: 'einzeln',
+        gruppe: participant.role_name === 'konfi' ? 'konfi' : 'teamer'
       });
       triggerRefresh('events');
     } catch {
       setParticipants(prev => prev.map(p =>
-        p.id === participant.id ? { ...p, attendance_status: participant.attendance_status } : p
+        p.id === participant.id
+          ? {
+              ...p,
+              attendance_status: participant.attendance_status,
+              excuse_reason: participant.excuse_reason,
+              attendance_note: participant.attendance_note,
+              attendance_set_by_name: participant.attendance_set_by_name,
+              attendance_set_at: participant.attendance_set_at,
+              note_set_by_name: participant.note_set_by_name,
+              note_set_at: participant.note_set_at
+            }
+          : p
       ));
       setError('Fehler beim Aktualisieren der Anwesenheit');
     }
   };
 
+  // Ein MODAL, kein Alert: siehe AbmeldungNachtragenModal. Die
+  // Abmeldung war beim Umbau der Notiz als Alert stehengeblieben — dieselbe
+  // Begruendung traegt hier genauso, und mit zwei Textfeldern erst recht.
+  const showAbmeldungModal = (participant: Participant) => {
+    abmeldungTeilnehmerRef.current = participant;
+    presentAbmeldungModal({ presentingElement: presentingElement || undefined });
+  };
+
+  // Notiz allein aendern, ohne am Status zu ruehren. Der Status wird dabei
+  // mitgeschickt, weil die Route ihn verlangt — es ist derselbe wie zuvor.
+  const showNotizModal = (participant: Participant) => {
+    if (!participant.attendance_status) {
+      setError('Erst die Anwesenheit setzen, dann die Notiz eintragen');
+      return;
+    }
+    notizTeilnehmerRef.current = participant;
+    presentNotizModal({ presentingElement: presentingElement || undefined });
+  };
+
   const showAttendanceActionSheet = (participant: Participant) => {
+    // Anwesenheit verbuchen ist Leitungssache (requireAdmin). Der Riegel sitzt
+    // hier UND am Zeilen-Tipp: Die Zeitfenster-Liste ruft dieselbe Funktion
+    // ueber ein Prop auf, dort gaebe es sonst einen zweiten Weg herein.
+    if (!darfVerwalten) return;
     if (offlineBlockiert(isOnline, setError)) return;
     const buttons: ActionSheetButton[] = [];
     if (participant.attendance_status !== 'present') {
@@ -440,11 +751,49 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     if (participant.attendance_status !== 'absent') {
       buttons.push({ text: 'Abwesend', icon: ICON_ABSAGE, handler: () => handleAttendanceUpdate(participant, 'absent') });
     }
+    // Immer angeboten, auch wenn schon 'excused': dann ist es das Bearbeiten
+    // des Grundes.
+    buttons.push({
+      text: participant.attendance_status === 'excused' ? 'Abmeldung bearbeiten' : 'Abgemeldet',
+      icon: ICON_ENTFERNEN_GEFUELLT,
+      handler: () => showAbmeldungModal(participant)
+    });
+    if (participant.attendance_status) {
+      buttons.push({
+        text: participant.attendance_note ? 'Notiz bearbeiten' : 'Notiz hinzufügen',
+        icon: ICON_TEXTDOKUMENT,
+        handler: () => showNotizModal(participant)
+      });
+    }
+    // Nur sichtbar, wenn ueberhaupt etwas eingetragen ist -- bei einer
+    // unverbuchten Person gaebe es nichts zurueckzusetzen, und der Eintrag
+    // waere ein Knopf ohne Wirkung.
+    //
+    // WORTLAUT: "Eintrag zuruecksetzen" und nicht "Loeschen". Geloescht wird
+    // im Repo, was verschwindet (Teilnehmer:in entfernen, Notiz loeschen);
+    // hier bleibt die Buchung bestehen, nur die Verbuchung faellt weg. Der
+    // Satz beschreibt genau das, was passiert: die Person steht danach wieder
+    // da, wo sie vor dem Eintrag stand.
+    //
+    // ROLLE: 'destructive'. Der Eintrag nimmt Punkte zurueck und loescht den
+    // Abmeldegrund samt Urheber -- dieselbe Art von Folge wie beim Entfernen
+    // eines Teilnehmers, das im Wartelisten-Sheet ebenfalls rot steht. Ein
+    // neutraler Eintrag stuende gleichrangig neben "Anwesend" und "Abwesend"
+    // und liesse sich im Vorbeitippen treffen.
+    if (participant.attendance_status) {
+      buttons.push({
+        text: 'Eintrag zurücksetzen',
+        icon: ICON_RUECKGAENGIG,
+        role: 'destructive',
+        handler: () => handleAttendanceUpdate(participant, null)
+      });
+    }
     buttons.push({ text: 'Abbrechen', role: 'cancel' });
     presentActionSheet({ header: participant.participant_name, subHeader: 'Anwesenheit verwalten', buttons });
   };
 
   const showWaitlistActionSheet = (participant: Participant) => {
+    if (!darfVerwalten) return;
     if (offlineBlockiert(isOnline, setError)) return;
     presentActionSheet({
       header: participant.participant_name,
@@ -483,6 +832,8 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     const punkteHinweis = rolle === 'teamer'
       ? ' Das Team bekommt dabei keine Punkte.'
       : ' (inkl. Punktevergabe)';
+    // ALERT, kein Modal: reine Ja/Nein-Rueckfrage ohne Eingabe. Die Linie
+    // steht beim Abmeldungs-Modal weiter oben.
     presentAlert({
       header: 'Alle bestätigen?',
       message: `${unprocessedCount} angemeldete ${wen} werden als anwesend verbucht${punkteHinweis}. Bereits Verbuchte bleiben unverändert.${waitlistHint}`,
@@ -493,6 +844,13 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           handler: async () => {
             try {
               const res = await api.put(`/events/${eventId}/participants/attendance-all`, { rolle });
+              // Anonyme Messung NACH der erfolgreichen Antwort. Bewusst OHNE
+              // die Anzahl: bei einer kleinen Gemeinde waere die Gruppengroesse
+              // ein Fingerabdruck.
+              trackHandlung('anwesenheit-erfasst', {
+                umfang: 'alle',
+                gruppe: rolle === 'teamer' ? 'teamer' : 'konfi'
+              });
               await loadEventData();
               triggerRefresh('events');
               setSuccess(res.data?.message || 'Teilnahmen verbucht');
@@ -522,6 +880,10 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
   // Rueckfrage vor dem Verschieben auf die Warteliste: ausgelöst wird das per
   // Wisch-Geste, ein Fehlwisch hätte sonst still eine Anmeldung zurueckgestuft
   // Das Absagen des Events fragt hier laengst nach.
+  //
+  // ALERT, kein Modal: nichts einzugeben, nur zu bestaetigen — und der
+  // Abbrechen-Zweig muss die Wisch-Geste wieder zufahren, was hier direkt
+  // danebensteht. Die Linie steht beim Abmeldungs-Modal weiter oben.
   const handleDemoteParticipant = (participant: Participant) => {
     presentAlert({
       header: 'Auf die Warteliste setzen?',
@@ -547,6 +909,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
   };
 
   // Ebenfalls per Wisch-Geste erreichbar und nicht umkehrbar -> Rueckfrage.
+  // ALERT, kein Modal: Bestaetigung ohne Eingabe, siehe oben.
   const handleRemoveParticipant = (participant: Participant) => {
     if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
@@ -559,36 +922,36 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     });
   };
 
-  const isCancelled = eventData?.cancelled || eventData?.registration_status === ('cancelled' as string);
+  const isCancelled = istAbgesagt(eventData);
 
+  // Absagen oeffnet das Modal mit dem optionalen Grund — bis
+  // hierher ein Action Sheet, was richtig war, solange es nur zu bestaetigen
+  // gab. Mit dem Freitext gilt die Linie aus AbmeldungNachtragenModal: Wer
+  // etwas SCHREIBT, bekommt ein Modal.
   const handleCancelEvent = async () => {
     if (!isOnline || !eventData) return;
-    const eventDate = new Date(eventData.event_date).toLocaleDateString('de-DE', {
-      weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric'
-    });
-    const konfiCount = participants.filter(p => p.role_name === 'konfi').length;
-    presentActionSheet({
-      header: `"${eventData.name}" absagen?`,
-      subHeader: `${eventDate} | ${konfiCount} Konfis angemeldet`,
-      buttons: [
-        {
-          text: 'Event absagen',
-          role: 'destructive',
-          icon: ICON_GESPERRT,
-          handler: async () => {
-            try {
-              await api.put(`/events/${eventData.id}/cancel`, {
-                notification_message: 'Das Event wurde leider abgesagt.'
-              });
-              setSuccess('Event wurde abgesagt');
-              onBack();
-            } catch (error) {
-              setError(fehlerText(error, 'Fehler beim Absagen'));
-            }
-          }
-        },
-        { text: 'Abbrechen', role: 'cancel' }
-      ]
+    presentAbsageModal({ presentingElement: presentingElement || undefined });
+  };
+
+  // ABSAGE ZURUECKNEHMEN, der Knopf ganz unten:
+  // "Könnten wir diesen Button genau so bauen, ganz unten bei einem Event
+  // [...] sodass wir da eine Symmetrie haben?" Am aktiven Termin steht dort
+  // "Event absagen", am abgesagten stattdessen dieser hier.
+  //
+  // DIESELBE RUECKFRAGE WIE DER WISCH IN DER LISTE: Sie steht in
+  // utils/absageZuruecknehmen.ts, damit es sie nur einmal gibt. Heute wurde
+  // hier schon einmal eine zweite Rueckfrage entfernt -- eine Kopie waere der
+  // Rueckweg dorthin.
+  //
+  // DIE ZAHL STIMMT AUCH HIER: durch_absage_abgemeldet_count liefert GET
+  // /events/:id mit (lesen.js), nicht nur die beiden Listen.
+  const handleAbsageZuruecknehmen = () => {
+    if (offlineBlockiert(isOnline, setError) || !eventData) return;
+    absageZuruecknehmenFragen(eventData, {
+      presentAlert,
+      setSuccess,
+      setError,
+      onErfolg: () => loadEventData()
     });
   };
 
@@ -644,27 +1007,17 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
 
   // Helper: Einzelnen Teilnehmer rendern
   const renderParticipant = (participant: Participant) => {
-    const isWaitlist = participant.status === 'waitlist';
-    const isOptedOut = participant.status === 'opted_out';
-    const listItemClass = isOptedOut ? 'app-list-item--danger' :
-                          participant.attendance_status === 'present' ? 'app-list-item--success' :
-                          participant.attendance_status === 'absent' ? 'app-list-item--danger' :
-                          isWaitlist ? 'app-list-item--warning' : 'app-list-item--info';
-    const iconCircleClass = isOptedOut ? 'app-icon-circle--danger' :
-                            participant.attendance_status === 'present' ? 'app-icon-circle--success' :
-                            participant.attendance_status === 'absent' ? 'app-icon-circle--danger' :
-                            isWaitlist ? 'app-icon-circle--warning' : 'app-icon-circle--info';
+    const darstellung = teilnahmeDarstellung(participant);
+    const isOptedOut = darstellung.istAbgemeldet;
+    const isExcused = darstellung.istNachgetragen;
+    const listItemClass = listItemKlasse(darstellung);
+    const iconCircleClass = iconKreisKlasse(darstellung);
+    const cornerBadgeClass = eckBadgeKlasse(darstellung);
+    const statusText = darstellung.statusText;
     const statusIcon = isOptedOut ? ICON_ABSAGE :
+                       isExcused ? ICON_ENTFERNEN_GEFUELLT :
                        participant.attendance_status === 'present' ? ICON_ZUSAGE_GEFUELLT :
                        participant.attendance_status === 'absent' ? ICON_ABSAGE : ICON_GRUPPE_GEFUELLT;
-    const statusText = isOptedOut ? 'Abgemeldet' :
-                       participant.attendance_status === 'present' ? 'Anwesend' :
-                       participant.attendance_status === 'absent' ? 'Abwesend' :
-                       isWaitlist ? 'Warteliste' : 'Gebucht';
-    const cornerBadgeClass = isOptedOut ? 'app-corner-badge--danger' :
-                             participant.attendance_status === 'present' ? 'app-corner-badge--success' :
-                             participant.attendance_status === 'absent' ? 'app-corner-badge--danger' :
-                             isWaitlist ? 'app-corner-badge--warning' : 'app-corner-badge--info';
 
     return (
       <IonItemSliding
@@ -677,9 +1030,18 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
       >
         <IonItem
           className="app-item-transparent"
-          button detail={false} lines="none"
+          // Ohne Verwaltungsrecht ist die Zeile reine Anzeige: kein `button`,
+          // damit kein Tipp ins Leere geht.
+          button={darfVerwalten} detail={false} lines="none"
           onClick={() => {
-            if (participant.status === 'confirmed') showAttendanceActionSheet(participant);
+            // 'opted_out' oeffnet DASSELBE Anwesenheits-Menue wie 'confirmed'
+            // "Ich als Admin will eine Selbstabmeldung
+            // bearbeiten koennen. Doch anwesend. Vermerk etc." Wer sich
+            // vorher abgemeldet hat und dann doch kommt, muss verbucht werden
+            // koennen -- vorher passierte auf den Tipp gar nichts, ohne jeden
+            // Hinweis warum. Das Backend liess das ohnehin zu; die Sperre sass
+            // allein hier.
+            if (participant.status === 'confirmed' || participant.status === 'opted_out' || participant.status === 'excused') showAttendanceActionSheet(participant);
             else if (participant.status === 'waitlist') showWaitlistActionSheet(participant);
           }}
         >
@@ -717,12 +1079,58 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                       Kennzeichen aus Migration 141 — eine Absage, die eine
                       Zusage zurueckgenommen hat, heisst fuer die Leitung
                       "kurzfristig umplanen" und wird eigens benannt. */}
-                  {isOptedOut && (participant.opt_out_reason || participant.absage_nach_zusage) && (
+                  {/* Am BUCHUNGSSTATUS, nicht an isOptedOut: Hat die Leitung
+                      eine Selbstabmeldung nachtraeglich verbucht ("kam doch"),
+                      faerbt die Zeile oben nach dem Anwesenheits-Status um —
+                      die Absage samt Grund bleibt aber die Vorgeschichte, die
+                      erklaert, warum ueberhaupt jemand nachgetragen hat. */}
+                  {participant.status === 'opted_out' && (participant.opt_out_reason || participant.absage_nach_zusage) && (
                     <div style={{ color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
                       {participant.absage_nach_zusage && (
                         <strong>Nach Zusage abgesagt{participant.opt_out_reason ? ': ' : ''}</strong>
                       )}
+                      {!participant.absage_nach_zusage && participant.attendance_status && (
+                        <strong>Hatte sich abgemeldet{participant.opt_out_reason ? ': ' : ''}</strong>
+                      )}
                       {participant.opt_out_reason}
+                    </div>
+                  )}
+                  {isExcused && participant.excuse_reason && (
+                    <div style={{ color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                      <strong>Abgemeldet: </strong>{participant.excuse_reason}
+                    </div>
+                  )}
+                  {/* Wer den Status samt Grund gesetzt hat. Fehlt der Urheber
+                      — Altbestand oder Selbst-Check-in per QR-Code —, faellt
+                      die Zeile weg statt "unbekannt" zu behaupten. */}
+                  {urheberZeile(participant) && (
+                    <div style={{ color: 'var(--app-text-tertiary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                      {urheberZeile(participant)}
+                    </div>
+                  )}
+                  {/* Beim Selbst-Check-in gibt es keinen Namen (Migration 148)
+                      — stattdessen sagt die Quelle, WOHER die Anwesenheit kam
+                      (Migration 151). Die beiden Zeilen schliessen einander
+                      aus: checkinZeile() liefert nur bei 'qr' etwas, und wer
+                      danach von Hand eintraegt, setzt die Quelle auf
+                      'manuell'. Sonst stuende hier "eingecheckt" unter einem
+                      Namen, der etwas anderes eingetragen hat. */}
+                  {checkinZeile(participant) && (
+                    <div style={{ color: 'var(--app-text-tertiary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                      {checkinZeile(participant)}
+                    </div>
+                  )}
+                  {participant.attendance_note && (
+                    <div style={{ color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                      <strong>Notiz: </strong>{participant.attendance_note}
+                    </div>
+                  )}
+                  {/* Wer die Notiz geschrieben hat — eigener Urheber, eigener
+                      Wortlaut ("Notiz von ..."), damit bei zwei Zeilen
+                      untereinander klar bleibt, welcher Name wozu gehoert. */}
+                  {participant.attendance_note && notizUrheberZeile(participant) && (
+                    <div style={{ color: 'var(--app-text-tertiary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                      {notizUrheberZeile(participant)}
                     </div>
                   )}
                 </div>
@@ -730,7 +1138,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
             </div>
           </div>
         </IonItem>
-        {(participant.role_name !== 'konfi' || !eventData?.mandatory) && (
+        {darfVerwalten && (participant.role_name !== 'konfi' || !eventData?.mandatory) && (
         <IonItemOptions className="app-swipe-actions" side="end">
           {participant.role_name === 'konfi' && participant.status === 'confirmed' && (
             <IonItemOption className="app-swipe-action" onClick={() => { closeOpenSlidingItems(); handleDemoteParticipant(participant); }} aria-label="Auf Warteliste setzen">
@@ -783,15 +1191,29 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           )}
           <IonTitle>{eventData?.name || 'Event Details'}</IonTitle>
           <IonButtons slot="end">
-            <IonButton aria-label="Event-Chat öffnen" onClick={handleChatButtonClick}>
-              <IonIcon icon={ICON_CHAT} />
-            </IonButton>
+            {/* Einen BESTEHENDEN Chat oeffnen darf auch das Team — das ist
+                reine Navigation. Ihn ANZULEGEN ist requireAdmin
+                (verwaltung.js). Gibt es noch keinen, fuehrte der Knopf
+                Teamer:innen deshalb ueber eine Rueckfrage in einen 403;
+                dann steht er jetzt gar nicht erst da. */}
+            {(eventData?.chat_room_id || darfVerwalten) && (
+              <IonButton aria-label="Event-Chat öffnen" onClick={handleChatButtonClick}>
+                <IonIcon icon={ICON_CHAT} />
+              </IonButton>
+            )}
             <IonButton aria-label="QR-Code anzeigen" onClick={() => presentQRDisplayModal({ presentingElement: presentingElement || undefined })}>
               <IonIcon icon={ICON_QRCODE} />
             </IonButton>
-            <IonButton aria-label="Event bearbeiten" onClick={() => presentEventModalHook({ presentingElement: presentingElement || undefined, canDismiss: eventModalCanDismiss, backdropDismiss: false })}>
-              <IonIcon icon={ICON_BEARBEITEN} />
-            </IonButton>
+            {darfVerwalten && (
+              <IonButton aria-label="Termin kopieren" onClick={handleKopieren}>
+                <IonIcon icon={ICON_KOPIEREN_GEFUELLT} />
+              </IonButton>
+            )}
+            {darfVerwalten && (
+              <IonButton aria-label="Event bearbeiten" onClick={() => presentEventModalHook({ presentingElement: presentingElement || undefined, canDismiss: eventModalCanDismiss, backdropDismiss: false })}>
+                <IonIcon icon={ICON_BEARBEITEN} />
+              </IonButton>
+            )}
           </IonButtons>
         </IonToolbar>
       </IonHeader>
@@ -826,7 +1248,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
               ? eventData?.teamer_max_participants : '\u221E';
             const presentCount = konfiOnly.filter(p => p.attendance_status === 'present').length;
             const konfiConfirmed = konfiOnly.filter(p => p.status === 'confirmed').length;
-            const konfiOptedOut = konfiOnly.filter(p => p.status === 'opted_out').length;
+            const konfiOptedOut = konfiOnly.filter(zaehltAlsAbgemeldet).length;
 
             // "Nur Teamer:innen": es gibt gar keine Konfi-Teilnahme -> die
             // Kacheln müssen komplett vom Team erzaehlen (vorher stand hier
@@ -868,6 +1290,11 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           })()}
         />
 
+        <AbsageBlock
+          event={eventData}
+          variante="kasten"
+        />
+
         {/* Event Details */}
         {eventData && (
           <EventInfoCard
@@ -897,36 +1324,38 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
             </IonListHeader>
             <IonCard className="app-card">
               <IonCardContent className="app-card-content">
+                {/* GENAU WIE BEIM TEAM: "erste abfrage
+                    beide danach im wechsel". Solange nichts entschieden ist,
+                    stehen beide Knoepfe da; danach nur noch der GEGENTEILIGE
+                    Weg. Welcher das ist und wie er heisst, entscheidet
+                    utils/zusageKnoepfe.ts -- dieselbe Stelle wie in
+                    teamer/pages/TeamerEventsPage.tsx.
+                    */}
                 <div className="app-button-row app-button-row--in-card">
-                  <IonButton
-                    expand="block"
-                    fill={eigeneTeilnahme?.status === 'confirmed' ? 'solid' : 'outline'}
-                    color="success"
-                    disabled={zusageLaeuft || !isOnline}
-                    onClick={() => setzeEigeneZusage(true)}
-                  >
-                    {eigeneTeilnahme?.status === 'confirmed' ? 'Du bist dabei' : 'Bin dabei'}
-                  </IonButton>
-                  <IonButton
-                    expand="block"
-                    fill={eigeneTeilnahme?.status === 'opted_out' ? 'solid' : 'outline'}
-                    color="danger"
-                    disabled={zusageLaeuft || !isOnline}
-                    onClick={() => {
-                      // Nach einer Zusage verlangt das Backend einen
-                      // Grund -- danach fragen, statt in den Fehler zu
-                      // laufen.
-                      if (eigeneTeilnahme?.status === 'confirmed') {
-                        const grund = window.prompt('Warum kannst du nicht? (Die Leitung muss umplanen)');
-                        if (grund === null) return;
-                        setzeEigeneZusage(false, grund);
-                      } else {
-                        setzeEigeneZusage(false);
-                      }
-                    }}
-                  >
-                    {eigeneTeilnahme?.status === 'opted_out' ? 'Abgesagt' : 'Bin nicht dabei'}
-                  </IonButton>
+                  {welcheKnoepfe(eigeneZusage) !== 'absage' && (
+                    <IonButton
+                      expand="block"
+                      fill="outline"
+                      color="success"
+                      disabled={zusageLaeuft || !isOnline}
+                      onClick={() => setzeEigeneZusage(true)}
+                    >
+                      <IonIcon icon={ICON_ZUSAGE_GEFUELLT} slot="start" />
+                      {zusageBeschriftung(eigeneZusage)}
+                    </IonButton>
+                  )}
+                  {welcheKnoepfe(eigeneZusage) !== 'zusage' && (
+                    <IonButton
+                      expand="block"
+                      fill="outline"
+                      color="danger"
+                      disabled={zusageLaeuft || !isOnline}
+                      onClick={oeffneEigeneAbsage}
+                    >
+                      <IonIcon icon={ICON_ABSAGE} slot="start" />
+                      {absageBeschriftung(eigeneZusage)}
+                    </IonButton>
+                  )}
                 </div>
                 {!isOnline && (
                   <p className="app-text-sub" style={{ marginTop: 'var(--app-abstand-mittel)', marginBottom: 0 }}>
@@ -949,6 +1378,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
             handleDemoteParticipant={handleDemoteParticipant}
             handleRemoveParticipant={handleRemoveParticipant}
             showWaitlistActionSheet={showWaitlistActionSheet}
+            darfVerwalten={darfVerwalten}
           />
         )}
 
@@ -989,6 +1419,10 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           // (vorher stand hier ausschliesslich "Konfi hinzufügen", und die
           // Teamer-Sektion darunter wurde durch den Return nie erreicht).
           if (displayParticipants.length === 0 && teamerParticipants.length === 0) {
+            // An einem abgesagten Termin gibt es nichts einzutragen — und ohne
+            // Angemeldete auch nichts anzuzeigen. Dann bleibt der Block leer,
+            // statt drei tote Knoepfe zu zeigen.
+            if (!darfEintragen) return null;
             const teamerErlaubt = !!(eventData?.teamer_needed || eventData?.teamer_only);
             return (
               <IonList className="app-section-inset" inset={true}>
@@ -1062,7 +1496,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                       // Button nur, wenn es unverbuchte Angemeldete gibt (Konfis mit
                       // Status bestätigt, aber ohne Anwesenheits-Status).
                       const unprocessed = confirmedParticipants.filter(p => !p.attendance_status).length;
-                      if (unprocessed === 0) return null;
+                      if (unprocessed === 0 || !darfVerwalten) return null;
                       return (
                         <IonButton fill="clear" size="small" disabled={!isOnline}
                           title={isOnline ? undefined : "Ohne Internetverbindung nicht möglich"}
@@ -1078,13 +1512,15 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
                         {displayParticipants.map(renderParticipant)}
                       </div>
-                      <div className="app-event-detail__add-button-wrapper">
-                        <IonButton expand="block" fill="outline"
-                          onClick={() => presentKonfiModal({ presentingElement: presentingElement || undefined })}>
-                          <IonIcon icon={ICON_PERSON_HINZUFUEGEN_GEFUELLT} className="app-event-detail__icon-gap" />
-                          Konfi hinzufügen
-                        </IonButton>
-                      </div>
+                      {darfEintragen && (
+                        <div className="app-event-detail__add-button-wrapper">
+                          <IonButton expand="block" fill="outline"
+                            onClick={() => presentKonfiModal({ presentingElement: presentingElement || undefined })}>
+                            <IonIcon icon={ICON_PERSON_HINZUFUEGEN_GEFUELLT} className="app-event-detail__icon-gap" />
+                            Konfi hinzufügen
+                          </IonButton>
+                        </div>
+                      )}
                     </IonCardContent>
                   </IonCard>
                 </IonList>
@@ -1102,7 +1538,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                       // im "Verbuchen"-Reiter stehen -- pending_bookings_count
                       // zaehlt beide Rollen (events.js:270-274).
                       const unprocessedTeamer = teamerConfirmed.filter(p => !p.attendance_status).length;
-                      if (unprocessedTeamer === 0) return null;
+                      if (unprocessedTeamer === 0 || !darfVerwalten) return null;
                       return (
                         <IonButton fill="clear" size="small" disabled={!isOnline}
                           title={isOnline ? undefined : "Ohne Internetverbindung nicht möglich"}
@@ -1118,23 +1554,25 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                       <div style={{ display: 'flex', flexDirection: 'column' }}>
                         {teamerParticipants.map(renderParticipant)}
                       </div>
-                      <div className="app-event-detail__add-button-wrapper">
-                        <IonButton expand="block" fill="outline"
-                          onClick={() => presentTeamerModal({ presentingElement: presentingElement || undefined })}>
-                          <IonIcon icon={ICON_PERSON_HINZUFUEGEN_GEFUELLT} className="app-event-detail__icon-gap" />
-                          Team hinzufügen
-                        </IonButton>
-                        <IonButton expand="block" fill="outline"
-                          onClick={() => presentLeitungModal({ presentingElement: presentingElement || undefined })}>
-                          <IonIcon icon={ICON_PERSON_HINZUFUEGEN_GEFUELLT} className="app-event-detail__icon-gap" />
-                          Leitung hinzufügen
-                        </IonButton>
-                      </div>
+                      {darfEintragen && (
+                        <div className="app-event-detail__add-button-wrapper">
+                          <IonButton expand="block" fill="outline"
+                            onClick={() => presentTeamerModal({ presentingElement: presentingElement || undefined })}>
+                            <IonIcon icon={ICON_PERSON_HINZUFUEGEN_GEFUELLT} className="app-event-detail__icon-gap" />
+                            Team hinzufügen
+                          </IonButton>
+                          <IonButton expand="block" fill="outline"
+                            onClick={() => presentLeitungModal({ presentingElement: presentingElement || undefined })}>
+                            <IonIcon icon={ICON_PERSON_HINZUFUEGEN_GEFUELLT} className="app-event-detail__icon-gap" />
+                            Leitung hinzufügen
+                          </IonButton>
+                        </div>
+                      )}
                     </IonCardContent>
                   </IonCard>
                 </IonList>
               )}
-              {!isTeamerOnlyEvent && displayParticipants.length === 0 && teamerParticipants.length > 0 && (
+              {darfEintragen && !isTeamerOnlyEvent && displayParticipants.length === 0 && teamerParticipants.length > 0 && (
                 <IonList className="app-section-inset" inset={true}>
                   <IonCard className="app-card">
                     <IonCardContent className="app-card-content">
@@ -1164,13 +1602,13 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           />
         )}
 
-        {/* Event absagen */}
-        {eventData && (
+        {eventData && darfVerwalten && (
           <EventActionsSection
             eventData={eventData}
             isCancelled={!!isCancelled}
             isOnline={isOnline}
             handleCancelEvent={handleCancelEvent}
+            handleAbsageZuruecknehmen={handleAbsageZuruecknehmen}
           />
         )}
 

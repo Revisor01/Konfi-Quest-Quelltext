@@ -230,48 +230,93 @@ END $$;
 -- ====================================================================
 -- certificate_types (teamer.js, organizations.js)
 -- WHERE ct.organization_id = $1
+--
+-- ACHTUNG: Derselbe Fall wie bei invite_codes oben.
+-- Die Zertifikats- und Material-Tabellen werden erst in
+-- 064_consolidate_inline_schemas.sql angelegt — und die laeuft wegen der
+-- rein alphabetischen Sortierung NACH dieser Datei. Auf einer FRISCHEN
+-- Datenbank brach hier die gesamte Migration ab (IF NOT EXISTS deckt nur
+-- den Index, nicht die fehlende Tabelle), womit auch die
+-- activity_categories-Indizes am Dateiende entfielen.
+-- material_tags/material_file_tags wurden spaeter per Migration 130
+-- gedroppt — der Guard ueberspringt sie dann dauerhaft, was richtig ist.
 -- ====================================================================
-CREATE INDEX IF NOT EXISTS idx_certificate_types_organization_id ON certificate_types(organization_id);
+DO $$
+BEGIN
+  IF to_regclass('public.certificate_types') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS idx_certificate_types_organization_id ON certificate_types(organization_id);
+  END IF;
+END $$;
 
 -- ====================================================================
 -- user_certificates (teamer.js, konfi-managment.js)
 -- WHERE uc.user_id = $1, WHERE uc.organization_id = $1
 -- ====================================================================
-CREATE INDEX IF NOT EXISTS idx_user_certificates_user_id ON user_certificates(user_id);
-CREATE INDEX IF NOT EXISTS idx_user_certificates_organization_id ON user_certificates(organization_id);
+DO $$
+BEGIN
+  IF to_regclass('public.user_certificates') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS idx_user_certificates_user_id ON user_certificates(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_certificates_organization_id ON user_certificates(organization_id);
+  END IF;
+END $$;
 
 -- ====================================================================
 -- material_files (material.js)
 -- WHERE mf.material_id = $1
 -- ====================================================================
-CREATE INDEX IF NOT EXISTS idx_material_files_material_id ON material_files(material_id);
+DO $$
+BEGIN
+  IF to_regclass('public.material_files') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS idx_material_files_material_id ON material_files(material_id);
+  END IF;
+END $$;
 
 -- ====================================================================
 -- material_events (material.js)
 -- WHERE me.material_id = $1, WHERE me.event_id = $1
 -- ====================================================================
-CREATE INDEX IF NOT EXISTS idx_material_events_material_id ON material_events(material_id);
-CREATE INDEX IF NOT EXISTS idx_material_events_event_id ON material_events(event_id);
+DO $$
+BEGIN
+  IF to_regclass('public.material_events') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS idx_material_events_material_id ON material_events(material_id);
+    CREATE INDEX IF NOT EXISTS idx_material_events_event_id ON material_events(event_id);
+  END IF;
+END $$;
 
 -- ====================================================================
 -- material_jahrgaenge (material.js)
 -- WHERE mj.material_id = $1, WHERE mj.jahrgang_id = $1
 -- ====================================================================
-CREATE INDEX IF NOT EXISTS idx_material_jahrgaenge_material_id ON material_jahrgaenge(material_id);
-CREATE INDEX IF NOT EXISTS idx_material_jahrgaenge_jahrgang_id ON material_jahrgaenge(jahrgang_id);
+DO $$
+BEGIN
+  IF to_regclass('public.material_jahrgaenge') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS idx_material_jahrgaenge_material_id ON material_jahrgaenge(material_id);
+    CREATE INDEX IF NOT EXISTS idx_material_jahrgaenge_jahrgang_id ON material_jahrgaenge(jahrgang_id);
+  END IF;
+END $$;
 
 -- ====================================================================
 -- material_file_tags (material.js)
 -- WHERE mft.material_id = $1, WHERE mft.tag_id = $1
 -- ====================================================================
-CREATE INDEX IF NOT EXISTS idx_material_file_tags_material_id ON material_file_tags(material_id);
-CREATE INDEX IF NOT EXISTS idx_material_file_tags_tag_id ON material_file_tags(tag_id);
+DO $$
+BEGIN
+  IF to_regclass('public.material_file_tags') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS idx_material_file_tags_material_id ON material_file_tags(material_id);
+    CREATE INDEX IF NOT EXISTS idx_material_file_tags_tag_id ON material_file_tags(tag_id);
+  END IF;
+END $$;
 
 -- ====================================================================
 -- materials (material.js)
 -- WHERE m.organization_id = $1
 -- ====================================================================
-CREATE INDEX IF NOT EXISTS idx_materials_organization_id ON materials(organization_id);
+DO $$
+BEGIN
+  IF to_regclass('public.materials') IS NOT NULL THEN
+    CREATE INDEX IF NOT EXISTS idx_materials_organization_id ON materials(organization_id);
+  END IF;
+END $$;
 
 -- ====================================================================
 -- activity_categories (organizations.js) — Join-Tabelle Activity <-> Category

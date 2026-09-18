@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import { useIonModal } from '@ionic/react';
-import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { haptik, ImpactStyle } from '../../utils/haptics';
 import { useApp } from '../../contexts/AppContext';
-import api from '../../services/api';
 import { compressImage } from '../../services/mediaCompression';
+import { getMediaBlob, istGecacht } from '../../services/mediaCache';
 // Native FileViewer über openFileNatively, FileViewerModal als Web-Fallback
 import { openFileNatively } from '../../utils/nativeFileViewer';
 import FileViewerModal, { FileItem } from '../shared/FileViewerModal';
@@ -111,23 +111,20 @@ export function useChatDateien({ messages }: ChatDateienDeps) {
     // einen zweiten Download zu starten.
     if (ladendeDatei) return;
     try {
-      await Haptics.impact({ style: ImpactStyle.Light });
-      setLadendeDatei({ pfad: filePath, prozent: 0 });
+      await haptik(ImpactStyle.Light);
 
-      // Angeklickte Datei als Blob laden
-      const response = await api.get(`/chat/files/${filePath}`, {
-        responseType: 'blob',
-        onDownloadProgress: (ereignis) => {
-          const gesamt = ereignis.total;
-          setLadendeDatei({
-            pfad: filePath,
-            prozent: gesamt ? Math.min(Math.round((ereignis.loaded / gesamt) * 100), 100) : null
-          });
-        }
+      // Beim Cache-Treffer gar keine Anzeige zeigen: Sie waere sofort wieder
+      // weg und wuerde nur aufblitzen.
+      const schonDa = await istGecacht(filePath);
+      if (!schonDa) setLadendeDatei({ pfad: filePath, prozent: 0 });
+
+      const blob = await getMediaBlob(filePath, (prozent) => {
+        setLadendeDatei({ pfad: filePath, prozent });
       });
-      const blob = response.data;
-      const contentType = response.headers?.['content-type'];
-      const mime: string = typeof contentType === 'string' ? contentType : mimeType;
+      // Der MIME-Typ kommt jetzt aus dem Dateinamen statt aus dem
+      // Antwort-Header — beim Cache-Treffer gibt es keine Antwort mehr.
+      // mimeType ist der vom Aufrufer gemeldete Typ der Nachricht.
+      const mime: string = mimeType || getMimeFromFileName(fileName);
 
       const openedNatively = await openFileNatively(blob, fileName, mime);
       if (openedNatively) return;
@@ -148,8 +145,8 @@ export function useChatDateien({ messages }: ChatDateienDeps) {
       const clickedIndex = allFileMessages.findIndex(m => m.file_path === filePath);
       viewerRef.current = { files, initialIndex: Math.max(0, clickedIndex) };
       presentFileViewer({ cssClass: 'file-viewer-modal' });
-    } catch {
-      setError('Fehler beim Öffnen der Datei');
+    } catch (err) {
+      setError('Fehler beim Öffnen der Datei', { ort: 'chat-datei', fehler: err });
     } finally {
       // finally statt einzelner Aufrufe: Der Zweig "nativ geoeffnet" steigt
       // per return aus, und ohne finally bliebe die Anzeige dort haengen.

@@ -30,8 +30,8 @@ import {
   ICON_VERBORGEN,
 } from '../../shared/icons';
 import { SectionHeader, ListSection, ChallengeLegendModal, EmptyState } from '../../shared';
-import { getChallengeBadgeIcon } from '../../konfi/views/ChallengesView';
-import type { AdminChallenge, ChallengeStatus, ChallengeMark } from '../../../types/challenges';
+import ChallengeStempelSektion from '../../shared/ChallengeStempelSektion';
+import type { AdminChallenge, ChallengeStatus, ChallengeMark, OffenerStempel } from '../../../types/challenges';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 import { anzahlBeitraege, wartenAufFreigabe } from '../../../utils/challengeTexte';
 
@@ -57,6 +57,7 @@ interface ChallengesManageViewProps {
    * Teilnahme — Leitung und Team machen selbst mit.
    */
   marks?: ChallengeMark[];
+  offeneStempel?: OffenerStempel[];
   ohneJahrgang?: boolean;
 }
 
@@ -164,6 +165,7 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
   presentingElement,
   headerSlot,
   marks: marksRaw = [],
+  offeneStempel: offeneStempelRaw = [],
   ohneJahrgang = false
 }) => {
   // Fehlt die Jahrgangs-Zuweisung, ist JEDER Reiter aus demselben Grund
@@ -176,6 +178,7 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
   const darfLoeschen = user?.type === 'admin';
 
   const marks: ChallengeMark[] = Array.isArray(marksRaw) ? marksRaw : [];
+  const offeneStempel: OffenerStempel[] = Array.isArray(offeneStempelRaw) ? offeneStempelRaw : [];
   // Defensive: bei kaputten/gecachten Responses (Object statt Array) auf [] fallen
   const challenges: AdminChallenge[] = Array.isArray(challengesRaw) ? challengesRaw : [];
 
@@ -477,7 +480,16 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
           IMMER anzeigen, auch leer: war der Abschnitt bei 0 Stempeln
           ausgeblendet, sah man nie, dass es ihn ueberhaupt gibt — und damit
           auch nicht, dass Mitmachen vorgesehen ist (User-Hinweis 11.08.). */}
-      <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
+      {/*
+          Der Leerzustand steckt jetzt in der Komponente selbst: Sie gibt
+          null zurueck, wenn es weder erhaltene noch offene Stempel gibt.
+          Sind offene da, zeigt sie sie grau -- was hier vorher der
+          EmptyState behauptete ("Noch keine Stempel"), obwohl es sehr wohl
+          welche zu holen gab. */}
+      {(marks.length > 0 || offeneStempel.length > 0) ? (
+        <ChallengeStempelSektion marks={marks} offeneStempel={offeneStempel} />
+      ) : (
+        <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
           <IonListHeader>
             <div className="app-section-icon app-section-icon--challenges">
               <IonIcon icon={ICON_ABZEICHEN} />
@@ -485,57 +497,17 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
             <IonLabel>Deine Stempel</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
-            <IonCardContent style={{ padding: marks.length === 0 ? 'var(--app-abstand-basis)' : 'var(--app-abstand-basis) var(--app-abstand-mittel)' }}>
-              {marks.length === 0 ? (
-                <EmptyState
-                  icon={ICON_ABZEICHEN}
-                  title="Noch keine Stempel"
-                  message="Mach selbst bei einer Challenge mit — tippe sie an und reiche oben über das Plus deinen Beitrag ein."
-                  iconColor="var(--app-color-challenges)"
-                />
-              ) : (
-              <div
-                style={{
-                  display: 'flex', gap: 'var(--app-abstand-mittelweit)', overflowX: 'auto',
-                  paddingBottom: 'var(--app-abstand-mini)', WebkitOverflowScrolling: 'touch'
-                }}
-              >
-                {marks.map((mark) => (
-                  <div
-                    key={mark.challenge_id}
-                    style={{
-                      display: 'flex', flexDirection: 'column', alignItems: 'center',
-                      gap: 'var(--app-abstand-kompakt)', minWidth: '74px', maxWidth: '92px', flexShrink: 0
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: '52px', height: '52px', borderRadius: 'var(--app-radius-kreis)',
-                        background: 'linear-gradient(135deg, var(--app-color-challenges) 0%, var(--app-color-challenges-dunkel) 100%)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        boxShadow: 'var(--app-schatten-glow-challenges)'
-                      }}
-                    >
-                      <IonIcon
-                        icon={getChallengeBadgeIcon(mark.badge_icon)}
-                        style={{ fontSize: 'var(--app-text-ueberschrift)', color: 'white' }}
-                      />
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 'var(--app-text-meta)', fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-ios)',
-                        textAlign: 'center', lineHeight: 1.2
-                      }}
-                    >
-                      {mark.badge_name}
-                    </div>
-                  </div>
-                ))}
-              </div>
-              )}
+            <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
+              <EmptyState
+                icon={ICON_ABZEICHEN}
+                title="Noch keine Stempel"
+                message="Mach selbst bei einer Challenge mit — tippe sie an und reiche oben über das Plus deinen Beitrag ein."
+                iconColor="var(--app-color-challenges)"
+              />
             </IonCardContent>
           </IonCard>
-      </IonList>
+        </IonList>
+      )}
 
       {/* --- 3. Archiv — heisst in der Konfi-Sicht "Vorbei"; hier bleibt es
               "Archiv", weil die Leitung dort weiter bearbeitet und loescht. --- */}

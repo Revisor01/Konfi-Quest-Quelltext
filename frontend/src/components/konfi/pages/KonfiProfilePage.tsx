@@ -41,25 +41,10 @@ interface KonfiProfile {
   pending_requests: number;
   rank_in_jahrgang?: number;
   total_in_jahrgang?: number;
-  recent_activities: RecentActivity[];
   progress_overview: ProgressOverview;
 }
 
-interface RecentActivity {
-  id: number;
-  title: string;
-  type: 'activity' | 'event' | 'badge' | 'request';
-  points: number;
-  date: string;
-  icon?: string;
-}
-
 interface ProgressOverview {
-  next_badge?: {
-    name: string;
-    points_needed: number;
-    progress_percentage: number;
-  };
   monthly_points: {
     month: string;
     points: number;

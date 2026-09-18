@@ -17,6 +17,7 @@ import {
   ICON_ANHANG,
   ICON_ANTWORTEN,
   ICON_DATEI_GEFUELLT,
+  ICON_ENTFERNEN_GEFUELLT,
   ICON_ENTSPERRT,
   ICON_GEMEINDE_GEFUELLT,
   ICON_GESPERRT,
@@ -32,6 +33,7 @@ import {
   ICON_ORT_GEFUELLT,
   ICON_POKAL_GEFUELLT,
   ICON_QRCODE,
+  ICON_RUECKGAENGIG,
   ICON_SCHUTZ_GEFUELLT,
   ICON_TERMIN_GEFUELLT,
   ICON_UHRZEIT_GEFUELLT,
@@ -39,6 +41,8 @@ import {
 } from '../../shared/icons';
 import { getStatusIcon } from '../../shared/StatusBadge';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
+import { urheberZeile, notizUrheberZeile, checkinZeile } from '../../../utils/anwesenheitUrheber';
+import { teilnahmeDarstellung, listItemKlasse, iconKreisKlasse, eckBadgeKlasse } from '../../../utils/teilnahmeStatus';
 import type { Participant, Unregistration, EventMaterial } from '../../../types/event';
 
 // ---- Shared Types (re-export from main file's interfaces) ----
@@ -74,6 +78,13 @@ export interface EventData {
   // Eigener Status fuer das TEAMER-Kontingent (Migration 120):
   // registration_status daruber rechnet ausschliesslich mit Konfi-Zahlen.
   teamer_registration_status?: 'none' | 'upcoming' | 'open' | 'waitlist' | 'closed' | 'cancelled';
+  // Der EIGENE Buchungsstatus der angemeldeten Person an diesem Termin
+  // (GET /events/:id, eb_user.status). Das Backend liefert ihn seit jeher --
+  // nur der Typ kannte ihn nicht, und deshalb las die Leitungsansicht ihren
+  // eigenen Zusage-Stand aus der Teilnehmerliste, in der die Leitung gar
+  // nicht steht. Optional, weil eine Person ohne Buchung hier
+  // nichts stehen hat -- genau das heisst "noch nicht entschieden".
+  booking_status?: 'confirmed' | 'waitlist' | 'pending' | 'opted_out' | 'excused' | null;
   available_spots: number;
   participants: Participant[];
   timeslots?: Array<{ id: number; start_time: string; end_time: string; max_participants: number; registered_count: number }>;
@@ -94,6 +105,18 @@ export interface EventData {
   created_at: string;
   chat_room_id?: number | null;
   cancelled?: boolean;
+  cancelled_at?: string | null;
+  cancelled_reason?: string | null;
+  cancelled_by_name?: string | null;
+  // Wer den Grund zuletzt gesetzt hat (Migration 152) — steht nur dann in
+  // einer eigenen Zeile, wenn es jemand anderes war als der Absagende.
+  cancelled_reason_set_by_name?: string | null;
+  cancelled_reason_set_at?: string | null;
+  // Wie viele durch DIESE Absage abgemeldet wurden -- also wie viele beim
+  // Zuruecknehmen wieder angemeldet wuerden. Die Rueckfrage
+  // nennt genau diese Zahl. NICHT alle Abgemeldeten: Wer sich vorher selbst
+  // abgemeldet hat oder einzeln abgemeldet wurde, bleibt abgemeldet.
+  durch_absage_abgemeldet_count?: number;
   waitlist_enabled?: boolean;
   max_waitlist_size?: number;
 }
@@ -647,33 +670,50 @@ interface EventActionsSectionProps {
   isCancelled: boolean;
   isOnline: boolean;
   handleCancelEvent: () => void;
+  // Fehlt der Rueckruf, steht am abgesagten Termin gar kein Knopf -- so
+  // verhaelt sich die Leitungsliste beim Wisch auch.
+  handleAbsageZuruecknehmen?: () => void;
 }
 
-// Chat-Zugriff läuft über den Button im Header (EventDetailView), hier nur noch Absage
 export const EventActionsSection = React.memo<EventActionsSectionProps>(({
   eventData,
   isCancelled,
   isOnline,
-  handleCancelEvent
+  handleCancelEvent,
+  handleAbsageZuruecknehmen
 }) => {
-  if (!eventData || isCancelled) return null;
+  if (!eventData) return null;
+  if (isCancelled && !handleAbsageZuruecknehmen) return null;
   return (
     <>
-      {/* Event absagen */}
+      {/* Event absagen bzw. Absage zurücknehmen */}
       <IonList className="app-section-inset" inset={true}>
         <IonCard className="app-card">
           <IonCardContent className="app-card-content">
             <div className="app-event-detail__add-button-wrapper">
-              <IonButton
-                expand="block"
-                fill="outline"
-                color="danger"
-                disabled={!isOnline}
-                onClick={handleCancelEvent}
-              >
-                <IonIcon icon={ICON_GESPERRT} className="app-event-detail__icon-gap" />
-                {!isOnline ? <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Du bist offline</> : 'Event absagen'}
-              </IonButton>
+              {isCancelled ? (
+                <IonButton
+                  expand="block"
+                  fill="outline"
+                  color="success"
+                  disabled={!isOnline}
+                  onClick={handleAbsageZuruecknehmen}
+                >
+                  <IonIcon icon={ICON_RUECKGAENGIG} className="app-event-detail__icon-gap" />
+                  {!isOnline ? <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Du bist offline</> : 'Absage zurücknehmen'}
+                </IonButton>
+              ) : (
+                <IonButton
+                  expand="block"
+                  fill="outline"
+                  color="danger"
+                  disabled={!isOnline}
+                  onClick={handleCancelEvent}
+                >
+                  <IonIcon icon={ICON_GESPERRT} className="app-event-detail__icon-gap" />
+                  {!isOnline ? <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Du bist offline</> : 'Event absagen'}
+                </IonButton>
+              )}
             </div>
           </IonCardContent>
         </IonCard>
@@ -693,6 +733,14 @@ interface TimeslotsSectionProps {
   handleDemoteParticipant: (participant: Participant) => void;
   handleRemoveParticipant: (participant: Participant) => void;
   showWaitlistActionSheet?: (participant: Participant) => void;
+  /**
+   * Darf diese Person Teilnehmende verwalten? Die Liste hier ist
+   * ein ZWEITER Renderpfad neben EventDetailView -- Zeilen-Tipp und Swipe sind
+   * hier noch einmal ausgeschrieben. Ohne dieses Prop blieben sie fuer
+   * Teamer:innen sichtbar, obwohl das Backend mit 403 antwortet.
+   * Fehlt es, wird verwaltet wie bisher (true).
+   */
+  darfVerwalten?: boolean;
 }
 
 export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
@@ -703,7 +751,8 @@ export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
   showAttendanceActionSheet,
   handleDemoteParticipant,
   handleRemoveParticipant,
-  showWaitlistActionSheet
+  showWaitlistActionSheet,
+  darfVerwalten = true
 }) => (
   <IonList className="app-section-inset" inset={true}>
     <IonListHeader>
@@ -727,7 +776,9 @@ export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
             }
             return false;
           };
-          const slotParticipants = participants.filter(p => p.status === 'confirmed' && matchesSlot(p));
+          const slotParticipants = participants.filter(
+            p => ['confirmed', 'excused', 'opted_out'].includes(p.status || '') && matchesSlot(p)
+          );
           const slotWaitlist = participants.filter(p => p.status === 'waitlist' && matchesSlot(p));
           const isFull = (timeslot.registered_count || 0) >= timeslot.max_participants;
           const waitlistCount = timeslot.waitlist_count || 0;
@@ -762,15 +813,14 @@ export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
               {slotParticipants.length > 0 && (
                 <div className="app-event-detail__slot-participants">
                   {slotParticipants.map((participant) => {
-                    const statusText = participant.attendance_status === 'present' ? 'Anwesend' :
-                                       participant.attendance_status === 'absent' ? 'Abwesend' : 'Gebucht';
-                    const cornerBadgeClass = participant.attendance_status === 'present' ? 'app-corner-badge--success' :
-                                             participant.attendance_status === 'absent' ? 'app-corner-badge--danger' : 'app-corner-badge--info';
-                    const listItemClass = participant.attendance_status === 'present' ? 'app-list-item--success' :
-                                          participant.attendance_status === 'absent' ? 'app-list-item--danger' : 'app-list-item--booked';
+                    const darstellung = teilnahmeDarstellung(participant);
+                    const istAbgemeldet = darstellung.istAbgemeldet || darstellung.istNachgetragen;
+                    const statusText = darstellung.statusText;
+                    const cornerBadgeClass = eckBadgeKlasse(darstellung);
+                    const listItemClass = listItemKlasse(darstellung);
                     return (
                       <IonItemSliding key={participant.id} className="app-event-detail__sliding-item">
-                        <IonItem className="app-item-transparent" button detail={false} lines="none"
+                        <IonItem className="app-item-transparent" button={darfVerwalten} detail={false} lines="none"
                           onClick={() => showAttendanceActionSheet(participant)}>
                           <div className={`app-list-item ${listItemClass} app-event-detail__list-item-flush`}>
                             <div className="app-corner-badges">
@@ -784,22 +834,68 @@ export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
                             </div>
                             <div className="app-list-item__row">
                               <div className="app-list-item__main">
-                                <div className={`app-icon-circle ${
-                                  participant.attendance_status === 'present' ? 'app-icon-circle--success' :
-                                  participant.attendance_status === 'absent' ? 'app-icon-circle--danger' : 'app-icon-circle--info'
-                                }`}>
-                                  <IonIcon icon={participant.attendance_status === 'present' ? ICON_ZUSAGE_GEFUELLT :
+                                <div className={`app-icon-circle ${iconKreisKlasse(darstellung)}`}>
+                                  <IonIcon icon={darstellung.istAbgemeldet ? ICON_ABSAGE :
+                                        darstellung.istNachgetragen ? ICON_ENTFERNEN_GEFUELLT :
+                                        participant.attendance_status === 'present' ? ICON_ZUSAGE_GEFUELLT :
                                         participant.attendance_status === 'absent' ? ICON_ABSAGE : ICON_GRUPPE_GEFUELLT} />
                                 </div>
                                 <div className="app-list-item__content">
                                   <div className="app-list-item__title app-list-item__title--badge-space-lg">{participant.participant_name}</div>
                                   <div className="app-list-item__subtitle">{participant.jahrgang_name || ''}</div>
+                                  {participant.status === 'opted_out' && (participant.opt_out_reason || participant.absage_nach_zusage) && (
+                                    <div style={{ color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                                      {participant.absage_nach_zusage && (
+                                        <strong>Nach Zusage abgesagt{participant.opt_out_reason ? ': ' : ''}</strong>
+                                      )}
+                                      {!participant.absage_nach_zusage && participant.attendance_status && (
+                                        <strong>Hatte sich abgemeldet{participant.opt_out_reason ? ': ' : ''}</strong>
+                                      )}
+                                      {participant.opt_out_reason}
+                                    </div>
+                                  )}
+                                  {istAbgemeldet && participant.excuse_reason && (
+                                    <div style={{ color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                                      <strong>Abgemeldet: </strong>{participant.excuse_reason}
+                                    </div>
+                                  )}
+                                  {/* Wer den Status samt Grund gesetzt hat
+                                      — dieselben Zeilen wie in
+                                      der Teilnehmerliste. Ohne Urheber faellt
+                                      die Zeile weg. */}
+                                  {urheberZeile(participant) && (
+                                    <div style={{ color: 'var(--app-text-tertiary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                                      {urheberZeile(participant)}
+                                    </div>
+                                  )}
+                                  {/* Der Selbst-Check-in nennt keine Person,
+                                      sondern die Quelle (Migration 151) —
+                                      dieselbe Zeile wie in der
+                                      Teilnehmerliste. */}
+                                  {checkinZeile(participant) && (
+                                    <div style={{ color: 'var(--app-text-tertiary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                                      {checkinZeile(participant)}
+                                    </div>
+                                  )}
+                                  {participant.attendance_note && (
+                                    <div style={{ color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                                      <strong>Notiz: </strong>{participant.attendance_note}
+                                    </div>
+                                  )}
+                                  {/* Die Notiz hat ihren eigenen Urheber
+                                      (Migration 149) — sie kann von jemand
+                                      anderem stammen als der Status. */}
+                                  {participant.attendance_note && notizUrheberZeile(participant) && (
+                                    <div style={{ color: 'var(--app-text-tertiary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                                      {notizUrheberZeile(participant)}
+                                    </div>
+                                  )}
                                 </div>
                               </div>
                             </div>
                           </div>
                         </IonItem>
-                        {!eventMandatory && (
+                        {darfVerwalten && !eventMandatory && (
                         <IonItemOptions className="app-swipe-actions" side="end">
                           <IonItemOption className="app-swipe-action" onClick={() => { closeOpenSlidingItems(); handleDemoteParticipant(participant); }} aria-label="Auf Warteliste setzen">
                             <div className="app-icon-circle app-icon-circle--lg app-icon-circle--warning">

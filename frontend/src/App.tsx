@@ -1,6 +1,6 @@
 import React, { useEffect, useCallback } from 'react';
 import { Navigate, Route } from 'react-router-dom';
-import { IonApp, IonRouterOutlet, setupIonicReact, isPlatform, useIonAlert } from '@ionic/react';
+import { IonApp, IonRouterOutlet, IonSpinner, setupIonicReact, isPlatform, useIonAlert } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
 // iOS26 Theme Animationen
 import { iosTransitionAnimation, popoverEnterAnimation, popoverLeaveAnimation } from '@rdlabo/ionic-theme-ios26';
@@ -18,6 +18,23 @@ import MainTabs from './components/layout/MainTabs';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import GlobalToasts from './components/common/GlobalToasts';
 import WartendeVorgaengeLeiste from './components/common/WartendeVorgaengeLeiste';
+import AppSperrbildschirm from './components/common/AppSperrbildschirm';
+import AppAbdeckung from './components/common/AppAbdeckung';
+import { useAppSperre } from './hooks/useAppSperre';
+import { useSeitenBereit } from './navigation/useSeitenBereit';
+
+/**
+ * Ladebildschirm VOR dem Router — bewusst KEINE IonPage.
+ *
+ * Eine IonPage waere eine Seite und wuerde, sobald sie in einem Outlet
+ * landet, genau den Tausch ausloesen, den dieser Bildschirm vermeiden soll.
+ * Hier steht deshalb schlichtes Markup ausserhalb jedes Outlets.
+ */
+const AppLaedt: React.FC = () => (
+  <div className="app-laedt">
+    <IonSpinner name="crescent" />
+  </div>
+);
 
 /* Core CSS required for Ionic components to work properly */
 import '@ionic/react/css/core.css';
@@ -63,7 +80,18 @@ setupIonicReact({
 
 
 const AppContent: React.FC = () => {
-  const { user, setUser, orgVersion } = useApp();
+  const { user, setUser, orgVersion, signOut } = useApp();
+
+  // App-Sperre: Face ID / Fingerabdruck vor der bereits angemeldeten App.
+  // Der Hook laeuft immer mit (er muss den Hintergrundwechsel auch dann
+  // mitbekommen, wenn gerade niemand angemeldet ist), der Sperrbildschirm
+  // erscheint aber nur ueber der angemeldeten App — auf der Anmeldeseite gibt
+  // es nichts zu verdecken, und ein Schloss vor dem Login waere eine Sackgasse.
+  const { gesperrt, startGeklaert, verdeckt, entsperren } = useAppSperre();
+
+  // Seitenbaum der Rolle vorladen. Das Ergebnis entscheidet unten, ob der
+  // Router schon montiert werden darf — siehe die Begruendung dort.
+  const seitenBereit = useSeitenBereit();
 
   // HINWEIS: Push-Listener (Empfang, Tap-Navigation, Counts-Refresh) liegen
   // zentral in AppContext. Frueher rief AppContent hier removeAllListeners()
@@ -136,6 +164,11 @@ const AppContent: React.FC = () => {
             <Route path="*" element={<Navigate to="/login" replace />} />
           </IonRouterOutlet>
         </IonReactRouter>
+        {/* Auch hier: Auf der Anmeldeseite kann ein eingetippter Benutzername
+            stehen, und nach dem Abmelden ist die letzte Ansicht unter Umstaenden
+            noch im Vorschaubild. Die Abdeckung liegt deshalb ueber JEDEM
+            Zustand, nicht nur ueber der angemeldeten App. */}
+        {verdeckt && <AppAbdeckung />}
       </IonApp>
     );
   }
@@ -144,6 +177,35 @@ const AppContent: React.FC = () => {
   // key={orgVersion}: Bei einem Org-Wechsel (Multi-Org-Switcher) wird orgVersion
   // erhöht -> der gesamte Router-Subtree remountet frisch und alle Views laden
   // mit dem neuen aktiven-Org-Header neu. Ersetzt den fragilen location-Reload.
+  // Der Seitenbaum der Rolle muss stehen, BEVOR der Router montiert wird.
+  //
+  // Jetzt wird der Router erst montiert, wenn der Baum endgueltig ist. Das
+  // Outlet sieht dadurch nie einen Tausch. Bis dahin steht ein Ladebildschirm
+  // AUSSERHALB jedes Outlets -- er ist keine Seite und kann keine verdraengen.
+  //
+  // `startGeklaert` beantwortet genau diese Frage, und sie wird hier
+  // beantwortet: VOR dem Rendern, wie beim Seitenbaum daneben. Bis dahin
+  // steht derselbe neutrale Ladebildschirm, den der Kaltstart ohnehin zeigt —
+  // bewusst NICHT die Abdeckung mit dem Logo: Wer die Sperre auf 'aus' hat
+  // (die Voreinstellung), saehe sonst ein Logo aufblitzen, das gleich wieder
+  // verschwindet. Ein Aufblitzen gegen ein anderes zu tauschen waere kein
+  // Gewinn. Im Browser steht `startGeklaert` sofort auf true und diese
+  // Bedingung kostet dort nichts.
+  if (!seitenBereit || !startGeklaert) {
+    return (
+      <IonApp>
+        <AppLaedt />
+        {gesperrt && (
+          <AppSperrbildschirm
+            onEntsperrt={entsperren}
+            onAbmelden={async () => { entsperren(); await signOut(); }}
+          />
+        )}
+        {verdeckt && <AppAbdeckung />}
+      </IonApp>
+    );
+  }
+
   return (
     <IonApp>
       <IonReactRouter key={orgVersion}>
@@ -154,6 +216,28 @@ const AppContent: React.FC = () => {
       </IonReactRouter>
       <GlobalToasts />
       <WartendeVorgaengeLeiste />
+      {/* Der Sperrbildschirm liegt OBEN DRAUF, statt den Baum zu ersetzen.
+          Ein Austausch wuerde MainTabs bei jedem Sperren neu montieren — genau
+          das Muster, das in dieser App schon zu weissen Seiten gefuehrt hat
+          (siehe Kommentar zum orgVersion-Schluessel oben). Verdeckt wird
+          vollstaendig und deckend, es scheint nichts durch. */}
+      {gesperrt && (
+        <AppSperrbildschirm
+          onEntsperrt={entsperren}
+          onAbmelden={async () => {
+            // Erst die Sperre loesen, dann abmelden. Andernfalls stuende das
+            // Schloss nach dem naechsten Anmelden sofort wieder da — der
+            // Rueckweg fuehrte im Kreis statt heraus.
+            entsperren();
+            await signOut();
+          }}
+        />
+      )}
+      {/* Die Abdeckung steht ZULETZT und damit ueber dem Sperrbildschirm.
+          Beim Wegwechseln kann beides gleichzeitig anstehen — dann gehoert
+          ins Vorschaubild die neutrale Flaeche, nicht der bedienbare
+          Sperrbildschirm. */}
+      {verdeckt && <AppAbdeckung />}
     </IonApp>
   );
 };

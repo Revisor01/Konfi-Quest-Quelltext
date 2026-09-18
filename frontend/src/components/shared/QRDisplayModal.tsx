@@ -49,11 +49,21 @@ const QRDisplayModal: React.FC<QRDisplayModalProps> = ({ eventId, eventName, eve
     });
   };
 
+  // Abbruch-Merker: Die Aufraeumfunktion lief bisher ins Leere,
+  // wenn das Modal geschlossen wurde, WAEHREND loadQR noch auf den Server und
+  // die QR-Erzeugung wartete — pollRef.current war dann noch null, und der
+  // danach gesetzte Intervall fragte bis zum App-Neustart alle 10 Sekunden
+  // weiter ab, unsichtbar. Mehrfaches Oeffnen summierte die Timer.
+  const abgebrochenRef = useRef(false);
+
   useEffect(() => {
+    abgebrochenRef.current = false;
     loadQR();
     return () => {
+      abgebrochenRef.current = true;
       if (pollRef.current) {
         clearInterval(pollRef.current);
+        pollRef.current = null;
       }
     };
   }, []);
@@ -70,15 +80,20 @@ const QRDisplayModal: React.FC<QRDisplayModalProps> = ({ eventId, eventName, eve
         errorCorrectionLevel: 'H',
         color: { dark: QR_FARBEN.dunkel, light: QR_FARBEN.hell }
       });
+
+      // Inzwischen geschlossen: weder anzeigen noch mit dem Abfragen anfangen.
+      if (abgebrochenRef.current) return;
+
       setQrDataUrl(dataUrl);
 
       // Start polling
       fetchAttendance();
       pollRef.current = setInterval(fetchAttendance, 10000);
     } catch (err) {
+      if (abgebrochenRef.current) return;
       setError(fehlerText(err, 'QR-Code konnte nicht generiert werden'));
     } finally {
-      setLoading(false);
+      if (!abgebrochenRef.current) setLoading(false);
     }
   };
 

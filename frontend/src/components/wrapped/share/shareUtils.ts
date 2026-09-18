@@ -1,7 +1,7 @@
 import { toPng } from 'html-to-image';
 import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
-import { Share } from '@capacitor/share';
+import { teilen, teilenImBrowser } from '../../../services/systemDialoge';
 
 export interface ShareTextData {
   wrappedType: 'konfi' | 'teamer';
@@ -108,7 +108,7 @@ async function teileImBrowser(
     const blob = await (await fetch(dataUrl)).blob();
     const datei = new File([blob], dateiname, { type: 'image/png' });
     if (navigator.canShare?.({ files: [datei] })) {
-      await navigator.share({
+      await teilenImBrowser({
         files: [datei],
         title: wrappedType === 'teamer' ? 'Mein Teamer Wrapped' : 'Mein Konfi Wrapped',
         text: generateFallbackText(textFallbackData),
@@ -162,7 +162,7 @@ export async function shareSlide(
         directory: Directory.Cache,
       });
 
-      await Share.share({ files: [fileUri.uri] });
+      await teilen({ files: [fileUri.uri] });
       return { art: 'geteilt' };
     }
     return await teileImBrowser(dataUrl, slideKey, wrappedType, textFallbackData);
@@ -183,14 +183,18 @@ async function teileNurText(
   const fallbackText = generateFallbackText(textFallbackData);
   try {
     if (Capacitor.isNativePlatform()) {
-      await Share.share({
+      await teilen({
         title: wrappedType === 'teamer' ? 'Mein Teamer Wrapped' : 'Mein Konfi Wrapped',
         text: fallbackText,
       });
       return { art: 'nur-text' };
     }
-    if (navigator.share) {
-      await navigator.share({ text: fallbackText });
+    // typeof statt `if (navigator.share)`: seit das Teilen ueber
+    // teilenImBrowser laeuft, sieht TypeScript in der Kurzform eine immer
+    // wahre Bedingung. Geprueft werden soll aber weiterhin, ob der Browser
+    // ueberhaupt teilen kann — auf dem Desktop kann er es oft nicht.
+    if (typeof navigator.share === 'function') {
+      await teilenImBrowser({ text: fallbackText });
       return { art: 'nur-text' };
     }
     if (navigator.clipboard) {

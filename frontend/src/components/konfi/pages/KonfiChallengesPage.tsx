@@ -22,7 +22,7 @@ import ChallengeDetailModal from '../modals/ChallengeDetailModal';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import type { KonfiChallenge, KonfiChallengesResponse } from '../../../types/challenges';
 
-const EMPTY_RESPONSE: KonfiChallengesResponse = { active: [], archive: [], marks: [] };
+const EMPTY_RESPONSE: KonfiChallengesResponse = { active: [], archive: [], marks: [], offene_stempel: [] };
 
 const KonfiChallengesPage: React.FC = () => {
   const { user } = useApp();
@@ -39,6 +39,9 @@ const KonfiChallengesPage: React.FC = () => {
   const active = Array.isArray(response.active) ? response.active : [];
   const archive = Array.isArray(response.archive) ? response.archive : [];
   const marks = Array.isArray(response.marks) ? response.marks : [];
+  // Noch nicht erhaltene Stempel (grau). Faellt still weg, wenn ein alter
+  // Cache-Eintrag oder ein aelterer Server das Feld nicht traegt.
+  const offeneStempel = Array.isArray(response.offene_stempel) ? response.offene_stempel : [];
 
   const [selectedChallenge, setSelectedChallenge] = useState<KonfiChallenge | null>(null);
 
@@ -113,6 +116,7 @@ const KonfiChallengesPage: React.FC = () => {
             active={active}
             archive={archive}
             marks={marks}
+            offeneStempel={offeneStempel}
             onSelectChallenge={handleSelectChallenge}
           />
         )}

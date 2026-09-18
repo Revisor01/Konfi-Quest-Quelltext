@@ -34,18 +34,17 @@ import {
   ICON_VIDEO,
   ICON_WELT,
 } from '../../shared/icons';
-import { Haptics, ImpactStyle } from '@capacitor/haptics';
 // Native FileViewer über openFileNatively, FileViewerModal als Web-Fallback
 import { openFileNatively } from '../../../utils/nativeFileViewer';
 import { useApp } from '../../../contexts/AppContext';
-import api from '../../../services/api';
+import api, { DATEI_TIMEOUT_MS } from '../../../services/api';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../../services/offlineCache';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import EmptyState from '../../shared/EmptyState';
 import { SectionHeader } from '../../shared';
 import FileViewerModal, { FileItem } from '../../shared/FileViewerModal';
-import { triggerPullHaptic } from '../../../utils/haptics';
+import { haptik, triggerPullHaptic, ImpactStyle } from '../../../utils/haptics';
 import { istWebLink, hostAus, materialLinks } from '../../../utils/linkDisplay';
 
 interface MaterialFile {
@@ -125,8 +124,8 @@ const TeamerMaterialDetailPage: React.FC<TeamerMaterialDetailProps> = ({ materia
 
   const openFile = async (file: MaterialFile) => {
     try {
-      await Haptics.impact({ style: ImpactStyle.Medium });
-      const response = await api.get(`/material/files/${file.stored_name}`, { responseType: 'blob' });
+      await haptik(ImpactStyle.Medium);
+      const response = await api.get(`/material/files/${file.stored_name}`, { responseType: 'blob', timeout: DATEI_TIMEOUT_MS });
       const blob = response.data;
       const contentType = response.headers?.['content-type'];
       const mime: string = typeof contentType === 'string' ? contentType : file.mime_type;
@@ -147,8 +146,8 @@ const TeamerMaterialDetailPage: React.FC<TeamerMaterialDetailProps> = ({ materia
       }
       viewerRef.current = { files, initialIndex: Math.max(0, clickedIdx) };
       presentFileViewer({ cssClass: 'file-viewer-modal' });
-    } catch {
-      setError('Fehler beim Öffnen der Datei');
+    } catch (err) {
+      setError('Fehler beim Öffnen der Datei', { ort: 'material-teamer-detail', fehler: err });
     }
   };
 
@@ -161,7 +160,7 @@ const TeamerMaterialDetailPage: React.FC<TeamerMaterialDetailProps> = ({ materia
       setError('Der Link konnte nicht geöffnet werden');
       return;
     }
-    await Haptics.impact({ style: ImpactStyle.Medium });
+    await haptik(ImpactStyle.Medium);
     window.open(url, '_blank');
   };
 

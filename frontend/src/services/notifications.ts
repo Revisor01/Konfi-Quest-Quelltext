@@ -173,6 +173,7 @@ const EVENT_NOTIFICATION_TYPES = new Set([
   'event_attendance',
   'event_reminder',
   'event_cancelled',
+  'event_reactivated',
   'event_unregistration',
   'events_pending_approval',
 ]);

@@ -47,6 +47,7 @@ import { compressImage } from '../../../services/mediaCompression';
 import { pruefeMusikLink, ERLAUBTE_DIENSTE_TEXT } from '../../../utils/musikLinks';
 import { getVisibilityInfo, getSuccessMessage } from '../../../utils/challengeTexte';
 import { AudioPlayer } from '../../shared';
+import { ohneSperre } from '../../../services/appSperre';
 import type {
   KonfiChallenge,
   ChallengeMediaType,
@@ -199,7 +200,12 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
   // Jetzt gewinnt immer die echte Auswahl: das native 'cancel'-Event löst sofort
   // auf, der Fokus-Fallback wartet grosszuegig (15 s) und prüft davor noch
   // einmal, ob inzwischen doch eine Datei angekommen ist.
-  const openFilePicker = (accept: string): Promise<File | null> => {
+  // ohneSperre: Die Dateiauswahl legt die App in den Hintergrund, ohne dass die
+  // Person sie verlaesst — wer laenger in der Fotomediathek blaettert, saesse
+  // beim Zurueckkommen sonst vor dem Sperrbildschirm (siehe services/appSperre).
+  // Die Klammer endet genau dann, wenn das Versprechen einloest: Datei da,
+  // abgebrochen oder Frist abgelaufen.
+  const openFilePicker = (accept: string): Promise<File | null> => ohneSperre(() => {
     return new Promise<File | null>((resolve) => {
       const input = document.createElement('input');
       input.type = 'file';
@@ -240,7 +246,7 @@ const ChallengeSubmitForm: React.FC<ChallengeSubmitFormProps> = ({
       window.addEventListener('focus', onFocus, { once: true });
       input.click();
     });
-  };
+  });
 
   // --- Foto: verstecktes <input type="file"> statt Capacitor Camera.getPhoto.
   // Camera.getPhoto mit CameraSource.Prompt schlug in TestFlight beim Antippen

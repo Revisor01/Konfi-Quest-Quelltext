@@ -32,7 +32,7 @@ import AttendanceMatrixModal from '../modals/AttendanceMatrixModal';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { OrgSwitcherButton } from '../../shared';
 import AdminOnboardingModal from '../modals/AdminOnboardingModal';
-import AdminUpdate211WalkthroughModal from '../modals/AdminUpdate211WalkthroughModal';
+import AdminUpdate220WalkthroughModal from '../modals/AdminUpdate220WalkthroughModal';
 import { useOnboardingWithUpdateOnce } from '../../../hooks/useOnboardingOnce';
 import NeuerungenBanner from '../../shared/NeuerungenBanner';
 import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
@@ -85,10 +85,12 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
   const { pageRef, presentingElement } = useModalPage('admin-konfis');
   // Onboarding-Tour einmal pro Admin-Account (beim ersten Betreten der Konfis-Seite,
   // der Landing-Page für Admins/Org-Admins) — bzw. für Bestandsnutzer die
-  // Neuigkeiten-Karte "Was ist neu in Version 2.0". Der Walkthrough öffnet
-  // sich über die Karte oder dauerhaft über "Was ist neu?" in den Einstellungen.
+  // Änderungsanzeige nach einem Update. Nie beides gleichzeitig, dafür sorgt
+  // der Hook; die Anzeige meldet sich genau einmal je Minor-Version von
+  // selbst und bleibt dauerhaft über "Was ist neu?" unter "Mehr" erreichbar.
   const {
     showOnboarding, closeOnboarding,
+    showNeuerungen, schliesseNeuerungen,
     showUpdateHinweis, markUpdateHinweisGesehen,
     showMitmachenHinweis, markMitmachenHinweisGesehen
   } = useOnboardingWithUpdateOnce('admin_onboarding_seen', user?.id);
@@ -424,9 +426,17 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
         />
       )}
 
-      {/* "Was ist neu"-Walkthrough — geöffnet über die Neuigkeiten-Karte */}
+      {/* Änderungsanzeige nach einem Update — meldet sich VON SELBST, genau
+          einmal je Minor-Version (useOnboardingWithUpdateOnce). Sie und die
+          Onboarding-Tour schließen sich gegenseitig aus; die Neuigkeiten-
+          Karte bleibt weg, solange sie offen ist. */}
+      {showNeuerungen && (
+        <AdminUpdate220WalkthroughModal onClose={schliesseNeuerungen} />
+      )}
+
+      {/* Derselbe Walkthrough — hier über die Neuigkeiten-Karte geöffnet. */}
       {showUpdateWalkthrough && (
-        <AdminUpdate211WalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
+        <AdminUpdate220WalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
       )}
 
       {showMitmachenErklaerung && (

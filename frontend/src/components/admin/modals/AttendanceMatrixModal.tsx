@@ -68,7 +68,10 @@ interface Booking {
   event_id: number;
   user_id: number;
   status: string | null;
-  attendance_status: 'present' | 'absent' | null;
+  // 'excused': von der Leitung nachgetragene Abmeldung.
+  attendance_status: 'present' | 'absent' | 'excused' | null;
+  excuse_reason?: string | null;
+  attendance_note?: string | null;
 }
 
 interface MatrixResponse {
@@ -414,20 +417,29 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
                   <tbody>
                     {filteredKonfis.map(k => {
                       const stats = konfiStats.get(k.user_id)
-                        || { present: 0, absent: 0, open: 0, opted_out: 0, nenner: 0 };
+                        || { present: 0, absent: 0, excused: 0, open: 0, opted_out: 0, nenner: 0 };
                       return (
                         <tr key={k.user_id}>
                           <td className="attendance-matrix__td-konfi">{k.display_name}</td>
                           {data.events.map(e => {
                             const s = getCellStatus(k.user_id, e.id);
+                            const b = bookingMap.get(`${k.user_id}-${e.id}`);
+                            // Grund und Notiz als Tooltip an der Zelle: Die
+                            // Matrix ist die Uebersicht, in der die Kolleginnen
+                            // nachsehen -- ohne das waere nur das graue Zeichen
+                            // da und die Frage "warum?" unbeantwortet.
+                            const hinweis = [
+                              s === 'excused' ? b?.excuse_reason : null,
+                              b?.attendance_note
+                            ].filter(Boolean).join(' · ');
                             return (
-                              <td key={e.id} className="attendance-matrix__td-cell">
+                              <td key={e.id} className="attendance-matrix__td-cell" title={hinweis || undefined}>
                                 <span className={`attendance-matrix__dot attendance-matrix__dot--${s}`}>
                                   <IonIcon
                                     icon={
                                       s === 'present' ? ICON_ZUSAGE_GEFUELLT
                                       : s === 'absent' ? ICON_ABSAGE
-                                      : s === 'opted_out' ? ICON_ENTFERNEN_GEFUELLT
+                                      : s === 'opted_out' || s === 'excused' ? ICON_ENTFERNEN_GEFUELLT
                                       : ICON_KREIS_LEER
                                     }
                                   />
@@ -474,6 +486,16 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
                       <IonIcon icon={ICON_ENTFERNEN_GEFUELLT} />
                     </span>
                     <span>Abgemeldet</span>
+                  </div>
+                  {/* Zweiter Abmelde-Weg: die Leitung traegt nach, was
+                      ausserhalb der App gemeldet wurde. Gleiches Zeichen,
+                      gleiche Wirkung auf den Nenner — aber eine andere
+                      Herkunft, deshalb ein eigener Eintrag. */}
+                  <div className="attendance-matrix__legend-item">
+                    <span className="attendance-matrix__dot attendance-matrix__dot--excused">
+                      <IonIcon icon={ICON_ENTFERNEN_GEFUELLT} />
+                    </span>
+                    <span>Abgemeldet (nachgetragen)</span>
                   </div>
                   <div className="attendance-matrix__legend-item">
                     <span className="attendance-matrix__dot attendance-matrix__dot--open">

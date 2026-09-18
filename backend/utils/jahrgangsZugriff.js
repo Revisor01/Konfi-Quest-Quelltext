@@ -100,4 +100,45 @@ async function darfKonfi(db, req, konfiId, { edit = false } = {}) {
   };
 }
 
-module.exports = { darfJahrgang, darfKonfi };
+/**
+ * Darf der Aufrufer diesen TERMIN bearbeiten?
+ *
+ * Die Regel folgt genau der Listen-Route, damit beide dasselbe meinen:
+ *   - reine Teamer-Termine: immer erlaubt (haengen an keinem Jahrgang)
+ *   - Termine ohne Jahrgangszuordnung: immer erlaubt (allgemeine Termine)
+ *   - jahrgangsgebundene Termine: nur bei Ueberschneidung mit den eigenen
+ *   - org_admin / super_admin: ausgenommen (ueber darfJahrgang)
+ *
+ * @param {object} db          Pool oder Client (muss .query haben).
+ * @param {object} req
+ * @param {number|string} eventId
+ * @param {object} [optionen]
+ * @param {boolean} [optionen.edit=false]  true -> can_edit statt can_view.
+ * @returns {Promise<{gefunden: boolean, erlaubt: boolean}>}
+ */
+async function darfTermin(db, req, eventId, { edit = false } = {}) {
+  const { rows: [termin] } = await db.query(
+    `SELECT e.teamer_only,
+            ARRAY_REMOVE(ARRAY_AGG(eja.jahrgang_id), NULL) AS jahrgang_ids
+     FROM events e
+     LEFT JOIN event_jahrgang_assignments eja ON eja.event_id = e.id
+     WHERE e.id = $1
+     GROUP BY e.id, e.teamer_only`,
+    [eventId]
+  );
+
+  if (!termin) return { gefunden: false, erlaubt: false };
+
+  // Reine Teamer-Termine haengen an keinem Jahrgang — es gibt nichts zu
+  // schuetzen, und sie sind laut Sollregel ausdruecklich ausgenommen.
+  if (termin.teamer_only) return { gefunden: true, erlaubt: true };
+
+  // Allgemeine Termine (keine Zuordnung) sind fuer alle da.
+  const ids = termin.jahrgang_ids || [];
+  if (ids.length === 0) return { gefunden: true, erlaubt: true };
+
+  // Sonst genuegt EIN gemeinsamer Jahrgang — wie in der Listen-Route.
+  return { gefunden: true, erlaubt: ids.some(id => darfJahrgang(req, id, { edit })) };
+}
+
+module.exports = { darfJahrgang, darfKonfi, darfTermin };

@@ -41,12 +41,12 @@ import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import { CACHE_TTL } from '../../../services/offlineCache';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import WrappedModal from '../../wrapped/WrappedModal';
-import { ProfileHeaderButton, TrialBanner, StoreUpdateBanner } from '../../shared';
+import { ProfileHeaderButton, TrialBanner, StoreUpdateBanner, AbsageBlock, istAbgesagt, titelDekoration } from '../../shared';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { mergeSectionOrder, DEFAULT_TEAMER_SECTION_ORDER } from '../../../utils/sectionOrder';
 import KonfispruchSelectModal from '../../konfi/modals/KonfispruchSelectModal';
 import TeamerOnboardingModal from '../modals/TeamerOnboardingModal';
-import TeamerUpdate211WalkthroughModal from '../modals/TeamerUpdate211WalkthroughModal';
+import TeamerUpdate220WalkthroughModal from '../modals/TeamerUpdate220WalkthroughModal';
 import { useOnboardingWithUpdateOnce } from '../../../hooks/useOnboardingOnce';
 import NeuerungenBanner from '../../shared/NeuerungenBanner';
 import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
@@ -203,11 +203,13 @@ const TeamerDashboardPage: React.FC = () => {
   const { user, setError } = useApp();
   const [showLosung] = useState(() => Math.random() > 0.5);
   // Onboarding-Tour einmal pro Teamer-Account (beim ersten Betreten der
-  // Startseite) — bzw. für Bestandsnutzer die Neuigkeiten-Karte "Was ist neu
-  // in Version 2.0". Nie beides gleichzeitig; der Walkthrough öffnet sich
-  // über die Karte oder dauerhaft über "Was ist neu?" im Profil.
+  // Startseite) — bzw. für Bestandsnutzer die Änderungsanzeige nach einem
+  // Update. Nie beides gleichzeitig, dafür sorgt der Hook; die Anzeige meldet
+  // sich genau einmal je Minor-Version von selbst und bleibt dauerhaft über
+  // "Was ist neu?" im Profil erreichbar.
   const {
     showOnboarding, closeOnboarding,
+    showNeuerungen, schliesseNeuerungen,
     showUpdateHinweis, markUpdateHinweisGesehen,
     showMitmachenHinweis, markMitmachenHinweisGesehen
   } = useOnboardingWithUpdateOnce('teamer_onboarding_seen', user?.id);
@@ -445,8 +447,44 @@ const TeamerDashboardPage: React.FC = () => {
   const recentVisibleCount = visibleBadges.filter((b) => earnedIds.has(b.id) && isRecent(b)).length;
   const recentSecretCount = secretEarned.filter((b) => isRecent(b)).length;
 
+  // Bis hierher stand an dieser Stelle `return <LoadingSpinner fullScreen />`
+  // -- und der bringt seine EIGENE IonPage mit. Die Startseite lieferte damit
+  // nacheinander zwei verschiedene Wurzel-KOMPONENTEN (LoadingSpinner, dann
+  // IonPage). React kann bei einem Wechsel des Komponententyps das DOM-Element
+  // nicht wiederverwenden: Es wirft das alte weg und baut ein neues. Daran
+  // haengt der weisse Start:
+  //
+  //   1. Ladebildschirm -> Element A. Ionic haengt im ref-Callback synchron
+  //      `ion-page-invisible` an (@ionic/react, IonPage.stableMergedRefs).
+  //      Der Wechsel in den Tab laeuft als Uebergang und nimmt die Klasse ab.
+  //   2. Daten da, `loading` faellt -> Element A wird verworfen, Element B
+  //      gebaut. Dessen ref-Callback haengt `ion-page-invisible` ERNEUT an.
+  //      Nur: Die Route hat sich nicht geaendert, es laeuft kein zweiter
+  //      Uebergang, und niemand nimmt die Klasse je wieder ab.
+  //
+  // Ergebnis ist genau das beobachtete Bild: Die Tab-Leiste steht (sie haengt
+  // ausserhalb des Router-Outlets), der Seiteninhalt ist unsichtbar -- weiss.
+  // Wegnavigieren und zurueck loest einen echten Uebergang aus, der die Klasse
+  // abnimmt; deshalb war "danach alles da".
+  //
+  // Deshalb ist die Wurzel jetzt in BEIDEN Zustaenden eine IonPage. React
+  // erkennt denselben Typ an derselben Stelle und behaelt dasselbe
+  // DOM-Element -- kein zweites `ion-page-invisible`. Die Leitungsseiten
+  // machen das schon immer so (AdminCategoriesPage, AdminCertificatesPage) --
+  // deshalb war die Leitung als einzige Rolle nicht betroffen.
   if (loading) {
-    return <LoadingSpinner fullScreen message="Dashboard wird geladen..." />;
+    return (
+      <IonPage>
+        <IonHeader translucent={true}>
+          <IonToolbar>
+            <IonTitle>Konfi Quest</IonTitle>
+          </IonToolbar>
+        </IonHeader>
+        <IonContent className="app-gradient-background" fullscreen>
+          <LoadingSpinner message="Dashboard wird geladen..." />
+        </IonContent>
+      </IonPage>
+    );
   }
 
   return (
@@ -905,7 +943,7 @@ const TeamerDashboardPage: React.FC = () => {
                               : undefined,
                             position: 'relative',
                             overflow: 'hidden',
-                            border: event.cancelled
+                            border: istAbgesagt(event)
                               ? '2px dashed rgba(255,255,255,0.3)'
                               : isWaitlist
                                 ? '2px solid rgba(var(--app-wrapped-gold-rgb), 0.5)'
@@ -919,7 +957,7 @@ const TeamerDashboardPage: React.FC = () => {
                             position: 'absolute',
                             top: '0',
                             right: '0',
-                            background: event.cancelled
+                            background: istAbgesagt(event)
                               ? 'rgba(255,255,255,0.3)'
                               : isWaitlist
                                 ? 'var(--app-gradient-badges)'
@@ -933,7 +971,7 @@ const TeamerDashboardPage: React.FC = () => {
                             textTransform: 'uppercase',
                             letterSpacing: '0.3px'
                           }}>
-                            {event.cancelled ? 'ABGESAGT' :
+                            {istAbgesagt(event) ? 'ABGESAGT' :
                              isWaitlist ?
                                'Warteliste' :
                                formatTimeUntil(event.event_date)}
@@ -945,10 +983,22 @@ const TeamerDashboardPage: React.FC = () => {
                               color: 'white',
                               marginBottom: 'var(--app-abstand-mini)',
                               paddingRight: 'var(--app-freiraum-aktion-xl)',
-                              textDecoration: event.cancelled ? 'line-through' : 'none'
+                              textDecoration: titelDekoration('kachel', event)
                             }}>
                               {event.title}
                             </div>
+                            {/* DER GRUND GEHOERT AUCH HIER AUF DIE STARTSEITE
+                                -- genau wie auf der Konfi-Start-
+                                seite: Wer den Push antippt, landet zuerst hier.
+                                ACHTUNG, OFFENE HAELFTE IM BACKEND: GET
+                                /teamer/dashboard filtert abgesagte Termine
+                                derzeit ganz heraus (`AND e.cancelled IS NOT
+                                TRUE`) und waehlt cancelled_reason gar nicht
+                                erst aus. Der Block bleibt deshalb vorerst leer
+                                -- er ist schon da, damit er ankommt, sobald die
+                                Route die Felder liefert, und nicht wieder
+                                vergessen wird. */}
+                            <AbsageBlock event={event} variante="zeile" aufDunkel />
                             <div className="app-dashboard-meta" style={{ flexWrap: 'wrap' }}>
                               <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ fontSize: 'var(--app-text-basis)' }} />
                               <span>{formatEventDate(event.event_date)}</span>
@@ -1186,9 +1236,17 @@ const TeamerDashboardPage: React.FC = () => {
         />
       )}
 
-      {/* "Was ist neu"-Walkthrough — geöffnet über die Neuigkeiten-Karte */}
+      {/* Änderungsanzeige nach einem Update — meldet sich VON SELBST, genau
+          einmal je Minor-Version (useOnboardingWithUpdateOnce). Sie und die
+          Onboarding-Tour schließen sich gegenseitig aus; die Neuigkeiten-
+          Karte bleibt weg, solange sie offen ist. */}
+      {showNeuerungen && (
+        <TeamerUpdate220WalkthroughModal onClose={schliesseNeuerungen} />
+      )}
+
+      {/* Derselbe Walkthrough — hier über die Neuigkeiten-Karte geöffnet. */}
       {showUpdateWalkthrough && (
-        <TeamerUpdate211WalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
+        <TeamerUpdate220WalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
       )}
 
       {showMitmachenErklaerung && (

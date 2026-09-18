@@ -2,13 +2,16 @@ const express = require('express');
 const liveUpdate = require('../../utils/liveUpdate');
 const { formatDatum } = require('../../utils/zeitformat');
 const { allIdsBelongToOrg } = require('../../utils/orgOwnership');
-const { validateTeamerQuota } = require('./validierung');
+const { darfJahrgang } = require('../../utils/jahrgangsZugriff');
+const { validateTeamerQuota, pruefeAnmeldeschluss } = require('./validierung');
 
-module.exports = (db, rbacVerifier, { requireTeamer }) => {
+// Deshalb requireAdmin (org_admin, admin) statt des frueheren requireTeamer.
+// Gesperrt wird in BEIDEN Ebenen: Oberflaeche und Backend.
+module.exports = (db, rbacVerifier, { requireAdmin }) => {
   const router = express.Router();
 
   // Create series events
-  router.post('/series', rbacVerifier, requireTeamer, async (req, res) => {
+  router.post('/series', rbacVerifier, requireAdmin, async (req, res) => {
     // WICHTIG: Diese Liste muss mit POST / (Einzel-Event, verwaltung.js) synchron bleiben.
     // Fehlende Felder wurden hier früher stillschweigend auf den Spalten-
     // Default gesetzt — eine Serie kam damit ohne Teamer-Kontingent, ohne
@@ -37,6 +40,15 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
     // Pflicht-Events benoetigen mindestens einen Jahrgang (wie POST /)
     if (mandatory && (!jahrgang_ids || jahrgang_ids.length === 0)) {
       return res.status(400).json({ error: 'Pflicht-Events benötigen mindestens einen Jahrgang' });
+    }
+
+    // Anmeldeschluss-Riegel wie in POST / und PUT /:id.
+    // Geprueft wird der ERSTE Termin: Die Folgetermine erben weiter unten
+    // denselben zeitlichen Abstand zum Beginn, ihr Schluss wandert also mit
+    // in die Zukunft. Steht der erste Termin stimmig, stehen alle stimmig.
+    const seriesSchlussFehler = pruefeAnmeldeschluss(registration_closes_at, event_date);
+    if (seriesSchlussFehler) {
+      return res.status(400).json({ error: seriesSchlussFehler });
     }
 
     // DIESELBEN Zwangsregeln wie POST / — vorher wendete die Serien-Route
@@ -74,6 +86,19 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
       }
       if (!(await allIdsBelongToOrg(db, 'categories', category_ids, req.user.organization_id))) {
         return res.status(400).json({ error: 'Mindestens eine Kategorie gehört nicht zu deiner Organisation' });
+      }
+
+      // Jahrgangs-Bindung, wortgleich zu POST / in verwaltung.js.
+      // Der Kommentar am Kopf dieser Route sagt es selbst: Die Feldliste muss
+      // mit dem Einzel-Event synchron bleiben. Beim Jahrgangs-Check war sie es
+      // zunaechst nicht — waehrend der Einzeltermin schon gebunden war, blieb
+      // die Serie ein offener Weg, Termine in fremde Jahrgaenge zu legen, und
+      // zwar gleich bis zu 26 auf einmal.
+      if (Array.isArray(jahrgang_ids) && jahrgang_ids.length > 0) {
+        const alleErlaubt = jahrgang_ids.every(jid => darfJahrgang(req, jid, { edit: true }));
+        if (!alleErlaubt) {
+          return res.status(403).json({ error: 'Kein Zugriff auf diesen Jahrgang' });
+        }
       }
     } catch (err) {
       console.error('Org-Ownership-Check fehlgeschlagen:', err);

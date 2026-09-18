@@ -41,7 +41,7 @@ import { useApp } from '../../../contexts/AppContext';
 
 /** Reiter im Challenge-Detail: Gruppen-Feed oder eigene Beitraege. */
 type KonfiReiter = 'feed' | 'meins';
-import api from '../../../services/api';
+import api, { DATEI_TIMEOUT_MS } from '../../../services/api';
 import { EmptyState, AudioPlayer } from '../../shared';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { istWebLink } from '../../../utils/linkDisplay';
@@ -146,7 +146,7 @@ const ChallengeMedia: React.FC<{
     let objectUrl = '';
     (async () => {
       try {
-        const res = await api.get(`/challenges/files/${filePath}`, { responseType: 'blob' });
+        const res = await api.get(`/challenges/files/${filePath}`, { responseType: 'blob', timeout: DATEI_TIMEOUT_MS });
         if (cancelled) return;
         objectUrl = URL.createObjectURL(res.data as Blob);
         setSrc(objectUrl);

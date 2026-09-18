@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { IonIcon, IonToggle, IonSpinner, useIonAlert } from '@ionic/react';
-import { ICON_FINGERABDRUCK } from './icons';
+import { biometrieIcon } from './biometrieSymbol';
 import {
   biometrieVerfuegbar,
   istBiometrieAktiv,
@@ -84,7 +84,9 @@ const BiometrieSchalter: React.FC<Props> = ({ variante }) => {
       <div className="app-list-item__row">
         <div className="app-list-item__main">
           <div className={`app-icon-circle app-icon-circle--${variante}`}>
-            <IonIcon icon={ICON_FINGERABDRUCK} />
+            {/* Symbol passend zum erkannten Verfahren — Gesicht fuer Face ID,
+                Finger fuer Touch ID/Fingerabdruck, sonst ein Schloss. */}
+            <IonIcon icon={biometrieIcon(verfuegbarkeit.sinnbild)} />
           </div>
           <div className="app-list-item__content">
             <div className="app-list-item__title">Anmelden mit {bezeichnung}</div>

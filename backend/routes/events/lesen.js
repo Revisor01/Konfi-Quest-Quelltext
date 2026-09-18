@@ -20,13 +20,26 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
       // GROUP BY über die ganze Breite nötig.
       const query = `
         SELECT e.*,
-                bstats.registered_count,
-                bstats.waitlist_count,
-                bstats.unprocessed_count,
-                bstats.teamer_unprocessed_count,
-                bstats.total_participants,
-                bstats.teamer_count,
-                bstats.teamer_waitlist_count,
+                -- DIE FALLE: Das COALESCE in der LATERAL-Unterabfrage weiter
+                -- unten schuetzt vor einer NULL-SPALTE, nicht vor einer
+                -- FEHLENDEN ZEILE. event_booking_stats entsteht mit GROUP BY
+                -- ueber event_bookings -- ein Termin OHNE jede Buchung hat
+                -- dort keine Zeile. Die Unterabfrage liefert dann nichts,
+                -- das ON true fuellt alle Spalten mit NULL auf, und das
+                -- innere COALESCE wird nie ausgewertet.
+                --
+                -- Nachgewiesen an einem frisch angelegten Termin in
+                -- Produktion: registered_count und abgemeldet_count kamen
+                -- als null zurueck. Dieselbe Falle steckte in routes/konfi.js
+                -- und liess dort "Anmelden (null/4)" auf dem Knopf stehen.
+                COALESCE(bstats.registered_count, 0)         as registered_count,
+                COALESCE(bstats.waitlist_count, 0)           as waitlist_count,
+                COALESCE(bstats.unprocessed_count, 0)        as unprocessed_count,
+                COALESCE(bstats.teamer_unprocessed_count, 0) as teamer_unprocessed_count,
+                COALESCE(bstats.total_participants, 0)       as total_participants,
+                COALESCE(bstats.teamer_count, 0)             as teamer_count,
+                COALESCE(bstats.teamer_waitlist_count, 0)    as teamer_waitlist_count,
+                COALESCE(bstats.abgemeldet_count, 0)         as abgemeldet_count,
                 CASE
                   WHEN e.has_timeslots THEN COALESCE(timeslot_capacity.total_capacity, e.max_participants)
                   ELSE e.max_participants
@@ -41,8 +54,8 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
                 event_chat.id as chat_room_id,
                 ${anmeldeStatusSql({
                   kapazitaet: kapazitaetSql('timeslot_capacity.total_capacity'),
-                  bestaetigt: 'bstats.registered_count',
-                  warteliste: 'bstats.waitlist_count'
+                  bestaetigt: 'COALESCE(bstats.registered_count, 0)',
+                  warteliste: 'COALESCE(bstats.waitlist_count, 0)'
                 })} as registration_status,
                 -- Bewusst ein ZWEITER Wert statt einer Aenderung am ersten: Die
                 -- beiden Kontingente sind unabhaengig (zehn Konfi-Plaetze und
@@ -55,20 +68,35 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
                   WHEN NOW() > e.registration_closes_at THEN 'closed'
                   -- 0 heisst unbegrenzt, wie beim Konfi-Kontingent auch.
                   WHEN COALESCE(e.teamer_max_participants, 0) > 0
-                       AND bstats.teamer_count >= e.teamer_max_participants
+                       AND COALESCE(bstats.teamer_count, 0) >= e.teamer_max_participants
                        AND (NOT e.teamer_waitlist_enabled
-                            OR bstats.teamer_waitlist_count >= COALESCE(e.teamer_max_waitlist_size, 0))
+                            OR COALESCE(bstats.teamer_waitlist_count, 0) >= COALESCE(e.teamer_max_waitlist_size, 0))
                     THEN 'closed'
                   WHEN COALESCE(e.teamer_max_participants, 0) > 0
-                       AND bstats.teamer_count >= e.teamer_max_participants
+                       AND COALESCE(bstats.teamer_count, 0) >= e.teamer_max_participants
                     THEN 'waitlist'
                   ELSE 'open'
                 END as teamer_registration_status,
                 CASE WHEN eb_user.status = 'confirmed' THEN true ELSE false END as is_registered,
                 eb_user.status as booking_status,
                 eb_user.attendance_status,
+                -- Wer den Termin abgesagt hat (Migration 150), ADDITIV: e.*
+                -- bringt cancelled_reason und cancelled_by schon mit, der Name
+                -- fehlt aber. LEFT JOIN, weil NULL hier "unbekannt" heisst --
+                -- Termine, die vor der Migration abgesagt wurden, haben keinen
+                -- Urheber. Ein INNER JOIN wuerde die halbe Terminliste
+                -- verschlucken.
+                u_cancel.display_name as cancelled_by_name,
+                -- Wer den GRUND zuletzt gesetzt hat (Migration 152). Beim
+                -- Absagen dieselbe Person wie cancelled_by; erst bei einer
+                -- nachtraeglichen Korrektur gehen die beiden auseinander.
+                u_grund.display_name as cancelled_reason_set_by_name,
+                -- Siehe das LATERAL absage_abm weiter unten.
+                COALESCE(absage_abm.anzahl, 0) as durch_absage_abgemeldet_count,
                 mat.material_count
         FROM events e
+        LEFT JOIN users u_cancel ON e.cancelled_by = u_cancel.id
+        LEFT JOIN users u_grund ON e.cancelled_reason_set_by = u_grund.id
         -- Zahlen aus der View statt aus einer eigenen Kopie.
         --
         -- event_booking_stats liegt seit Migration 128 bereit und wurde von
@@ -95,10 +123,37 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
             -- von niemandem — weder Backend noch App.)
             COALESCE(ebs.gebucht_gesamt, 0)
               + COALESCE(ebs.konfi_opted_out, 0)
-              + COALESCE(ebs.teamer_opted_out, 0) as total_participants
+              + COALESCE(ebs.teamer_opted_out, 0)
+              + COALESCE(ebs.konfi_excused, 0)
+              + COALESCE(ebs.teamer_excused, 0) as total_participants,
+            -- ABGEMELDETE KONFIS, ADDITIV -- dieselbe Zahl und
+            -- dieselbe Begruendung wie in konfi.js: beide Abmelde-Arten
+            -- zusammen, KONFI-rein wie registered_count daneben. Die Ansicht
+            -- kann damit bei einem abgesagten Termin sagen, um wie viele
+            -- Personen es ging, ohne registered_count umzudeuten.
+            --
+            -- NICHT total_participants nehmen: Die Zahl meint ausdruecklich
+            -- ALLE Buchungen einschliesslich Team-Seite und ist damit eine
+            -- andere Groesse als die Konfi-Zahl daneben.
+            COALESCE(ebs.konfi_opted_out, 0)
+              + COALESCE(ebs.konfi_excused, 0) as abgemeldet_count
           FROM event_booking_stats ebs
           WHERE ebs.event_id = e.id
         ) bstats ON true
+        LEFT JOIN LATERAL (
+          -- Wie viele beim Zuruecknehmen der Absage wieder angemeldet wuerden
+          -- ADDITIV -- fuer die Rueckfrage vor dem
+          -- Zuruecknehmen. Auch in DIESER Liste, nicht nur in
+          -- GET /events/cancelled: Die Leitungsansicht nimmt ihren Termin
+          -- von hier. Das Feld BLEIBT stehen, auch seit das Zuruecknehmen
+          -- am selben Tag auf requireAdmin umgestellt wurde -- ein einmal
+          -- geliefertes Feld wegzunehmen bricht ausgelieferte App-Fassungen.
+          -- Begruendung, warum nicht aus konfi_excused/teamer_excused: dort.
+          SELECT COUNT(*)::int as anzahl
+          FROM event_bookings eb
+          JOIN users u ON eb.user_id = u.id AND u.deleted_at IS NULL
+          WHERE eb.event_id = e.id AND eb.abgemeldet_durch_absage = TRUE
+        ) absage_abm ON true
         LEFT JOIN LATERAL (
           SELECT STRING_AGG(DISTINCT c.id::text, ',') as category_ids,
                  STRING_AGG(DISTINCT c.name, ', ') as category_names
@@ -273,9 +328,46 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
                 STRING_AGG(DISTINCT c.id::text, ',') as category_ids,
                 STRING_AGG(DISTINCT c.name, ', ') as category_names,
                 STRING_AGG(DISTINCT j.id::text, ',') as jahrgang_ids,
-                STRING_AGG(DISTINCT j.name, ', ') as jahrgang_names
+                STRING_AGG(DISTINCT j.name, ', ') as jahrgang_names,
+                -- Wer abgesagt hat (Migration 150), ADDITIV. e.* bringt
+                -- cancelled_reason und cancelled_by mit, nur der Name fehlt.
+                -- LEFT JOIN: Termine, die vor der Migration abgesagt wurden,
+                -- haben keinen Urheber und muessen trotzdem in der Liste
+                -- stehen -- gerade hier, wo ausschliesslich Altbestand liegt.
+                u_cancel.display_name as cancelled_by_name,
+                -- Wer den GRUND zuletzt gesetzt hat (Migration 152) -- gerade
+                -- in dieser Liste relevant: Hier stehen ausschliesslich
+                -- abgesagte Termine, und hier wird nachgetragen.
+                u_grund.display_name as cancelled_reason_set_by_name,
+                -- Wie viele beim Zuruecknehmen der Absage wieder angemeldet
+                -- wuerden, ADDITIV. Die Rueckfrage vor dem
+                -- Zuruecknehmen kuendigt genau diese Zahl an -- sie schickt
+                -- allen einen Push, und wer sie ausloest, soll vorher wissen,
+                -- wie viele Leute das erreicht.
+                --
+                -- NICHT aus konfi_excused + teamer_excused: Die zaehlen JEDE
+                -- Abmeldung, auch die einzelne von vor der Absage. Genau die
+                -- bleibt beim Zuruecknehmen aber abgemeldet und bekommt
+                -- keinen Push. Die Zahl muss dasselbe meinen wie die Auswahl
+                -- der Route, sonst kuendigt die Rueckfrage etwas anderes an,
+                -- als dann passiert.
+                --
+                -- Eigenes LATERAL statt eines weiteren JOINs: event_bookings
+                -- haengt hier schon an keiner Stelle dran, und ein JOIN
+                -- vervielfachte die Zeilen, die STRING_AGG oben gruppiert.
+                COALESCE(absage_abm.anzahl, 0) as durch_absage_abgemeldet_count
         FROM events e
+        LEFT JOIN users u_cancel ON e.cancelled_by = u_cancel.id
+        LEFT JOIN users u_grund ON e.cancelled_reason_set_by = u_grund.id
         LEFT JOIN event_booking_stats ebs ON ebs.event_id = e.id
+        LEFT JOIN LATERAL (
+          -- Geloeschte Konten zaehlen nicht mit: Sie bekommen keinen Push
+          -- (getTokensForUser filtert sie) und stehen in keiner Liste.
+          SELECT COUNT(*)::int as anzahl
+          FROM event_bookings eb
+          JOIN users u ON eb.user_id = u.id AND u.deleted_at IS NULL
+          WHERE eb.event_id = e.id AND eb.abgemeldet_durch_absage = TRUE
+        ) absage_abm ON true
         LEFT JOIN event_categories ec ON e.id = ec.event_id
         LEFT JOIN categories c ON ec.category_id = c.id
         LEFT JOIN event_jahrgang_assignments eja ON e.id = eja.event_id
@@ -284,8 +376,17 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
         -- Die ebs-Spalten muessen ins GROUP BY: Das STRING_AGG fuer Kategorien
         -- und Jahrgaenge verlangt es, und die View liefert pro Termin genau
         -- eine Zeile, gruppiert also nichts zusammen.
+        -- u_cancel.display_name muss mit ins GROUP BY: Der Name ist kein
+        -- Aggregat, und e.id allein deckt ihn nicht ab (Postgres erkennt die
+        -- funktionale Abhaengigkeit nur ueber den Primaerschluessel DER
+        -- gruppierten Tabelle, nicht ueber einen mitgejointen).
+        -- u_grund.display_name aus demselben Grund (Migration 152): Auch er
+        -- kommt aus einer mitgejointen Tabelle.
+        -- absage_abm.anzahl ebenso: Der Zaehler kommt aus einem
+        -- LATERAL und ist fuer Postgres kein Aggregat DIESER Abfrage.
         GROUP BY e.id, ebs.konfi_confirmed, ebs.konfi_waitlist, ebs.konfi_offen,
-                 ebs.teamer_confirmed, ebs.teamer_waitlist, ebs.teamer_offen
+                 ebs.teamer_confirmed, ebs.teamer_waitlist, ebs.teamer_offen,
+                 u_cancel.display_name, u_grund.display_name, absage_abm.anzahl
         ORDER BY e.cancelled_at DESC
       `;
       
@@ -397,10 +498,28 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
                e.series_id, e.mandatory, e.is_konfirmation, e.bring_items,
                e.checkin_window, e.teamer_needed, e.teamer_only, e.cancelled,
                e.cancelled_at, e.qr_token, e.created_by, e.organization_id, e.created_at,
+               -- Absagegrund und Urheber (Migration 150), ADDITIV: drei neue
+               -- Felder, kein bestehendes aendert Form oder Typ. Die
+               -- Detailansicht hat im Gegensatz zur Liste eine feste
+               -- Spaltenliste, deshalb muessen sie hier ausdruecklich dazu.
+               -- Der Name kommt per LEFT JOIN (NULL = unbekannt, siehe
+               -- Migration 150 -- kein Backfill fuer Altabsagen).
+               e.cancelled_reason, e.cancelled_by, u_cancel.display_name as cancelled_by_name,
+               -- Wer den GRUND zuletzt gesetzt hat (Migration 152), samt
+               -- Zeitpunkt -- dieselbe Begruendung wie eine Zeile hoeher.
+               e.cancelled_reason_set_by, e.cancelled_reason_set_at,
+               u_grund.display_name as cancelled_reason_set_by_name,
+               -- Wie viele beim Zuruecknehmen der Absage wieder angemeldet
+               -- wuerden, ADDITIV -- fuer die Rueckfrage vor dem
+               -- Zuruecknehmen. Begruendung ausfuehrlich bei GET
+               -- /events/cancelled: nicht aus konfi_excused/teamer_excused,
+               -- weil die auch die einzeln Abgemeldeten zaehlen, die
+               -- abgemeldet BLEIBEN.
+               COALESCE(absage_abm.anzahl, 0) as durch_absage_abgemeldet_count,
                ${anmeldeStatusSql({
                  kapazitaet: kapazitaetSql('timeslot_capacity.total_capacity'),
-                 bestaetigt: 'bstats.registered_count',
-                 warteliste: 'bstats.waitlist_count'
+                 bestaetigt: 'COALESCE(bstats.registered_count, 0)',
+                 warteliste: 'COALESCE(bstats.waitlist_count, 0)'
                })} as registration_status,
                -- Zweiter, unabhaengiger Status fuer das TEAMER-Kontingent,
                -- wortgleich zur Liste (oben in dieser Datei). Ohne ihn
@@ -413,16 +532,18 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
                  WHEN NOW() < e.registration_opens_at THEN 'upcoming'
                  WHEN NOW() > e.registration_closes_at THEN 'closed'
                  WHEN COALESCE(e.teamer_max_participants, 0) > 0
-                      AND bstats.teamer_count >= e.teamer_max_participants
+                      AND COALESCE(bstats.teamer_count, 0) >= e.teamer_max_participants
                       AND (NOT e.teamer_waitlist_enabled
-                           OR bstats.teamer_waitlist_count >= COALESCE(e.teamer_max_waitlist_size, 0))
+                           OR COALESCE(bstats.teamer_waitlist_count, 0) >= COALESCE(e.teamer_max_waitlist_size, 0))
                    THEN 'closed'
                  WHEN COALESCE(e.teamer_max_participants, 0) > 0
-                      AND bstats.teamer_count >= e.teamer_max_participants
+                      AND COALESCE(bstats.teamer_count, 0) >= e.teamer_max_participants
                    THEN 'waitlist'
                  ELSE 'open'
                END as teamer_registration_status
         FROM events e
+        LEFT JOIN users u_cancel ON e.cancelled_by = u_cancel.id
+        LEFT JOIN users u_grund ON e.cancelled_reason_set_by = u_grund.id
         LEFT JOIN LATERAL (
           SELECT
             COALESCE(ebs.konfi_confirmed, 0)  as registered_count,
@@ -432,6 +553,14 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
           FROM event_booking_stats ebs
           WHERE ebs.event_id = e.id
         ) bstats ON true
+        LEFT JOIN LATERAL (
+          -- Geloeschte Konten zaehlen nicht mit: Sie bekommen keinen Push
+          -- und stehen in keiner Liste.
+          SELECT COUNT(*)::int as anzahl
+          FROM event_bookings eb
+          JOIN users u ON eb.user_id = u.id AND u.deleted_at IS NULL
+          WHERE eb.event_id = e.id AND eb.abgemeldet_durch_absage = TRUE
+        ) absage_abm ON true
         LEFT JOIN LATERAL (
           SELECT SUM(et.max_participants) as total_capacity
           FROM event_timeslots et
@@ -462,18 +591,54 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
                 kp.jahrgang_id,
                 et.start_time as timeslot_start_time,
                 et.end_time as timeslot_end_time,
-                r.name as role_name
+                r.name as role_name,
+                -- Urheber der Anwesenheit (Migration 148), ADDITIV: eb.* bringt
+                -- attendance_set_by/_at schon mit, der Name fehlt aber. LEFT
+                -- JOIN, weil NULL hier "unbekannt" heisst -- Bestandszeilen und
+                -- Selbst-Check-ins per QR-Code haben keinen. Ein INNER JOIN
+                -- wuerde genau die Buchungen aus der Liste werfen.
+                u_att.display_name as attendance_set_by_name,
+                -- Urheber der NOTIZ (Migration 149), getrennt gefuehrt: Wer
+                -- die Notiz geschrieben hat, muss nicht die Person sein, die
+                -- den Status gesetzt hat. Ebenfalls LEFT JOIN und aus
+                -- demselben Grund -- eine Buchung ohne Notiz-Urheber (keine
+                -- Notiz, oder eine von vor der Migration) bleibt in der Liste.
+                u_note.display_name as note_set_by_name
         FROM event_bookings eb
         JOIN users u ON eb.user_id = u.id
+        LEFT JOIN users u_att ON eb.attendance_set_by = u_att.id
+        LEFT JOIN users u_note ON eb.note_set_by = u_note.id
         LEFT JOIN roles r ON u.role_id = r.id
         LEFT JOIN konfi_profiles kp ON u.id = kp.user_id
         LEFT JOIN jahrgaenge j ON kp.jahrgang_id = j.id
         LEFT JOIN event_timeslots et ON eb.timeslot_id = et.id
-        WHERE eb.event_id = $1 AND u.organization_id = $2 AND u.deleted_at IS NULL
+        -- ORG-FILTER AN DER BUCHUNG, NICHT AN DER PERSON.
+        --
+        -- Hier stand u.organization_id = $2 -- die HEIMAT-Organisation aus
+        -- der users-Tabelle. Wer per Org-Wechsel arbeitet (Multi-Org,
+        -- X-Active-Organization), traegt dort eine ANDERE Org als die aktive
+        -- und fiel damit aus der Teilnehmerliste des eigenen Termins heraus.
+        --
+        -- Und weil booking_status weiter unten aus GENAU DIESEM Array
+        -- abgeleitet wird, hingen beide Symptome an derselben Zeile: Der
+        -- Zusage-Knopf blieb auf "noch nichts entschieden" stehen.
+        --
+        -- eb.organization_id ist der richtige Anker: Die Buchung selbst
+        -- traegt die Organisation (eigene Spalte mit Index und
+        -- Fremdschluessel). Der Riegel BLEIBT damit bestehen -- er sitzt nur
+        -- an der richtigen Zeile. Ein Termin zeigt weiterhin ausschliesslich
+        -- Buchungen seiner eigenen Gemeinde.
+        WHERE eb.event_id = $1 AND eb.organization_id = $2 AND u.deleted_at IS NULL
         ORDER BY
+          -- 'excused' steht hier AUSDRUECKLICH und nicht nur im ELSE: Der
+          -- ELSE-Zweig traefe zwar dieselbe Zahl, sagt aber nicht, dass es so
+          -- gemeint ist. Wer die Reihenfolge spaeter aendert, soll sehen,
+          -- dass Abgemeldete absichtlich dort unten sitzen.
           CASE eb.status
             WHEN 'confirmed' THEN 1
             WHEN 'waitlist' THEN 2
+            WHEN 'excused' THEN 3
+            WHEN 'opted_out' THEN 3
             ELSE 3
           END,
           eb.created_at ASC
@@ -483,12 +648,26 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
       // Get series events if this is part of a series
       let seriesEvents = [];
       if (event.is_series && event.series_id) {
+        // Zahlen aus event_booking_stats statt aus einer eigenen Kopie
+        // Die alte Abfrage war die letzte Stelle, an der
+        // `registered_count` etwas anderes hiess als ueberall sonst:
+        //
+        //   COUNT(eb.id) ... LEFT JOIN event_bookings eb ON eb.status = 'confirmed'
+        //
+        // Kein Rollenfilter -- Teamer und zugeordnete Leitung zaehlten als
+        // Konfis mit. Kein deleted_at-Filter -- die Buchung eines geloeschten
+        // Kontos zaehlte weiter. Angezeigt wird die Zahl in der Serienliste
+        // des Termindetails als "N/max TN", mit demselben Wort und demselben
+        // Nenner wie die Kachel darueber, die nur Konfis meint. Ein
+        // Serientermin mit 19 Konfis und 4 Teamer:innen meldete dort 23.
+        //
+        // Das ist derselbe Fehler, den Migration 128 fuer fuenf Endpunkte
+        // behoben hat; diese Stelle wurde damals uebersehen.
         const seriesQuery = `
-          SELECT e.*, COUNT(eb.id) as registered_count
+          SELECT e.*, COALESCE(ebs.konfi_confirmed, 0) as registered_count
           FROM events e
-          LEFT JOIN event_bookings eb ON e.id = eb.event_id AND eb.status = 'confirmed'
+          LEFT JOIN event_booking_stats ebs ON ebs.event_id = e.id
           WHERE e.series_id = $1 AND e.organization_id = $2 AND e.id != $3
-          GROUP BY e.id
           ORDER BY e.event_date ASC
         `;
         const { rows } = await db.query(seriesQuery, [event.series_id, req.user.organization_id, eventId]);

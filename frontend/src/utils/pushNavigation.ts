@@ -104,8 +104,32 @@ export const buildPushTargetUrl = (
     case 'waitlist_promotion':
     case 'event_attendance':
     case 'event_reminder':
-    case 'event_cancelled':
       return `${routePrefix}/events`;
+
+    // Zuruecknahme der Absage: dasselbe Ziel wie die Absage.
+    // Der Push sagt "prüf bitte, ob du Zeit hast, und melde dich sonst ab" —
+    // genau das geht am Termin, nicht auf der Liste.
+    case 'event_reactivated':
+    case 'event_cancelled': {
+      // Absage: zum Termin, wenn die Kennung mitkommt. Dort steht der Grund
+      // ausfuehrlich und darunter, wer abgesagt hat — auf der Liste steht nur
+      // "Abgesagt". Konfi und Leitung haben eine Detailroute, Teamer:innen
+      // nicht (siehe rollenBaeume.ts), die bleiben auf ihrer Liste.
+      //
+      // Der Termin ist abgesagt, aber nicht weg: Beide Detailansichten
+      // oeffnen abgesagte Termine, und die Konfi-Liste, aus der die
+      // Detailseite ihren Termin nimmt, behaelt abgesagte Termine fuer die
+      // Angemeldeten — also fuer genau die, die diesen Push bekommen haben.
+      //
+      // Wird ein GELOESCHTER Termin gemeldet, schickt der Server keine
+      // Kennung mit (pushService): Dann bleibt es bei der Liste, statt auf
+      // eine Seite zu springen, die es nicht mehr gibt.
+      const evId = data?.event_id || data?.eventId;
+      if (evId && (userType === 'konfi' || userType === 'admin')) {
+        return `${routePrefix}/events/${evId}`;
+      }
+      return `${routePrefix}/events`;
+    }
 
     case 'level_up':
     case 'activity_assigned':

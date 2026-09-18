@@ -445,6 +445,9 @@ ion-item-sliding:last-child {
 .app-list-item--material, ion-item.app-list-item--material { border-left-color: var(--app-color-material); }
 .app-list-item--requests, ion-item.app-list-item--requests { border-left-color: var(--app-color-activities); }
 .app-list-item--jahrgang, ion-item.app-list-item--jahrgang { border-left-color: var(--app-color-jahrgang); }
+/* Grau fuer Zustaende ohne Wertung: die nachgetragene Abmeldung ist weder
+   ein Erfolg (gruen) noch ein Fehlen (rot). */
+.app-list-item--neutral, ion-item.app-list-item--neutral { border-left-color: var(--app-color-neutral); }
 
 /* Chat-Raumtyp-Farben */
 /* (verschoben — siehe app-list-item--teamer Block) */
@@ -502,6 +505,11 @@ ion-item-sliding:last-child {
 }
 .app-reason-box__label {
   font-weight: var(--app-schrift-halbfett);
+}
+.app-absage-block__text {
+  font-size: var(--app-text-sekundaer);
+  line-height: 1.4;
+  color: var(--app-text-secondary);
 }
 .app-reason-box--danger .app-reason-box__label { color: var(--app-color-danger); }
 .app-reason-box--warning .app-reason-box__label { color: var(--app-color-warning); }
@@ -607,6 +615,8 @@ ion-item-sliding:last-child {
 .app-corner-badge--chat-jahrgang { background-color: var(--app-color-chat); }
 .app-corner-badge--konfi { background-color: var(--app-color-konfis); }
 .app-corner-badge--group { background-color: var(--app-color-group); }
+/* Grau fuer Zustaende ohne Wertung (nachgetragene Abmeldung). */
+.app-corner-badge--neutral { background-color: var(--app-color-neutral); }
 /* Queue-Badge (orange, Icon-only, schmaler Padding) */
 .app-corner-badge--queue {
   background-color: var(--app-color-warning);
@@ -738,6 +748,8 @@ ion-list[inset] ion-list-header {
 .app-icon-circle--group { background-color: var(--app-color-bonus); }
 .app-icon-circle--material { background-color: var(--app-color-material); }
 .app-icon-circle--jahrgang { background-color: var(--app-color-jahrgang); }
+/* Grau fuer Zustaende ohne Wertung (nachgetragene Abmeldung). */
+.app-icon-circle--neutral { background-color: var(--app-color-neutral); }
 .app-icon-circle ion-icon {
   color: white;
   font-size: var(--app-text-basis);
@@ -1409,6 +1421,39 @@ ion-item.app-item-transparent {
   --min-height: auto;
 }
 
+/* === Listen-Wrapper mit Abstand ===
+ * Wie app-item-transparent, aber zusaetzlich mit dem Listen-Abstand nach
+ * unten -- fuer Listen, in denen beide Bauformen nebeneinander stehen:
+ * ein direktes div.app-list-item UND ein IonItem, das innen ein
+ * div.app-list-item traegt.
+ *
+ * WARUM EINE EIGENE KLASSE: Bei Bauform A kommt der Abstand aus
+ * `.app-list-item { margin-bottom }` und faellt beim letzten Eintrag per
+ * :last-child weg. Bei Bauform B ist das innere div immer :last-child seines
+ * IonItem -- es hat also NIE einen Abstand, und der Abstand muss vom IonItem
+ * selbst kommen. Wurde er dort von Hand als Inline-Style gesetzt, fehlte er,
+ * sobald jemand nach dem bis dahin letzten IonItem noch einen Eintrag
+ * anhaengte (genau so entstand der fehlende Abstand ueber "App sperren").
+ * Hier haengt der Abstand an derselben Bedingung wie bei Bauform A -- an der
+ * Stellung in der Liste, nicht am Gedaechtnis der schreibenden Person.
+ *
+ * NICHT an app-item-transparent angehaengt: die Klasse dient anderswo auch
+ * Formularfeldern, die diesen Abstand nicht haben sollen.
+ */
+ion-item.app-list-wrapper {
+  --background: transparent;
+  --padding-start: 0;
+  --padding-end: 0;
+  --inner-padding-end: 0;
+  --inner-border-width: 0;
+  --border-style: none;
+  --min-height: auto;
+  margin-bottom: var(--app-abstand-eng);
+}
+ion-item.app-list-wrapper:last-child {
+  margin-bottom: 0;
+}
+
 /* === Swipe-Actions (global) ===
  * Einzige Quelle der Wahrheit für Swipe-Buttons (Größe, Form, Farbe, Abstaende).
  * Views setzen NUR die Klassen .app-swipe-actions / .app-swipe-action und je einen
@@ -1541,6 +1586,17 @@ ion-card-content.app-card-content {
 .app-list-item__title--with-dual-badge {
   padding-right: var(--app-freiraum-aktion-xxxl);
 }
+/*
+   Die schmalere Klasse der Leitungsansicht (--badge-space, 50 px) ist hier
+   KEIN Ersatz: bei zwei Badges laeuft der Titel darunter durch — nachgemessen
+   lief genau eine Zeile in das Badge hinein. Deshalb zwei eigene Werte mit
+   ein paar Pixeln Luft auf das breiteste gemessene Badge. */
+.app-list-item__title--punkte-badge {
+  padding-right: 58px;
+}
+.app-list-item__title--punkte-badge-doppelt {
+  padding-right: 84px;
+}
 
 /* === Toolbar-Grundfarbe gegen System-Dark-Mode festnageln ===
    Die App hat KEIN eigenes Dark-Theme (Ionic-Dark-Palettes in App.tsx alle
@@ -1670,6 +1726,36 @@ ion-toggle.app-toggle--events {
 .app-button-row--in-card {
   margin-top: -4px;
   margin-bottom: -4px;
+}
+
+/*
+   Das Muster gab es laengst — nur vier Mal als Inline-Style abgeschrieben
+   (Abmelden und Account loeschen in Konfi- und Teamer-Profil): rot umrandet,
+   volle Breite, Karten-Radius, halbfett. Der Loeschen-Knopf im Notiz-Modal
+   hatte es nicht und stand als blasser Textknopf daneben.
+
+   Hier steht es einmal, damit der naechste Loeschen-Knopf es einfach benutzt.
+   Zu ergaenzen ist am Aufrufer nur noch expand="block" fill="outline"
+   color="danger" — Farbe und Rahmen kommen von Ionic, Groesse und Rundung
+   von hier. */
+.app-gefahr-knopf {
+  height: var(--app-abstand-block);
+  --border-radius: var(--app-radius-karte);
+  font-weight: var(--app-schrift-halbfett);
+}
+/* Steht der Knopf unter einem anderen, braucht er Luft nach oben. */
+.app-gefahr-knopf + .app-gefahr-knopf {
+  margin-top: var(--app-abstand-eng);
+}
+
+/* === Hinweiszeile unter einem Eingabefeld ===
+   Eine kurze Folge, die beim Speichern eintritt ("keine Punkte", "die Konfi
+   bekommt eine Mitteilung") — nicht der Erklaertext, der gehoert ins
+   Handbuch. */
+.app-hinweis-text {
+  display: block;
+  padding: var(--app-abstand-eng) var(--app-abstand-eng) 0;
+  font-size: var(--app-text-hinweis);
 }
 
 /* === Flex-Fill (flex: 1) === */
@@ -1881,6 +1967,47 @@ ion-toggle.app-toggle--events {
 /* Container für eine Formular-Sektion in einem Modal */
 .app-modal-section {
   margin: var(--app-abstand-basis);
+}
+
+/* === Datums-Knopf unter einer gestapelten Beschriftung ===
+   Ionic deckelt ein ion-item mit position="stacked" auf --min-height: 55px
+   und setzt overflow: hidden auf die innere Huelle. Das passt fuer ein
+   ion-input, das mitschrumpft -- ein ion-datetime-button ist aber fest 31px
+   hoch. Gemessen im Browser: Beschriftung ab 12px, 18px hoch,
+   Knopf ab 12+18 = 31px bis 61px -- 6px mehr als die 55px, die das Item
+   hergibt. Ergebnis: die Unterlaengen der Beschriftung liegen unter dem
+   Knopf und werden am Item-Rand abgeschnitten.
+   Darum hier: Hoehe aufmachen statt deckeln, und nichts wegschneiden. */
+.app-datumsfeld {
+  --min-height: 0;
+  overflow: visible;
+}
+.app-datumsfeld::part(native) {
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+  padding-top: var(--app-abstand-eng);
+  padding-bottom: var(--app-abstand-eng);
+}
+/* Die gestapelte Beschriftung wird von Ionic per
+   transform: scale(.75) translateY(12px) verschoben. Der Text rutscht dabei
+   nach unten, ihr Layout-Kasten bleibt aber stehen -- ein margin-bottom an
+   der Beschriftung greift deshalb nicht (gemessen: bleibt 0). Der Abstand
+   muss vom Knopf kommen: 10px lassen gemessene 6,3px Luft zwischen dem
+   Ende des Beschriftungstextes und der Oberkante des Knopfes. */
+.app-datumsfeld ion-datetime-button {
+  margin-top: 10px;
+}
+
+/* === Knopf am unteren Rand einer Karte ===
+   app-event-detail__add-button-wrapper zieht mit margin-bottom: -7px Ionics
+   eigenen Button-Rand zurueck. In einer ion-card mit overflow: hidden
+   schneidet das die untere Kante des Knopfes ab (im Browser gesehen:
+   der Umriss von "Zeitfenster hinzufuegen" endete an der Kartenkante).
+   Hier nur so viel zuruecknehmen, wie Ionic wirklich setzt (4px). */
+.app-modal-knopf-in-karte {
+  margin-top: var(--app-abstand-eng);
+  margin-bottom: -4px;
 }
 
 /* === Modal Section Header === */
@@ -2973,6 +3100,13 @@ ion-toggle.app-toggle--info { --background-checked: var(--app-color-info) !impor
 .attendance-matrix__dot--opted_out {
   color: var(--app-color-neutral);
 }
+/* Nachgetragene Abmeldung: Die Leitung traegt ein, was
+   ausserhalb der App gemeldet wurde. Fachlich dieselbe Aussage wie die
+   Selbstabmeldung -- keine Punkte, nicht im Pflicht-Nenner -- deshalb
+   auch dasselbe Grau. Unterschieden wird in der Legende, nicht in der Farbe. */
+.attendance-matrix__dot--excused {
+  color: var(--app-color-neutral);
+}
 .attendance-matrix__legend {
   display: flex;
   flex-wrap: wrap;
@@ -3308,3 +3442,358 @@ ion-segment.md ion-segment-button {
   --padding-end: var(--app-abstand-eng);
 }
 
+
+/* ===================================================================
+   APP-SPERRE — der Sperrbildschirm vor der angemeldeten App
+   ===================================================================
+   Verdeckt die App vollstaendig, solange sie gesperrt ist. Deckende
+   Flaeche, keine Transparenz und keine Unschaerfe: Unschaerfe liesse
+   Fotos und Namen weiterhin erahnen, und genau davor schuetzt die
+   Sperre. Das z-index liegt ueber allem, was Ionic selbst aufbaut
+   (Modals liegen bei 20000, Toasts bei 60000) -- ein Modal, das noch
+   offen stand, als die App in den Hintergrund ging, darf den
+   Sperrbildschirm nicht ueberlagern.
+
+   Bildsprache wie die Anmeldeseite (.app-auth-background): beide sind
+   Torhueter vor der App und gehoeren optisch zusammen -- Aurora-Verlauf
+   mit zwei radialen Lichtpunkten, darueber das freigestellte Logo als
+   grosses Wasserzeichen. Der Verlauf liegt bewusst auf ::before und
+   nicht auf dieser Regel: hier bleibt eine deckende Grundfarbe stehen,
+   damit selbst dann nichts durchscheint, wenn der Verlauf (oder eine
+   der darin genutzten Variablen) einmal nicht greift. */
+.app-sperrbildschirm {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: var(--ion-background-color, #ffffff);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  overflow: hidden;
+  padding:
+    calc(var(--app-abstand-weit) + env(safe-area-inset-top, 0px))
+    calc(var(--app-abstand-weit) + env(safe-area-inset-right, 0px))
+    calc(var(--app-abstand-weit) + env(safe-area-inset-bottom, 0px))
+    calc(var(--app-abstand-weit) + env(safe-area-inset-left, 0px));
+  gap: var(--app-abstand-basis);
+}
+
+/* Der Aurora-Verlauf, deckend ueber die ganze Flaeche. Farbwerte und
+   Lichtpunkte sind dieselben wie auf der Anmeldeseite. */
+.app-sperrbildschirm::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 15% 8%, rgba(255, 255, 255, 0.30) 0%, transparent 45%),
+    radial-gradient(circle at 92% 100%, rgba(var(--app-aurora-tuerkis-rgb), 0.80) 0%, transparent 52%),
+    var(--app-gradient-aurora);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Freigestelltes Logo (Lutherrose+Herz) als Wasserzeichen -- wie auf der
+   Anmeldeseite oben rechts aus dem Rahmen laufend, einfarbig weiss. */
+.app-sperrbildschirm__wasserzeichen {
+  position: absolute;
+  top: -10vh;
+  right: -22vw;
+  left: auto;
+  transform: rotate(-10deg);
+  width: 95vw;
+  height: 95vw;
+  max-width: none;
+  object-fit: contain;
+  opacity: 0.16;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Alles Bedienbare liegt ueber Verlauf und Wasserzeichen. */
+.app-sperrbildschirm > *:not(.app-sperrbildschirm__wasserzeichen) {
+  position: relative;
+  z-index: 1;
+}
+
+/* Das Schloss ist der Mittelpunkt: weiss in einem hellen Kreis, damit es
+   auf dem farbigen Grund traegt (grau wie zuvor verschwaende darin). */
+.app-sperrbildschirm__schloss-kreis {
+  width: 112px;
+  height: 112px;
+  flex: 0 0 auto;
+  border-radius: var(--app-radius-kreis);
+  background: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: var(--app-abstand-eng);
+  box-shadow: var(--app-schatten-hoch);
+}
+
+.app-sperrbildschirm__schloss {
+  font-size: var(--app-icon-leerzustand);
+  color: var(--app-weiss);
+}
+
+.app-sperrbildschirm__titel {
+  font-family: var(--app-schriftart-marke);
+  font-size: var(--app-text-ueberschrift-gross);
+  font-weight: var(--app-schrift-normal);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  margin: 0;
+  color: var(--app-weiss);
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+}
+
+.app-sperrbildschirm__text {
+  margin: 0;
+  max-width: 22rem;
+  font-size: var(--app-text-standard);
+  color: var(--app-weiss);
+  opacity: 0.9;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Der Hinweis nach einem Fehlversuch. Das sonst uebliche Dunkelrot
+   (--app-text-fehler) ist auf dem Verlauf nicht lesbar -- hier traegt
+   stattdessen eine eigene helle Flaeche mit weisser Schrift. */
+.app-sperrbildschirm__hinweis {
+  margin: 0;
+  max-width: 22rem;
+  padding: var(--app-abstand-schmal) var(--app-abstand-basis);
+  border-radius: var(--app-radius-karte);
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  font-size: var(--app-text-sekundaer);
+  color: var(--app-weiss);
+}
+
+/* Haupt-Aktion: weiss auf dem Verlauf, wie die Anmeldeseite es auf der
+   Card umgekehrt macht -- die kraeftigste Flaeche ist die Aktion. */
+.app-sperrbildschirm__knopf {
+  width: 100%;
+  max-width: 20rem;
+  --background: var(--app-weiss);
+  --background-hover: var(--app-weiss);
+  --background-activated: rgba(255, 255, 255, 0.85);
+  --color: var(--app-color-konfis);
+  --border-radius: var(--app-radius-gross);
+  --box-shadow: var(--app-schatten-hoch);
+  height: 52px;
+  font-weight: var(--app-schrift-halbfett);
+  margin: 0;
+}
+
+/* Der Rueckweg. Bleibt waehrend der laufenden Abfrage bedienbar und
+   darf deshalb NICHT so weit zuruecktreten, dass man ihn in einer
+   Notlage nicht findet: weisse Schrift in voller Deckkraft, eigener
+   Rahmen, volle Knopfhoehe -- sichtbar zweite Wahl, aber nie ein
+   Fussnotenlink. */
+.app-sperrbildschirm__abmelden {
+  width: 100%;
+  max-width: 20rem;
+  --background: rgba(255, 255, 255, 0.12);
+  --background-hover: rgba(255, 255, 255, 0.22);
+  --background-activated: rgba(255, 255, 255, 0.28);
+  --color: var(--app-weiss);
+  --border-radius: var(--app-radius-gross);
+  --border-width: 1px;
+  --border-style: solid;
+  --border-color: rgba(255, 255, 255, 0.55);
+  height: 48px;
+  font-weight: var(--app-schrift-halbfett);
+  margin: 0;
+}
+
+/*
+   z-index LIEGT UEBER dem Sperrbildschirm (100000): Beim Wegwechseln kann
+   BEIDES gleichzeitig anstehen (die App war schon gesperrt und wandert erneut
+   in den Hintergrund). Dann muss die neutrale Flaeche gewinnen -- der
+   Sperrbildschirm nennt zwar auch keine Namen, ist aber der bedienbare
+   Bildschirm und gehoert nicht ins Vorschaubild.
+
+   Deckend ohne Transparenz und ohne Unschaerfe, aus demselben Grund wie beim
+   Sperrbildschirm: Unschaerfe liesse Fotos und Namen weiterhin erahnen. */
+.app-abdeckung {
+  position: fixed;
+  inset: 0;
+  z-index: 100001;
+  background: var(--app-gradient-aurora, var(--ion-background-color, #ffffff));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--app-abstand-basis);
+  padding: var(--app-abstand-weit);
+  text-align: center;
+  overflow: hidden;
+}
+
+.app-abdeckung__logo {
+  width: 120px;
+  height: 120px;
+  max-width: 40vw;
+  max-height: 40vw;
+  object-fit: contain;
+  opacity: 0.92;
+}
+
+.app-abdeckung__name {
+  margin: 0;
+  font-family: var(--app-schriftart-marke);
+  font-size: var(--app-text-ueberschrift-gross);
+  font-weight: var(--app-schrift-normal);
+  letter-spacing: 4px;
+  text-transform: uppercase;
+  color: var(--app-weiss);
+  text-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+}
+
+/*
+   Die Farbe kommt von aussen ueber --kachel-farbe (Abzeichen tragen ihre
+   eigene, Stempel die Challenge-Farbe), damit eine Klasse alle Faelle
+   bedient. Zustand und Inhalt bleiben Sache der Komponente: ein noch nicht
+   verdientes Abzeichen setzt --gesperrt, Stempel gibt es nur verdient.
+
+   Bewusst OHNE color-mix(): die App laeuft ab Android minSdk 24, und auf
+   ungepflegten Geraeten steckt dort eine System-WebView vor Chrome 111 --
+   color-mix faellt dann ersatzlos aus und die Kachel waere durchsichtig
+   statt getoent. Die Komponente uebergibt deshalb wie bisher fertige
+   Flaechen- und Rahmenfarben (--kachel-flaeche/--kachel-rahmen); die Werte
+   bildet sie aus derselben Farbe, aus der sie heute schon `${farbe}10` und
+   `${farbe}40` zusammensetzt. */
+.app-kachelraster {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--app-abstand-mittel);
+  /* Alle Kacheln einer Reihe gleich hoch: ohne das richtet sich die Zeile am
+     hoechsten Kind aus und eine zweizeilige Beschriftung zieht die Nachbarn
+     mit in die Hoehe. Mit 1fr bekommen alle Kacheln der Reihe dieselbe
+     Hoehe, und weil der Namensbereich unten zwei Zeilen fest reserviert,
+     sitzen Symbol, Name und Fortschritt ueberall auf derselben Linie. */
+  grid-auto-rows: 1fr;
+}
+.app-kachel {
+  --kachel-farbe: var(--app-color-badges);
+  --kachel-flaeche: transparent;
+  --kachel-rahmen: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--app-abstand-kompakt);
+  padding: var(--app-abstand-mittel) var(--app-abstand-eng);
+  border-radius: var(--app-radius-gross);
+  background: var(--kachel-flaeche);
+  border: 2px solid var(--kachel-rahmen);
+  /* minWidth:0 + overflow: lange Namen sprengen sonst die Spalte. */
+  min-width: 0;
+  overflow: hidden;
+  position: relative;
+}
+/* Anklickbare Kacheln (Abzeichen oeffnen ein Popover) */
+.app-kachel--klickbar {
+  cursor: pointer;
+}
+/* Noch nicht verdient: ausgegraut, aber weiter lesbar. Nur Abzeichen kennen
+   diesen Zustand -- ein Stempel existiert erst, wenn er verdient ist. */
+.app-kachel--gesperrt {
+  background: var(--app-surface-muted);
+  border-color: transparent;
+}
+.app-kachel__symbol {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--app-radius-kreis);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--kachel-verlauf, linear-gradient(135deg, var(--kachel-farbe) 0%, var(--kachel-farbe) 100%));
+  box-shadow: var(--kachel-schatten, 0 4px 12px rgba(0, 0, 0, 0.18));
+  position: relative;
+  flex-shrink: 0;
+}
+.app-kachel__symbol ion-icon {
+  font-size: var(--app-text-ueberschrift);
+  color: white;
+}
+.app-kachel--gesperrt .app-kachel__symbol {
+  background: var(--app-gradient-badge-gesperrt);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+.app-kachel--gesperrt .app-kachel__symbol ion-icon {
+  color: var(--app-text-muted);
+}
+/* Eckzeichen am Symbol: Haken (verdient) oder Schloss (gesperrt). */
+.app-kachel__zeichen {
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--app-radius-kreis);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid white;
+  background: var(--app-color-success);
+}
+.app-kachel__zeichen ion-icon {
+  font-size: var(--app-text-mini);
+  color: white;
+}
+.app-kachel__zeichen--gesperrt {
+  background: var(--app-text-system);
+}
+.app-kachel__name {
+  font-size: var(--app-text-meta);
+  font-weight: var(--app-schrift-halbfett);
+  color: var(--app-text-ios);
+  text-align: center;
+  line-height: 1.2;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Zwei Zeilen: ein Name wie "Gemeindefest-Held:in" passt sonst nie. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  /* Umbruch NUR an echten Wortgrenzen -- ein zu langes Wort wird NICHT
+     zerlegt.
+
+     Gekuerzt wird deshalb GEMESSEN in JavaScript (shared/useKachelName.ts):
+     wortweise, mit sichtbarem "…", nie mitten im Wort. Der volle Name steht
+     im title-Attribut und bei Abzeichen im Popover. */
+  overflow-wrap: normal;
+  word-break: normal;
+  /* Der Namensbereich belegt IMMER zwei Zeilen, auch bei einem kurzen Namen.
+     Sonst sitzt der Fortschritt in der Nachbarkachel eine Zeile hoeher. */
+  min-height: calc(2 * 1.2em);
+}
+.app-kachel--gesperrt .app-kachel__name {
+  color: var(--app-text-muted);
+}
+/* Fortschritt in Prozent unter dem Namen (nur Abzeichen). */
+.app-kachel__fortschritt {
+  font-size: var(--app-text-mini);
+  font-weight: var(--app-schrift-fett);
+  color: var(--app-color-users);
+}
+
+/* LADEBILDSCHIRM VOR DEM ROUTER
+   Gehoert zu AppLaedt in App.tsx. Er steht ausserhalb jedes
+   IonRouterOutlet und ist bewusst KEINE IonPage: Eine Seite wuerde im
+   Outlet registriert und spaeter getauscht -- genau das Muster, das in
+   dieser App wiederholt zu leeren Bildschirmen gefuehrt hat (siehe den
+   Kommentar an AppContent und keinTauschImOutlet.test.ts).
+   Die Grundfarbe deckend, damit beim Start nichts durchscheint. */
+.app-laedt {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  background: var(--ion-background-color, var(--app-weiss));
+}

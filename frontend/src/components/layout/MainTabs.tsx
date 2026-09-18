@@ -211,30 +211,20 @@ const MainTabs: React.FC = () => {
   // Schlaegt das Laden fehl (offline), schluckt ladeRolleVor den Fehler;
   // die Seite laedt dann eben beim ersten Besuch.
   // Alle Seiten der Rolle laden, BEVOR das Outlet zum ersten Mal rendert.
+
+  // WICHTIG: Hier steht KEIN Ladezustand mehr.
   //
-  // Die Chunks liegen nativ auf der Platte und im Browser meist im Cache;
-  // der Start verzoegert sich dadurch kaum. Schlaegt das Laden fehl
-  // (offline), geht es trotzdem weiter — dann rendert React die Seite
-  // selbst nach, sobald ihr Modul da ist.
-  const [seitenBereit, setSeitenBereit] = React.useState(false);
-  useEffect(() => {
-    if (!user) return;
-    let abgebrochen = false;
-    void ladeRolleVor(rolle).finally(() => {
-      if (!abgebrochen) setSeitenBereit(true);
-    });
-    return () => { abgebrochen = true; };
-  }, [rolle, user?.id]);
-
-  if (!user) {
-    return <SeiteLaedt />;
-  }
-
-  // Bis die Seiten-Chunks da sind: der bekannte Startbildschirm. Danach
-  // rendert das Outlet EINMAL mit fertigen Seiten — kein Tausch, kein Weiss.
-  if (!seitenBereit) {
-    return <SeiteLaedt />;
-  }
+  // Dass der Tausch IMMER passiert, ist nachgesehen und nicht vermutet:
+  // ladeRolleVor() wartet auf dynamische Importe (rollenBaeume.ts:133,
+  // `await Promise.allSettled`), kommt also fruehestens einen Microtask
+  // spaeter zurueck -- seitenBereit ist im ersten Durchgang zwangslaeufig
+  // false.
+  //
+  // Der Ladezustand liegt jetzt in App.tsx OBERHALB des Routers: Dort wird
+  // der Router erst montiert, wenn der Baum endgueltig ist, und das Outlet
+  // sieht nie einen Tausch. Siehe AppContent in App.tsx.
+  //
+  // Der Test __tests__/navigation/keinTauschImOutlet.test.ts haelt das fest.
 
   // EIN Renderer fuer alle Rollen — die Routen, Tabs und Umleitungen stehen
   // als Daten in navigation/rollenBaeume.ts.

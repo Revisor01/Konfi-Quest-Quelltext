@@ -1,4 +1,7 @@
 import { fehlerDaten, fehlerStatus, fehlerText } from '../../../utils/fehler';
+import { absageZuruecknehmenFragen } from '../../../utils/absageZuruecknehmen';
+import { darfTermineVerwalten } from '../../../utils/terminRechte';
+import { kopiereTermin } from '../../../utils/terminVorbelegung';
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useAppLocation } from '../../../navigation/useAppLocation';
 import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonRefresher, IonRefresherContent, IonButtons, IonButton, IonIcon, IonSegment, IonSegmentButton, IonLabel, useIonModal, useIonActionSheet, useIonAlert, useIonRouter } from '@ionic/react';
@@ -19,9 +22,10 @@ import ActivityRequestsView from '../ActivityRequestsView';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import EventModal from '../modals/EventModal';
 import ActivityRequestModal from '../modals/ActivityRequestModal';
-import { Event } from '../../../types/event';
+import TerminAbsagenModal from '../modals/TerminAbsagenModal';
+import { Event, Timeslot } from '../../../types/event';
 import { triggerPullHaptic } from '../../../utils/haptics';
-import { eventEnde } from '../../shared';
+import { aktuelleTermine, zuVerbuchendeTermine, vergangeneTermine, istAbgesagt } from '../../shared';
 
 /**
  * 409-Antwort beim Löschen eines Termins (events/verwaltung.js).
@@ -128,6 +132,9 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
   const [searchText, setSearchText] = useState('');
 
   const [editEvent, setEditEvent] = useState<Event | null>(null);
+  // Zeitfenster einer Kopie. Das Modal kann sie bei einer Kopie nicht selbst
+  // nachladen -- die hat keine id (siehe kopiereTermin).
+  const [kopierteTimeslots, setKopierteTimeslots] = useState<Timeslot[]>([]);
 
   // --- Aktivitäten-State ---
   const [modalRequestId, setModalRequestId] = useState<number | null>(null);
@@ -139,17 +146,62 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
 
   const [presentEventModalHook, dismissEventModalHook] = useIonModal(EventModal, {
     event: editEvent,
+    vorbelegteTimeslots: kopierteTimeslots,
     onDirtyChange: (dirty: boolean) => { eventModalDirtyRef.current = dirty; },
-    onClose: () => {
-      dismissEventModalHook();
-      setEditEvent(null);
-    },
+    onClose: () => dismissEventModalHook(),
     onSuccess: () => {
       dismissEventModalHook();
-      setEditEvent(null);
       refreshEvents();
       refreshCancelled();
     }
+  });
+
+  // ABSAGE-MODAL: Bis hierher war die Absage ein Action Sheet --
+  // richtig, solange sie nur zu bestaetigen war. Mit dem freiwilligen Grund
+  // (Migration 150) wird daraus eine Texteingabe, und die laeuft in dieser App
+  // ueber ein Modal (dieselbe Linie wie bei AbmeldungNachtragenModal).
+  //
+  // Ref-Getter wie beim Abmelde-Modal: Welcher Termin gemeint ist, steht erst
+  // beim Oeffnen fest, die Props werden aber schon beim Rendern deklariert.
+  const absageTerminRef = useRef<Event | null>(null);
+  const [presentAbsageModal, dismissAbsageModal] = useIonModal(TerminAbsagenModal, {
+    get terminName() { return absageTerminRef.current?.name ?? ''; },
+    get terminDatum() {
+      const termin = absageTerminRef.current;
+      if (!termin) return '';
+      return new Date(termin.event_date).toLocaleDateString('de-DE', {
+        weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric'
+      });
+    },
+    get konfiAnzahl() { return absageTerminRef.current?.registered_count || 0; },
+    // Ein abgesagter Termin bedeutet: Grund bearbeiten, kein zweites Absagen.
+    // Die Entscheidung faellt hier und nicht im Modal, weil hier steht,
+    // welcher Termin gemeint ist.
+    get modus() { return istAbgesagt(absageTerminRef.current) ? 'grund' as const : 'absagen' as const; },
+    get grundVorgabe() { return absageTerminRef.current?.cancelled_reason ?? ''; },
+    onSave: async (grund: string) => {
+      const termin = absageTerminRef.current;
+      if (!termin) return;
+      if (istAbgesagt(termin)) {
+        // Eigene Route (Migration 152): /cancel lehnt einen bereits abgesagten
+        // Termin mit 400 ab und muss das fuer ausgelieferte App-Fassungen auch
+        // weiterhin tun.
+        await api.put(`/events/${termin.id}/absagegrund`, { cancelled_reason: grund });
+        setSuccess(grund ? 'Absagegrund gespeichert' : 'Absagegrund entfernt');
+      } else {
+        await api.put(`/events/${termin.id}/cancel`, {
+          // notification_message bleibt mitgeschickt: Die Route nimmt es
+          // weiterhin entgegen, und es hier wegzulassen aendert nichts am
+          // Verhalten — aber der Vertrag bleibt so unangetastet.
+          notification_message: 'Das Event wurde leider abgesagt.',
+          cancelled_reason: grund
+        });
+        setSuccess(`Event "${termin.name}" wurde abgesagt`);
+      }
+      await refreshEvents();
+      await refreshCancelled();
+    },
+    dismiss: () => dismissAbsageModal()
   });
 
   const [presentRequestModalHook, dismissRequestModalHook] = useIonModal(ActivityRequestModal, {
@@ -213,36 +265,12 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
     });
   };
 
-  const eventEndDate = eventEnde;
-
-  const getAktuellEvents = () => {
-    const now = new Date();
-    const abgesagteZukuenftig = (cancelledEvents || []).filter(e => eventEndDate(e) >= now);
-    const list = [...events, ...abgesagteZukuenftig].filter(event => eventEndDate(event) >= now);
-    return list.sort((a, b) => new Date(a.event_date).getTime() - new Date(b.event_date).getTime());
-  };
-
-  // Tab "Verbuchen": beendete Events mit offenen (unverbuchten) Buchungen.
-  const getVerbuchenEvents = () => {
-    const now = new Date();
-    const list = events.filter(event => {
-      const hasPendingBookings = !!event.pending_bookings_count && event.pending_bookings_count > 0;
-      return eventEndDate(event) < now && hasPendingBookings && event.registration_status !== 'cancelled';
-    });
-    return list.sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
-  };
-
-  // Tab "Vergangen": beendete Events ohne offene Buchungen (fertig verbucht),
-  // plus die bereits vergangenen abgesagten Termine.
-  const getVergangenEvents = () => {
-    const now = new Date();
-    const abgesagteVergangen = (cancelledEvents || []).filter(e => eventEndDate(e) < now);
-    const list = [...events, ...abgesagteVergangen].filter(event => {
-      const hasPendingBookings = !!event.pending_bookings_count && event.pending_bookings_count > 0;
-      return eventEndDate(event) < now && !hasPendingBookings;
-    });
-    return list.sort((a, b) => new Date(b.event_date).getTime() - new Date(a.event_date).getTime());
-  };
+  // Die drei Reiter rechnen in shared/eventFormatting.ts — dort steht auch,
+  // warum abgesagte Termine in "Aktuell" und "Vergangen" stehen, in
+  // "Verbuchen" aber nicht.
+  const getAktuellEvents = () => aktuelleTermine(events, cancelledEvents || []);
+  const getVerbuchenEvents = () => zuVerbuchendeTermine(events);
+  const getVergangenEvents = () => vergangeneTermine(events, cancelledEvents || []);
 
   const handleDeleteEvent = async (event: Event) => {
     if (offlineBlockiert(isOnline, setError)) return;
@@ -317,7 +345,20 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
     return teile.join(', ');
   };
 
+  // WARUM DIE ZWEITE RUECKFRAGE UEBER onDidDismiss LAEUFT:
+  // Sie erschien nie. Zwei Mechaniken greifen ineinander —
+  //   1. Der Knopf-Handler eines Alerts wird ABGEWARTET, bevor der Alert
+  //      schliesst. Der `await api.delete(...)` unten laeuft also im noch
+  //      OFFENEN Alert.
+  //   2. Ein zweiter Alert, der aufgehen soll, waehrend noch einer offen ist,
+  //      wird STILL verworfen — ohne Fehler, ohne Log.
+  // Direkt aus dem catch heraus nachzufragen hiess also: Dialog weg, nichts
+  // passiert, der Termin bleibt stehen. Deshalb wird die Rueckfrage nur
+  // GEMERKT und erst angestossen, wenn der erste Alert wirklich zu ist —
+  // dasselbe Muster wie bei eventModalCanDismiss weiter oben.
+  // NICHT auf einen Aufruf direkt im catch zurueckdrehen.
   const deleteSingleEvent = async (event: Event) => {
+    let nachDemSchliessen: (() => void) | null = null;
     presentAlert({
       header: 'Event löschen',
       message: `Event "${event.name}" wirklich löschen?`,
@@ -333,14 +374,33 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
               await refreshCancelled();
             } catch (error) {
               if (fehlerStatus(error) === 409) {
-                confirmForceDelete(event, fehlerDaten(error));
+                const daten = fehlerDaten(error);
+                nachDemSchliessen = () => confirmForceDelete(event, daten);
               } else {
                 setError(fehlerText(error, 'Fehler beim Löschen des Events'));
               }
             }
           }
         }
-      ]
+      ],
+      // setTimeout 0, NICHT direkt aufrufen: @ionic/react ruft
+      // onDidDismiss auf, BEVOR es overlayRef.current freigibt --
+      //
+      //   const handleDismiss = (event) => {
+      //     if (onDidDismiss) { onDidDismiss(event); }
+      //     overlayRef.current = undefined;
+      //   };
+      //
+      // Ein presentAlert von hier aus liefe also noch gegen ein belegtes
+      // overlayRef und wuerde still verworfen. Genau das war der erste,
+      // wirkungslose Anlauf dieser Korrektur. Der Timeout laesst den
+      // Aufrufstapel zu Ende laufen; die Freigabe steht synchron direkt hinter
+      // unserem Callback und ist dann durch.
+      onDidDismiss: () => {
+        const naechster = nachDemSchliessen;
+        nachDemSchliessen = null;
+        if (naechster) setTimeout(naechster, 0);
+      }
     });
   };
 
@@ -373,6 +433,7 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
   };
 
   const deleteSeriesEvents = async (seriesEvents: Event[], label: string) => {
+    let nachDemSchliessen: (() => void) | null = null;
     presentAlert({
       header: 'Serie löschen',
       message: `Wirklich ${label} mit ${seriesEvents.length} Terminen löschen?`,
@@ -408,11 +469,17 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
               );
             }
             if (konflikte.length > 0) {
-              confirmForceDeleteSeries(konflikte);
+              nachDemSchliessen = () => confirmForceDeleteSeries(konflikte);
             }
           }
         }
-      ]
+      ],
+      // setTimeout 0 aus demselben Grund wie beim Einzeltermin (siehe dort).
+      onDidDismiss: () => {
+        const naechster = nachDemSchliessen;
+        nachDemSchliessen = null;
+        if (naechster) setTimeout(naechster, 0);
+      }
     });
   };
 
@@ -457,35 +524,30 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
     });
   };
 
+  // Absagen oeffnet jetzt das Modal mit dem optionalen Grund.
+  // Eckdaten (Datum, Konfi-Zahl) stehen dort im Kopf, wie vorher im Sheet.
   const handleCancelEvent = async (event: Event) => {
     if (offlineBlockiert(isOnline, setError)) return;
-    const eventDate = new Date(event.event_date).toLocaleDateString('de-DE', {
-      weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric'
-    });
-    const konfiCount = (event.registered_count || 0);
-    presentActionSheet({
-      header: `"${event.name}" absagen?`,
-      subHeader: `${eventDate} | ${konfiCount} Konfis angemeldet`,
-      buttons: [
-        {
-          text: 'Event absagen',
-          role: 'destructive',
-          icon: ICON_GESPERRT,
-          handler: async () => {
-            try {
-              await api.put(`/events/${event.id}/cancel`, {
-                notification_message: 'Das Event wurde leider abgesagt.'
-              });
-              setSuccess(`Event "${event.name}" wurde abgesagt`);
-              await refreshEvents();
-              await refreshCancelled();
-            } catch (error) {
-              setError(fehlerText(error, 'Fehler beim Absagen'));
-            }
-          }
-        },
-        { text: 'Abbrechen', role: 'cancel' }
-      ]
+    absageTerminRef.current = event;
+    presentAbsageModal({ presentingElement: presentingElement || undefined });
+  };
+
+  // ABSAGE ZURUECKNEHMEN
+  //
+  // Rueckfrage und Aufruf stehen in utils/absageZuruecknehmen.ts, weil es
+  // zwei Wege dorthin gibt: den Wisch hier in der Liste und den Knopf ganz
+  // unten in der Detailansicht. Zwei Kopien derselben Rueckfrage waeren zwei
+  // Stellen, an denen sie auseinanderlaufen koennen.
+  const handleAbsageZuruecknehmen = (event: Event) => {
+    if (offlineBlockiert(isOnline, setError)) return;
+    absageZuruecknehmenFragen(event, {
+      presentAlert,
+      setSuccess,
+      setError,
+      onErfolg: async () => {
+        await refreshEvents();
+        await refreshCancelled();
+      }
     });
   };
 
@@ -500,6 +562,10 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
   };
 
   const presentEventModal = (eventType: 'single' | 'series' = 'single') => {
+    // Zeitfenster einer vorherigen Kopie verwerfen: Sie werden beim Schliessen
+    // bewusst nicht zurueckgesetzt (siehe Kommentar am Modal-Hook), sonst
+    // brachte "Neuer Termin" direkt nach einem Kopieren dessen Zeitfenster mit.
+    setKopierteTimeslots([]);
     if (eventType === 'series') {
       // For series, we need to create a proper "new event" object with is_series flag
       setEditEvent({
@@ -516,6 +582,44 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
     } else {
       setEditEvent(null);
     }
+    presentEventModalHook({
+      presentingElement: presentingElement,
+      canDismiss: eventModalCanDismiss,
+      backdropDismiss: false
+    });
+  };
+
+  /**
+   * TERMIN KOPIEREN
+   *
+   *   "kopieren eröffnet ein modal mit allem voreingetragen."
+   *   "es wird ja nur das modal vorausgefüllt und man kann es dann direkt anlegen."
+   *
+   * Es wird NICHTS angelegt -- das Modal oeffnet sich wie beim Neuanlegen, nur
+   * vorbefuellt. Die Regel, was mitkommt und was nicht, steht in
+   * utils/terminVorbelegung.ts (kopiereTermin).
+   *
+   * Die Zeitfenster holt dieser Handler vorher ab: Die Terminliste liefert sie
+   * nicht mit, und das Modal kann sie bei einer Kopie nicht nachladen (id 0).
+   * Scheitert das Laden, wird trotzdem kopiert -- ohne Zeitfenster, mit
+   * Hinweis. Ein stummer Verlust waere schlimmer als ein Hinweis.
+   */
+  const handleKopiereEvent = async (event: Event) => {
+    if (offlineBlockiert(isOnline, setError)) return;
+
+    let timeslots: Timeslot[] = [];
+    if (event.has_timeslots) {
+      try {
+        const res = await api.get(`/events/${event.id}/timeslots`);
+        timeslots = res.data || [];
+      } catch (err) {
+        setError('Die Zeitfenster konnten nicht geladen werden — die Kopie hat keine.');
+      }
+    }
+
+    const { event: vorlage, timeslots: kopierteSlots } = kopiereTermin(event, timeslots);
+    setKopierteTimeslots(kopierteSlots);
+    setEditEvent(vorlage);
     presentEventModalHook({
       presentingElement: presentingElement,
       canDismiss: eventModalCanDismiss,
@@ -573,8 +677,10 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
     });
   };
 
-  // Rollen-basierte Berechtigungen (org_admin, admin UND teamer dürfen Events verwalten)
-  const canManageEvents = ['org_admin', 'admin', 'teamer'].includes(user?.role_name || '');
+  // Terminverwaltung ist Leitungssache. Die Regel steht in
+  // utils/terminRechte.ts und spiegelt requireAdmin im Backend — vorher zaehlte
+  // die Oberflaeche hier 'teamer' mit und bot Knoepfe an, die mit 403 endeten.
+  const canManageEvents = darfTermineVerwalten(user);
   const canCreate = canManageEvents;
   const canEdit = canManageEvents;
   const canDelete = canManageEvents;
@@ -669,6 +775,10 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
             selectedEventId={selectedEventId}
             onDeleteEvent={canDelete ? handleDeleteEvent : undefined}
             onCancelEvent={canCancel ? handleCancelEvent : undefined}
+            // Wer absagen darf, darf auch zuruecknehmen -- dieselbe
+            // Berechtigung im Backend (requireTeamer + darfTermin).
+            onZuruecknehmen={canCancel ? handleAbsageZuruecknehmen : undefined}
+            onKopieren={canCreate ? handleKopiereEvent : undefined}
             activeTab={activeTab}
             onTabChange={setActiveTab}
             eventCounts={{

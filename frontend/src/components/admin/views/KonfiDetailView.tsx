@@ -25,7 +25,7 @@ import {
   useIonModal,
   useIonAlert
 } from '@ionic/react';
-import api from '../../../services/api';
+import api, { DATEI_TIMEOUT_MS } from '../../../services/api';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { offlineCache } from '../../../services/offlineCache';
@@ -59,6 +59,7 @@ interface OffenerAntrag {
   photo_filename?: string;
 }
 import KonfiBadgesSection from './KonfiBadgesSection';
+import ChallengeStempelSektion from '../../shared/ChallengeStempelSektion';
 import WrappedModal from '../../wrapped/WrappedModal';
 import type { WrappedHistoryEntry } from '../../../types/wrapped';
 import { triggerPullHaptic } from '../../../utils/haptics';
@@ -547,8 +548,8 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
               await api.delete(`/admin/konfis/${konfiId}/activities/${activity.id}`);
               await loadKonfiData();
               triggerRefresh('konfis');
-            } catch {
-              setError('Fehler beim Löschen der Aktivität');
+            } catch (err) {
+              setError('Fehler beim Löschen der Aktivität', { ort: 'aktivitaet-loeschen-konfidetail', fehler: err });
             }
           }
         }
@@ -615,7 +616,8 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
     if (activity.hasPhoto && activity.requestId) {
       try {
         const response = await api.get(`/admin/activities/requests/${activity.requestId}/photo`, {
-          responseType: 'blob'
+          responseType: 'blob',
+          timeout: DATEI_TIMEOUT_MS
         });
         const photoUrl = URL.createObjectURL(response.data);
         // Vorherige Blob-URL freigeben, falls direkt ein weiteres Foto geoeffnet wird
@@ -923,6 +925,12 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
         {isTeamer && (
           <KonfiBadgesSection konfiId={konfiId} role="teamer" />
         )}
+
+        <ChallengeStempelSektion
+          marks={currentKonfi?.challengeMarks || []}
+          offeneStempel={currentKonfi?.offeneStempel || []}
+          titel="Stempel"
+        />
 
         {/* Teamer-Beförderung - nur für Konfis */}
         {!isTeamer && (

@@ -46,6 +46,7 @@ import { CACHE_TTL } from '../../../services/offlineCache';
 import QRCode from 'qrcode';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 import { tageBis } from '../../shared/eventFormatting';
+import { teilenImBrowser } from '../../../services/systemDialoge';
 
 interface Jahrgang {
   id: number;
@@ -247,9 +248,11 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
     const registrationUrl = `https://konfi-quest.de/register?code=${inviteCode}`;
     const jahrgangName = (jahrgaenge || []).find(j => j.id === selectedJahrgang)?.name || 'Konfi';
 
-    if (navigator.share) {
+    // typeof-Pruefung statt Kurzform: sagt TypeScript dasselbe wie vorher und
+    // fragt weiterhin, ob der Browser ueberhaupt teilen kann.
+    if (typeof navigator.share === 'function') {
       try {
-        await navigator.share({
+        await teilenImBrowser({
           title: 'Konfi Quest - Einladung',
           text: `Registriere dich für ${jahrgangName} bei Konfi Quest!`,
           url: registrationUrl

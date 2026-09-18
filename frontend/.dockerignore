@@ -1,0 +1,26 @@
+# Was NICHT in den Build-Kontext gehoert.
+#
+# Nebenwirkung, die genauso zaehlt: node_modules und dist des Rechners wurden
+# ins Image kopiert und erst danach von `npm ci` bzw. `npm run build`
+# ueberschrieben. Das Image trug also fremde Staende mit sich herum.
+
+# Abhaengigkeiten und Bau-Ergebnis entstehen IM Image (npm ci, npm run build).
+node_modules
+dist
+
+# Native Projekte -- fuer den Web-Build ohne Bedeutung, zusammen 1,8 GB.
+ios
+android
+
+# Werkzeug-Caches
+.vite
+coverage
+test-results
+playwright-report
+*.log
+
+# Entwicklungs-Kram
+.git
+.DS_Store
+.env
+.env.*

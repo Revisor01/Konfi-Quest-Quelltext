@@ -29,7 +29,7 @@ import {
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
-import api from '../../../services/api';
+import api, { DATEI_TIMEOUT_MS } from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
@@ -108,7 +108,8 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
   const loadPhoto = async (id: number) => {
     try {
       const response = await api.get(`/admin/activities/requests/${id}/photo`, {
-        responseType: 'blob'
+        responseType: 'blob',
+        timeout: DATEI_TIMEOUT_MS
       });
       const url = URL.createObjectURL(response.data);
       setPhotoUrl(url);

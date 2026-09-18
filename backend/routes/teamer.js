@@ -87,6 +87,10 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       const isPromotedKonfi = !!konfiProfile;
       let badges = [];
       if (isPromotedKonfi) {
+        // organization_id kommt im selben Zug dazu: Ohne sie zaehlte die
+        // Abfrage Abzeichen aus JEDER Organisation, in der die Person je ein
+        // Konto hatte. So macht es der Rest des Hauses auch
+        // (konfi-management.js:764, badges.js:208, konfi.js:1077).
         const badgesQuery = `
           SELECT kb.badge_id, b.name, b.description, b.icon, b.color,
                  b.criteria_type, b.criteria_value,
@@ -94,9 +98,11 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
           FROM user_badges kb
           JOIN custom_badges b ON kb.badge_id = b.id
           WHERE kb.user_id = $1
+            AND b.target_role = 'konfi'
+            AND b.organization_id = $2
           ORDER BY kb.awarded_date DESC
         `;
-        const result = await db.query(badgesQuery, [userId]);
+        const result = await db.query(badgesQuery, [userId, req.user.organization_id]);
         badges = result.rows;
       }
 
@@ -643,16 +649,34 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       //
       // Der Filter auf teamer_only/teamer_needed fehlte ebenfalls ganz; ohne
       // ihn stuenden auch reine Konfi-Termine auf der Teamer-Startseite.
+      // ABGESAGTE TERMINE STEHEN HIER -- ABER NUR FUER DIE EIGENE BUCHUNG
+      // 
+      //
+      // WARUM SIE HINEINGEHOEREN: Wer fuer morgen zugesagt hat, muss auf der
+      // Startseite sehen, dass der Termin ausfaellt. Genau dafuer schaut man
+      // dort hin. Ein Termin, der still aus der Liste verschwindet, sagt
+      // "nichts los" statt "faellt aus" -- und die Zusage bleibt im Kopf.
+      //
+      // Die drei Absage-Felder kommen ADDITIV dazu, Muster und LEFT JOINs wie
+      // in events/lesen.js: Termine, die vor Migration 150/152 abgesagt
+      // wurden, haben keinen Urheber -- ein INNER JOIN wuerde sie aus der
+      // Liste werfen. NULL heisst hier "kein Grund angegeben" bzw.
+      // "unbekannt", nicht "niemand".
       const eventsQuery = `
         SELECT e.id, e.name AS title, e.event_date, e.event_end_time, e.location, e.type,
                e.teamer_only, e.teamer_needed, e.bring_items, e.cancelled,
+               e.cancelled_reason, e.cancelled_by, e.cancelled_at,
+               u_cancel.display_name as cancelled_by_name,
+               u_grund.display_name as cancelled_reason_set_by_name,
                CASE WHEN eb.id IS NOT NULL THEN true ELSE false END as is_registered,
                eb.status as booking_status
         FROM events e
         LEFT JOIN event_bookings eb ON e.id = eb.event_id AND eb.user_id = $1
+        LEFT JOIN users u_cancel ON e.cancelled_by = u_cancel.id
+        LEFT JOIN users u_grund ON e.cancelled_reason_set_by = u_grund.id
         WHERE e.organization_id = $2
           AND e.event_date >= CURRENT_DATE
-          AND (e.cancelled IS NOT TRUE)
+          AND (e.cancelled IS NOT TRUE OR eb.id IS NOT NULL)
           AND (
             eb.id IS NOT NULL          -- eigene Buchung: immer zeigen
             OR e.teamer_only = true    -- reiner Team-Termin

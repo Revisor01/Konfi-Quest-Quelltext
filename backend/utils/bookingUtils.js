@@ -112,6 +112,179 @@ async function takeBackEventPoints(client, userId, eventId) {
   return { points: pts.points, point_type: pts.point_type };
 }
 
+/** Fester Text, wenn eine Absage ohne Grund ausgesprochen wurde. */
+const ABSAGE_OHNE_GRUND = 'Termin abgesagt';
+
+/**
+ * Meldet beim Absagen eines Termins alle Angemeldeten und Wartenden ab.
+ *
+ * WAS DIE AUSWAHL WEITERHIN AUSNIMMT, und warum das kein Widerspruch ist:
+ * `status IN ('confirmed', 'waitlist')`. Diese Bedingung bleibt -- sie traegt
+ * seit Migration 153 die ganze Abgrenzung:
+ *
+ * Wer auf 'present' oder 'absent' steht, hat dagegen status 'confirmed' oder
+ * 'waitlist' -- eine lebende Anmeldung. Die faellt jetzt mit.
+ *
+ * ABMELDEN IST DIE VOREINSTELLUNG, NICHT DAS ENDE: Die
+ * Leitung kann danach einzelne Personen ueber den normalen Weg wieder auf
+ * 'present' setzen und ihnen Punkte geben -- etwa wenn drei Konfis schon da
+ * waren und geholfen haben. Diese Funktion laeuft genau einmal, beim Absagen;
+ * sie kommt nicht zurueck, um eine spaetere Entscheidung zu kassieren.
+ *
+ * EIN MENGEN-UPDATE, keine Schleife pro Person: Ein Termin kann viele
+ * Angemeldete haben. Die Punkte-Ruecknahme laeuft ebenso in zwei
+ * Mengen-Anweisungen ueber alle Betroffenen statt in einer Abfrage je Person.
+ *
+ * ERWARTET EINEN CLIENT in laufender Transaktion: Abmeldung und
+ * Punkte-Ruecknahme gehoeren zur Absage. Schlaegt eines fehl, darf der Termin
+ * nicht halb abgesagt zurueckbleiben.
+ *
+ * @param {object} client - Client aus db.getClient(), NICHT der Pool
+ * @param {number} eventId
+ * @param {string|null} grund - der Absagegrund; ohne ihn ABSAGE_OHNE_GRUND
+ * @returns {{abgemeldet: number, punkteZurueckgenommen: Array<{konfi_id: number, points: number, point_type: string}>}}
+ */
+async function meldeAlleAbBeiAbsage(client, eventId, grund) {
+  verlangeClient(client, 'meldeAlleAbBeiAbsage');
+
+  // Der Grund ist der Absagegrund. Ohne ihn ein fester Text statt NULL: Die
+  // Zeile in der Teilnehmerliste liest sich sonst als "abgemeldet, Grund
+  // unbekannt" -- der Grund ist aber bekannt, der Termin faellt aus.
+  const abmeldeGrund = grund || ABSAGE_OHNE_GRUND;
+
+  // 1. Punkte zuerst LESEN -- fuer genau die Buchungen, die gleich umgestellt
+  //    werden. Nach dem UPDATE waere die Auswahl nicht mehr zu treffen, weil
+  //    `status` dann bei allen auf 'excused' steht.
+  const { rows: punkte } = await client.query(
+    `SELECT ep.konfi_id, ep.points, ep.point_type
+       FROM event_points ep
+      WHERE ep.event_id = $1
+        AND EXISTS (
+          SELECT 1 FROM event_bookings eb
+           WHERE eb.event_id = ep.event_id AND eb.user_id = ep.konfi_id
+             AND eb.status IN ('confirmed', 'waitlist')
+        )`,
+    [eventId]
+  );
+
+  // 2. Punkte-Salden in EINER Anweisung zurueckrechnen, getrennt nach
+  //    Punkt-Typ. GREATEST(0, ...) wie ueberall sonst gegen den Unterlauf.
+  if (punkte.length > 0) {
+    const konfiIds = punkte.map(p => p.konfi_id);
+    await client.query(
+      `UPDATE konfi_profiles kp
+          SET gemeinde_points = GREATEST(0, kp.gemeinde_points - summe.gemeinde),
+              gottesdienst_points = GREATEST(0, kp.gottesdienst_points - summe.gottesdienst)
+         FROM (
+           SELECT konfi_id,
+                  COALESCE(SUM(points) FILTER (WHERE point_type <> 'gottesdienst'), 0) AS gemeinde,
+                  COALESCE(SUM(points) FILTER (WHERE point_type = 'gottesdienst'), 0) AS gottesdienst
+             FROM event_points
+            WHERE event_id = $1 AND konfi_id = ANY($2::int[])
+            GROUP BY konfi_id
+         ) AS summe
+        WHERE kp.user_id = summe.konfi_id`,
+      [eventId, konfiIds]
+    );
+    await client.query(
+      'DELETE FROM event_points WHERE event_id = $1 AND konfi_id = ANY($2::int[])',
+      [eventId, konfiIds]
+    );
+  }
+
+  //    attendance_status = 'excused'   -- wie der Termin ausgegangen ist
+  //    status            = 'excused'   -- die Buchung zaehlt nicht mehr
+  //    abgemeldet_durch_absage = TRUE  -- WOHER die Abmeldung kommt
+  //
+  //    `status IN ('confirmed','waitlist')` BLEIBT und traegt jetzt die ganze
+  //    Abgrenzung allein: 'opted_out' und 'excused' (Einzelabmeldung mit
+  //    eigenem Grund) stehen nicht drin. Die einzeln abgemeldete Person
+  //    behaelt damit ihren Grund, ihr abgemeldet_durch_absage = FALSE und
+  //    ueberlebt die Zuruecknahme.
+  const { rowCount } = await client.query(
+    `UPDATE event_bookings
+        SET attendance_status = 'excused',
+            status_vor_absage = status,
+            status = 'excused',
+            abgemeldet_durch_absage = TRUE,
+            excuse_reason = $2,
+            attendance_set_by = NULL,
+            attendance_set_at = NULL,
+            checkin_quelle = NULL,
+            checked_in_at = NULL
+      WHERE event_id = $1
+        AND status IN ('confirmed', 'waitlist')`,
+    [eventId, abmeldeGrund]
+  );
+
+  return { abgemeldet: rowCount, punkteZurueckgenommen: punkte };
+}
+
+/**
+ * Hebt beim Zuruecknehmen einer Absage genau die Abmeldungen auf, die AUS
+ * DIESER ABSAGE stammen. Das Gegenstueck zu meldeAlleAbBeiAbsage.
+ *
+ * NUR abgemeldet_durch_absage = TRUE (Migration 153). Das ist der Kern:
+ *
+ *   "Könnte ja auch sein wir sagen eine Pflicht ab, manche sind entschuldigt,
+ *    dann machen wir es doch. Status bei allen zurück außer bei denen."
+ *
+ * Wer sich VOR der Absage selbst abgemeldet hat ('opted_out') oder von der
+ * Leitung einzeln abgemeldet wurde ('excused' mit abgemeldet_durch_absage =
+ * FALSE), bleibt abgemeldet. Die Mutter hat angerufen, das Kind ist krank --
+ * daran aendert sich nichts dadurch, dass der Termin nun doch stattfindet.
+ *
+ * JEDE PERSON KEHRT AUF IHREN EIGENEN ALTEN STATUS ZURUECK
+ * (status_vor_absage, Migration 155): 'confirmed' bleibt 'confirmed',
+ * 'waitlist' bleibt 'waitlist'. Eine Wartende darf nicht als Angemeldete
+ * zurueckkommen -- sie haette dann einen Platz, den sie nie hatte, und der
+ * Termin waere ueberbucht. Fehlt der Wert (Bestandsdaten von vor Migration
+ * 155), faellt es auf 'confirmed' zurueck: der Normalfall, und von Hand
+ * geraderueckbar. Eine faelschlich fehlende Anmeldung faellt dagegen
+ * niemandem auf.
+ *
+ * DIE ABMELDE-SPUREN WERDEN GELOESCHT, nicht aufbewahrt: attendance_status,
+ * excuse_reason, abgemeldet_durch_absage und status_vor_absage gehen zurueck
+ * auf NULL bzw. FALSE. Die Abmeldung hat es nicht mehr gegeben -- der Termin
+ * findet statt und ist wieder unverbucht. Bliebe excuse_reason ("Heizung
+ * defekt") stehen, staende bei jeder Person ein Grund fuer eine Abmeldung,
+ * die aufgehoben ist.
+ *
+ * KEINE UEBERBUCHUNG MOEGLICH: An einem abgesagten Termin kann niemand
+ * nachgerueckt sein -- promoteFromWaitlist liefert dort null (der Guard steht
+ * zentral dort, nicht an den Aufrufstellen). Die Plaetze, die diese Buchungen
+ * vor der Absage belegt haben, sind seither also unberuehrt geblieben. Jede
+ * Person bekommt genau zurueck, was sie hatte.
+ *
+ * ERWARTET EINEN CLIENT in laufender Transaktion: Wiederaufnahme des Termins
+ * und Wiederherstellung der Buchungen gehoeren zusammen. Schlaegt eines fehl,
+ * darf kein halb reaktivierter Termin zurueckbleiben.
+ *
+ * @param {object} client - Client aus db.getClient(), NICHT der Pool
+ * @param {number} eventId
+ * @returns {Promise<Array<{user_id: number, status: string}>>} die
+ *   wiederhergestellten Buchungen -- genau die Empfaenger des
+ *   "Findet doch statt"-Pushes
+ */
+async function hebeAbsageAbmeldungenAuf(client, eventId) {
+  verlangeClient(client, 'hebeAbsageAbmeldungenAuf');
+
+  const { rows } = await client.query(
+    `UPDATE event_bookings
+        SET status = COALESCE(status_vor_absage, 'confirmed'),
+            status_vor_absage = NULL,
+            abgemeldet_durch_absage = FALSE,
+            attendance_status = NULL,
+            excuse_reason = NULL
+      WHERE event_id = $1
+        AND abgemeldet_durch_absage = TRUE
+      RETURNING user_id, status`,
+    [eventId]
+  );
+
+  return rows;
+}
+
 /**
  * Rueckt den ersten Wartelisten-Eintrag nach (timeslot-aware, rollen-gefiltert)
  *
@@ -143,6 +316,13 @@ async function promoteFromWaitlist(db, eventId, timeslotId, roleFilter) {
   if (roleFilter !== 'teamer' && roleFilter !== 'not_teamer') {
     throw new Error(`promoteFromWaitlist: roleFilter muss 'teamer' oder 'not_teamer' sein (war: ${roleFilter})`);
   }
+
+  // Abgesagt? Dann gibt es nichts nachzurruecken.
+  const { rows: [termin] } = await db.query(
+    'SELECT cancelled FROM events WHERE id = $1',
+    [eventId]
+  );
+  if (!termin || termin.cancelled === true) return null;
   // Rollen-Bedingung: Team-Warteliste vs. Konfi-Warteliste.
   // 'teamer' meint hier das TEAM-Kontingent — Teamer:innen und die einem
   // Termin zugeordneten Admins. Wuerde weiter strikt auf
@@ -190,6 +370,94 @@ async function promoteFromWaitlist(db, eventId, timeslotId, roleFilter) {
   await addToEventChat(db, eventId, promoted.user_id, promoted.organization_id);
 
   return promoted.user_id;
+}
+
+/**
+ * Ein frei gewordener Platz wird nachbesetzt — Kapazitaetspruefung inklusive.
+ *
+ * WARUM ES DIESE FUNKTION GIBT:
+ * Vor ihr stand der Dreischritt "Kapazitaet des Kontingents holen, Bestaetigte
+ * zaehlen, bei Luft promoteFromWaitlist rufen" als Kopie an jeder Stelle, die
+ * einen Platz freigibt — und an SECHS weiteren Stellen gar nicht. Wer einen
+ * Platz freiraeumt, soll genau eine Zeile schreiben muessen.
+ *
+ * Die Kapazitaet holt die Funktion selbst: Konfi-Seite aus
+ * `event_timeslots.max_participants` (mit Timeslot) bzw.
+ * `events.max_participants`, Team-Seite immer aus
+ * `events.teamer_max_participants` (Team-Buchungen haben nie einen Timeslot).
+ * 0 heisst unbegrenzt — dann rueckt immer nach.
+ *
+ * @param {object} client  DB-Client in laufender Transaktion (kein Pool)
+ * @param {object} eingabe
+ * @param {number} eingabe.eventId
+ * @param {number|null} [eingabe.timeslotId]  nur Konfi-Seite
+ * @param {'konfi'|'team'} eingabe.seite      welches Kontingent frei wurde
+ * @param {number} [eingabe.anzahl=1]         wie viele Plaetze frei wurden
+ * @returns {Promise<number[]>} User-IDs der Nachgerueckten, in Nachrueck-Reihenfolge
+ */
+async function rueckeNach(client, { eventId, timeslotId = null, seite, anzahl = 1 }) {
+  verlangeClient(client, 'rueckeNach');
+  if (seite !== 'konfi' && seite !== 'team') {
+    throw new Error(`rueckeNach: seite muss 'konfi' oder 'team' sein (war: ${seite})`);
+  }
+
+  const { rows: [event] } = await client.query(
+    'SELECT cancelled, max_participants, teamer_max_participants FROM events WHERE id = $1',
+    [eventId]
+  );
+  // Abgesagt: promoteFromWaitlist wuerde ohnehin null liefern — hier sparen
+  // wir uns zusaetzlich das Zaehlen.
+  if (!event || event.cancelled === true) return [];
+
+  let maxKapazitaet;
+  if (seite === 'team') {
+    // Team-Buchungen haben nie einen Timeslot -> event-weite Kapazitaet und
+    // event-weite Zaehlung. Ein mitgegebener timeslotId wird auf der
+    // Team-Seite bewusst ignoriert (siehe `bereich` und der Aufruf unten).
+    maxKapazitaet = event.teamer_max_participants || 0;
+  } else if (timeslotId) {
+    const { rows: [slot] } = await client.query(
+      'SELECT max_participants FROM event_timeslots WHERE id = $1',
+      [timeslotId]
+    );
+    maxKapazitaet = slot?.max_participants || 0;
+  } else {
+    maxKapazitaet = event.max_participants || 0;
+  }
+
+  const bereich = timeslotId && seite === 'konfi' ? { timeslotId } : { eventId };
+  const roleFilter = seite === 'team' ? 'teamer' : 'not_teamer';
+  const nachgerueckt = [];
+
+  // Nach jeder Befoerderung neu zaehlen: Die gerade nachgerueckte Person
+  // belegt den Platz, den sie bekommen hat. Ohne die Neuzaehlung wuerde
+  // `anzahl` > 1 ueber die Kapazitaet hinaus befoerdern.
+  for (let i = 0; i < anzahl; i++) {
+    if (maxKapazitaet > 0) {
+      const bestaetigt = await zaehleBestaetigte(client, bereich, seite);
+      if (bestaetigt >= maxKapazitaet) break;
+    }
+    const userId = await promoteFromWaitlist(client, eventId, seite === 'team' ? null : timeslotId, roleFilter);
+    if (!userId) break; // Warteliste leer — kein Absturz, einfach nichts zu tun.
+    nachgerueckt.push(userId);
+  }
+
+  return nachgerueckt;
+}
+
+/**
+ * Wie viele Plaetze hat dieses Kontingent noch frei? null = unbegrenzt.
+ * Fuer die Faelle, in denen die KAPAZITAET steigt statt ein Platz frei zu
+ * werden (Termin bearbeiten) — dort ist die Zahl der freien Plaetze die
+ * Obergrenze fuer `rueckeNach({ anzahl })`.
+ *
+ * @returns {Promise<number|null>}
+ */
+async function freiePlaetze(client, { eventId, timeslotId = null, seite }, maxKapazitaet) {
+  if (!maxKapazitaet || maxKapazitaet <= 0) return null;
+  const bereich = timeslotId && seite === 'konfi' ? { timeslotId } : { eventId };
+  const bestaetigt = await zaehleBestaetigte(client, bereich, seite);
+  return Math.max(0, maxKapazitaet - bestaetigt);
 }
 
 /**
@@ -416,14 +684,33 @@ async function bucheTermin(client, eingabe) {
   );
   if (!event) return fehler(404, 'Event nicht gefunden');
 
+  //     Stand bis dahin nur im Konfi-Zweig weiter unten; der Team-Zweig kam
+  //     ohne ihn aus und haette eine zurueckgenommene Team-Absage
+  //     (reaktivierung) auch an einem abgesagten Termin durchgelassen.
+  //     Jetzt zentral, vor der Rollenweiche — dasselbe Muster wie in
+  //     setzeTeamerZusage, das den Riegel schon hatte.
+  //
+  //     Das Zuruecknehmen der Absage laeuft NICHT hier durch, sondern ueber
+  //     hebeAbsageAbmeldungenAuf (eigenes UPDATE) — der Riegel behindert es
+  //     nicht.
+  if (event.cancelled) return fehler(400, 'Dieser Termin ist abgesagt');
+
   // 2. Doppelbuchung — vor allen fachlichen Pruefungen, damit ein zweiter
   //    Versuch immer 409 meldet und nicht je nach Termin etwas anderes.
   //
-  //    Bewusst NUR auf der Team-Seite: Konfis nehmen eine Pflicht-Abmeldung
-  //    ueber POST /konfi/events/:id/opt-in zurueck (eigene Regeln, eigener
-  //    Push an die Leitung) — dieser Weg bleibt fuer sie der einzige.
+  //    KEINE SONDERREGEL DAHINTER: Nach der Reaktivierung laeuft die Buchung
+  //    den normalen Weg -- Anmeldefenster, Konfirmations-Sperre, Kapazitaet,
+  //    Zeitslot-Zwang, Warteliste. Eine abgemeldete Zeile belegt dabei keinen
+  //    Platz (zaehleBuchungen zaehlt nur 'confirmed'/'waitlist'), der Termin
+  //    ist fuer die Betroffene also wieder ein offener Termin.
+  //
+  //    NICHT BERUEHRT: die Check-in-Sperre am Termintag (checkin.js). Wer
+  //    abgemeldet ist, checkt nicht per QR-Code ein -- sonst holte sich eine
+  //    krank gemeldete Konfi die Punkte selbst zurueck. Der Weg zurueck
+  //    fuehrt ueber die Anmeldung, nicht ueber den Check-in.
   const vorhanden = await checkExistingBooking(client, userId, eventId);
-  const reaktivierung = !!vorhanden && vorhanden.status === 'opted_out' && rolle === 'teamer';
+  const reaktivierung = !!vorhanden
+    && (vorhanden.status === 'opted_out' || vorhanden.status === 'excused');
   if (vorhanden && !reaktivierung) {
     return fehler(409, 'Du bist bereits für dieses Event angemeldet');
   }
@@ -460,7 +747,9 @@ async function bucheTermin(client, eingabe) {
         `UPDATE event_bookings
             SET status = $3, booking_date = NOW(),
                 opt_out_reason = NULL, opt_out_date = NULL,
-                absage_nach_zusage = false
+                absage_nach_zusage = false,
+                attendance_status = NULL, excuse_reason = NULL,
+                attendance_set_by = NULL, attendance_set_at = NULL
           WHERE id = $4 AND user_id = $2 AND event_id = $1
           RETURNING id`,
         [eventId, userId, ergebnis, vorhanden.id]
@@ -481,7 +770,7 @@ async function bucheTermin(client, eingabe) {
 
   // ---------- KONFI-SEITE ----------
   if (event.teamer_only) return fehler(403, 'Dieses Event ist nur für das Team');
-  if (event.cancelled) return fehler(400, 'Dieser Termin ist abgesagt');
+  // (Der cancelled-Riegel steht jetzt zentral oben, vor der Rollenweiche.)
 
   const fenster = validateRegistrationWindow(event);
   if (!fenster.valid) return fehler(400, fenster.error);
@@ -538,11 +827,45 @@ async function bucheTermin(client, eingabe) {
 
   // organization_id MUSS gesetzt sein, sonst zaehlen die Abzeichen-Abfragen
   // die Buchung nicht (sie filtern auf organization_id).
-  const { rows: [neu] } = await client.query(
-    `INSERT INTO event_bookings (event_id, user_id, timeslot_id, status, booking_date, organization_id)
-     VALUES ($1, $2, $3, $4, NOW(), $5) RETURNING id`,
-    [eventId, userId, timeslotId, ergebnis, orgId]
-  );
+  let neu;
+  if (reaktivierung) {
+    // ZURUECK AUS EINER ABMELDUNG: Zeile aktualisieren statt neu anlegen --
+    // der UNIQUE-Index idx_event_bookings_user_event (user_id, event_id)
+    // kennt keinen Statusfilter, ein INSERT liefe auf 23505.
+    //
+    // Die neue Anmeldung ERSETZT die Abmeldung, sie ergaenzt sie nicht:
+    // Abmeldegrund, Anwesenheitsstempel und dessen Urheber fallen weg. Bleibe
+    // etwa excuse_reason stehen, zeigte die Teilnehmerliste "Krank gemeldet"
+    // an einer Person, die wieder angemeldet ist. Dieselbe Regel wie auf der
+    // Team-Seite oben; dort heissen die Felder nur anders (opt_out_reason).
+    //
+    // booking_date auf NOW(): Fuer Warteliste und Nachruecken zaehlt die
+    // NEUE Entscheidung, nicht der Zeitpunkt der zurueckgenommenen.
+    //
+    // timeslot_id wird mitgeschrieben: Wer vorher in einem anderen Zeitfenster
+    // stand, meldet sich jetzt fuer das gewaehlte an.
+    ({ rows: [neu] } = await client.query(
+      `UPDATE event_bookings
+          SET status = $4, timeslot_id = $3, booking_date = NOW(),
+              opt_out_reason = NULL, opt_out_date = NULL,
+              absage_nach_zusage = false,
+              attendance_status = NULL, excuse_reason = NULL,
+              attendance_set_by = NULL, attendance_set_at = NULL
+        WHERE id = $5 AND user_id = $2 AND event_id = $1
+        RETURNING id`,
+      // Kein orgId-Parameter: Die Zeile existiert bereits und traegt ihre
+      // organization_id seit dem urspruenglichen INSERT. Ein ungenutzter
+      // Parameter laesst Postgres ausserdem mit "could not determine data
+      // type" abbrechen.
+      [eventId, userId, timeslotId, ergebnis, vorhanden.id]
+    ));
+  } else {
+    ({ rows: [neu] } = await client.query(
+      `INSERT INTO event_bookings (event_id, user_id, timeslot_id, status, booking_date, organization_id)
+       VALUES ($1, $2, $3, $4, NOW(), $5) RETURNING id`,
+      [eventId, userId, timeslotId, ergebnis, orgId]
+    ));
+  }
   await addToEventChat(client, eventId, userId, orgId);
 
   return {
@@ -698,10 +1021,15 @@ async function setzeTeamerZusage(client, eingabe) {
 }
 
 module.exports = {
+  ABSAGE_OHNE_GRUND,
+  meldeAlleAbBeiAbsage,
+  hebeAbsageAbmeldungenAuf,
   takeBackEventPoints,
   checkExistingBooking,
   determineBookingStatus,
   promoteFromWaitlist,
+  rueckeNach,
+  freiePlaetze,
   validateRegistrationWindow,
   isRegistrationOpenForKonfis,
   zaehleBuchungen,

@@ -16,7 +16,6 @@ import {
 import {
   ICON_ABSAGE,
   ICON_AKTUALISIEREN,
-  ICON_FINGERABDRUCK,
   ICON_PERSON_GEFUELLT,
   ICON_PFEIL_WEITER_GEFUELLT,
   ICON_SCHLUESSEL_GEFUELLT,
@@ -24,9 +23,10 @@ import {
   ICON_VERBORGEN,
   ICON_WARNHINWEIS_GEFUELLT,
 } from '../shared/icons';
+import { biometrieIcon } from '../shared/biometrieSymbol';
 import { useApp } from '../../contexts/AppContext';
 import { loginWithAutoDetection, mitBiometrieAnmelden } from '../../services/auth';
-import { biometrieVerfuegbar, istBiometrieAktiv } from '../../services/biometrics';
+import { biometrieVerfuegbar, istBiometrieAktiv, BiometrieSinnbild } from '../../services/biometrics';
 import { BaseUser } from '../../types/user';
 
 const LoginView: React.FC = () => {
@@ -41,6 +41,9 @@ const LoginView: React.FC = () => {
   const [isNetworkError, setIsNetworkError] = useState(false);
   // Biometrie: Knopf nur zeigen, wenn eine gesicherte Sitzung hinterlegt ist.
   const [biometrieBezeichnung, setBiometrieBezeichnung] = useState<string | null>(null);
+  // Sinnbild des erkannten Verfahrens (Gesicht/Finger/Schloss). Wird zusammen
+  // mit der Bezeichnung gesetzt, damit Symbol und Text nie auseinanderlaufen.
+  const [biometrieSinnbild, setBiometrieSinnbild] = useState<BiometrieSinnbild>('schloss');
   const [biometrieLaeuft, setBiometrieLaeuft] = useState(false);
   // Der automatische Versuch beim Oeffnen darf sich NICHT wiederholen: sonst
   // erscheint nach jedem Abbruch sofort wieder die Abfrage und man kommt nicht
@@ -159,6 +162,7 @@ const LoginView: React.FC = () => {
       if (!verfuegbarkeit.verfuegbar || !aktiv) return;
 
       setBiometrieBezeichnung(verfuegbarkeit.bezeichnung);
+      setBiometrieSinnbild(verfuegbarkeit.sinnbild);
 
       if (autoVersuchGelaufen.current) return;
       autoVersuchGelaufen.current = true;
@@ -364,7 +368,7 @@ const LoginView: React.FC = () => {
                     <IonSpinner name="crescent" />
                   ) : (
                     <>
-                      <IonIcon icon={ICON_FINGERABDRUCK} slot="start" />
+                      <IonIcon icon={biometrieIcon(biometrieSinnbild)} slot="start" />
                       Mit {biometrieBezeichnung} anmelden
                     </>
                   )}

@@ -471,7 +471,8 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin, requireTeam
       `, [jahrgangId, req.user.organization_id]);
 
       const { rows: bookings } = await db.query(`
-        SELECT eb.event_id, eb.user_id, eb.status, eb.attendance_status
+        SELECT eb.event_id, eb.user_id, eb.status, eb.attendance_status,
+               eb.excuse_reason, eb.attendance_note
         FROM event_bookings eb
         WHERE eb.event_id = ANY($1::int[])
           AND eb.user_id = ANY($2::int[])

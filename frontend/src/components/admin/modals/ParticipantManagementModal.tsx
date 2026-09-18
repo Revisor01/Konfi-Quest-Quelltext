@@ -116,8 +116,8 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
 
       // Dann verfügbare Konfis laden (braucht Participants für Filterung)
       await loadAvailableKonfis(loadedParticipants);
-    } catch {
-      setError('Fehler beim Laden der Daten');
+    } catch (err) {
+      setError('Fehler beim Laden der Daten', { ort: 'teilnehmer-verwaltung-laden', fehler: err });
     }
   };
 

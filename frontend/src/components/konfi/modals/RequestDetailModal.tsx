@@ -25,7 +25,7 @@ import {
   ICON_WARTEND_GEFUELLT,
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
-import api from '../../../services/api';
+import api, { DATEI_TIMEOUT_MS } from '../../../services/api';
 
 export interface ActivityRequest {
   id: number;
@@ -71,7 +71,8 @@ const RequestDetailModal: React.FC<RequestDetailModalProps> = ({
     setPhotoLoadFailed(false);
     try {
       const response = await api.get(`/konfi/activity-requests/${id}/photo`, {
-        responseType: 'blob'
+        responseType: 'blob',
+        timeout: DATEI_TIMEOUT_MS
       });
       const url = URL.createObjectURL(response.data);
       setPhotoUrl(url);

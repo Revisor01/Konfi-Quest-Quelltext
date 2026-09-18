@@ -508,8 +508,72 @@ footer a:hover{color:#fff}
 <!-- Umami-Reichweitenmessung (self-hosted auf t.godsapp.de).
      Cookiefrei und ohne personenbezogene Daten -> keine Einwilligung noetig,
      deshalb darf das Script direkt laden. Das Event-Tracking selbst steht
-     gebuendelt am Seitenende. -->
-<script defer src="https://t.godsapp.de/script.js" data-website-id="dfd37276-5ad4-474d-8306-bf3ed9a3a5d3"></script>
+     gebuendelt am Seitenende.
+     -->
+<script defer src="https://t.godsapp.de/script.js" id="umami-script" data-website-id="dfd37276-5ad4-474d-8306-bf3ed9a3a5d3" data-domains="konfi-quest.de,www.konfi-quest.de"></script>
+
+<!--
+     WARUM MARKIEREN UND NICHT WEGLASSEN. Den Aufruf einfach nicht zu
+     zaehlen waere falsch: er hat stattgefunden, und eine Zahl, die still
+     Faelle verschluckt, laesst sich hinterher von niemandem nachpruefen.
+     Markiert bleibt beides sichtbar und die Auswertung kann trennen.
+
+     WARUM data-tag. Umami haengt den Tag an JEDES Ereignis der Sitzung —
+     auch an den Seitenaufruf selbst. Das Ereignis `app-oeffnen` allein
+     reicht nicht: es entsteht erst beim Klick, der Seitenaufruf ist da
+     laengst als Werbe-Aufruf gezaehlt. Der Tag dagegen steht von der
+     ersten Zeile an dran. Das Script liest das Attribut EINMAL beim
+     Ausfuehren; weil es `defer` traegt, laeuft dieser Block vorher.
+
+     WORAN "durchlauf" ERKANNT WIRD — zwei Merkmale, beide ohne Personenbezug:
+
+     1. Im Browser liegt die Anmeldung der App unter DERSELBEN Herkunft
+        (konfi-quest.de) im localStorage. Gefragt wird ausschliesslich, OB
+        ein solcher Schluessel existiert — der Wert wird nie gelesen, nie
+        gesendet, nicht einmal in eine Variable geschrieben. Das Ergebnis
+        ist ein einzelnes Ja/Nein und sagt nur: dieser Browser hat sich
+        hier schon einmal angemeldet.
+     2. Der Verweis kommt aus der App selbst (eigene Herkunft), etwa ueber
+        einen Link im Konfi-Bereich zurueck auf die Startseite.
+
+     WAS DAS NICHT KANN — und bewusst nicht vorgibt zu koennen: Wer sich
+     noch nie angemeldet hat, faellt unter "werbung", auch wenn er gleich
+     zum Login geht. Ein frisch aufgesetzter Browser oder geleerte
+     Websitedaten sehen aus wie ein Neuling. Die Markierung ist damit eine
+     UNTERGRENZE fuer die Durchlaeufer, keine exakte Trennung. Als Kontrolle
+     daneben steht weiter das Ereignis `app-oeffnen`.
+
+     KEIN PERSONENBEZUG: kein Name, keine Kennung, kein Jahrgang, keine
+     Gemeinde, kein Token — nur eines von zwei festen Woertern. Die
+     Nutzenden sind ueberwiegend minderjaehrig. -->
+<script>
+(function(){
+  'use strict';
+  var s = document.getElementById('umami-script');
+  if(!s) return;
+
+  // 1. Hat sich dieser Browser hier schon einmal angemeldet? Nur die
+  //    Existenz des Schluessels zaehlt. "CapacitorStorage."-Praefix ist der
+  //    heutige Stand, der nackte Name der alte (migrateStorage.ts laesst ihn
+  //    als Rueckfallebene stehen) — beide gelten.
+  //    localStorage kann werfen (Privatmodus, gesperrte Websitedaten); dann
+  //    gilt schlicht "nicht erkannt".
+  var angemeldet = false;
+  try {
+    angemeldet = localStorage.getItem('CapacitorStorage.konfi_token') !== null
+              || localStorage.getItem('konfi_token') !== null;
+  } catch(_){ angemeldet = false; }
+
+  // 2. Kommt der Verweis aus der App auf derselben Herkunft?
+  var ausDerApp = false;
+  try {
+    ausDerApp = !!document.referrer
+      && new URL(document.referrer).origin === location.origin;
+  } catch(_){ ausDerApp = false; }
+
+  s.setAttribute('data-tag', (angemeldet || ausDerApp) ? 'durchlauf' : 'werbung');
+})();
+</script>
 </head>
 <body>
 <nav>

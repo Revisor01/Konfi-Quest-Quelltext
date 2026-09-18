@@ -1,5 +1,6 @@
 import React from 'react';
 import { IonCard, IonCardContent, IonLabel, IonList, IonListHeader, IonItem, IonItemSliding, IonItemOptions, IonItemOption, IonIcon, IonButton, IonDatetimeButton, IonDatetime, IonModal } from '@ionic/react';
+import type { ChallengeMark, OffenerStempel } from '../../../types/challenges';
 import {
   ICON_ABSAGE,
   ICON_ABZEICHEN_GEFUELLT,
@@ -67,6 +68,14 @@ export interface Konfi {
   bonusPoints?: number;
   totalBonus?: number;
   badgeCount?: number;
+  /**
+   * Freigegebene Challenge-Stempel dieser Person (GET /admin/konfis/:id).
+   * Leer, wenn es keine gibt — oder wenn der Jahrgang ausserhalb der eigenen
+   * Zuweisung liegt.
+   */
+  challengeMarks?: ChallengeMark[];
+  /** Noch nicht erhaltene Stempel (grau). Fehlt bei aelteren Servern. */
+  offeneStempel?: OffenerStempel[];
   activities_count?: number;
   role_name?: string;
   user_type?: string;
@@ -1183,7 +1192,7 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
                         <IonIcon icon={entryIcon} />
                       </div>
                       <div className="app-list-item__content">
-                        <div className="app-list-item__title app-list-item__title--badge-space">{entry.title}</div>
+                        <div className={`app-list-item__title ${typeBadgeColor ? 'app-list-item__title--punkte-badge-doppelt' : 'app-list-item__title--punkte-badge'}`}>{entry.title}</div>
                         <div className="app-list-item__meta">
                           <span className="app-list-item__meta-item">{formatDate(entry.date)}</span>
                         </div>

@@ -411,6 +411,11 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin }, io) => {
     }
 
     const client = await db.getClient();
+    // Vor dem try deklariert, weil die Nacharbeit hinter dem finally sie braucht.
+    let photoFilenames = [];
+    let challengeFiles = [];
+    let chatFiles = [];
+    let nichtGefunden = false;
     try {
       await client.query('BEGIN');
 
@@ -457,7 +462,6 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin }, io) => {
       // die DB-Zeilen verschwinden gleich, die verschluesselten Dateien auf der
       // Platte sonst nicht. Entfernt werden
       // sie erst nach erfolgreichem COMMIT.
-      let chatFiles = [];
       try {
         const { rows } = await client.query(
           "SELECT file_path FROM chat_messages WHERE user_id = $1 AND file_path IS NOT NULL",
@@ -481,7 +485,6 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin }, io) => {
       // Nachweisfotos der Anträge dieses Users einsammeln, BEVOR activity_requests
       // im Purge unten gelöscht wird — sonst blieben die Dateien als Leichen liegen.
       // Entfernt werden sie erst nach erfolgreichem COMMIT.
-      let photoFilenames = [];
       try {
         const { rows } = await client.query(
           "SELECT photo_filename FROM activity_requests WHERE user_id = $1 AND photo_filename IS NOT NULL",
@@ -497,7 +500,6 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin }, io) => {
       // CASCADE mit dem User, die verschluesselten Dateien auf der Platte aber
       // nicht. konfiDeletion.js macht das laengst, dieser Pfad nicht — auch
       // Teamer:innen reichen Beitraege ein.
-      let challengeFiles = [];
       try {
         const { rows } = await client.query(
           "SELECT file_path FROM challenge_submissions WHERE user_id = $1 AND file_path IS NOT NULL",
@@ -544,13 +546,28 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin }, io) => {
 
       if (deleteUserResult.rowCount === 0) {
         await client.query('ROLLBACK');
-        client.release();
-        return res.status(404).json({ error: 'Benutzer in dieser Organisation nicht gefunden' });
+        nichtGefunden = true;
+      } else {
+        await client.query('COMMIT');
       }
-
-      await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.error(`Database error in DELETE /users/${id}:`, err);
+      return res.status(500).json({ error: 'Datenbankfehler' });
+    } finally {
+      // KEIN client.release() im try — nur hier. Die Nacharbeit unten
+      // (Sockets trennen, drei Dateilösch-Schleifen, Antwort, Live-Update)
+      // lief frueher NACH dem Release im try: ein Fehler dort landete im
+      // Transaktions-catch und setzte ein ROLLBACK auf eine Verbindung ab,
+      // die inzwischen ein anderer Request aus dem Pool hatte.
       client.release();
+    }
 
+    if (nichtGefunden) {
+      return res.status(404).json({ error: 'Benutzer in dieser Organisation nicht gefunden' });
+    }
+
+    try {
       // Aktive Socket-Verbindungen des geloeschten Users sofort trennen — sonst
       // liest ein noch verbundener Client mit toter Session weiter Live-Updates
       // mit, bis er von selbst neu verbindet. Nach dem COMMIT (User ist weg).
@@ -566,17 +583,19 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin }, io) => {
       for (const filePath of chatFiles) {
         await deleteChatFile(filePath);
       }
+    } catch (nachErr) {
+      // Der Benutzer ist geloescht — das ist festgeschrieben. Ein Fehler beim
+      // Aufraeumen darf die Antwort nicht mehr in einen 500 kippen.
+      console.error(`Aufraeumen nach DELETE /users/${id} fehlgeschlagen:`, nachErr);
+    }
 
-      res.json({ message: 'Benutzer erfolgreich gelöscht' });
+    res.json({ message: 'Benutzer erfolgreich gelöscht' });
 
-      // Live-Update NACH der Response: geloeschter Benutzer aus der Benutzer-Liste.
+    // Live-Update NACH der Response: geloeschter Benutzer aus der Benutzer-Liste.
+    try {
       liveUpdate.sendToOrgAdmins(organizationId, 'users', 'delete', { userId: parseInt(id) });
-
-    } catch (err) {
-      try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
-      client.release();
-      console.error(`Database error in DELETE /users/${id}:`, err);
-      res.status(500).json({ error: 'Datenbankfehler' });
+    } catch (liveErr) {
+      console.error(`Live-Update nach DELETE /users/${id} fehlgeschlagen:`, liveErr);
     }
   });
 
@@ -597,6 +616,9 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin }, io) => {
         }
 
         const client = await db.getClient();
+        // Frueher Ausstieg aus der Transaktion: Status und Antwort merken und
+        // erst hinter dem finally senden. Im try steht nur BEGIN..COMMIT.
+        let fruehAntwort = null;
         try {
         await client.query('BEGIN');
 
@@ -620,9 +642,8 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin }, io) => {
         const fremdesZiel = newJahrgangIds.filter(id => !darfDiesenJahrgang(id));
         if (fremdesZiel.length > 0) {
             await client.query('ROLLBACK');
-            client.release();
-            return res.status(403).json({ error: 'Kein Zugriff auf diesen Jahrgang' });
-        }
+            fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf diesen Jahrgang' } };
+        } else {
 
         // Bestehende Zuweisungen ausserhalb der eigenen Jahrgaenge bleiben
         // stehen: Nur die eigenen werden ersetzt.
@@ -635,13 +656,32 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin }, io) => {
 
         // Delete existing assignments for this user — aber nur die, die der
         // Aufrufer selbst verantworten darf.
+        //
+        // Der JOIN auf jahrgaenge bindet das DELETE zusaetzlich an die
+        // Organisation, so wie der Insert-Pfad weiter unten es tut. Praktisch
+        // erreichbar ist damit heute nichts: Der Zielbenutzer wird zweifach
+        // org-gebunden geladen, eine org-fremde Zuweisung kann ueber die API
+        // gar nicht erst entstehen. Die Grenze steht hier trotzdem explizit,
+        // damit sie nicht allein von den Aufrufern weiter oben abhaengt.
         if (behaltenIds.length > 0) {
             await client.query(
-                "DELETE FROM user_jahrgang_assignments WHERE user_id = $1 AND NOT (jahrgang_id = ANY($2::bigint[]))",
-                [userId, behaltenIds]
+                `DELETE FROM user_jahrgang_assignments uja
+                 USING jahrgaenge j
+                 WHERE uja.jahrgang_id = j.id
+                   AND uja.user_id = $1
+                   AND j.organization_id = $2
+                   AND NOT (uja.jahrgang_id = ANY($3::bigint[]))`,
+                [userId, organizationId, behaltenIds]
             );
         } else {
-            await client.query("DELETE FROM user_jahrgang_assignments WHERE user_id = $1", [userId]);
+            await client.query(
+                `DELETE FROM user_jahrgang_assignments uja
+                 USING jahrgaenge j
+                 WHERE uja.jahrgang_id = j.id
+                   AND uja.user_id = $1
+                   AND j.organization_id = $2`,
+                [userId, organizationId]
+            );
         }
 
         // Alle uebergebenen Zuweisungen werden geschrieben: Ein Jahrgang aus
@@ -661,10 +701,8 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin }, io) => {
             // (user_id, jahrgang_id) mit 500 zu scheitern.
             if (validJahrgaenge.length !== jahrgangIds.length) {
                 await client.query('ROLLBACK');
-                client.release();
-                return res.status(400).json({ error: 'Mindestens eine Jahrgangs-ID ist ungültig oder gehört nicht zu dieser Organisation.' });
-            }
-
+                fruehAntwort = { status: 400, body: { error: 'Mindestens eine Jahrgangs-ID ist ungültig oder gehört nicht zu dieser Organisation.' } };
+            } else {
             // Now, insert all new assignments
             for (const assignment of einzufuegen) {
                 const { jahrgang_id, can_view = true, can_edit = false } = assignment;
@@ -674,19 +712,33 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin }, io) => {
                 `;
                 await client.query(insertQuery, [userId, jahrgang_id, can_view, can_edit, req.user.id]);
             }
+            }
         }
 
-        // Chat-Mitgliedschaft für ALLE betroffenen Jahrgänge (alt + neu)
-        // zentral synchronisieren: zugewiesene Admins/Teamer treten bei,
-        // entzogene fliegen raus, Org-Admins bleiben immer drin, Chat wird bei
-        // Bedarf angelegt. Ersetzt die frueheren manuellen Add/Remove-Schleifen
-        // (die Teamer faelschlich als 'admin' eintrugen und Org-Admins ignorierten).
-        for (const jahrgangId of affectedJahrgangIds) {
-            await syncJahrgangChat(client, jahrgangId, organizationId, req.user.id);
+        if (!fruehAntwort) {
+            // Chat-Mitgliedschaft für ALLE betroffenen Jahrgänge (alt + neu)
+            // zentral synchronisieren: zugewiesene Admins/Teamer treten bei,
+            // entzogene fliegen raus, Org-Admins bleiben immer drin, Chat wird bei
+            // Bedarf angelegt. Ersetzt die frueheren manuellen Add/Remove-Schleifen
+            // (die Teamer faelschlich als 'admin' eintrugen und Org-Admins ignorierten).
+            for (const jahrgangId of affectedJahrgangIds) {
+                await syncJahrgangChat(client, jahrgangId, organizationId, req.user.id);
+            }
+
+            await client.query('COMMIT');
+        }
+        }
+        } catch (txErr) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw txErr;
+        } finally {
+          // KEIN client.release() im try — nur hier.
+          client.release();
         }
 
-        await client.query('COMMIT');
-        client.release();
+        if (fruehAntwort) {
+            return res.status(fruehAntwort.status).json(fruehAntwort.body);
+        }
 
         // Die Zuweisungen haengen im rbac-Cache des betroffenen Benutzers
         // (30 s TTL, rbac.js:180-192). Ohne diese Zeile wirkt eine frisch
@@ -704,15 +756,9 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin }, io) => {
         // die Benutzer-Liste (Zugehoerigkeit/Anzeige).
         liveUpdate.sendToOrgAdmins(organizationId, 'users', 'update', { userId: parseInt(userId) });
 
-        } catch (err) {
-          try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
-          client.release();
-          throw err;
-        }
-
     } catch (err) {
       console.error(`Database error in POST /users/${userId}/jahrgaenge:`, err);
-        res.status(500).json({ error: 'Datenbankfehler beim Zuweisen der Jahrgänge' });
+        if (!res.headersSent) res.status(500).json({ error: 'Datenbankfehler beim Zuweisen der Jahrgänge' });
     }
   });
 
@@ -809,7 +855,25 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin, requireAdmin }, io) => {
 
       const hashedPassword = await bcrypt.hash(password, 10);
       // org-gescopt: id ist eindeutig, organization_id als defensiver Zusatzfilter (matcht den oben geladenen targetUser)
-      await db.query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2 AND organization_id = $3', [hashedPassword, id, targetUser.organization_id]);
+      await db.query(
+        'UPDATE users SET password_hash = $1, updated_at = NOW(), token_invalidated_at = NOW() WHERE id = $2 AND organization_id = $3',
+        [hashedPassword, id, targetUser.organization_id]
+      );
+
+      // Refresh-Tokens widerrufen. Ohne das ist die Invalidierung oben
+      // wirkungslos: Der Refresh-Token laeuft 90 Tage und holt sich laufend
+      // frische Access-Tokens.
+      await db.query(
+        'UPDATE refresh_tokens SET revoked_at = NOW(), expires_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL',
+        [id]
+      );
+
+      // Push-Tokens der beendeten Sitzungen mitloeschen: Der Versand haengt im
+      // pushService nur an user_id, NICHT an einer gueltigen Sitzung. Ohne die
+      // Loeschung bekaeme ein gerade ausgesperrtes Geraet weiter Push-Nachrichten
+      // samt Chat-Inhalten — unbegrenzt, weil jede Zustellung updated_at
+      // auffrischt und die 30-Tage-Bereinigung dadurch nie greift.
+      await db.query('DELETE FROM push_tokens WHERE user_id = $1', [id]);
 
       // Bestehende Socket-Verbindungen des Users trennen: Nach einem Passwort-
       // Reset soll die alte Session nicht über einen offenen Socket weiterlaufen.

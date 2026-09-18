@@ -41,28 +41,32 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
     const userId = req.user.id;
 
     const client = await db.getClient();
+    // Im try steht NUR die Transaktion. Frueher Ausstieg und Nacharbeit
+    // (Badges, Push, Live-Update, Antwort) laufen hinter dem finally — sonst
+    // rollt ein Fehler aus der Nacharbeit eine Verbindung zurueck, die
+    // inzwischen ein anderer Request aus dem Pool hat.
+    let fruehAntwort = null;
+    let event = null;
+    let pointsAwarded = false;
     try {
       await client.query('BEGIN');
 
       // Event laden und qr_token abgleichen
-      const { rows: [event] } = await client.query(
+      const { rows: [gefunden] } = await client.query(
         `SELECT id, name, event_date, checkin_window, mandatory, points, point_type, qr_token, organization_id
          FROM events WHERE id = $1 AND qr_token = $2`,
         [eventId, token]
       );
+      event = gefunden;
 
       if (!event) {
         await client.query('ROLLBACK');
-        client.release();
-        return res.status(400).json({ error: 'Ungültiger QR-Code', error_type: 'invalid_token' });
-      }
-
-      // Organization-Check
-      if (event.organization_id !== req.user.organization_id) {
+        fruehAntwort = { status: 400, body: { error: 'Ungültiger QR-Code', error_type: 'invalid_token' } };
+      } else if (event.organization_id !== req.user.organization_id) {
+        // Organization-Check
         await client.query('ROLLBACK');
-        client.release();
-        return res.status(403).json({ error: 'Kein Zugriff auf dieses Event', error_type: 'wrong_organization' });
-      }
+        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf dieses Event', error_type: 'wrong_organization' } };
+      } else {
 
       // Zeitfenster-Prüfung (komplett in PostgreSQL für korrekte Zeitzonen)
       const { rows: [timeCheck] } = await client.query(
@@ -75,22 +79,19 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
 
       if (timeCheck.too_early) {
         await client.query('ROLLBACK');
-        client.release();
-        return res.status(400).json({
+        fruehAntwort = { status: 400, body: {
           error: 'Check-in ist noch nicht möglich',
           error_type: 'too_early',
           event_date: event.event_date,
           checkin_window: event.checkin_window
-        });
-      }
-      if (timeCheck.too_late) {
+        } };
+      } else if (timeCheck.too_late) {
         await client.query('ROLLBACK');
-        client.release();
-        return res.status(400).json({
+        fruehAntwort = { status: 400, body: {
           error: 'Der Check-in-Zeitraum ist abgelaufen',
           error_type: 'too_late'
-        });
-      }
+        } };
+      } else {
 
       // Booking prüfen
       const { rows: [booking] } = await client.query(
@@ -100,37 +101,65 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
 
       if (!booking) {
         await client.query('ROLLBACK');
-        client.release();
-        return res.status(400).json({ error: 'Du bist nicht für dieses Event angemeldet', error_type: 'not_registered' });
-      }
-      if (booking.status === 'opted_out') {
+        fruehAntwort = { status: 400, body: { error: 'Du bist nicht für dieses Event angemeldet', error_type: 'not_registered' } };
+      } else if (booking.status === 'opted_out') {
         await client.query('ROLLBACK');
-        client.release();
-        return res.status(400).json({ error: 'Du hast dich von diesem Event abgemeldet', error_type: 'opted_out' });
-      }
-      if (booking.status !== 'confirmed') {
+        fruehAntwort = { status: 400, body: { error: 'Du hast dich von diesem Event abgemeldet', error_type: 'opted_out' } };
+      } else if (booking.status === 'excused') {
+        // DARF EINE ABGEMELDETE PERSON EINCHECKEN? NEIN -- und zwar aus
+        // demselben Grund, aus dem eine Selbstabmeldung es nicht darf: Der
+        // Check-in ist kein Anmeldeweg, sondern die Bestaetigung einer
+        // bestehenden Anmeldung. Es gibt hier keine mehr. Waere es erlaubt,
+        // koennte eine krank gemeldete Konfi sich per QR-Code selbst wieder
+        // eintragen und sich Punkte gutschreiben -- die Abmeldung der
+        // Leitung liesse sich also von der abgemeldeten Person aufheben.
+        //
+        // Der Rueckweg bleibt offen, nur nicht hier: Die Leitung setzt die
+        // Person ueber die Teilnehmerliste auf 'present' (anwesenheit.js),
+        // und das holt den Buchungsstatus auf 'confirmed' zurueck. Wer
+        // abgemeldet ist und doch kommt, meldet sich also bei der Leitung --
+        // was in dem Moment ohnehin passiert.
+        //
+        // EIGENER ZWEIG STATT DES not_confirmed-SAMMELFALLS darunter: Dessen
+        // Text ("Deine Anmeldung ist nicht bestaetigt") beschreibt die
+        // Warteliste und waere hier schlicht falsch. Ein eigener error_type
+        // laesst die App ausserdem das Richtige sagen. ADDITIV: Ein neuer
+        // error_type ist ein neuer WERT, kein neues Feld -- ausgelieferte
+        // Fassungen zeigen den error-Text, den sie mitbekommen.
         await client.query('ROLLBACK');
-        client.release();
-        return res.status(400).json({ error: 'Deine Anmeldung ist nicht bestätigt', error_type: 'not_confirmed' });
-      }
-
-      // Duplikat-Check
-      if (booking.attendance_status === 'present') {
+        fruehAntwort = { status: 400, body: {
+          error: 'Du wurdest von diesem Termin abgemeldet. Melde dich bei der Leitung, wenn du doch da bist.',
+          error_type: 'excused'
+        } };
+      } else if (booking.status !== 'confirmed') {
         await client.query('ROLLBACK');
-        client.release();
-        return res.json({
+        fruehAntwort = { status: 400, body: { error: 'Deine Anmeldung ist nicht bestätigt', error_type: 'not_confirmed' } };
+      } else if (booking.attendance_status === 'present') {
+        // Duplikat-Check
+        await client.query('ROLLBACK');
+        fruehAntwort = { status: 200, body: {
           message: 'Du bist bereits eingecheckt',
           already_checked_in: true,
           event_name: event.name,
           event_id: event.id
-        });
-      }
+        } };
+      } else {
 
       // Attendance setzen
-      await client.query("UPDATE event_bookings SET attendance_status = 'present' WHERE id = $1", [booking.id]);
+      //
+      // DIE QUELLE WIRD SEIT MIGRATION 151 GETRENNT FESTGEHALTEN
+      // checkin_quelle = 'qr' und checked_in_at sagen, WOHER
+      // die Anwesenheit kam, ohne eine Person zu benennen. Vorher stand der
+      // Selbst-Check-in im selben NULL wie der Altbestand von vor Migration
+      // 148 -- beides "unbekannt", obwohl hier sehr wohl etwas bekannt ist.
+      // Die Anzeige macht daraus "Checkin via QR-Code am 15.09." statt gar
+      // keiner Zeile. attendance_set_by/_at bleiben davon unberuehrt.
+      await client.query(
+        "UPDATE event_bookings SET attendance_status = 'present', checkin_quelle = 'qr', checked_in_at = NOW() WHERE id = $1",
+        [booking.id]
+      );
 
       // Punkte-Vergabe (nur für Konfis, Teamer erhalten keine Punkte)
-      let pointsAwarded = false;
       if (event.points > 0 && !event.mandatory && req.user.type === 'konfi') {
         const pointType = event.point_type || 'gemeinde';
         const { enabled: ptEnabled } = await checkPointTypeEnabled(client, userId, pointType);
@@ -162,8 +191,23 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
       }
 
       await client.query('COMMIT');
+      } // Duplikat-Check
+      } // Zeitfenster
+      } // Event gefunden + richtige Organisation
+    } catch (txErr) {
+      await client.query('ROLLBACK').catch(() => {});
+      console.error('Database error in POST /events/qr-checkin:', txErr);
+      return res.status(500).json({ error: 'Datenbankfehler' });
+    } finally {
+      // KEIN client.release() im try — nur hier.
       client.release();
+    }
 
+    if (fruehAntwort) {
+      return res.status(fruehAntwort.status).json(fruehAntwort.body);
+    }
+
+    try {
       // Badge-Check für Teamer NACH COMMIT (Konfis bekommen Badge-Check schon oben)
       if (req.user.type === 'teamer') {
         try {
@@ -192,19 +236,18 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
         console.error('Post-commit notification error:', notifyErr);
       }
 
-      res.json({
-        message: 'Erfolgreich eingecheckt',
-        event_name: event.name,
-        event_id: event.id,
-        points_awarded: pointsAwarded
-      });
-
-    } catch (err) {
-      try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
-      client.release();
-      console.error('Database error in POST /events/qr-checkin:', err);
-      res.status(500).json({ error: 'Datenbankfehler' });
+    } catch (nachErr) {
+      // Der Check-in ist festgeschrieben — ein Fehler in der Nacharbeit darf
+      // die Antwort nicht mehr kippen.
+      console.error('Post-commit error in POST /events/qr-checkin:', nachErr);
     }
+
+    res.json({
+      message: 'Erfolgreich eingecheckt',
+      event_name: event.name,
+      event_id: event.id,
+      points_awarded: pointsAwarded
+    });
   });
 
   // Generate QR token for event (Admin/Teamer)
@@ -245,6 +288,16 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
   router.get('/:id/attendance-count', rbacVerifier, requireTeamer, async (req, res) => {
     const { id } = req.params;
     try {
+      // "X von Y eingecheckt" waehrend des Check-ins. `total` sind die
+      // ERWARTETEN -- deshalb weiterhin nur status = 'confirmed'.
+      //
+      // Seit Migration 153 faellt eine von der Leitung
+      // abgemeldete Person hier automatisch heraus, weil sie auf
+      // status = 'excused' steht. Das ist richtig und der Grund, warum diese
+      // Abfrage NICHT angefasst wird: Wer abgemeldet ist, wird nicht erwartet
+      // und darf die Zahl nicht kuenstlich erhoehen -- sonst stuende am Ende
+      // eines vollstaendig verlaufenen Termins "18 von 20", obwohl alle da
+      // waren, die kommen sollten.
       const { rows: [counts] } = await db.query(
         `SELECT
            COUNT(*) FILTER (WHERE eb.attendance_status = 'present') AS checked_in,

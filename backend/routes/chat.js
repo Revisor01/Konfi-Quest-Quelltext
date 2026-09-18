@@ -1800,36 +1800,50 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       }
       
       const client = await db.getClient();
+      // Im try steht NUR die Transaktion; Antwort, Socket und Push laufen
+      // hinter dem finally. Sonst faellt ein Fehler aus der Nacharbeit in den
+      // Transaktions-catch und rollt eine Verbindung zurueck, die laengst ein
+      // anderer Request aus dem Pool hat.
+      let messageId;
+      let newPoll;
       try {
-      await client.query('BEGIN');
+        await client.query('BEGIN');
 
-      // First create the message
-      const messageQuery = `
-        INSERT INTO chat_messages (room_id, user_id, user_type, message_type, content, created_at)
-        VALUES ($1, $2, $3, 'poll', $4, NOW())
-        RETURNING id
-      `;
-      const { rows: [newMessage] } = await client.query(messageQuery, [roomId, userId, userType, question]);
-      const messageId = newMessage.id;
+        // First create the message
+        const messageQuery = `
+          INSERT INTO chat_messages (room_id, user_id, user_type, message_type, content, created_at)
+          VALUES ($1, $2, $3, 'poll', $4, NOW())
+          RETURNING id
+        `;
+        const { rows: [newMessage] } = await client.query(messageQuery, [roomId, userId, userType, question]);
+        messageId = newMessage.id;
 
-      // Then create the poll
-      const pollQuery = `
-        INSERT INTO chat_polls (message_id, question, options, multiple_choice, expires_at, anonymous, exclusive_options, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-        RETURNING id
-      `;
-      const { rows: [newPoll] } = await client.query(pollQuery, [
-        messageId,
-        question,
-        JSON.stringify(validOptions),
-        isMultipleChoice,
-        expiresAt,
-        Boolean(anonymous),
-        Boolean(exclusive_options)
-      ]);
+        // Then create the poll
+        const pollQuery = `
+          INSERT INTO chat_polls (message_id, question, options, multiple_choice, expires_at, anonymous, exclusive_options, created_at)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+          RETURNING id
+        `;
+        const { rows: [poll] } = await client.query(pollQuery, [
+          messageId,
+          question,
+          JSON.stringify(validOptions),
+          isMultipleChoice,
+          expiresAt,
+          Boolean(anonymous),
+          Boolean(exclusive_options)
+        ]);
+        newPoll = poll;
 
-      await client.query('COMMIT');
-      client.release();
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        console.error('Database error in POST /rooms/:roomId/polls:', err);
+        return res.status(500).json({ error: 'Datenbankfehler' });
+      } finally {
+        // KEIN client.release() im try — nur hier.
+        client.release();
+      }
 
       // Return the created poll
       res.status(201).json({
@@ -1954,15 +1968,9 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
         }
       })();
 
-      } catch (err) {
-        try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
-        client.release();
-        console.error('Database error in POST /rooms/:roomId/polls:', err);
-        res.status(500).json({ error: 'Datenbankfehler' });
-      }
     } catch (err) {
       console.error('Database error in POST /rooms/:roomId/polls:', err);
-      res.status(500).json({ error: 'Datenbankfehler' });
+      if (!res.headersSent) res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
 
@@ -2029,95 +2037,96 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       }
       
       const client = await db.getClient();
-      try {
-      await client.query('BEGIN');
-
       // Use the actual poll.id from database, not the request pollId (which might be message_id)
       const actualPollId = poll.id;
+      // Im try steht NUR die Transaktion. Das Live-Update und die Antwort
+      // folgen hinter dem finally — sonst kann ein Fehler daraus ein ROLLBACK
+      // auf einer laengst weitergereichten Verbindung ausloesen.
+      let aktion = null; // 'removed' | 'added' | 'taken'
+      try {
+        await client.query('BEGIN');
 
-      // Bei exklusiven Umfragen die Poll-Zeile sperren (FOR UPDATE), damit zwei
-      // gleichzeitige Votes auf dieselbe Option serialisiert werden -> kein Race,
-      // bei dem beide dieselbe Option ergattern.
-      const isExclusive = Boolean(poll.exclusive_options);
-      if (isExclusive) {
-        await client.query("SELECT 1 FROM chat_polls WHERE id = $1 FOR UPDATE", [actualPollId]);
-      }
+        // Bei exklusiven Umfragen die Poll-Zeile sperren (FOR UPDATE), damit zwei
+        // gleichzeitige Votes auf dieselbe Option serialisiert werden -> kein Race,
+        // bei dem beide dieselbe Option ergattern.
+        const isExclusive = Boolean(poll.exclusive_options);
+        if (isExclusive) {
+          await client.query("SELECT 1 FROM chat_polls WHERE id = $1 FOR UPDATE", [actualPollId]);
+        }
 
-      // Check if user already voted for this specific option
-      const { rows: [existingVote] } = await client.query(
-        "SELECT 1 FROM chat_poll_votes WHERE poll_id = $1 AND user_id = $2 AND user_type = $3 AND option_index = $4",
-        [actualPollId, userId, userType, option_index]
-      );
-
-      if (existingVote) {
-        // If already voted for this option, remove the vote (toggle off).
-        // Gilt auch für exklusive Umfragen: die eigene Wahl wieder freigeben.
-        await client.query(
-          "DELETE FROM chat_poll_votes WHERE poll_id = $1 AND user_id = $2 AND user_type = $3 AND option_index = $4",
+        // Check if user already voted for this specific option
+        const { rows: [existingVote] } = await client.query(
+          "SELECT 1 FROM chat_poll_votes WHERE poll_id = $1 AND user_id = $2 AND user_type = $3 AND option_index = $4",
           [actualPollId, userId, userType, option_index]
         );
-        await client.query('COMMIT');
-        client.release();
-        // Live-Update: aktualisierten Poll-Stand an den Raum senden.
-        await emitPollUpdate(actualPollId, poll.room_id);
-        return res.json({
-          message: 'Stimme erfolgreich entfernt',
-          poll_id: actualPollId,
-          option_index: option_index,
-          user_id: userId,
-          action: 'removed'
-        });
-      }
 
-      // Exklusive Umfrage: ist diese Option schon von JEMAND ANDEREM belegt?
-      // Dann ist sie vergeben -> 409, kein Doppel-Eintrag.
-      if (isExclusive) {
-        const { rows: [taken] } = await client.query(
-          "SELECT 1 FROM chat_poll_votes WHERE poll_id = $1 AND option_index = $2 LIMIT 1",
-          [actualPollId, option_index]
-        );
-        if (taken) {
-          await client.query('ROLLBACK');
-          client.release();
-          return res.status(409).json({ error: 'Diese Option ist bereits vergeben', action: 'taken' });
+        if (existingVote) {
+          // If already voted for this option, remove the vote (toggle off).
+          // Gilt auch für exklusive Umfragen: die eigene Wahl wieder freigeben.
+          await client.query(
+            "DELETE FROM chat_poll_votes WHERE poll_id = $1 AND user_id = $2 AND user_type = $3 AND option_index = $4",
+            [actualPollId, userId, userType, option_index]
+          );
+          await client.query('COMMIT');
+          aktion = 'removed';
+        } else {
+          // Exklusive Umfrage: ist diese Option schon von JEMAND ANDEREM belegt?
+          // Dann ist sie vergeben -> 409, kein Doppel-Eintrag.
+          let vergeben = false;
+          if (isExclusive) {
+            const { rows: [taken] } = await client.query(
+              "SELECT 1 FROM chat_poll_votes WHERE poll_id = $1 AND option_index = $2 LIMIT 1",
+              [actualPollId, option_index]
+            );
+            vergeben = Boolean(taken);
+          }
+
+          if (vergeben) {
+            await client.query('ROLLBACK');
+            aktion = 'taken';
+          } else {
+            // Einzelauswahl (auch exklusiv): vorhandene Stimme(n) des Nutzers entfernen,
+            // bevor die neue gesetzt wird. So wechselt man bei exklusiven Umfragen die
+            // Option und gibt die alte automatisch wieder frei.
+            if (!poll.multiple_choice) {
+              await client.query(
+                "DELETE FROM chat_poll_votes WHERE poll_id = $1 AND user_id = $2 AND user_type = $3",
+                [actualPollId, userId, userType]
+              );
+            }
+
+            // Add the new vote
+            await client.query(
+              "INSERT INTO chat_poll_votes (poll_id, user_id, user_type, option_index, created_at) VALUES ($1, $2, $3, $4, NOW())",
+              [actualPollId, userId, userType, option_index]
+            );
+
+            await client.query('COMMIT');
+            aktion = 'added';
+          }
         }
+      } catch (txErr) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw txErr;
+      } finally {
+        // KEIN client.release() im try — nur hier.
+        client.release();
       }
 
-      // Einzelauswahl (auch exklusiv): vorhandene Stimme(n) des Nutzers entfernen,
-      // bevor die neue gesetzt wird. So wechselt man bei exklusiven Umfragen die
-      // Option und gibt die alte automatisch wieder frei.
-      if (!poll.multiple_choice) {
-        await client.query(
-          "DELETE FROM chat_poll_votes WHERE poll_id = $1 AND user_id = $2 AND user_type = $3",
-          [actualPollId, userId, userType]
-        );
+      if (aktion === 'taken') {
+        return res.status(409).json({ error: 'Diese Option ist bereits vergeben', action: 'taken' });
       }
-
-      // Add the new vote
-      await client.query(
-        "INSERT INTO chat_poll_votes (poll_id, user_id, user_type, option_index, created_at) VALUES ($1, $2, $3, $4, NOW())",
-        [actualPollId, userId, userType, option_index]
-      );
-
-      await client.query('COMMIT');
-      client.release();
 
       // Live-Update: aktualisierten Poll-Stand an den Raum senden.
       await emitPollUpdate(actualPollId, poll.room_id);
 
-      res.json({
-        message: 'Stimme erfolgreich abgegeben',
+      return res.json({
+        message: aktion === 'removed' ? 'Stimme erfolgreich entfernt' : 'Stimme erfolgreich abgegeben',
         poll_id: actualPollId,
         option_index: option_index,
         user_id: userId,
-        action: 'added'
+        action: aktion
       });
-
-      } catch (err) {
-        try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
-        client.release();
-        throw err;
-      }
 
     } catch (err) {
       console.error('Database error in POST /polls/:pollId/vote:', err);
@@ -2292,7 +2301,16 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       }
 
       await client.query('COMMIT');
-      client.release();
+      } catch (txErr) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw txErr;
+      } finally {
+        // KEIN client.release() im try — nur hier. Sonst faellt der Fehler aus
+        // emitRoomsChanged (synchron, ohne eigenen Schutz) in den
+        // Transaktions-catch und rollt die Transaktion eines FREMDEN Requests
+        // zurueck, der die Verbindung inzwischen aus dem Pool bekommen hat.
+        client.release();
+      }
 
       res.json({ message: 'Chat-Raum erfolgreich gelöscht' });
 
@@ -2300,15 +2318,9 @@ module.exports = (db, rbacMiddleware, uploadsDir, chatUpload, io) => {
       // verlieren.
       emitRoomsChanged(participantsBeforeDelete);
 
-      } catch (err) {
-        try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
-        client.release();
-        throw err;
-      }
-
     } catch (err) {
       console.error('Database error in DELETE /rooms/:roomId:', roomId, err);
-      res.status(500).json({ error: 'Datenbankfehler' });
+      if (!res.headersSent) res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
 

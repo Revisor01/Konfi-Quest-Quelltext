@@ -1,6 +1,6 @@
 import { fehlerStatus } from '../../utils/fehler';
 import { useState } from 'react';
-import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { haptik, ImpactStyle } from '../../utils/haptics';
 import { useApp } from '../../contexts/AppContext';
 import api from '../../services/api';
 import { writeQueue } from '../../services/writeQueue';
@@ -98,7 +98,7 @@ export function useUmfragenUndReaktionen({
   const toggleReaction = async (messageId: number, emoji: string) => {
     // Offline: Optimistic UI + Queue-Fallback (fire-and-forget)
     if (!networkMonitor.isOnline) {
-      await Haptics.impact({ style: ImpactStyle.Light });
+      await haptik(ImpactStyle.Light);
       setShouldAutoScroll(false);
 
       // Optimistisch toggeln
@@ -141,7 +141,7 @@ export function useUmfragenUndReaktionen({
     }
 
     try {
-      await Haptics.impact({ style: ImpactStyle.Light });
+      await haptik(ImpactStyle.Light);
       setShouldAutoScroll(false);
 
       const response = await api.post(`/chat/messages/${messageId}/reactions`, { emoji });

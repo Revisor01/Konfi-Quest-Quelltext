@@ -3,6 +3,7 @@ import { IonIcon } from '@ionic/react';
 import {
   ICON_ABSAGE,
   ICON_ANWESEND,
+  ICON_ENTFERNEN_GEFUELLT,
   ICON_FLAMME_GEFUELLT,
   ICON_HAKEN_GEFUELLT,
   ICON_INFO_GEFUELLT,
@@ -45,6 +46,10 @@ const STATUS_ICON_MAP: Record<string, string> = {
   'Abwesend': ICON_ABSAGE,
   'Gefehlt': ICON_ABSAGE,
   'Abgemeldet': ICON_ABSAGE,
+  // Von der Leitung nachgetragene Abmeldung. Eigenes Zeichen,
+  // weil es weder ein Fehlen (Kreuz) noch eine Selbstabmeldung ist: der
+  // Minus-Kreis sagt "faellt heraus", ohne zu werten.
+  'Abgemeldet (nachgetragen)': ICON_ENTFERNEN_GEFUELLT,
   // Eigene Absage der Teamer:innen. Fehlte hier, deshalb fiel das Badge auf
   // die Text-Variante zurueck und schrieb "Abgesagt von dir" lang aus, waehrend
   // jeder andere Zustand ein Symbol zeigt. Gleiches Zeichen

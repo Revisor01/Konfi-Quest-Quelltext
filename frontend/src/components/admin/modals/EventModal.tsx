@@ -22,9 +22,13 @@ import {
 import type { EventFormData } from './EventFormSections';
 import { safeUUID } from '../../../utils/uuid';
 import { fehlerDaten } from '../../../utils/fehler';
+import { trackHandlung } from '../../../services/analytics';
 
 interface EventModalProps {
   event?: Event | null;
+  // Zeitfenster einer Kopie. Ein bestehender Termin laedt seine selbst nach;
+  // eine Kopie hat keine id, unter der das ginge (siehe useEffect unten).
+  vorbelegteTimeslots?: Timeslot[];
   onClose: () => void;
   onSuccess: () => void;
   dismiss?: () => void;
@@ -33,7 +37,10 @@ interface EventModalProps {
   onDirtyChange?: (dirty: boolean) => void;
 }
 
-const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dismiss, onDirtyChange }) => {
+import { anmeldeschlussVorschlag, toIonDatetimeISO, neuerTerminBeginn, endeNachDatumswechsel } from '../../../utils/terminVorbelegung';
+export { anmeldeschlussVorschlag };
+
+const EventModal: React.FC<EventModalProps> = ({ event, vorbelegteTimeslots, onClose, onSuccess, dismiss, onDirtyChange }) => {
   const { setSuccess, setError } = useApp();
   const { isSubmitting, guard } = useActionGuard();
   const [loading, setLoading] = useState(false);
@@ -110,26 +117,27 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
       if (event.teamer_only) setTeamerAccess('teamer_only');
       else if (event.teamer_needed) setTeamerAccess('teamer_needed');
       else setTeamerAccess('normal');
-      if (event.has_timeslots) loadTimeslots(event.id);
+      // Zeitfenster: Ein bestehender Termin laedt sie nach. Eine Kopie (und die
+      // Serien-Vorlage) hat id 0 -- dort gaebe es /events/0/timeslots, also
+      // einen Fehlgriff, und die Zeitfenster blieben stillschweigend leer.
+      // Deshalb bringt die Kopie sie ueber vorbelegteTimeslots selbst mit.
+      if (event.has_timeslots) {
+        if (event.id > 0) loadTimeslots(event.id);
+        else setTimeslots(vorbelegteTimeslots ?? []);
+      } else {
+        setTimeslots([]);
+      }
     } else {
-      const roundToHalfHour = (date: Date) => {
-        const rounded = new Date(date);
-        const minutes = rounded.getMinutes();
-        if (minutes < 30) rounded.setMinutes(0, 0, 0);
-        else rounded.setMinutes(30, 0, 0);
-        return rounded;
-      };
-      const eventStart = new Date();
-      eventStart.setMinutes(eventStart.getMinutes() + 30);
-      const roundedEventStart = roundToHalfHour(eventStart);
+      const roundedEventStart = neuerTerminBeginn();
       const eventEnd = new Date(roundedEventStart);
       eventEnd.setHours(eventEnd.getHours() + 2);
-      const regCloses = new Date(roundedEventStart);
-      regCloses.setHours(regCloses.getHours() - 1);
-      const toIonDatetimeISO = (date: Date) => {
-        const pad = (num: number) => num.toString().padStart(2, '0');
-        return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
-      };
+      // Hier stand `beginn - 1 Stunde`. Der voreingestellte Beginn ist aber
+      // "jetzt + 30 Minuten" — der Schluss lag also schon beim OEFFNEN des
+      // Formulars eine halbe Stunde in der Vergangenheit. Wer nur den Namen
+      // eintrug und speicherte, bekam einen Termin, zu dem sich niemand
+      // anmelden kann. Jetzt ueber denselben Vorschlag wie beim Aendern des
+      // Datums (siehe anmeldeschlussVorschlag).
+      const regCloses = anmeldeschlussVorschlag(roundedEventStart);
       setFormData({
         name: '', description: '', event_date: toIonDatetimeISO(roundedEventStart),
         event_end_time: toIonDatetimeISO(eventEnd), location: '', points: 1,
@@ -178,10 +186,6 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
       participants = timeslots[0].max_participants;
     }
     const endTime = new Date(startTime.getTime() + 60 * 60 * 1000);
-    const toIonDatetimeISO = (date: Date) => {
-      const pad = (num: number) => num.toString().padStart(2, '0');
-      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
-    };
     setTimeslots([...timeslots, { start_time: toIonDatetimeISO(startTime), end_time: toIonDatetimeISO(endTime), max_participants: participants }]);
   };
 
@@ -272,9 +276,20 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
         } else {
           if (formData.is_series) {
             await api.post('/events/series', payload);
+            // Anonyme Messung NACH der erfolgreichen Antwort. Nur Form und
+            // Zielgruppe — kein Titel, kein Datum, kein Jahrgang, keine
+            // Teilnehmerzahl und auch nicht die Laenge der Serie.
+            trackHandlung('termin-angelegt', {
+              form: 'serie',
+              zielgruppe: isTeamerOnly ? 'teamer' : 'konfi'
+            });
             setSuccess(`Event-Serie mit ${formData.series_count} Events erstellt`);
           } else {
             await api.post('/events', payload);
+            trackHandlung('termin-angelegt', {
+              form: 'einzeln',
+              zielgruppe: isTeamerOnly ? 'teamer' : 'konfi'
+            });
           }
         }
       } else {
@@ -365,11 +380,11 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
           <IonCard className="app-card">
           <IonCardContent>
             <IonList>
-              <IonItem lines="none">
+              <IonItem lines="none" className="app-datumsfeld">
                 <IonLabel position="stacked">Event Datum & Uhrzeit *</IonLabel>
                 <IonDatetimeButton datetime="event-date-picker" />
               </IonItem>
-              <IonItem lines="none">
+              <IonItem lines="none" className="app-datumsfeld">
                 <IonLabel position="stacked">Endzeit (optional)</IonLabel>
                 <IonDatetimeButton datetime="end-time-picker" />
               </IonItem>
@@ -430,12 +445,12 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
                       />
                     </IonItem>
                     {!!formData.registration_opens_at && (
-                      <IonItem lines="none">
+                      <IonItem lines="none" className="app-datumsfeld">
                         <IonLabel position="stacked">Anmeldung ab</IonLabel>
                         <IonDatetimeButton datetime="registration-opens-picker" />
                       </IonItem>
                     )}
-                    <IonItem lines="none">
+                    <IonItem lines="none" className="app-datumsfeld">
                       <IonLabel position="stacked">Anmeldeschluss</IonLabel>
                       <IonDatetimeButton datetime="registration-closes-picker" />
                     </IonItem>
@@ -473,7 +488,7 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
                   }} disabled={loading} />
               </IonItem>
               {formData.has_timeslots && (
-                <div className="app-event-detail__add-button-wrapper" style={{ padding: '0 var(--app-abstand-basis)' }}>
+                <div className="app-modal-knopf-in-karte" style={{ padding: '0 var(--app-abstand-basis)' }}>
                   <IonButton
                     expand="block"
                     fill="outline"
@@ -504,11 +519,11 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
             <IonCard className="app-card">
               <IonCardContent>
                 <IonList>
-                  <IonItem lines="none">
+                  <IonItem lines="none" className="app-datumsfeld">
                     <IonLabel position="stacked">Startzeit</IonLabel>
                     <IonDatetimeButton datetime={`timeslot-start-${index}`} />
                   </IonItem>
-                  <IonItem lines="none">
+                  <IonItem lines="none" className="app-datumsfeld">
                     <IonLabel position="stacked">Endzeit</IonLabel>
                     <IonDatetimeButton datetime={`timeslot-end-${index}`} />
                   </IonItem>
@@ -573,12 +588,12 @@ const EventModal: React.FC<EventModalProps> = ({ event, onClose, onSuccess, dism
           onIonChange={(e) => {
             const selectedDate = e.detail.value as string;
             const eventDate = new Date(selectedDate);
-            const toIonDatetimeISO = (date: Date) => {
-              const pad = (num: number) => num.toString().padStart(2, '0');
-              return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:00`;
-            };
-            const endDate = new Date(eventDate); endDate.setHours(endDate.getHours() + 1);
-            const regCloses = new Date(eventDate); regCloses.setHours(regCloses.getHours() - 24);
+            // Das Ende wandert MIT, die Dauer bleibt.
+            // Vorher stand hier fest "+1 Stunde" — eine Freizeit von Freitag
+            // bis Sonntag wurde damit zum Ein-Stunden-Termin, sobald jemand
+            // das Datum verschob.
+            const endDate = endeNachDatumswechsel(eventDate, formData.event_date, formData.event_end_time);
+            const regCloses = anmeldeschlussVorschlag(eventDate);
             // Anmeldezeiten NUR beim Neuanlegen mitziehen. Beim Bearbeiten
             // wuerde ein Dreh am Datums-Wheel sonst still die vom Admin
             // gesetzten Anmeldezeiten ueberschreiben (Datenverlust).

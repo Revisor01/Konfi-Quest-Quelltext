@@ -17,6 +17,8 @@ const { getKonfiBadgeProgress } = require('../utils/konfiBadgeProgress');
 const { darfJahrgang, darfKonfi } = require('../utils/jahrgangsZugriff');
 const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
+const { rueckeNach } = require('../utils/bookingUtils');
+const { meldeNachrueckern } = require('../utils/nachrueckMeldung');
 const router = express.Router();
 
 // Konfis: Teamer darf ansehen, Admin darf bearbeiten
@@ -313,6 +315,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
             return res.status(400).json({ error: 'Name und Jahrgang sind erforderlich' });
         }
         const client = await db.getClient();
+        const nachgerueckteJahrgang = [];
         try {
             await client.query('BEGIN');
 
@@ -390,7 +393,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                          SELECT 1 FROM event_jahrgang_assignments eja
                          WHERE eja.event_id = e.id AND eja.jahrgang_id = $4
                        )
-                     RETURNING eb.event_id`,
+                     RETURNING eb.event_id, eb.status, eb.timeslot_id`,
                     [req.params.id, req.user.organization_id, currentProfile.jahrgang_id, jahrgang_id]
                   );
                   // Wer nicht mehr gebucht ist, gehört auch nicht mehr in den
@@ -400,6 +403,19 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                   // 
                   for (const row of abgemeldet) {
                     await removeFromEventChat(client, row.event_id, parseInt(req.params.id, 10), req.user.organization_id);
+                  }
+
+                  // Nur bestaetigte Buchungen geben einen Platz frei; eine
+                  // geloeschte Wartelisten-Buchung aendert an der Kapazitaet
+                  // nichts. Immer 'konfi' — hier wird ein Konfi verschoben.
+                  for (const row of abgemeldet) {
+                    if (row.status !== 'confirmed') continue;
+                    const [promoted] = await rueckeNach(client, {
+                      eventId: row.event_id,
+                      timeslotId: row.timeslot_id,
+                      seite: 'konfi'
+                    });
+                    if (promoted) nachgerueckteJahrgang.push({ eventId: row.event_id, userId: promoted });
                   }
               }
                 const enrollFutureEventsQuery = `
@@ -428,6 +444,9 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
             await client.query('COMMIT');
 
             res.json({ message: 'Konfi erfolgreich aktualisiert' });
+
+            // Wer nachgerueckt ist, erfaehrt es — nach dem COMMIT.
+            await meldeNachrueckern(db, req.user.organization_id, nachgerueckteJahrgang);
 
             // Live-Update NACH der Response: geaenderter Konfi in der Admin-Liste.
             liveUpdate.sendToOrgAdmins(req.user.organization_id, 'konfis', 'update', { konfiId: req.params.id });
@@ -465,10 +484,12 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                 return res.status(403).json({ error: 'Kein Zugriff auf diesen Konfi' });
             }
 
-            await deleteKonfiCascade(client, userId, req.user.organization_id);
+            const nachgerueckteLoeschung = await deleteKonfiCascade(client, userId, req.user.organization_id);
 
             await client.query('COMMIT');
             res.json({ message: 'Konfi erfolgreich gelöscht' });
+
+            await meldeNachrueckern(db, req.user.organization_id, nachgerueckteLoeschung);
 
             // Live-Update NACH der Response: geloeschter Konfi aus der Admin-Liste entfernen.
             liveUpdate.sendToOrgAdmins(req.user.organization_id, 'konfis', 'delete', { konfiId: userId });
@@ -531,7 +552,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
             }
 
             const updateUserQuery = `
-                UPDATE users SET password_hash = $1
+                UPDATE users SET password_hash = $1, token_invalidated_at = NOW()
                 WHERE id = $2 AND organization_id = $3`;
             const { rowCount } = await client.query(updateUserQuery, [hashedPassword, req.params.id, req.user.organization_id]);
 
@@ -539,6 +560,19 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                 await client.query('ROLLBACK');
                 return res.status(404).json({ error: 'Konfi nicht gefunden' });
             }
+
+            // Refresh-Tokens widerrufen — sonst ist die Invalidierung oben
+            // wirkungslos: Der Refresh-Token laeuft 90 Tage und holt laufend
+            // frische Access-Tokens.
+            await client.query(
+                'UPDATE refresh_tokens SET revoked_at = NOW(), expires_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL',
+                [req.params.id]
+            );
+
+            // Push-Tokens mitloeschen: Der Versand haengt nur an user_id, nicht
+            // an einer gueltigen Sitzung. Ein ausgesperrtes Geraet bekaeme sonst
+            // weiter Push-Nachrichten samt Chat-Inhalten.
+            await client.query('DELETE FROM push_tokens WHERE user_id = $1', [req.params.id]);
 
             const updateProfileQuery = "UPDATE konfi_profiles SET password_plain = NULL WHERE user_id = $1";
             await client.query(updateProfileQuery, [req.params.id]);
@@ -593,6 +627,18 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                 return res.status(404).json({ error: 'Benutzer nicht gefunden' });
             }
 
+            // Bei Konfis entscheidet der Jahrgang (darfKonfi). Teamer:innen
+            // haengen an mehreren Jahrgaengen oder an keinem — dieselbe
+            // Ausnahme wie ueberall sonst ("ein Admin sieht ALLE Teamer:innen",
+            // siehe utils/jahrgangsZugriff.js). Fuer sie genuegt die
+            // Organisation, die die Abfrage oben schon geprueft hat.
+            if (konfi.role_name === 'konfi') {
+                const zugriff = await darfKonfi(db, req, konfiId);
+                if (!zugriff.erlaubt) {
+                    return res.status(403).json({ error: 'Kein Zugriff auf diesen Konfi' });
+                }
+            }
+
             const activitiesQuery = `
                 SELECT ka.*, a.name, a.points, a.type, a.target_role, u.display_name as admin_name
                 FROM user_activities ka
@@ -618,6 +664,62 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                 WHERE ub.user_id = $1 AND cb.target_role = $2
             `;
             const { rows: [badgeResult] } = await db.query(badgeQuery, [konfiId, konfi.role_name]);
+
+            // Gezaehlt wird GENAU wie im eigenen Profil (challenges.js,
+            // GET /challenges/konfi): nur EIGENE und FREIGEGEBENE Beitraege
+            // (moderation_status='approved'), nicht jede Challenge, die ein
+            // Abzeichen vergibt. Ein Stempel je Challenge, auch bei mehreren
+            // freigegebenen Beitraegen — deshalb DISTINCT ueber challenge_id.
+            const stempelQuery = `
+                SELECT c.id AS challenge_id, c.badge_icon, c.badge_name, c.title,
+                       c.description,
+                       MIN(COALESCE(s.approved_at, s.created_at)) AS earned_at
+                FROM challenge_submissions s
+                JOIN challenges c ON c.id = s.challenge_id
+                WHERE s.user_id = $1
+                  AND s.moderation_status = 'approved'
+                  AND c.organization_id = $2
+                GROUP BY c.id, c.badge_icon, c.badge_name, c.title, c.description
+                ORDER BY c.title
+            `;
+            const { rows: challengeMarks } = await db.query(stempelQuery, [konfiId, req.user.organization_id]);
+
+            // Gescopet wie die Konfi-Sicht selbst (challenges.js GET /konfi):
+            // nur gestartete, keine Entwuerfe, und nur Challenges des eigenen
+            // Jahrgangs. Ohne Jahrgang (Teamer:innen haben keinen in
+            // konfi_profiles) bleibt die Liste leer statt org-weit zu werden —
+            // sonst saehe die Leitung dort Challenges, an denen die Person nie
+            // haette teilnehmen koennen.
+            //
+            // EIGENES FELD, nicht in challengeMarks gemischt: Die Apps im
+            // Store zeichnen jeden Eintrag daraus als erhaltenen Stempel.
+            let offeneStempel = [];
+            if (konfi.jahrgang_id) {
+                const offeneQuery = `
+                    SELECT c.id AS challenge_id, c.badge_icon, c.badge_name, c.title,
+                           c.description,
+                           CASE WHEN c.ends_at IS NOT NULL AND c.ends_at < NOW()
+                                THEN 'ended' ELSE 'active' END AS status,
+                           c.ends_at
+                    FROM challenges c
+                    JOIN challenge_jahrgang_assignments cja ON cja.challenge_id = c.id
+                    WHERE c.organization_id = $2
+                      AND cja.jahrgang_id = $3
+                      AND c.is_draft = false
+                      AND c.starts_at <= NOW()
+                      AND c.audience <> 'nur_team'
+                      AND c.badge_name IS NOT NULL
+                      AND NOT EXISTS (
+                        SELECT 1 FROM challenge_submissions s
+                        WHERE s.challenge_id = c.id AND s.user_id = $1
+                          AND s.moderation_status = 'approved'
+                      )
+                    ORDER BY c.title
+                `;
+                const { rows } = await db.query(offeneQuery,
+                    [konfiId, req.user.organization_id, konfi.jahrgang_id]);
+                offeneStempel = rows;
+            }
 
             // Zertifikate für Teamer mitladen
             let certificates = [];
@@ -735,6 +837,11 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                 activities: activities || [],
                 bonusPoints: bonusPoints || [],
                 badgeCount: badgeResult ? badgeResult.badgeCount : 0,
+                // Neues Feld, additiv: alte App-Versionen lesen es
+                // nicht, nichts Bestehendes faellt weg oder aendert den Typ.
+                challengeMarks,
+                // Ebenfalls additiv: die grauen Stempel.
+                offeneStempel,
                 ...(konfi.role_name === 'teamer' ? { certificates, teamerEvents, konfiHistory } : {})
             });
 
@@ -1239,6 +1346,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
         const konfiId = parseInt(req.params.id);
 
         const client = await db.getClient();
+        const nachgerueckteBefoerderung = [];
         try {
             await client.query('BEGIN');
 
@@ -1290,8 +1398,27 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
             // 3. Rolle ändern + teamer_since setzen
             await client.query('UPDATE users SET role_id = $1, teamer_since = CURRENT_DATE WHERE id = $2', [teamerRole.id, konfiId]);
 
-            // 4. Event-Buchungen löschen
+            // 4. Event-Buchungen löschen.
+            //
+            // seite: 'konfi' ist hier FEST verdrahtet und nicht aus der Rolle
+            // abgeleitet: Die Rolle ist eine Zeile weiter oben schon auf
+            // 'teamer' gewechselt. Die Plaetze, die gleich frei werden, waren
+            // aber Konfi-Plaetze -- die Person hat sie als Konfi belegt. Aus
+            // der neuen Rolle zu schliessen hiesse, einen Konfi-Platz an eine
+            // wartende Teamer:in zu geben.
+            const { rows: freiwerdend } = await client.query(
+                "SELECT event_id, timeslot_id FROM event_bookings WHERE user_id = $1 AND status = 'confirmed'",
+                [konfiId]
+            );
             await client.query('DELETE FROM event_bookings WHERE user_id = $1', [konfiId]);
+            for (const platz of freiwerdend) {
+                const [promoted] = await rueckeNach(client, {
+                    eventId: platz.event_id,
+                    timeslotId: platz.timeslot_id,
+                    seite: 'konfi'
+                });
+                if (promoted) nachgerueckteBefoerderung.push({ eventId: platz.event_id, userId: promoted });
+            }
 
             const { rows: pendingFotos } = await client.query(
                 "SELECT photo_filename FROM activity_requests WHERE user_id = $1 AND status = 'pending' AND photo_filename IS NOT NULL",
@@ -1343,6 +1470,10 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                     role_name: 'teamer'
                 }
             });
+
+            // Wer nachgerueckt ist, erfaehrt es — nach dem COMMIT und
+            // fehlertolerant: Ein Push-Fehler darf die Befoerderung nicht kippen.
+            await meldeNachrueckern(db, req.user.organization_id, nachgerueckteBefoerderung);
 
             // Live-Update NACH der Response: Konfi verschwindet aus der Konfi-Liste
             // und taucht als Teamer:in in der Benutzer-Liste auf.

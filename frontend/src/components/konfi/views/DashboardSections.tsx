@@ -187,6 +187,8 @@ export const getBadgeColor = (badge: Pick<Badge, 'color' | 'criteria_type' | 'cr
 
 // --- EventCard ---
 import { DashboardEvent } from '../../../types/dashboard';
+import AbsageBlock from '../../shared/AbsageBlock';
+import { istAbgesagt, titelDekoration } from '../../shared/eventFormatting';
 
 interface EventCardProps {
   event: DashboardEvent;
@@ -205,7 +207,7 @@ export const EventCard = React.memo<EventCardProps>(({ event, onClick }) => {
           : undefined,
         position: 'relative',
         overflow: 'hidden',
-        border: event.cancelled
+        border: istAbgesagt(event)
           ? '2px dashed rgba(255,255,255,0.3)'
           : isWaitlist
             ? '2px solid rgba(var(--app-wrapped-gold-rgb), 0.5)'
@@ -218,7 +220,7 @@ export const EventCard = React.memo<EventCardProps>(({ event, onClick }) => {
         position: 'absolute',
         top: '0',
         right: '0',
-        background: event.cancelled
+        background: istAbgesagt(event)
           ? 'rgba(255,255,255,0.3)'
           : isWaitlist
             ? 'var(--app-gradient-badges)'
@@ -232,7 +234,7 @@ export const EventCard = React.memo<EventCardProps>(({ event, onClick }) => {
         textTransform: 'uppercase',
         letterSpacing: '0.3px'
       }}>
-        {event.cancelled ? 'ABGESAGT' :
+        {istAbgesagt(event) ? 'ABGESAGT' :
          isWaitlist ?
            `Warteliste #${event.waitlist_position || '?'}` :
            formatTimeUntil(event.event_date || event.date)}
@@ -244,10 +246,17 @@ export const EventCard = React.memo<EventCardProps>(({ event, onClick }) => {
           color: 'white',
           marginBottom: 'var(--app-abstand-mini)',
           paddingRight: 'var(--app-freiraum-aktion-xl)',
-          textDecoration: event.cancelled ? 'line-through' : 'none'
+          textDecoration: titelDekoration('kachel', event)
         }}>
           {event.title || event.name}
         </div>
+        {/* DER GRUND GEHOERT AUF DIE STARTSEITE: Wer den Push
+            "Termin abgesagt" antippt, landet hier -- und nirgends sonst
+            zuerst. Bis hierher stand hier nur das Wort ABGESAGT im Eck, und
+            der Grund, den die Leitung ausdruecklich fuer alle Teilnehmenden
+            geschrieben hat, war erst zwei Tipps weiter zu lesen.
+            Auf dunklem Grund, deshalb aufDunkel. */}
+        <AbsageBlock event={event} variante="zeile" aufDunkel />
         {/* Zeile 1: Datum + Uhrzeit */}
         <div className="app-dashboard-meta">
           <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ fontSize: 'var(--app-text-basis)' }} />

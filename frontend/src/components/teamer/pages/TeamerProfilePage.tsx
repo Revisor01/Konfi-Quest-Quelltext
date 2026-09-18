@@ -48,11 +48,12 @@ import { CACHE_TTL } from '../../../services/offlineCache';
 import { setUser as setTokenStoreUser } from '../../../services/tokenStore';
 import ChangeEmailModal from '../../shared/ChangeEmailModal';
 import ChangePasswordModal from '../../shared/ChangePasswordModal';
+import AppSperreSchalter from '../../shared/AppSperreSchalter';
 import ChangeRoleTitleModal from '../../admin/modals/ChangeRoleTitleModal';
 import DeleteAccountModal from '../../shared/DeleteAccountModal';
 import SpiritFooter from '../../shared/SpiritFooter';
 import TeamerOnboardingModal from '../modals/TeamerOnboardingModal';
-import TeamerUpdate211WalkthroughModal from '../modals/TeamerUpdate211WalkthroughModal';
+import TeamerUpdate220WalkthroughModal from '../modals/TeamerUpdate220WalkthroughModal';
 import WrappedModal from '../../wrapped/WrappedModal';
 import type { WrappedHistoryEntry } from '../../../types/wrapped';
 import LoadingSpinner from '../../common/LoadingSpinner';
@@ -78,7 +79,10 @@ interface TeamerProfile {
   konfi_data: {
     gottesdienst_points: number;
     gemeinde_points: number;
-    jahrgang_name: string;
+    // Leer, wenn der Jahrgang der Konfizeit geloescht wurde — die Punkte und
+    // Abzeichen daneben bleiben. Deshalb optional: Wer hierauf eine Anzeige
+    // stuetzt, blendet sie fuer genau diese Leute aus.
+    jahrgang_name?: string;
     badges: Array<{
       badge_id: number;
       name: string;
@@ -235,16 +239,6 @@ const TeamerProfilePage: React.FC = () => {
     });
   };
 
-  const itemStyle: Record<string, string> = {
-    '--background': 'transparent',
-    '--padding-start': '0',
-    '--padding-end': '0',
-    '--inner-padding-end': '0',
-    '--inner-border-width': '0',
-    '--border-style': 'none',
-    '--min-height': 'auto'
-  };
-
   if (loading) {
     return <LoadingSpinner message="Profil wird geladen..." />;
   }
@@ -259,8 +253,9 @@ const TeamerProfilePage: React.FC = () => {
               expand="block"
               fill="outline"
               color="danger"
+              className="app-gefahr-knopf"
               onClick={handleLogout}
-              style={{ marginTop: 'var(--app-abstand-weit)', height: '48px', borderRadius: 'var(--app-radius-karte)', fontWeight: 'var(--app-schrift-halbfett)' }}
+              style={{ marginTop: 'var(--app-abstand-weit)' }}
             >
               <IonIcon icon={ICON_ABMELDEN} slot="start" />
               Abmelden
@@ -406,7 +401,7 @@ const TeamerProfilePage: React.FC = () => {
                   onClick={() => presentRoleTitleModal({ presentingElement: pageRef.current ?? undefined })}
                   detail={false}
                   lines="none"
-                  style={{ ...itemStyle, marginBottom: 'var(--app-abstand-eng)' } as React.CSSProperties}
+                  className="app-list-wrapper"
                 >
                   <div className="app-list-item app-list-item--teamer" style={{ width: '100%' }}>
                     <div className="app-list-item__row">
@@ -433,7 +428,7 @@ const TeamerProfilePage: React.FC = () => {
                   onClick={() => presentEmailModal({ presentingElement: pageRef.current ?? undefined })}
                   detail={false}
                   lines="none"
-                  style={{ ...itemStyle, marginBottom: 'var(--app-abstand-eng)' } as React.CSSProperties}
+                  className="app-list-wrapper"
                 >
                   <div className="app-list-item app-list-item--teamer" style={{ width: '100%' }}>
                     <div className="app-list-item__row">
@@ -460,7 +455,7 @@ const TeamerProfilePage: React.FC = () => {
                   onClick={() => presentPasswordModal({ presentingElement: pageRef.current ?? undefined })}
                   detail={false}
                   lines="none"
-                  style={{ ...itemStyle, marginBottom: 'var(--app-abstand-eng)' } as React.CSSProperties}
+                  className="app-list-wrapper"
                 >
                   <div className="app-list-item app-list-item--teamer" style={{ width: '100%' }}>
                     <div className="app-list-item__row">
@@ -485,7 +480,7 @@ const TeamerProfilePage: React.FC = () => {
                   onClick={() => presentBibleModal({ presentingElement: pageRef.current ?? undefined })}
                   detail={false}
                   lines="none"
-                  style={{ ...itemStyle, marginBottom: 'var(--app-abstand-eng)' } as React.CSSProperties}
+                  className="app-list-wrapper"
                 >
                   <div className="app-list-item app-list-item--teamer" style={{ width: '100%' }}>
                     <div className="app-list-item__row">
@@ -510,11 +505,13 @@ const TeamerProfilePage: React.FC = () => {
                 {/* App-Tour: zwischen Bibeluebersetzung und Medien-Cache.
                     Stand vorher ausserhalb des
                     Flex-Containers und hing deshalb ohne Abstand am
-                    vorherigen Eintrag. */}
+                    vorherigen Eintrag. Den Abstand nach unten gibt
+                    .app-list-item selbst -- von Hand gesetzt wuerde er auch
+                    dann stehen bleiben, wenn der Eintrag einmal ans Ende der
+                    Liste rutscht. */}
                 <div
                   className="app-list-item app-list-item--teamer"
                   onClick={() => setShowOnboarding(true)}
-                  style={{ marginBottom: 'var(--app-abstand-eng)' }}
                 >
                   <div className="app-list-item__row">
                     <div className="app-list-item__main">
@@ -537,7 +534,7 @@ const TeamerProfilePage: React.FC = () => {
                   onClick={handleClearMediaCache}
                   detail={false}
                   lines="none"
-                  style={{ ...itemStyle, marginBottom: 'var(--app-abstand-eng)' } as React.CSSProperties}
+                  className="app-list-wrapper"
                 >
                   <div className="app-list-item app-list-item--teamer" style={{ width: '100%' }}>
                     <div className="app-list-item__row">
@@ -555,6 +552,9 @@ const TeamerProfilePage: React.FC = () => {
                     </div>
                   </div>
                 </IonItem>
+
+                {/* App-Sperre: Face ID / Fingerabdruck vor der laufenden App */}
+                <AppSperreSchalter variante="teamer" />
 
               </div>
             </IonCardContent>
@@ -592,7 +592,16 @@ const TeamerProfilePage: React.FC = () => {
                 </div>
               </div>
 
-              {profile.konfi_data?.jahrgang_name && (
+              {/* An den DATEN, nicht am Jahrgangsnamen:
+                  Wird der Jahrgang einer frueheren Konfizeit
+                  geloescht, liefert das Backend konfi_data weiter — nur
+                  jahrgang_name ist dann leer. Der Einstieg verschwand damit,
+                  obwohl Punkte und Abzeichen dahinter unveraendert liegen.
+                  Das Backend warnt an der Quelle ausdruecklich davor
+                  (teamer.js). Reine Teamer:innen ohne Konfi-Vergangenheit
+                  haben konfi_data=null und sehen den Einstieg weiterhin
+                  nicht — er fuehrte fuer sie ins Leere. */}
+              {profile.konfi_data && (
                 <div
                   className="app-list-item app-list-item--konfi"
                   onClick={() => router.push('/teamer/profile/konfi-stats')}
@@ -623,12 +632,8 @@ const TeamerProfilePage: React.FC = () => {
             expand="block"
             fill="outline"
             color="danger"
+            className="app-gefahr-knopf"
             onClick={handleLogout}
-            style={{
-              height: '48px',
-              borderRadius: 'var(--app-radius-karte)',
-              fontWeight: 'var(--app-schrift-halbfett)'
-            }}
           >
             <IonIcon icon={ICON_ABMELDEN} slot="start" />
             Abmelden
@@ -638,13 +643,8 @@ const TeamerProfilePage: React.FC = () => {
             expand="block"
             fill="outline"
             color="danger"
+            className="app-gefahr-knopf"
             onClick={() => presentDeleteAccount({ presentingElement: pageRef.current ?? undefined })}
-            style={{
-              height: '48px',
-              marginTop: 'var(--app-abstand-eng)',
-              borderRadius: 'var(--app-radius-karte)',
-              fontWeight: 'var(--app-schrift-halbfett)'
-            }}
           >
             <IonIcon icon={ICON_LOESCHEN} slot="start" />
             Account löschen
@@ -664,7 +664,7 @@ const TeamerProfilePage: React.FC = () => {
       )}
 
       {showUpdateWalkthrough && (
-        <TeamerUpdate211WalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
+        <TeamerUpdate220WalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
       )}
 
       {showMitmachenErklaerung && (

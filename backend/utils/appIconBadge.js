@@ -68,6 +68,10 @@ async function antragZaehlerProOrg(db, orgIds) {
   )).rows;
 }
 
+// Abgesagte Termine zaehlen NICHT: Der "Verbuchen"-Tab blendet sie aus, also
+// stuende sonst eine Zahl am Icon, hinter der eine leere Liste wartet.
+// `IS NOT TRUE` statt `= FALSE`, weil die Spalte nullable ist -- Termine aus
+// dem Altbestand tragen dort NULL und sind damit nicht abgesagt.
 async function terminZaehlerProOrg(db, orgIds) {
   if (orgIds.length === 0) return [];
   return (await db.query(
@@ -75,6 +79,7 @@ async function terminZaehlerProOrg(db, orgIds) {
        FROM events e
       WHERE e.organization_id = ANY($1::int[])
         AND e.event_date < NOW()
+        AND e.cancelled IS NOT TRUE
         AND EXISTS (
           SELECT 1 FROM event_bookings eb
            WHERE eb.event_id = e.id
@@ -116,7 +121,8 @@ async function antragZaehlerGebunden(db, personen) {
 // Unverarbeitete Termine fuer GEBUNDENE Admins: derselbe Sichtbarkeits-Filter
 // wie die Terminliste (events/lesen.js) und badge-counts -- Termine ohne
 // Jahrgang und Teamer-Termine zaehlen immer, jahrgangsgebundene nur aus
-// zugewiesenen Jahrgaengen.
+// zugewiesenen Jahrgaengen. Abgesagte Termine bleiben hier ebenso aussen vor
+// wie in terminZaehlerProOrg -- beide Wege muessen dieselbe Zahl liefern.
 async function terminZaehlerGebunden(db, personen) {
   if (personen.length === 0) return [];
   return (await db.query(
@@ -126,6 +132,7 @@ async function terminZaehlerGebunden(db, personen) {
        LEFT JOIN events e
               ON e.organization_id = z.organization_id
              AND e.event_date < NOW()
+             AND e.cancelled IS NOT TRUE
              AND EXISTS (
                SELECT 1 FROM event_bookings eb
                 WHERE eb.event_id = e.id

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { haptik, ImpactStyle } from '../../utils/haptics';
 import { getMediaBlob } from '../../services/mediaCache';
 import { Message } from '../../types/chat';
 import { formatFileSize } from '../../utils/helpers';
@@ -73,6 +73,14 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
 
   useEffect(() => {
     let blobUrl = '';
+    // Abbruch-Merker wie in LazyImage: Ohne ihn las die
+    // Aufraeumfunktion `blobUrl` aus dem Effekt-Scope, waehrend der Download
+    // noch lief — sie sah dann den leeren Anfangswert, und die DANACH erzeugte
+    // Object-URL wurde nie freigegeben. Ein Video im Chat wegzuscrollen, bevor
+    // es fertig geladen war, hinterliess damit ein Leck bis zum App-Neustart.
+    // Ausserdem feuerte der Fehlerzweig einen Hinweis fuer eine Nachricht, die
+    // laengst nicht mehr auf dem Bildschirm steht.
+    let cancelled = false;
 
     const loadVideoBlob = async () => {
       try {
@@ -103,10 +111,19 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
         const correctedBlob = new Blob([blob], { type: mimeType });
         blobUrl = URL.createObjectURL(correctedBlob);
 
+        // Waehrend des Ladens abgehaengt: die eben erzeugte URL sofort wieder
+        // freigeben und nichts mehr in einen toten Zustand schreiben.
+        if (cancelled) {
+          URL.revokeObjectURL(blobUrl);
+          blobUrl = '';
+          return;
+        }
+
         setVideoUrl(blobUrl);
         generateThumbnail(blobUrl);
         setLoading(false);
       } catch (error) {
+        if (cancelled) return;
         console.error('Fehler beim Laden des Video-Blobs:', error);
         setHasError(true);
         setLoading(false);
@@ -119,6 +136,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
     }
 
     return () => {
+      cancelled = true;
       if (blobUrl) {
         URL.revokeObjectURL(blobUrl);
       }
@@ -130,7 +148,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
 
   const handleVideoClick = async () => {
     try {
-      await Haptics.impact({ style: ImpactStyle.Light });
+      await haptik(ImpactStyle.Light);
 
       if (videoRef.current) {
         if (isPlaying) {

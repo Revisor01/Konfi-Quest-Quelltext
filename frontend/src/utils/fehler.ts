@@ -91,3 +91,55 @@ export function fehlerDaten(err: unknown): ApiFehlerAntwort | undefined {
 export function alsApiFehler(err: unknown): { response?: { status?: number; data?: ApiFehlerAntwort }; message?: string; code?: string } {
   return alsObjekt(err) !== null ? (err as { response?: { status?: number; data?: ApiFehlerAntwort }; message?: string; code?: string }) : {};
 }
+
+/**
+ * Grobe Ursache eines gefangenen Fehlers, fuer die anonyme Messung.
+ *
+ * Beantwortet das WARUM, ohne irgendetwas ueber die Person oder ihre Daten zu
+ * verraten. Das Ergebnis ist IMMER einer von wenigen festen Werten:
+ *
+ * - `http-403`, `http-404`, `http-500` …  — der Status, sonst nichts. Kein
+ *   Text der Antwort, keine URL, keine Kennung.
+ * - `timeout`                              — die Anfrage lief in die Zeitgrenze.
+ * - `netz`                                 — offline oder Verbindung abgerissen.
+ * - `abbruch`                              — die Anfrage wurde abgebrochen
+ *                                            (Seitenwechsel), kein echter Fehler.
+ * - `intern`                               — im Browser aufgetreten, keine
+ *                                            Anfrage im Spiel (z.B. ein
+ *                                            fehlgeschlagenes natives Plugin).
+ *
+ * Niemals uebertragen werden `err.message`, `err.response.data`, Dateinamen,
+ * Kennungen oder URLs — die enthalten Namen und Freitext. Der Status ist eine
+ * dreistellige Zahl aus einer festen Menge und damit nicht rueckfuehrbar.
+ */
+export function fehlerArt(err: unknown): string {
+  const obj = alsObjekt(err) as { code?: unknown; name?: unknown } | null;
+  const code = typeof obj?.code === 'string' ? obj.code : '';
+  const name = typeof obj?.name === 'string' ? obj.name : '';
+
+  // Zeitgrenze VOR dem Netzwerkfehler pruefen: axios liefert bei einem Timeout
+  // ebenfalls keine Response, `istNetzwerkfehler` wuerde es sonst schlucken.
+  if (code === 'ECONNABORTED' || code === 'ETIMEDOUT' || name === 'TimeoutError') {
+    return 'timeout';
+  }
+  if (code === 'ERR_CANCELED' || name === 'CanceledError' || name === 'AbortError') {
+    return 'abbruch';
+  }
+
+  const status = fehlerStatus(err);
+  if (typeof status === 'number' && status >= 100 && status <= 599) {
+    return `http-${status}`;
+  }
+
+  // axios meldet einen abgerissenen Transport als ERR_NETWORK; ein `fetch`
+  // scheitert stattdessen mit einem TypeError ohne jede Kennzeichnung.
+  if (code === 'ERR_NETWORK') return 'netz';
+
+  // Kein axios-Fehler mit Status: entweder ein Netzwerkproblem ohne
+  // Kennzeichnung oder ein Fehler im Browser selbst. Ist das Geraet offline,
+  // ist es das Netz.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return 'netz';
+  }
+  return 'intern';
+}

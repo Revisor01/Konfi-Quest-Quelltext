@@ -1,5 +1,4 @@
 // Events routes
-// Events: Teamer darf alles (view, create, edit, delete, manage_bookings)
 //
 // Zur Einhänge-Reihenfolge: Die Teilmodule haben keine überlappenden
 // Pfad-Muster (gleiche Methode UND gleiche Segmentzahl), mit einer Ausnahme:

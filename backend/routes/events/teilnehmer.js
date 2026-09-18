@@ -2,15 +2,19 @@ const express = require('express');
 const { formatUhrzeit } = require('../../utils/zeitformat');
 const PushService = require('../../services/pushService');
 const liveUpdate = require('../../utils/liveUpdate');
-const { promoteFromWaitlist, takeBackEventPoints } = require('../../utils/bookingUtils');
+const { rueckeNach, takeBackEventPoints, freiePlaetze } = require('../../utils/bookingUtils');
+const { meldeNachrueckern } = require('../../utils/nachrueckMeldung');
 const { removeFromEventChat, addToEventChat } = require('../../utils/eventChat');
 const { nachAntwort } = require('../../utils/nachAntwort');
+const { darfTermin } = require('../../utils/jahrgangsZugriff');
 
-module.exports = (db, rbacVerifier, { requireTeamer }) => {
+// Deshalb requireAdmin (org_admin, admin) statt des frueheren requireTeamer.
+// Gesperrt wird in BEIDEN Ebenen: Oberflaeche und Backend.
+module.exports = (db, rbacVerifier, { requireAdmin }) => {
   const router = express.Router();
 
   // Add participant to event (Admin only) - mit Transaktion gegen Race Conditions
-  router.post('/:id/participants', rbacVerifier, requireTeamer, async (req, res) => {
+  router.post('/:id/participants', rbacVerifier, requireAdmin, async (req, res) => {
     const eventId = req.params.id;
     const { user_id, status = 'auto', timeslot_id = null } = req.body;
 
@@ -25,6 +29,22 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
         await client.query('ROLLBACK');
         client.release();
         return res.status(404).json({ error: 'Event nicht gefunden' });
+      }
+
+      // Wer wieder Leute eintragen will, nimmt zuerst die Absage zurueck
+      // (PUT /:id/reaktivieren) — dort kommen die vorher Abgemeldeten
+      // ohnehin von selbst zurueck.
+      if (event.cancelled) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(400).json({ error: 'Dieser Termin ist abgesagt' });
+      }
+
+      const zugriff = await darfTermin(client, req, eventId);
+      if (!zugriff.erlaubt) {
+        await client.query('ROLLBACK');
+        client.release();
+        return res.status(403).json({ error: 'Kein Zugriff auf diesen Termin' });
       }
 
       // 2. Validate user
@@ -62,20 +82,28 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
 
       // 5. Determine final status
       let finalStatus = status;
+
+      // Die Rolle wird IMMER bestimmt, nicht nur im 'auto'-Zweig: Sie
+      // entscheidet unten auch darueber, ueber welchen Einstiegspunkt der
+      // Push rausgeht. Mit explizitem status ('confirmed'/'waitlist') war sie
+      // frueher gar nicht gesetzt.
+      const { rows: [addedUser] } = await client.query(
+        `SELECT r.name AS role_name FROM users u
+         JOIN roles r ON u.role_id = r.id
+         WHERE u.id = $1 AND u.organization_id = $2`,
+        [user_id, req.user.organization_id]
+      );
+      const addedIsKonfi = addedUser?.role_name === 'konfi';
+      const addedIsTeamer = !addedIsKonfi;
+
       if (status === 'auto') {
         // Rolle des hinzugefuegten Users bestimmt, GEGEN WELCHES Kontingent
         // gezählt wird. Ohne diese Weiche landete ein per Admin hinzugefuegter
         // Teamer im Konfi-Kontingent — und stand er auf der Warteliste, fand
         // ihn promoteFromWaitlist(...,'not_teamer') nie: eine tote Buchung.
-        const { rows: [addedUser] } = await client.query(
-          `SELECT r.name AS role_name FROM users u
-           JOIN roles r ON u.role_id = r.id
-           WHERE u.id = $1 AND u.organization_id = $2`,
-          [user_id, req.user.organization_id]
-        );
-        const addedIsKonfi = addedUser?.role_name === 'konfi';
-        const addedIsTeamer = !addedIsKonfi;
-
+        //
+        // addedIsKonfi/addedIsTeamer stehen oben, vor dieser Weiche — sie
+        // werden auch beim Push gebraucht.
         if (addedIsTeamer && !event.teamer_needed && !event.teamer_only) {
           await client.query('ROLLBACK');
           client.release();
@@ -165,12 +193,44 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
         message: responseMessage
       });
 
-      // Live Update: Notify the booked person and admins about the admin-booking.
-      // sendToUserByRole statt hart 'konfi': die Leitung kann hier auch
-      // Teamer:innen eintragen (siehe addedIsTeamer oben) — die sitzen im Raum
-      // user_teamer_<id> und bekamen ihr eigenes Ereignis sonst nie.
-      liveUpdate.sendToUserByRole(user_id, 'events', 'update', { eventId, status: finalStatus });
-      liveUpdate.sendToOrgAdmins(req.user.organization_id, 'events', 'update', { eventId, action: 'admin_booking' });
+      // Seiteneffekte NACH der Antwort (siehe utils/nachAntwort.js): Die
+      // Leitung soll nicht warten, bis der Push draussen ist, und ein
+      // Push-Fehler darf die laengst committete Buchung nicht kippen.
+      nachAntwort(req, async () => {
+        // Vorher gab es hier nur Live-Updates: Die erreichen eine offene
+        // Sitzung, aber kein Handy. Es ist derselbe Wortlaut wie bei der
+        // Selbstanmeldung (routes/events/buchung.js) — die Meldung ist
+        // dieselbe, egal ob man sich selbst anmeldet oder angemeldet wird.
+        //
+        // AUCH BEI DER WARTELISTE (bewusst so entschieden): Wer direkt auf
+        // die Warteliste gesetzt wird, bekommt die passende Meldung "Du
+        // stehst auf der Warteliste" — sendEventRegisteredToKonfi
+        // unterscheidet den Wortlaut ueber den status. Schweigen waere hier
+        // falsch: Die Person weiss sonst nicht einmal, dass die Leitung sie
+        // ueberhaupt vorgemerkt hat, und hielte sich den Termin nicht frei.
+        if (Number(user_id) !== Number(req.user.id)) {
+          try {
+            if (addedIsTeamer) {
+              await PushService.sendEventRegisteredToTeamer(
+                db, user_id, event.name, event.event_date, finalStatus, eventId, req.user.organization_id
+              );
+            } else {
+              await PushService.sendEventRegisteredToKonfi(
+                db, user_id, event.name, event.event_date, finalStatus, eventId, timeslot, req.user.organization_id
+              );
+            }
+          } catch (pushErr) {
+            console.error('Push notification failed for admin booking:', pushErr);
+          }
+        }
+
+        // Live Update: Notify the booked person and admins about the admin-booking.
+        // sendToUserByRole statt hart 'konfi': die Leitung kann hier auch
+        // Teamer:innen eintragen (siehe addedIsTeamer oben) — die sitzen im Raum
+        // user_teamer_<id> und bekamen ihr eigenes Ereignis sonst nie.
+        liveUpdate.sendToUserByRole(user_id, 'events', 'update', { eventId, status: finalStatus });
+        liveUpdate.sendToOrgAdmins(req.user.organization_id, 'events', 'update', { eventId, action: 'admin_booking' });
+      }, 'POST /events/:id/participants');
 
     } catch (err) {
       try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
@@ -184,7 +244,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
   });
   
   // Delete event booking (Admin only)
-  router.delete('/:id/bookings/:bookingId', rbacVerifier, requireTeamer, async (req, res) => {
+  router.delete('/:id/bookings/:bookingId', rbacVerifier, requireAdmin, async (req, res) => {
     const { id: eventId, bookingId } = req.params;
     
     try {
@@ -237,6 +297,12 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
           return res.status(403).json({ error: 'Zugriff verweigert' });
         }
 
+        const zugriff = await darfTermin(client, req, eventId);
+        if (!zugriff.erlaubt) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'Kein Zugriff auf diesen Termin' });
+        }
+
         // Falls der Konfi als ANWESEND verbucht war, beim Löschen die vergebenen
         // Event-Punkte zuruecknehmen (sonst behält er Punkte für ein Event, an dem
         // er nicht mehr als Teilnehmer geführt wird). Nur für Konfis relevant.
@@ -252,87 +318,26 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
         // 
         await removeFromEventChat(client, eventId, booking.user_id, req.user.organization_id);
 
-      // Auto-promote from waitlist if the deleted booking was confirmed.
-      // Konfi- und Teamer-Kontingent sind strikt getrennt: ein frei gewordener
-      // Konfi-Platz wird nur aus der Konfi-Warteliste nachbesetzt und umgekehrt.
-      // promoteFromWaitlist filtert die Rolle und schließt geloeschte User aus.
+      // Ein frei gewordener Platz wird nachbesetzt. Konfi- und Team-Kontingent
+      // sind strikt getrennt: ein frei gewordener Konfi-Platz wird nur aus der
+      // Konfi-Warteliste nachbesetzt und umgekehrt.
         if (booking.status === 'confirmed') {
           const removedIsTeamer = booking.is_teamer_booking === true;
-          // Kein eigener try/catch mehr um diesen Block: Ein geschluckter
-          // Fehler wuerde jetzt in ein COMMIT laufen und einen halben Zustand
-          // festschreiben. Scheitert das Nachruecken, rollt das Entfernen
-          // zurueck und laesst sich wiederholen.
-          let maxCapacity = 0;
-          let confirmedCount = 0;
-
-          if (removedIsTeamer) {
-            // Teamer-Buchungen haben nie einen Timeslot -> event-weite Zählung.
-            const { rows: [teamerCapInfo] } = await client.query(
-              "SELECT teamer_max_participants FROM events WHERE id = $1 AND organization_id = $2",
-              [eventId, req.user.organization_id]
+          // Kein eigener try/catch um diesen Block: Ein geschluckter Fehler
+          // wuerde in ein COMMIT laufen und einen halben Zustand festschreiben.
+          // Scheitert das Nachruecken, rollt das Entfernen zurueck.
+          const [nachgerueckt] = await rueckeNach(client, {
+            eventId,
+            timeslotId: removedIsTeamer ? null : booking.timeslot_id,
+            seite: removedIsTeamer ? 'team' : 'konfi'
+          });
+          if (nachgerueckt) {
+            promotedUserId = nachgerueckt;
+            const { rows: [eventInfo] } = await client.query(
+              "SELECT name FROM events WHERE id = $1", [eventId]
             );
-            const { rows: [teamerCountRes] } = await client.query(
-              `SELECT COUNT(*) as confirmed_count
-               FROM event_bookings eb
-               JOIN users u ON eb.user_id = u.id
-               JOIN roles r ON u.role_id = r.id
-               WHERE eb.event_id = $1 AND eb.status = 'confirmed'
-                 AND r.name <> 'konfi' AND u.deleted_at IS NULL`,
-              [eventId]
-            );
-            maxCapacity = teamerCapInfo?.teamer_max_participants || 0;
-            confirmedCount = parseInt(teamerCountRes?.confirmed_count || '0', 10);
-          } else if (booking.timeslot_id) {
-            const { rows: [slotInfo] } = await client.query(
-              "SELECT max_participants FROM event_timeslots WHERE id = $1 AND organization_id = $2",
-              [booking.timeslot_id, req.user.organization_id]
-            );
-            // Teamer:innen zählen NICHT gegen das Konfi-Kontingent (sie haben
-            // ihr eigenes) — sonst blockiert eine bestaetigte Teamer-Buchung
-            // den Nachrueckplatz eines Konfis.
-            const { rows: [slotCountRes] } = await client.query(
-              `SELECT COUNT(*) as confirmed_count
-               FROM event_bookings eb
-               LEFT JOIN users u ON eb.user_id = u.id
-               LEFT JOIN roles r ON u.role_id = r.id AND r.name <> 'konfi'
-               WHERE eb.timeslot_id = $1 AND eb.status = 'confirmed' AND r.id IS NULL`,
-              [booking.timeslot_id]
-            );
-            maxCapacity = slotInfo?.max_participants || 0;
-            confirmedCount = parseInt(slotCountRes?.confirmed_count || '0', 10);
-          } else {
-            const { rows: [eventCapInfo] } = await client.query(
-              "SELECT max_participants FROM events WHERE id = $1 AND organization_id = $2",
-              [eventId, req.user.organization_id]
-            );
-            const { rows: [countResult] } = await client.query(
-              `SELECT COUNT(*) as confirmed_count
-               FROM event_bookings eb
-               LEFT JOIN users u ON eb.user_id = u.id
-               LEFT JOIN roles r ON u.role_id = r.id AND r.name <> 'konfi'
-               WHERE eb.event_id = $1 AND eb.status = 'confirmed' AND r.id IS NULL`,
-              [eventId]
-            );
-            maxCapacity = eventCapInfo?.max_participants || 0;
-            confirmedCount = parseInt(countResult?.confirmed_count || '0', 10);
-          }
-
-          // Nur nachruecken wenn unter Kapazität (0 = unbegrenzt, immer nachruecken).
-          if (maxCapacity === 0 || confirmedCount < maxCapacity) {
-            promotedUserId = await promoteFromWaitlist(
-              client,
-              eventId,
-              removedIsTeamer ? null : booking.timeslot_id,
-              removedIsTeamer ? 'teamer' : 'not_teamer'
-            );
-
-            if (promotedUserId) {
-              const { rows: [eventInfo] } = await client.query(
-                "SELECT name FROM events WHERE id = $1", [eventId]
-              );
-              promotedEventName = eventInfo?.name || null;
-              promotedType = removedIsTeamer ? 'teamer' : 'konfi';
-            }
+            promotedEventName = eventInfo?.name || null;
+            promotedType = removedIsTeamer ? 'teamer' : 'konfi';
           }
         }
 
@@ -378,7 +383,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
   });
 
   // Promote/Demote participant between confirmed and waitlist
-  router.put('/:id/participants/:participantId/status', rbacVerifier, requireTeamer, async (req, res) => {
+  router.put('/:id/participants/:participantId/status', rbacVerifier, requireAdmin, async (req, res) => {
     const { id: eventId, participantId } = req.params;
     const { status } = req.body;
     
@@ -407,10 +412,25 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
       let betroffenerUser = null;
       let eventName = null;
       let eventDatum = null;
+      let herabstufungNachrueckerIn = null;
+      let herabstufungSeite = 'konfi';
       try {
         await client.query('BEGIN');
 
-        const { rows: [booking] } = await client.query("SELECT eb.status, eb.attendance_status, eb.user_id, e.organization_id, e.name AS event_name, e.event_date FROM event_bookings eb JOIN events e ON eb.event_id = e.id WHERE eb.id = $1 AND eb.event_id = $2 FOR UPDATE OF eb", [participantId, eventId]);
+        const { rows: [booking] } = await client.query(
+          `SELECT eb.status, eb.attendance_status, eb.user_id, eb.timeslot_id,
+                  e.organization_id, e.name AS event_name, e.event_date, e.cancelled,
+                  e.max_participants, e.teamer_max_participants,
+                  ts.max_participants AS timeslot_max,
+                  COALESCE(r.name, '') <> 'konfi' AS ist_team
+             FROM event_bookings eb
+             JOIN events e ON eb.event_id = e.id
+             JOIN users u ON eb.user_id = u.id
+             LEFT JOIN roles r ON u.role_id = r.id
+             LEFT JOIN event_timeslots ts ON eb.timeslot_id = ts.id
+            WHERE eb.id = $1 AND eb.event_id = $2 FOR UPDATE OF eb`,
+          [participantId, eventId]
+        );
         if (!booking) {
           await client.query('ROLLBACK');
           // KEIN client.release() hier — das finally unten released.
@@ -420,9 +440,21 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
           await client.query('ROLLBACK');
           return res.status(403).json({ error: 'Zugriff verweigert' });
         }
+
+        const zugriff = await darfTermin(client, req, eventId);
+        if (!zugriff.erlaubt) {
+          await client.query('ROLLBACK');
+          return res.status(403).json({ error: 'Kein Zugriff auf diesen Termin' });
+        }
+
         if (booking.status === status) {
           await client.query('ROLLBACK');
           return res.status(400).json({ error: `Teilnehmer:in ist bereits ${status === 'confirmed' ? 'bestätigt' : 'auf der Warteliste'}` });
+        }
+
+        if (booking.cancelled && status === 'confirmed') {
+          await client.query('ROLLBACK');
+          return res.status(400).json({ error: 'Dieser Termin ist abgesagt' });
         }
 
         // Vorheriger Status: bei Wechsel von 'waitlist' -> 'confirmed' ist es eine
@@ -440,8 +472,82 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
           // Punkte-Ruecknahme ueber den gemeinsamen Helfer: Derselbe Block lag
           // vorher viermal im Code, zweimal transaktional und zweimal nicht.
           punkteZurueck = await takeBackEventPoints(client, booking.user_id, eventId);
+
+          // Sie kann dabei nicht sich selbst nachruecken: Der FIFO-Zugriff
+          // nimmt den AELTESTEN Wartelisten-Eintrag (ORDER BY created_at), und
+          // ihr Eintrag ist der aelteste nur, wenn sonst niemand wartet -- dann
+          // aber stuende sie ohnehin allein da, und die Herabstufung waere
+          // wirkungslos. Deshalb wird sie ausgeschlossen.
+          const [nachgerueckt] = await rueckeNach(client, {
+            eventId,
+            timeslotId: booking.ist_team ? null : booking.timeslot_id,
+            seite: booking.ist_team ? 'team' : 'konfi'
+          });
+          if (nachgerueckt && nachgerueckt !== booking.user_id) {
+            herabstufungNachrueckerIn = nachgerueckt;
+            herabstufungSeite = booking.ist_team ? 'team' : 'konfi';
+          } else if (nachgerueckt === booking.user_id) {
+            // Sie hat sich selbst zurueckgeholt -- das macht die Herabstufung
+            // zunichte. Rueckgaengig: zurueck auf die Warteliste.
+            await client.query("UPDATE event_bookings SET status = 'waitlist', war_auf_warteliste = false WHERE id = $1", [participantId]);
+          }
         } else {
-          await client.query("UPDATE event_bookings SET status = $1 WHERE id = $2", [status, participantId]);
+          // KAPAZITAET PRUEFEN -- bis hierher gab es hier KEINE.
+          //
+          // Das fiel erst auf, seit das Nachruecken vollstaendig ist: Jede
+          // Abmeldung und jede Herabstufung befoerdert seit dem 15.09.
+          // automatisch die naechste wartende Person. Wer eine Abmeldung ueber
+          // den Umweg "zurueck auf die Warteliste, dann bestaetigen" rueckgaengig
+          // machen wollte -- der einzige Weg, den es bis heute gab --, buchte
+          // den Termin damit still ueber: Beim Herabstufen rueckt Y nach, beim
+          // Bestaetigen kommt X ungeprueft dazu. Zwei Personen auf einem Platz,
+          // und nirgends eine Zahl, die rot wird.
+          //
+          // ABGELEHNT STATT STILL UEBERBUCHT (Entscheidung): Die Leitung soll
+          // handlungsfaehig bleiben, aber nicht versehentlich ueber die eigene
+          // Obergrenze gehen. Wer bewusst mehr Leute mitnehmen will, hat dafuer
+          // den richtigen Weg -- die Kapazitaet des Termins erhoehen. Dann
+          // stimmt die Zahl hinterher auch, und die Wartenden ruecken von
+          // selbst korrekt nach. Eine stille Ueberbuchung dagegen ist kein
+          // Alltagsweg, sondern ein Unfall: Sie faellt erst am Termin auf, wenn
+          // die Stuehle nicht reichen.
+          //
+          // Ohne Obergrenze (0 oder NULL) aendert sich nichts -- dort gibt es
+          // nichts zu ueberschreiten. Die Zaehlung laeuft ueber dieselbe Regel
+          // wie das Nachruecken (zaehleBestaetigte ueber freiePlaetze), damit
+          // beide nicht auseinanderlaufen koennen.
+          const maxKapazitaet = booking.ist_team
+            ? (booking.teamer_max_participants || 0)
+            : (booking.timeslot_id ? (booking.timeslot_max || 0) : (booking.max_participants || 0));
+          const frei = await freiePlaetze(
+            client,
+            {
+              eventId,
+              timeslotId: booking.ist_team ? null : booking.timeslot_id,
+              seite: booking.ist_team ? 'team' : 'konfi'
+            },
+            maxKapazitaet
+          );
+          if (frei !== null && frei <= 0) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+              error: 'Der Termin ist voll. Erhöhe die Teilnehmerzahl, um weitere Plätze zu vergeben.'
+            });
+          }
+
+          // BEFOERDERUNG VON HAND: Die Leitung waehlt eine bestimmte Person aus
+          // -- FIFO gilt hier bewusst nicht, also kann promoteFromWaitlist das
+          // nicht uebernehmen. Was es aber tut und hier fehlte:
+          // war_auf_warteliste setzen (Migration 145). Ohne die Spalte verliert
+          // der Jahresrueckblick im Moment der Befoerderung die Information,
+          // dass diese Person gewartet hat.
+          await client.query(
+            `UPDATE event_bookings
+                SET status = $1,
+                    war_auf_warteliste = CASE WHEN $3::boolean THEN true ELSE war_auf_warteliste END
+              WHERE id = $2`,
+            [status, participantId, wasWaitlist]
+          );
         }
 
         // In den Chat zum Termin, falls es einen gibt. Auch bei der Rueckstufung
@@ -469,6 +575,16 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
           } catch (pushErr) {
             console.error('Error sending waitlist promotion push:', pushErr);
           }
+        }
+
+        // Wer durch die Herabstufung nachgerueckt ist, erfaehrt es — ueber
+        // denselben Weg wie an allen anderen Nachrueck-Stellen.
+        if (herabstufungNachrueckerIn) {
+          await meldeNachrueckern(db, req.user.organization_id, [{
+            eventId,
+            userId: herabstufungNachrueckerIn,
+            seite: herabstufungSeite
+          }]);
         }
 
         // Live-Update an die betroffene Person (korrekter Socket-Raum per Rolle).

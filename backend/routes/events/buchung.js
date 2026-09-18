@@ -39,19 +39,22 @@ module.exports = (db, rbacVerifier) => {
 
       if (!ergebnis.ok) {
         await client.query('ROLLBACK');
-        client.release();
-        const antwort = { error: ergebnis.error };
-        if (ergebnis.error_code) antwort.error_code = ergebnis.error_code;
-        return res.status(ergebnis.status).json(antwort);
+      } else {
+        await client.query('COMMIT');
       }
-
-      await client.query('COMMIT');
-      client.release();
     } catch (err) {
-      try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
-      client.release();
+      await client.query('ROLLBACK').catch(() => {});
       console.error('Database error in POST /events/:eventId/book:', eventId, err);
       return res.status(500).json({ error: 'Datenbankfehler bei der Anmeldung' });
+    } finally {
+      // KEIN client.release() im try — nur hier.
+      client.release();
+    }
+
+    if (!ergebnis.ok) {
+      const antwort = { error: ergebnis.error };
+      if (ergebnis.error_code) antwort.error_code = ergebnis.error_code;
+      return res.status(ergebnis.status).json(antwort);
     }
 
     const { bookingId, status, event } = ergebnis;
@@ -268,11 +271,13 @@ module.exports = (db, rbacVerifier) => {
         return res.status(403).json({ error: 'Nur Konfis und das Team können ihre Buchungen einsehen' });
       }
       
+      // 'opted_out' bleibt bewusst draussen, wie bisher: Wer sich SELBST
+      // abgemeldet hat, weiss es -- und die Liste soll zeigen, was ansteht.
       const query = `
         SELECT eb.*, eb.status, e.name as event_name, e.event_date, e.location, e.mandatory, e.bring_items
         FROM event_bookings eb
         JOIN events e ON eb.event_id = e.id
-        WHERE eb.user_id = $1 AND eb.status IN ('confirmed', 'waitlist') AND e.organization_id = $2
+        WHERE eb.user_id = $1 AND eb.status IN ('confirmed', 'waitlist', 'excused') AND e.organization_id = $2
         ORDER BY e.event_date ASC
       `;
       const { rows: bookings } = await db.query(query, [req.user.id, req.user.organization_id]);

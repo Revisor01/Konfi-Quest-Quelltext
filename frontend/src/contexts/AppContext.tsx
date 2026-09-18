@@ -15,7 +15,8 @@ import { logout as performLogout } from '../services/auth';
 import { clearAuth } from '../services/tokenStore';
 import { BackgroundTask } from '@capawesome/capacitor-background-task';
 import { BaseUser } from '../types/user';
-import { setAnalyticsRole, trackFehler, trackSitzungsstart } from '../services/analytics';
+import { setAnalyticsRole, trackFehler, trackSitzungsstart, istGueltigeArt, istGueltigerOrt } from '../services/analytics';
+import { fehlerArt } from '../utils/fehler';
 import { buildPushTargetUrl, resolveOrgForPush, PushUserType } from '../utils/pushNavigation';
 
 // FCM Token wird über Window Events empfangen (siehe AppDelegate.swift)
@@ -116,6 +117,21 @@ export interface UserOrganization {
   is_active?: boolean;
 }
 
+/**
+ * Zusatzangaben zu einem Fehler — ausschliesslich fuer die anonyme Messung.
+ * Sie erscheinen NIRGENDS auf dem Bildschirm; die angezeigte Meldung bleibt
+ * die, die als erstes Argument uebergeben wird.
+ *
+ * `ort`: kurzes, im Code fest vergebenes Kuerzel der Fundstelle, damit sich
+ * gleichlautende Meldungen aus verschiedenen Ansichten unterscheiden lassen
+ * (nur Kleinbuchstaben, Ziffern, Bindestriche — nie Daten aus einer Antwort).
+ * `fehler`: der gefangene Fehler; daraus wird nur die grobe Ursache gelesen.
+ */
+export interface FehlerDiagnose {
+  ort?: string;
+  fehler?: unknown;
+}
+
 interface AppContextType {
   user: BaseUser | null;
   error: string;
@@ -131,7 +147,7 @@ interface AppContextType {
   signOut: () => Promise<void>;
   setUser: (user: BaseUser | null) => void;
   refreshUser: () => Promise<void>;
-  setError: (error: string) => void;
+  setError: (error: string, diagnose?: FehlerDiagnose) => void;
   setSuccess: (success: string) => void;
   clearMessages: () => void;
   requestPushPermissions: () => Promise<void>;
@@ -150,14 +166,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // die anonyme Messung ein — DAS beantwortet "wo klemmt es". Uebertragen wird
   // nur eine gekuerzte, entschaerfte Fassung des Textes: keine Namen, keine
   // IDs, keine Freitexte aus Beitraegen (Zahlen werden ersetzt).
-  const setErrorTracked = useCallback((meldung: string) => {
+  //
+  // Der zweite Parameter ist rein diagnostisch und beruehrt die Anzeige NICHT:
+  //   `ort`    — ein im Code fest vergebenes Kuerzel. Loest das Problem, dass
+  //              derselbe Meldungstext an mehreren Stellen steht (z.B. steht
+  //              "Fehler beim Öffnen der Datei" an vier Stellen und kam bis
+  //              dahin als ein einziger Eintrag an).
+  //   `fehler` — der gefangene Fehler. Daraus wird NUR die grobe Ursache
+  //              abgeleitet (Status, timeout, netz …), siehe `fehlerArt`.
+  //              Das Objekt selbst verlaesst diese Funktion nie.
+  const setErrorTracked = useCallback((meldung: string, diagnose?: FehlerDiagnose) => {
     setError(meldung);
-    if (meldung) {
-      const anonym = meldung
-        .replace(/\d+/g, '#')
-        .slice(0, 80);
-      trackFehler(anonym);
-    }
+    if (!meldung) return;
+
+    const anonym = meldung
+      .replace(/\d+/g, '#')
+      .slice(0, 80);
+
+    // Beide Zusatzangaben werden gegen ihr Muster geprueft, bevor sie das
+    // Geraet verlassen. Was nicht passt, faellt weg — lieber ein Eintrag ohne
+    // Ursache als einer mit einem durchgereichten Dateinamen.
+    const art = diagnose && 'fehler' in diagnose ? fehlerArt(diagnose.fehler) : undefined;
+    const ort = diagnose?.ort;
+
+    trackFehler(
+      anonym,
+      art && istGueltigeArt(art) ? art : undefined,
+      ort && istGueltigerOrt(ort) ? ort : undefined
+    );
   }, []);
 
   // Rolle für die anonyme Nutzungsmessung mitfuehren (konfi/teamer/admin) —

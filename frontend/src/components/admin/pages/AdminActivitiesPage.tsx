@@ -89,7 +89,7 @@ const AdminActivitiesPage: React.FC = () => {
               await refreshActivities();
             } catch (err) {
               const errorMessage = fehlerText(err, 'Fehler beim Löschen der Aktivität');
-              setError(errorMessage);
+              setError(errorMessage, { ort: 'aktivitaet-loeschen-verwaltung', fehler: err });
             }
           }
         }

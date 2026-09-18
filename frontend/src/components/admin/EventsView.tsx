@@ -2,6 +2,7 @@ import React from 'react';
 import { IonIcon, IonItem, IonLabel, IonInput, IonItemSliding, IonItemOptions, IonItemOption, IonItemGroup, IonSegment, IonSegmentButton, IonSelect, IonSelectOption, IonList, IonListHeader, useIonModal } from '@ionic/react';
 import {
   ICON_ANHANG,
+  ICON_BEARBEITEN,
   ICON_FILTER,
   ICON_GEMEINDE_GEFUELLT,
   ICON_GESPERRT,
@@ -14,12 +15,13 @@ import {
   ICON_MATERIAL,
   ICON_ORT_GEFUELLT,
   ICON_POKAL_GEFUELLT,
+  ICON_RUECKGAENGIG,
   ICON_SUCHE_GEFUELLT,
   ICON_TERMIN,
   ICON_TERMIN_GEFUELLT,
   ICON_UHRZEIT_GEFUELLT,
 } from '../shared/icons';
-import { SectionHeader, ListSection, EventLegendModal, EventCornerBadges, formatEventDate as formatDate, formatEventTime as formatTime, istVergangen, eventEnde, kategorienText, zeigtPunkteart, punkteartText } from '../shared';
+import { SectionHeader, ListSection, EventLegendModal, EventCornerBadges, AbsageBlock, formatEventDate as formatDate, formatEventTime as formatTime, istVergangen, istAbgesagt, titelDekoration, eventEnde, kategorienText, zeigtPunkteart, punkteartText } from '../shared';
 import { getStatusIcon } from '../shared/StatusBadge';
 import { Event } from '../../types/event';
 import { closeOpenSlidingItems } from '../../utils/slidingItems';
@@ -29,6 +31,11 @@ interface EventsViewProps {
   onSelectEvent: (event: Event) => void;
   onDeleteEvent?: (event: Event) => void;
   onCancelEvent?: (event: Event) => void;
+  // Absage zuruecknehmen -- nur an abgesagten Terminen sichtbar.
+  onZuruecknehmen?: (event: Event) => void;
+  // Termin kopieren. Oeffnet das Anlege-Formular vorbefuellt;
+  // angelegt wird erst beim Speichern.
+  onKopieren?: (event: Event) => void;
   activeTab?: 'aktuell' | 'verbuchen' | 'vergangen';
   onTabChange?: (tab: 'aktuell' | 'verbuchen' | 'vergangen') => void;
   eventCounts?: {
@@ -55,6 +62,8 @@ const EventsView: React.FC<EventsViewProps> = ({
   onSelectEvent,
   onDeleteEvent,
   onCancelEvent,
+  onZuruecknehmen,
+  onKopieren,
   activeTab = 'aktuell',
   onTabChange,
   eventCounts,
@@ -226,7 +235,10 @@ const EventsView: React.FC<EventsViewProps> = ({
       >
         {filteredAndSortedEvents.map((event, index) => {
               const isPastEvent = istVergangen(event);
-              const isCancelled = event.registration_status === 'cancelled';
+              // istAbgesagt() prueft BEIDE Felder: GET /events liefert
+              // registration_status, GET /events/cancelled zusaetzlich
+              // cancelled. Beide Listen laufen durch diese Ansicht.
+              const isCancelled = istAbgesagt(event);
               // Konfirmations-Event über das is_konfirmation-Flag (Phase 117, Migration 091).
               const isKonfirmationEvent = event.is_konfirmation === true;
               const hatBuchungen = (event.registered_count || 0) > 0 || (event.teamer_count || 0) > 0;
@@ -326,7 +338,7 @@ const EventsView: React.FC<EventsViewProps> = ({
                             className="app-list-item__title"
                             style={{
                               color: isCancelled || shouldGrayOut ? 'var(--app-text-muted)' : undefined,
-                              textDecoration: isCancelled ? 'line-through' : 'none',
+                              textDecoration: titelDekoration('liste', event),
                               display: 'flex',
                               alignItems: 'center',
                               gap: 'var(--app-abstand-kompakt)',
@@ -343,6 +355,8 @@ const EventsView: React.FC<EventsViewProps> = ({
                               {event.jahrgang_names.split(',').join(' \u00B7 ')}
                             </div>
                           )}
+
+                          <AbsageBlock event={event} variante="zeile" />
 
                           {/* Zeile 2: Buchungen + Teamer + Warteliste + Punkte.
                               Bei "Nur Teamer:innen" gibt es keine Konfi-Teilnahme \u2014
@@ -445,16 +459,51 @@ const EventsView: React.FC<EventsViewProps> = ({
                   </div>
                 </IonItem>
 
-                {(onDeleteEvent || onCancelEvent) && (
+                {(onDeleteEvent || onCancelEvent || onZuruecknehmen || onKopieren) && (
                   <IonItemOptions side="end" className="app-swipe-actions">
+                    {/* ABSAGE ZURUECKNEHMEN: nur an abgesagten
+                        Terminen, und dort als ERSTE Aktion — sie ist die
+                        aufbauende, waehrend die beiden daneben abbauen. Gruen
+                        statt rot, damit sie sich nicht wie "noch
+                        endgueltiger absagen" liest. Die Rueckfrage mit der
+                        Zahl der Betroffenen stellt der Aufrufer. */}
+                    {onZuruecknehmen && isCancelled && (
+                      <IonItemOption
+                        onClick={() => { closeOpenSlidingItems(); onZuruecknehmen(event); }}
+                        aria-label="Absage zurücknehmen"
+                        className="app-swipe-action"
+                      >
+                        <div className="app-icon-circle app-icon-circle--lg app-icon-circle--success">
+                          <IonIcon icon={ICON_RUECKGAENGIG} />
+                        </div>
+                      </IonItemOption>
+                    )}
+                    {/* KOPIEREN: Oeffnet das Anlege-Formular mit
+                        den Werten dieses Termins. Es wird nichts angelegt --
+                        deshalb steht die Aktion neutral zwischen den
+                        abbauenden und braucht keine Rueckfrage. Auch an
+                        abgesagten Terminen sinnvoll: Die Kopie ist nicht
+                        abgesagt, so laesst sich ein ausgefallener Termin
+                        nachholen. */}
+                    {onKopieren && (
+                      <IonItemOption
+                        onClick={() => { closeOpenSlidingItems(); onKopieren(event); }}
+                        aria-label="Termin kopieren"
+                        className="app-swipe-action"
+                      >
+                        <div className="app-icon-circle app-icon-circle--lg app-icon-circle--primary">
+                          <IonIcon icon={ICON_KOPIEREN_GEFUELLT} />
+                        </div>
+                      </IonItemOption>
+                    )}
                     {onCancelEvent && (
                       <IonItemOption
                         onClick={() => { closeOpenSlidingItems(); onCancelEvent(event); }}
-                        aria-label="Event absagen"
+                        aria-label={isCancelled ? 'Absagegrund bearbeiten' : 'Event absagen'}
                         className="app-swipe-action"
                       >
                         <div className="app-icon-circle app-icon-circle--lg app-icon-circle--warning">
-                          <IonIcon icon={ICON_GESPERRT} />
+                          <IonIcon icon={isCancelled ? ICON_BEARBEITEN : ICON_GESPERRT} />
                         </div>
                       </IonItemOption>
                     )}

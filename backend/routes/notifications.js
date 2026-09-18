@@ -153,6 +153,13 @@ module.exports = (db, verifyTokenRBAC) => {
       // Filter wie die Terminliste (events/lesen.js) — Termine ohne Jahrgang
       // und Teamer-Termine zaehlen immer, jahrgangsgebundene nur aus
       // zugewiesenen Jahrgaengen.
+      //
+      // Abgesagte Termine zaehlen NICHT: Der "Verbuchen"-Tab blendet sie aus,
+      // also stuende sonst eine rote Zahl am Reiter, hinter der eine leere
+      // Liste wartet — dieselbe Fehlerklasse wie oben bei der
+      // Jahrgangs-Bindung. `IS NOT TRUE` statt `= FALSE`, weil die Spalte
+      // nullable ist: Termine aus dem Altbestand haben dort NULL und sind
+      // damit nicht abgesagt.
       let eventsPromise = zero;
       if (isAdminType) {
         const eventSichtFilter = istGebundenerAdmin
@@ -173,6 +180,7 @@ module.exports = (db, verifyTokenRBAC) => {
            FROM events e
            WHERE e.organization_id = $1
            AND e.event_date < NOW()
+           AND e.cancelled IS NOT TRUE
            AND EXISTS (
              SELECT 1 FROM event_bookings eb
              WHERE eb.event_id = e.id

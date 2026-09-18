@@ -117,8 +117,13 @@
 
 <!-- Umami-Reichweitenmessung (self-hosted, cookiefrei, ohne personenbezogene Daten).
      Nur Seitenaufrufe — das ausfuehrliche Interaktions-Tracking laeuft
-     ausschliesslich auf der Landingpage. -->
-<script defer src="https://t.godsapp.de/script.js" data-website-id="dfd37276-5ad4-474d-8306-bf3ed9a3a5d3"></script>
+     ausschliesslich auf der Landingpage.
+
+     data-domains sperrt jede fremde Domain aus. Ohne das Attribut zaehlt Umami
+     von ueberall, wo diese Datei geoeffnet wird — auch von localhost aus der
+     Entwicklung und aus dem App-WebView, in das Capacitor diese Seite mit
+     hineinkopiert. Der Hostname wird EXAKT gegen diese Liste geprueft. -->
+<script defer src="https://t.godsapp.de/script.js" data-website-id="dfd37276-5ad4-474d-8306-bf3ed9a3a5d3" data-domains="konfi-quest.de,www.konfi-quest.de"></script>
 </head>
 <body>
     <div class="container">
@@ -250,6 +255,7 @@
             <p>Umami arbeitet ohne Cookies und ohne geräteübergreifende Wiedererkennung. Erfasst werden lediglich anonymisierte Angaben wie aufgerufene Seiten, ungefähre Gerätekategorie, Browsertyp und das Herkunftsland. Ein Rückschluss auf Ihre Person ist dabei nicht möglich.</p>
             <p>Auf unserer Startseite werten wir zusätzlich anonym aus, wie die Seite genutzt wird: welche Schaltflächen und Links angeklickt werden, wie weit gescrollt wird, welche Abschnitte betrachtet und welche FAQ-Fragen aufgeklappt werden, sowie die ungefähre Verweildauer in Zeitstufen. Diese Angaben werden ausschließlich zusammengefasst ausgewertet, um die Seite verständlicher zu gestalten. Es werden dabei keine Eingaben aus Formularen, keine Texteingaben und keine personenbezogenen Daten erfasst.</p>
             <p><strong>In der App (iOS und Android)</strong> werten wir seit Version 2.0 ebenfalls anonym aus, wie die App genutzt wird — mit demselben, selbst betriebenen Umami. Erfasst wird, welche Bereiche geöffnet werden, welche Funktionen genutzt werden (zum Beispiel eine Anmeldung zu einer Veranstaltung oder ein Beitrag zu einer Challenge), wie weit auf der Startseite gescrollt wird und an welchen Stellen Fehlermeldungen erscheinen. Zusätzlich wird die Rolle in grober Einteilung übermittelt (Konfirmand:in, Teamer:in oder Leitung), damit wir erkennen, für welche Gruppe etwas nicht funktioniert.</p>
+            <p>Von der Arbeit mit der App halten wir fest, <em>welche Art</em> von Handlung stattgefunden hat — etwa dass Punkte vergeben, eine Anwesenheit eingetragen, ein Beitrag durchgesehen, ein Termin angelegt oder Material bereitgestellt wurde. Dazu kommt eine grobe Einordnung der Handlung, zum Beispiel ob ein Termin einzeln oder als Serie angelegt wurde. <strong>Wer</strong> etwas getan hat, <strong>für wen</strong> und <strong>mit welchem Inhalt</strong>, wird dabei nicht übertragen — auch keine Anzahlen und keine Punktwerte. Bei einer Fehlermeldung vermerken wir zusätzlich die Art des Fehlers (etwa Zeitüberschreitung oder fehlende Verbindung) und die Stelle der App, an der er auftrat.</p>
             <p>Ausdrücklich <strong>nicht</strong> erfasst werden: Name, Benutzername oder Nutzerkennung, Jahrgang, Gemeinde, Inhalte von Beiträgen, Fotos oder Chat-Nachrichten sowie Eingaben aus Formularen. Eine Zuordnung zu einer bestimmten Person ist nicht möglich, und es findet keine geräteübergreifende Wiedererkennung statt. Die Angaben werden ausschließlich zusammengefasst ausgewertet, um Fehler zu finden und die App verständlicher zu machen.</p>
             <p>Rechtsgrundlage ist unser berechtigtes Interesse an einer bedarfsgerechten Gestaltung und der Verbesserung unseres Angebots (§ 6 Nr. 8 DSG-EKD).</p>
         </div>

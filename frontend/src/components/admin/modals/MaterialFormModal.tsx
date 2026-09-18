@@ -40,19 +40,20 @@ import {
   ICON_SCHLIESSEN,
   ICON_VIDEO,
 } from '../../shared/icons';
-import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { haptik, ImpactStyle } from '../../../utils/haptics';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { FileViewer } from '@capacitor/file-viewer';
 import { FileOpener } from '@capacitor-community/file-opener';
 import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
-import api from '../../../services/api';
+import api, { DATEI_TIMEOUT_MS } from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import FileViewerModal from '../../shared/FileViewerModal';
 import { safeUUID } from '../../../utils/uuid';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 import { istWebLink } from '../../../utils/linkDisplay';
+import { trackHandlung } from '../../../services/analytics';
 
 interface MaterialFile {
   id: number;
@@ -179,9 +180,10 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
 
   const openFile = async (file: MaterialFile) => {
     try {
-      await Haptics.impact({ style: ImpactStyle.Medium });
+      await haptik(ImpactStyle.Medium);
       const response = await api.get(`/material/files/${file.stored_name}`, {
-        responseType: 'blob'
+        responseType: 'blob',
+        timeout: DATEI_TIMEOUT_MS
       });
       const blob = response.data;
       const base64Data = await new Promise<string>((resolve) => {
@@ -217,10 +219,10 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
     } catch (err) {
       console.warn('Native file viewer failed, using in-app fallback:', err);
       try {
-        const response = await api.get(`/material/files/${file.stored_name}`, { responseType: 'blob' });
+        const response = await api.get(`/material/files/${file.stored_name}`, { responseType: 'blob', timeout: DATEI_TIMEOUT_MS });
         openInAppViewer(response.data, file.original_name, file.mime_type);
-      } catch {
-        setError('Fehler beim Öffnen der Datei');
+      } catch (fallbackErr) {
+        setError('Fehler beim Öffnen der Datei', { ort: 'material-admin-formular', fehler: fallbackErr });
       }
     }
   };
@@ -321,6 +323,23 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
             });
             await api.post(`/material/${materialId}/files`, formData, {
               headers: { 'Content-Type': 'multipart/form-data' }
+            });
+          }
+
+          // Anonyme Messung, erst wenn ALLE Aufrufe des Online-Zweigs durch
+          // sind — also nach dem Anlegen UND dem Datei-Upload. Gemessen wird
+          // nur neu eingestelltes Material, nicht das Nachbessern eines
+          // vorhandenen: gezaehlt werden soll bereitgestellte Arbeit.
+          //
+          // Nur die Art des Inhalts — kein Titel, kein Dateiname, keine
+          // Anzahl, keine Jahrgaenge.
+          if (!material) {
+            const hatDatei = newFiles.length > 0;
+            const hatLink = bereinigt.length > 0;
+            trackHandlung('material-bereitgestellt', {
+              inhalt: hatDatei && hatLink
+                ? 'beides'
+                : hatDatei ? 'datei' : hatLink ? 'link' : 'nur-text'
             });
           }
 

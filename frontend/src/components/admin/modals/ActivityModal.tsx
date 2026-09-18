@@ -18,6 +18,7 @@ import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
 import { istPunkteartAktiv, type PunkteartFlags } from '../../../utils/punktearten';
+import { trackHandlung } from '../../../services/analytics';
 
 interface Activity {
   id: number;
@@ -115,6 +116,13 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
       if (networkMonitor.isOnline) {
         try {
           await api.post(`/admin/konfis/${konfiId}/activities`, body);
+          // Anonyme Messung NACH der erfolgreichen Antwort: eine Aktivitaet
+          // wurde wirklich verbucht. Nur der Weg und die Punkteart — kein
+          // Name der Aktivitaet, keine Konfi, keine Punktzahl.
+          trackHandlung('punkte-vergeben', {
+            weg: 'aktivitaet',
+            punkteart: activities.find((a) => a.id === selectedActivity)?.type || 'ohne'
+          });
           setIsDirty(false);
           await onSave();
           doClose();

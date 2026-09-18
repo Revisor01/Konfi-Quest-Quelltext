@@ -4,7 +4,6 @@ import {
   ICON_BONUS_GEFUELLT,
   ICON_FLAMME_GEFUELLT,
   ICON_GRUPPE_GEFUELLT,
-  ICON_HAKEN_GEFUELLT,
   ICON_HAND_GEFUELLT,
   ICON_JAHRGANG,
   ICON_POKAL_GEFUELLT,
@@ -66,12 +65,15 @@ interface KonfiBadge {
 interface KonfiData {
   gottesdienst_points: number;
   gemeinde_points: number;
-  jahrgang_name: string;
+  // Leer, wenn der Jahrgang der Konfizeit geloescht wurde. Die Ueberschrift
+  // faengt das ab ("Konfi-Zeit" statt "Jahrgang …"); der Typ sagt es jetzt auch.
+  jahrgang_name?: string;
   badges: KonfiBadge[];
 }
 
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { getIconFromString } from '../../../utils/badgeIcons';
+import KachelRaster from '../../shared/KachelRaster';
 import BadgePopoverContent, { BadgePopoverData } from '../../shared/BadgePopoverContent';
 
 
@@ -334,99 +336,35 @@ const TeamerKonfiStatsPage: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* 3-Column Badge Grid */}
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(3, 1fr)',
-                      gap: 'var(--app-abstand-mittel)'
-                    }}>
-                      {category.badges.map((badge) => {
-                        // Echte Hexfarbe noetig: unten wird per Alpha-Suffix (`${bColor}40`) gerechnet,
-                        // mit einem var()-String entstuende ungueltiges CSS.
-                        const bColor = badge.color || FARBEN.badges;
-                        return (
-                          <div
-                            key={badge.badge_id}
-                            onClick={(e) => handleBadgeClick(badge, e)}
-                            style={{
-                              display: 'flex',
-                              flexDirection: 'column',
-                              alignItems: 'center',
-                              padding: 'var(--app-abstand-mittel) var(--app-abstand-eng)',
-                              borderRadius: 'var(--app-radius-gross)',
-                              background: `${bColor}10`,
-                              border: `2px solid ${bColor}40`,
-                              position: 'relative',
-                              cursor: 'pointer'
-                            }}
-                          >
-                            {/* Badge Icon */}
-                            <div style={{
-                              width: '56px',
-                              height: '56px',
-                              borderRadius: 'var(--app-radius-kreis)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              background: `linear-gradient(145deg, ${bColor} 0%, ${bColor}cc 100%)`,
-                              boxShadow: `0 4px 12px ${bColor}40`,
-                              position: 'relative',
-                              marginBottom: 'var(--app-abstand-eng)'
-                            }}>
-                              <IonIcon
-                                icon={getIconFromString(badge.icon)}
-                                style={{ fontSize: 'var(--app-anzeige-basis)', color: 'white' }}
-                              />
-                              {/* Earned Checkmark */}
-                              <div style={{
-                                position: 'absolute',
-                                bottom: '-2px',
-                                right: '-2px',
-                                width: '20px',
-                                height: '20px',
-                                borderRadius: 'var(--app-radius-kreis)',
-                                background: 'var(--app-color-success)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                border: '2px solid white'
-                              }}>
-                                <IonIcon icon={ICON_HAKEN_GEFUELLT} style={{ fontSize: 'var(--app-text-meta)', color: 'white' }} />
-                              </div>
-                            </div>
-
-                            {/* Badge Name */}
-                            <span style={{
-                              fontSize: 'var(--app-text-klein)',
-                              fontWeight: 'var(--app-schrift-halbfett)',
-                              color: 'var(--app-text-primary)',
-                              textAlign: 'center',
-                              lineHeight: '1.2',
-                              maxWidth: '100%',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical'
-                            }}>
-                              {badge.name}
-                            </span>
-
-                            {/* Award Date */}
-                            <span style={{
-                              fontSize: 'var(--app-text-winzig)',
-                              color: 'var(--app-text-tertiary)',
-                              marginTop: 'var(--app-abstand-winzig)'
-                            }}>
-                              {new Date(badge.awarded_date).toLocaleDateString('de-DE', {
-                                day: 'numeric',
-                                month: 'short'
-                              })}
-                            </span>
-                          </div>
-                        );
-                      })}
-                    </div>
+                    {/* Dasselbe Kachelraster wie ueberall sonst
+                        (shared/KachelRaster). Das Verleihdatum bleibt als
+                        Zusatz erhalten -- es gibt es nur hier. */}
+                    <KachelRaster
+                      eintraege={category.badges.map((badge) => ({
+                        schluessel: badge.badge_id,
+                        icon: getIconFromString(badge.icon),
+                        name: badge.name,
+                        // Echte Hexfarbe noetig: das Raster rechnet per
+                        // Alpha-Suffix weiter.
+                        farbe: badge.color || FARBEN.badges,
+                        zeichen: true,
+                        zusatz: (
+                          <span style={{
+                            fontSize: 'var(--app-text-winzig)',
+                            color: 'var(--app-text-tertiary)'
+                          }}>
+                            {new Date(badge.awarded_date).toLocaleDateString('de-DE', {
+                              day: 'numeric',
+                              month: 'short'
+                            })}
+                          </span>
+                        )
+                      }))}
+                      onKachelClick={(schluessel, e) => {
+                        const badge = category.badges.find((b) => b.badge_id === schluessel);
+                        if (badge) handleBadgeClick(badge, e);
+                      }}
+                    />
                   </IonCardContent>
                 </IonCard>
               ))}

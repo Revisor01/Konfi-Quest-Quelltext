@@ -16,6 +16,14 @@ const api = axios.create({
   timeout: 20000,
 });
 
+/**
+ * Zeitlimit fuer Datei-Downloads (Blob), getrennt vom globalen der API.
+ *
+ * 180 s reichen fuer 20 MB ab etwa 0,9 Mbit/s. Ein totes Netz faengt weiterhin
+ * der networkMonitor ab; hier geht es um langsame, nicht um fehlende Leitungen.
+ */
+export const DATEI_TIMEOUT_MS = 180000;
+
 // Automatischer Retry für transiente Fehler (5xx, 408) — NICHT für 429.
 // WICHTIG: 429 (Rate-Limit) darf NICHT retried werden. Ein Retry-auf-429 zählt
 // erneut gegen das Limit und macht die Ueberschreitung schlimmer (Retry-Lawine) —

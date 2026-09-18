@@ -8,7 +8,7 @@ import {
   ICON_VIDEO,
 } from '../../shared/icons';
 import SlideBase from './SlideBase';
-import api from '../../../services/api';
+import api, { DATEI_TIMEOUT_MS } from '../../../services/api';
 import { getIconFromString } from '../../../utils/badgeIcons';
 import { linkBeschriftung } from '../../../utils/linkDisplay';
 import type { SlideProps, KonfiChallengeMoment } from '../../../types/wrapped';
@@ -48,7 +48,7 @@ const ChallengeFoto: React.FC<{ filePath: string; fileName?: string }> = ({ file
 
     const laden = async () => {
       try {
-        const res = await api.get(`/challenges/files/${filePath}`, { responseType: 'blob' });
+        const res = await api.get(`/challenges/files/${filePath}`, { responseType: 'blob', timeout: DATEI_TIMEOUT_MS });
         if (abgebrochen) return;
         const url = URL.createObjectURL(res.data as Blob);
         urlRef.current = url;

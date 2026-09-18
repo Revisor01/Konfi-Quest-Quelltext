@@ -174,7 +174,6 @@ export {
   sparklesOutline as ICON_FUNKELN,
   flame as ICON_FLAMME_GEFUELLT,
   flameOutline as ICON_FLAMME,
-  rocket as ICON_RAKETE,
   podium as ICON_PODIUM,
   statsChart as ICON_STATISTIK_GEFUELLT,
   statsChartOutline as ICON_STATISTIK,

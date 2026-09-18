@@ -19,7 +19,8 @@ import {
   ICON_UHRZEIT,
 } from '../../shared/icons';
 import { EmptyState, SectionHeader } from '../../shared';
-import type { KonfiChallenge, ChallengeMark } from '../../../types/challenges';
+import ChallengeStempelSektion from '../../shared/ChallengeStempelSektion';
+import type { KonfiChallenge, ChallengeMark, OffenerStempel } from '../../../types/challenges';
 import { getIconFromString } from '../../../utils/badgeIcons';
 
 /**
@@ -39,6 +40,8 @@ interface ChallengesViewProps {
   active: KonfiChallenge[];
   archive: KonfiChallenge[];
   marks: ChallengeMark[];
+  /** Noch nicht erhaltene Stempel (grau). Fehlt bei aelteren Servern. */
+  offeneStempel?: OffenerStempel[];
   onSelectChallenge: (challenge: KonfiChallenge) => void;
   // Zusaetzlicher Inhalt DIREKT UNTER dem SectionHeader (Leitungs-Sicht:
   // Verwalten|Mitmachen). Gleiches Muster wie EventsView/RequestsView.
@@ -97,6 +100,7 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
   active,
   archive,
   marks,
+  offeneStempel = [],
   onSelectChallenge,
   headerSlot
 }) => {
@@ -319,66 +323,28 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
       </>
       )}
 
-      {/* --- 2. Deine Stempel (bewusst OHNE Zaehler) --- */}
-      <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
-        <IonListHeader>
-          <div className="app-section-icon app-section-icon--challenges">
-            <IonIcon icon={ICON_ABZEICHEN} />
-          </div>
-          <IonLabel>Deine Stempel</IonLabel>
-        </IonListHeader>
-        <IonCard className="app-card">
-          <IonCardContent style={{ padding: marks.length === 0 ? 'var(--app-abstand-basis)' : 'var(--app-abstand-basis) var(--app-abstand-mittel)' }}>
-            {marks.length === 0 ? (
+      {marks.length === 0 && offeneStempel.length === 0 ? (
+        <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
+          <IonListHeader>
+            <div className="app-section-icon app-section-icon--challenges">
+              <IonIcon icon={ICON_ABZEICHEN} />
+            </div>
+            <IonLabel>Deine Stempel</IonLabel>
+          </IonListHeader>
+          <IonCard className="app-card">
+            <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
               <EmptyState
                 icon={ICON_ABZEICHEN}
                 title="Noch keine Stempel"
                 message="Für jede Challenge, bei der du mitmachst, bekommst du einen eigenen Stempel."
                 iconColor="var(--app-color-challenges)"
               />
-            ) : (
-              <div
-                style={{
-                  display: 'flex', gap: 'var(--app-abstand-mittelweit)', overflowX: 'auto',
-                  paddingBottom: 'var(--app-abstand-mini)', WebkitOverflowScrolling: 'touch'
-                }}
-              >
-                {marks.map((mark) => (
-                  <div
-                    key={mark.challenge_id}
-                    style={{
-                      display: 'flex', flexDirection: 'column', alignItems: 'center',
-                      gap: 'var(--app-abstand-kompakt)', minWidth: '74px', maxWidth: '92px', flexShrink: 0
-                    }}
-                  >
-                    <div
-                      style={{
-                        width: '52px', height: '52px', borderRadius: 'var(--app-radius-kreis)',
-                        background: 'linear-gradient(135deg, var(--app-color-challenges) 0%, var(--app-color-challenges-dunkel) 100%)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        boxShadow: 'var(--app-schatten-glow-challenges)'
-                      }}
-                    >
-                      <IonIcon
-                        icon={getChallengeBadgeIcon(mark.badge_icon)}
-                        style={{ fontSize: 'var(--app-text-ueberschrift)', color: 'white' }}
-                      />
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 'var(--app-text-meta)', fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-ios)',
-                        textAlign: 'center', lineHeight: 1.2
-                      }}
-                    >
-                      {mark.badge_name}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </IonCardContent>
-        </IonCard>
-      </IonList>
+            </IonCardContent>
+          </IonCard>
+        </IonList>
+      ) : (
+        <ChallengeStempelSektion marks={marks} offeneStempel={offeneStempel} />
+      )}
 
 
     </div>

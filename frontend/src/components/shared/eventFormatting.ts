@@ -139,3 +139,141 @@ export const zeigtPunkteart = (event: {
 // einmal die Ursache dafuer, dass ueberall "Gemeinde" stand.
 export const punkteartText = (event: { point_type?: string }): string =>
   event.point_type === 'gottesdienst' ? 'Gottesdienst' : 'Gemeinde';
+
+/**
+ * Ist dieser Termin abgesagt?
+ *
+ * ZWEI FELDER, WEIL ZWEI ROUTEN: GET /events/cancelled liefert
+ * registration_status = 'cancelled' (fest gesetzt), die Detailansicht
+ * zusaetzlich das Feld cancelled aus der Tabelle. Beide Listen laufen durch
+ * dieselben Ansichten, und wer nur eines der beiden prueft, sieht den Termin
+ * je nach Herkunft mal als abgesagt und mal nicht. Genau diese Doppelung
+ * stand vorher an vier Stellen einzeln im Code.
+ */
+export const istAbgesagt = (
+  event: { cancelled?: boolean; registration_status?: string } | null | undefined
+): boolean => !!event && (event.cancelled === true || event.registration_status === 'cancelled');
+
+/**
+ * Streicht die Ansicht den Titel eines abgesagten Termins durch?
+ *
+ * NUR IN LISTEN UND AUF KACHELN, NICHT IM DETAIL -- und das ist eine
+ * Entscheidung, keine Nachlaessigkeit:
+ *
+ * In einer Liste steht der Titel zwischen zwanzig anderen, alle gleich gross.
+ * Das Eck-Badge ist klein und liegt am Rand; wer die Liste ueberfliegt, liest
+ * die Titelspalte und sonst nichts. Der Durchstrich ist dort das einzige
+ * Zeichen, das im Vorbeilesen ankommt.
+ *
+ * In der Detailansicht steht der Titel gross und allein, darunter sagt der
+ * Kopf "Abgesagt" im Klartext, die Farbe ist danger, und unmittelbar darunter
+ * steht der Absagegrund in einem roten Kasten. Vier Aussagen ueber dieselbe
+ * Sache; eine fuenfte in Form eines durchgestrichenen Ueberschrift-Titels
+ * traegt nichts bei und liest sich wie geloeschter Text statt wie ein
+ * ausgefallener Termin.
+ */
+export const streichtDurch = (
+  ort: 'liste' | 'detail' | 'kachel',
+  event: { cancelled?: boolean; registration_status?: string } | null | undefined
+): boolean => ort !== 'detail' && istAbgesagt(event);
+
+/**
+ * Die Textdekoration fuer den Titel -- fertig zum Einsetzen in style.
+ * Spart den Dreisatz an jeder Aufrufstelle und macht im Test pruefbar, dass
+ * alle Listen dieselbe Quelle benutzen.
+ */
+export const titelDekoration = (
+  ort: 'liste' | 'detail' | 'kachel',
+  event: { cancelled?: boolean; registration_status?: string } | null | undefined
+): 'line-through' | 'none' => (streichtDurch(ort, event) ? 'line-through' : 'none');
+
+/**
+ * Diese Begruendung sticht nicht. Der Termin steht im Kalender der Konfi an
+ * einem bestimmten Tag; sie sucht ihn dort und nirgendwo sonst. Wandert er ans
+ * Ende, sieht sie an seiner Datumsstelle eine Luecke und muss raten, ob der
+ * Termin je existierte. Steht er an seinem Platz -- durchgestrichen und mit
+ * rotem Eck-Badge --, dann beantwortet die Liste im Vorbeigehen genau die
+ * Frage, die sie hat: "Was ist mit dem Termin am Freitag?" Ausfallen ist eine
+ * Aussage ueber einen Tag, keine Zeile am Listenende.
+ *
+ * Das war eine Entscheidung, kein Versehen: Wer die Sortierung wieder
+ * einbauen will, hat es mit diesem Absatz zu tun.
+ */
+
+/**
+ * Gehoert dieser Termin in den Konfi-Reiter "Meine"?
+ *
+ * DER FEHLER, DEN DAS BEHEBT: Der Reiter fragte `is_registered ||
+ * booking_status === 'opted_out'`. `is_registered` setzt das Backend aber nur
+ * bei `status = 'confirmed'` (backend/routes/konfi.js). Seit Migration 153
+ * setzt eine Terminabsage ALLE Buchungen auf `status = 'excused'`
+ * -- damit kippte `is_registered` auf false, `booking_status` stand auf
+ * 'excused', und der Termin verschwand aus "Meine". Ausgerechnet die Person,
+ * die sich angemeldet hatte, verlor die Absage aus dem Blick: Im Reiter "Alle"
+ * stand sie zwar noch, aber "Meine" ist der Ort, an dem man nach den eigenen
+ * Terminen sieht. Ein Folgefehler der Umstellung, kein alter Zustand.
+ *
+ * WER HIER DAZUGEHOERT: jede Person mit einer Buchung an diesem Termin, egal
+ * in welchem Zustand. Wer angemeldet WAR, sieht den Termin weiter -- bestaetigt
+ * ('confirmed'), auf der Warteliste ('waitlist'), selbst abgemeldet
+ * ('opted_out') oder durch Absage bzw. Leitung abgemeldet ('excused').
+ * Die Karte sagt ueber ihr Badge, welcher Fall vorliegt; das Herausfiltern
+ * waere die falsche Stelle dafuer.
+ *
+ * WARUM NICHT EINFACH `booking_status`-LISTE: Weil jeder neue Zustand sonst
+ * wieder still Termine verschwinden liesse. Gefragt wird deshalb, OB eine
+ * Buchung existiert -- `booking_status` ist genau dann gesetzt, wenn
+ * `eb_konfi.id IS NOT NULL` ist. `is_registered` bleibt als zweites Kriterium
+ * stehen fuer Pflichttermine, bei denen das Backend die Anmeldung ohne
+ * eigene Buchungszeile herleitet.
+ */
+export const zaehltAlsMeiner = (event: {
+  is_registered?: boolean;
+  booking_status?: string | null;
+}): boolean => !!event.is_registered || !!event.booking_status;
+
+// --- Die drei Reiter der Leitungs-Terminliste ---------------------------
+//
+// Die Aufteilung steht hier und nicht in AdminEventsPage, damit sie sich
+// ohne die halbe Seite pruefen laesst.
+//
+// `offen` sind die nicht abgesagten Termine (GET /events, der Client filtert
+// registration_status === 'cancelled' heraus), `abgesagt` die aus
+// GET /events/cancelled (e.cancelled = TRUE). Die beiden Mengen sind
+// komplementaer -- derselbe Termin kann nie in beiden stehen.
+
+interface ReiterTermin {
+  event_date: string;
+  event_end_time?: string | null;
+  pending_bookings_count?: number;
+  registration_status?: string;
+}
+
+const hatOffeneBuchungen = (event: ReiterTermin): boolean =>
+  !!event.pending_bookings_count && event.pending_bookings_count > 0;
+
+const nachDatumAufsteigend = <T extends ReiterTermin>(a: T, b: T) =>
+  new Date(a.event_date).getTime() - new Date(b.event_date).getTime();
+
+const nachDatumAbsteigend = <T extends ReiterTermin>(a: T, b: T) =>
+  new Date(b.event_date).getTime() - new Date(a.event_date).getTime();
+
+export const aktuelleTermine = <T extends ReiterTermin>(offen: T[], abgesagt: T[]): T[] =>
+  [...offen, ...abgesagt].filter(e => eventEnde(e) >= new Date()).sort(nachDatumAufsteigend);
+
+// Reiter "Verbuchen": beendete Termine mit offenen Buchungen. Abgesagte
+// gehoeren bewusst NICHT dazu -- an einem abgesagten Termin gibt es nichts
+// zu verbuchen.
+export const zuVerbuchendeTermine = <T extends ReiterTermin>(offen: T[]): T[] =>
+  offen
+    .filter(e => eventEnde(e) < new Date() && hatOffeneBuchungen(e) && e.registration_status !== 'cancelled')
+    .sort(nachDatumAbsteigend);
+
+// Reiter "Vergangen": beendete Termine ohne offene Buchungen (fertig
+// verbucht), plus ALLE bereits beendeten abgesagten Termine.
+export const vergangeneTermine = <T extends ReiterTermin>(offen: T[], abgesagt: T[]): T[] => {
+  const jetzt = new Date();
+  const verbucht = offen.filter(e => eventEnde(e) < jetzt && !hatOffeneBuchungen(e));
+  const abgesagtVorbei = abgesagt.filter(e => eventEnde(e) < jetzt);
+  return [...verbucht, ...abgesagtVorbei].sort(nachDatumAbsteigend);
+};

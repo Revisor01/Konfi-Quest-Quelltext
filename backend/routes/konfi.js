@@ -9,8 +9,10 @@ const liveUpdate = require('../utils/liveUpdate');
 const { heuteBerlin } = require('../utils/zeitformat');
 const { beantworteTageslosung } = require('../services/losungService');
 const { encryptBuffer, decryptBuffer } = require('../utils/photoCrypto');
-const { deletePhotoFile } = require('../utils/photoStorage');
-const { bucheTermin, zaehleBestaetigte, promoteFromWaitlist } = require('../utils/bookingUtils');
+const { deletePhotoFile, istSichererDateiname } = require('../utils/photoStorage');
+const { darfKonfi } = require('../utils/jahrgangsZugriff');
+const { bucheTermin, zaehleBestaetigte, promoteFromWaitlist, rueckeNach } = require('../utils/bookingUtils');
+const { meldeNachrueckern } = require('../utils/nachrueckMeldung');
 const { removeFromEventChat, addToEventChat } = require('../utils/eventChat');
 const { computeCurrentStreak } = require('../utils/streakCalculation');
 const { getKonfiBadgeProgress } = require('../utils/konfiBadgeProgress');
@@ -38,6 +40,18 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
     body('activity_id').isInt({ min: 1 }).withMessage('Ungültige Aktivitäts-ID'),
     body('requested_date').notEmpty().isISO8601().withMessage('Gültiges Datum erforderlich'),
     body('client_id').optional().isUUID().withMessage('client_id muss eine UUID sein'),
+    // photo_filename kommt aus dem Body und landete ungeprueft in der DB und
+    // spaeter in path.join() — '../../../../etc/passwd' verliess damit das
+    // Upload-Verzeichnis. Die Kette war allein mit
+    // Konfi-Rechten geschlossen: eigener Antrag, status='pending', also greift
+    // isOwnRequest beim Abruf; decryptBuffer reicht unverschluesselte Dateien
+    // unveraendert durch.
+    //
+    // Die Upload-Route erzeugt crypto.randomBytes(32).toString('hex') — genau
+    // 64 Hexzeichen. Etwas anderes kann es nie geben, also wird auch nichts
+    // anderes angenommen. Dieselbe Linie wie in chat.js/material.js.
+    body('photo_filename').optional({ nullable: true })
+      .matches(/^[a-f0-9]{64}$/).withMessage('Ungültiger Dateiname'),
     handleValidationErrors
   ];
 
@@ -775,9 +789,15 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
     try {
       const requestId = parseInt(req.params.id);
 
-      // Get request with photo filename + status
+      // Get request with photo filename + status.
+      // target_role wird fuer die Jahrgangs-Bindung unten gebraucht. LEFT JOIN,
+      // weil activity_id NULL sein kann (geloeschte Aktivitaet) — ein INNER
+      // JOIN liesse den Antrag dann verschwinden.
       const { rows: [request] } = await db.query(
-        'SELECT photo_filename, user_id, status FROM activity_requests WHERE id = $1 AND organization_id = $2',
+        `SELECT ar.photo_filename, ar.user_id, ar.status, a.target_role
+         FROM activity_requests ar
+         LEFT JOIN activities a ON ar.activity_id = a.id
+         WHERE ar.id = $1 AND ar.organization_id = $2`,
         [requestId, req.user.organization_id]
       );
 
@@ -804,8 +824,29 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         return res.status(403).json({ error: 'Foto nach Bearbeitung nicht mehr verfügbar' });
       }
 
+      // Jahrgangs-Bindung fuer die Leitung. req.user.type bildet
+      // in rbac.js JEDE Nicht-Konfi/Nicht-Teamer-Rolle auf 'admin' ab — bis
+      // hierher genuegte das, um JEDES offene Nachweisfoto der Organisation zu
+      // sehen, auch aus fremden Jahrgaengen. Nachweisfotos zeigen ueberwiegend
+      // Minderjaehrige.
+      if (isAdmin && request.target_role !== 'teamer') {
+        const zugriff = await darfKonfi(db, req, request.user_id);
+        if (zugriff.gefunden && !zugriff.erlaubt) {
+          return res.status(403).json({ error: 'Kein Zugriff auf diesen Konfi' });
+        }
+      }
+
       const fs = require('fs');
       const path = require('path');
+
+      // Ausgangspruefung des Dateinamens: Der Wert kommt
+      // aus der Datenbank und kann aus der Zeit VOR der Eingangspruefung
+      // stammen. Ohne diese Zeile verlaesst '../../../..' das Verzeichnis.
+      if (!istSichererDateiname(request.photo_filename)) {
+        console.error('Foto-Abruf: verdaechtiger Dateiname abgewiesen:', request.photo_filename);
+        return res.status(400).json({ error: 'Ungültiger Dateiname' });
+      }
+
       const photoPath = path.join(__dirname, '../uploads/requests', request.photo_filename);
 
       if (!fs.existsSync(photoPath)) {
@@ -1043,9 +1084,23 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
       // eigene Buchung als LEFT JOIN LATERAL mit LIMIT 1 — kein GROUP BY nötig.
       const query = `
         SELECT e.*,
-               bstats.registered_count,
-               bstats.waitlist_count,
-               bstats.teamer_count,
+               -- COALESCE AUF DER AEUSSEREN EBENE.
+               --
+               -- DIE FALLE: Ein COALESCE INNERHALB der LATERAL-Unterabfrage
+               -- schuetzt vor einer NULL-SPALTE, nicht vor einer FEHLENDEN
+               -- ZEILE. event_booking_stats entsteht mit GROUP BY ueber
+               -- event_bookings -- ein Termin OHNE jede Buchung hat dort
+               -- keine Zeile. Die Unterabfrage liefert dann null Zeilen,
+               -- ON true fuellt alle Spalten mit NULL auf, und das innere
+               -- COALESCE wird nie ausgewertet. In der App stand daraufhin
+               -- "Anmelden (null/4)" auf dem Knopf.
+               --
+               -- Deshalb steht die Absicherung hier aussen, wie bei
+               -- GET /events/:id/status weiter unten in dieser Datei.
+               COALESCE(bstats.registered_count, 0)  as registered_count,
+               COALESCE(bstats.waitlist_count, 0)    as waitlist_count,
+               COALESCE(bstats.teamer_count, 0)      as teamer_count,
+               COALESCE(bstats.abgemeldet_count, 0)  as abgemeldet_count,
                CASE
                  WHEN e.has_timeslots THEN COALESCE(timeslot_capacity.total_capacity, e.max_participants)
                  ELSE e.max_participants
@@ -1055,8 +1110,10 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
                event_chat.id as chat_room_id,
                ${anmeldeStatusSql({
                  kapazitaet: kapazitaetSql('timeslot_capacity.total_capacity'),
-                 bestaetigt: 'bstats.registered_count',
-                 warteliste: 'bstats.waitlist_count'
+                 // Auch hier ausdruecklich abgesichert: bstats liefert bei
+                 // einem Termin ohne Buchung gar keine Zeile (siehe oben).
+                 bestaetigt: 'COALESCE(bstats.registered_count, 0)',
+                 warteliste: 'COALESCE(bstats.waitlist_count, 0)'
                })} as registration_status,
                -- Konfi-specific data
                eb_konfi.status as booking_status,
@@ -1076,8 +1133,16 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
                CASE
                  WHEN eb_konfi.status = 'waitlist' THEN wpos.waitlist_position
                  ELSE NULL
-               END as waitlist_position
+               END as waitlist_position,
+               u_cancel.display_name as cancelled_by_name,
+               -- Wer den GRUND zuletzt gesetzt hat (Migration 152). Auch die
+               -- Konfi bekommt das: Sie liest den Grund, also soll auch bei
+               -- ihr die richtige Person darunterstehen, wenn jemand anderes
+               -- als der Absagende ihn nachgetragen hat.
+               u_grund.display_name as cancelled_reason_set_by_name
         FROM events e
+        LEFT JOIN users u_cancel ON e.cancelled_by = u_cancel.id
+        LEFT JOIN users u_grund ON e.cancelled_reason_set_by = u_grund.id
         INNER JOIN event_jahrgang_assignments eja ON e.id = eja.event_id
         -- Zahlen aus event_booking_stats statt aus einer eigenen Kopie
         -- Konfi-Sicht: registered_count UND waitlist_count
@@ -1089,7 +1154,21 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
           SELECT
             COALESCE(ebs.konfi_confirmed, 0)  as registered_count,
             COALESCE(ebs.konfi_waitlist, 0)   as waitlist_count,
-            COALESCE(ebs.teamer_confirmed, 0) as teamer_count
+            COALESCE(ebs.teamer_confirmed, 0) as teamer_count,
+            -- ABGEMELDETE KONFIS, ADDITIV.
+            --
+            -- Beide Abmelde-Arten in einer Zahl: die Selbstabmeldung
+            -- ('opted_out') und die Abmeldung durch die Leitung ('excused').
+            -- Aus Konfi-Sicht ist das derselbe Sachverhalt -- diese Person
+            -- ist nicht dabei --, und die Konfi-Ansicht hat keinen Anlass,
+            -- den Unterschied zu zeigen: Wer wen abgemeldet hat, geht sie
+            -- nichts an. Die Leitungsansicht trennt es weiterhin, sie liest
+            -- die Spalten einzeln.
+            --
+            -- NEUES FELD, kein bestehendes geaendert: Aeltere App-Fassungen
+            -- kennen es nicht und zeigen weiter, was sie bisher zeigten.
+            COALESCE(ebs.konfi_opted_out, 0)
+              + COALESCE(ebs.konfi_excused, 0) as abgemeldet_count
           FROM event_booking_stats ebs
           WHERE ebs.event_id = e.id
         ) bstats ON true
@@ -1387,19 +1466,24 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
 
       if (!ergebnis.ok) {
         await client.query('ROLLBACK');
-        client.release();
-        // Diese Route hat den error_code nie mitgeliefert und tut es weiterhin
-        // nicht — sonst waere es eine Formaenderung fuer die Konfi-App.
-        return res.status(ergebnis.status).json({ error: ergebnis.error });
+      } else {
+        await client.query('COMMIT');
       }
-
-      await client.query('COMMIT');
-      client.release();
     } catch (err) {
-      try { await client.query('ROLLBACK'); } catch (e) { /* ignore */ }
-      client.release();
+      await client.query('ROLLBACK').catch(() => {});
       console.error('Database error in POST /events/:id/register:', err);
       return res.status(500).json({ error: 'Datenbankfehler' });
+    } finally {
+      // KEIN client.release() im try — nur hier. Sonst faellt jede spaetere
+      // Nacharbeit in den Transaktions-catch und rollt eine Verbindung zurueck,
+      // die inzwischen ein anderer Request aus dem Pool hat.
+      client.release();
+    }
+
+    if (!ergebnis.ok) {
+      // Diese Route hat den error_code nie mitgeliefert und tut es weiterhin
+      // nicht — sonst waere es eine Formaenderung fuer die Konfi-App.
+      return res.status(ergebnis.status).json({ error: ergebnis.error });
     }
 
     const { bookingId, status, event, timeslot, waitlistPosition } = ergebnis;
@@ -1658,35 +1742,73 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         return res.status(400).json({ error: 'Event ist bereits vorbei' });
       }
 
-      // Status-Wechsel: confirmed -> opted_out
-      const { rowCount } = await db.query(
-        `UPDATE event_bookings SET status = 'opted_out', opt_out_reason = $3, opt_out_date = NOW()
-         WHERE user_id = $1 AND event_id = $2 AND status = 'confirmed'`,
-        [konfiId, eventId, reason.trim()]
-      );
+      const client = await db.getClient();
+      let fruehAntwort = null;
+      let nachgerueckt = [];
+      try {
+        await client.query('BEGIN');
 
-      if (rowCount === 0) {
-        // Schon abgemeldet? Dann ist das Ziel erreicht.
-        //
-        // Eine offline abgegebene Abmeldung kann zweimal ankommen: Die Anfrage
-        // erreicht den Server, die Antwort geht auf dem Rueckweg verloren
-        // (Funkloch, Timeout), und die Warteschlange legt sie erneut vor. Der
-        // zweite Lauf traf 0 Zeilen und meldete 400 — ein erfolgreicher
-        // Vorgang wurde also als Fehler angezeigt und im Fehl-Merker abgelegt.
-        //
-        // Eine client_id braucht es dafuer nicht: Der Zustand selbst sagt
-        // schon, dass nichts mehr zu tun ist.
-        const { rows: [bestehend] } = await db.query(
-          `SELECT status FROM event_bookings WHERE user_id = $1 AND event_id = $2`,
-          [konfiId, eventId]
+        // Status-Wechsel: confirmed -> opted_out
+        const { rows: [abgemeldet] } = await client.query(
+          `UPDATE event_bookings SET status = 'opted_out', opt_out_reason = $3, opt_out_date = NOW()
+           WHERE user_id = $1 AND event_id = $2 AND status = 'confirmed'
+           RETURNING timeslot_id`,
+          [konfiId, eventId, reason.trim()]
         );
-        if (bestehend && bestehend.status === 'opted_out') {
-          return res.json({ message: 'Abmeldung erfolgreich', bereits_abgemeldet: true });
+
+        if (!abgemeldet) {
+          // Schon abgemeldet? Dann ist das Ziel erreicht.
+          //
+          // Eine offline abgegebene Abmeldung kann zweimal ankommen: Die Anfrage
+          // erreicht den Server, die Antwort geht auf dem Rueckweg verloren
+          // (Funkloch, Timeout), und die Warteschlange legt sie erneut vor. Der
+          // zweite Lauf traf 0 Zeilen und meldete 400 — ein erfolgreicher
+          // Vorgang wurde also als Fehler angezeigt und im Fehl-Merker abgelegt.
+          //
+          // Eine client_id braucht es dafuer nicht: Der Zustand selbst sagt
+          // schon, dass nichts mehr zu tun ist.
+          const { rows: [bestehend] } = await client.query(
+            `SELECT status FROM event_bookings WHERE user_id = $1 AND event_id = $2`,
+            [konfiId, eventId]
+          );
+          await client.query('ROLLBACK');
+          fruehAntwort = (bestehend && bestehend.status === 'opted_out')
+            ? { status: 200, body: { message: 'Abmeldung erfolgreich', bereits_abgemeldet: true } }
+            : { status: 400, body: { error: 'Keine aktive Anmeldung gefunden' } };
+        } else {
+          // WIE OFT DAS GREIFT: Heute selten. Ein Pflichttermin bekommt beim
+          // Speichern max_participants = 0 (unbegrenzt) und die Warteliste
+          // ausgeschaltet (routes/events/verwaltung.js) — ohne Warteliste gibt
+          // es niemanden zum Nachruecken. Bestandsdaten und jede kuenftige
+          // Lockerung dieser Regel fallen aber sofort hier durch, und die
+          // Inkonsistenz zur Teamer-Absage war ohnehin keine.
+          nachgerueckt = await rueckeNach(client, {
+            eventId,
+            timeslotId: abgemeldet.timeslot_id,
+            seite: 'konfi'
+          });
+          await client.query('COMMIT');
         }
-        return res.status(400).json({ error: 'Keine aktive Anmeldung gefunden' });
+      } catch (txErr) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw txErr;
+      } finally {
+        client.release();
+      }
+
+      if (fruehAntwort) {
+        return res.status(fruehAntwort.status).json(fruehAntwort.body);
       }
 
       res.json({ message: 'Abmeldung erfolgreich' });
+
+      // Ab hier ist alles festgeschrieben — Benachrichtigungen erst jetzt,
+      // ueber denselben Weg wie an allen anderen Nachrueck-Stellen.
+      await meldeNachrueckern(
+        db,
+        req.user.organization_id,
+        nachgerueckt.map((promotedUserId) => ({ eventId, userId: promotedUserId, seite: 'konfi' }))
+      );
 
       // Push an Admins (fire-and-forget)
       try {
@@ -1718,12 +1840,21 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
 
       // Event laden
       const { rows: [event] } = await db.query(
-        'SELECT name, event_date, mandatory, organization_id FROM events WHERE id = $1 AND organization_id = $2',
+        'SELECT name, event_date, mandatory, cancelled, organization_id FROM events WHERE id = $1 AND organization_id = $2',
         [eventId, req.user.organization_id]
       );
 
       if (!event) {
         return res.status(404).json({ error: 'Event nicht gefunden' });
+      }
+
+      // Das Zuruecknehmen der Absage beruehrt dieser Riegel NICHT:
+      // hebeAbsageAbmeldungenAuf stellt die Buchungen mit einem eigenen
+      // UPDATE her und laeuft nicht ueber diese Route.
+      //
+      // ABMELDEN bleibt erlaubt — nur das Anmelden ist gesperrt.
+      if (event.cancelled) {
+        return res.status(400).json({ error: 'Dieser Termin ist abgesagt' });
       }
 
       // Guard: Nur bei Pflicht-Events

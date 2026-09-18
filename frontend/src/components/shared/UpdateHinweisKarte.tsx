@@ -24,7 +24,7 @@ const UpdateHinweisKarte: React.FC<UpdateHinweisKarteProps> = ({ onOpen, onDismi
     role="button"
     tabIndex={0}
     style={style}
-    aria-label="Was ist neu in Version 2.1? Die Neuerungen ansehen"
+    aria-label="Was ist neu in Version 2.2? Die Neuerungen ansehen"
     onClick={onOpen}
     onKeyDown={(e) => {
       if (e.key === 'Enter' || e.key === ' ') {
@@ -35,8 +35,8 @@ const UpdateHinweisKarte: React.FC<UpdateHinweisKarteProps> = ({ onOpen, onDismi
   >
     <IonIcon icon={ICON_FUNKELN} className="app-whatsnew__icon" aria-hidden="true" />
     <div className="app-whatsnew__text">
-      <span className="app-whatsnew__title">Was ist neu in Version 2.1?</span>
-      <span className="app-whatsnew__sub">Dein Jahresrückblick, Zu- und Absagen, Material mit Links — hier tippen für den Überblick.</span>
+      <span className="app-whatsnew__title">Was ist neu in Version 2.2?</span>
+      <span className="app-whatsnew__sub">App-Sperre per Face ID, Challenge-Stempel im Profil, schnellerer Start — hier tippen für den Überblick.</span>
     </div>
     {onDismiss ? (
       <button

@@ -1,18 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { FARBEN } from '../../../theme/colors';
-import {
-  IonCard,
-  IonCardContent,
-  IonIcon,
-  IonLabel,
-  IonList,
-  IonListHeader,
-  useIonPopover
-} from '@ionic/react';
-import { ICON_HAKEN_GEFUELLT, ICON_POKAL, ICON_POKAL_GEFUELLT } from '../../shared/icons';
+import { useIonPopover } from '@ionic/react';
+import { ICON_POKAL, ICON_POKAL_GEFUELLT } from '../../shared/icons';
 import api from '../../../services/api';
-import { EmptyState } from '../../shared';
+import { ListSection } from '../../shared';
 import { getIconFromString } from '../../../utils/badgeIcons';
+import KachelRaster from '../../shared/KachelRaster';
 import BadgePopoverContent, { BadgePopoverData } from '../../shared/BadgePopoverContent';
 
 
@@ -103,102 +96,32 @@ const KonfiBadgesSection: React.FC<KonfiBadgesSectionProps> = ({ konfiId, role =
   if (loading) return null;
 
   return (
-    <IonList className="app-section-inset" inset={true}>
-      <IonListHeader>
-        <div className="app-section-icon app-section-icon--badges">
-          <IonIcon icon={ICON_POKAL_GEFUELLT} />
-        </div>
-        <IonLabel>Badges ({earnedBadges.length})</IonLabel>
-      </IonListHeader>
-      <IonCard className="app-card">
-        <IonCardContent style={{ padding: earnedBadges.length === 0 ? 'var(--app-abstand-basis)' : 'var(--app-abstand-mittel)' }}>
-          {earnedBadges.length === 0 ? (
-            <EmptyState
-              icon={ICON_POKAL}
-              title="Keine Badges"
-              message="Noch keine Badges erreicht"
-              iconColor="var(--app-color-badges)"
-            />
-          ) : (
-            <div style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
-              gap: 'var(--app-abstand-mittel)'
-            }}>
-              {earnedBadges.map((badge) => {
-                const badgeColor = getBadgeColor(badge);
-                return (
-                  <div
-                    key={badge.id}
-                    onClick={(e) => handleBadgeClick(badge, e)}
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      alignItems: 'center',
-                      padding: 'var(--app-abstand-schmal) var(--app-abstand-mini)',
-                      borderRadius: 'var(--app-radius-gross)',
-                      background: `${badgeColor}10`,
-                      border: `2px solid ${badgeColor}40`,
-                      cursor: 'pointer',
-                      minWidth: 0,
-                      overflow: 'hidden'
-                    }}
-                  >
-                    <div style={{
-                      width: '52px',
-                      height: '52px',
-                      borderRadius: 'var(--app-radius-kreis)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      background: `linear-gradient(145deg, ${badgeColor} 0%, ${badgeColor}cc 100%)`,
-                      boxShadow: `0 4px 12px ${badgeColor}40`,
-                      position: 'relative',
-                      marginBottom: 'var(--app-abstand-kompakt)'
-                    }}>
-                      <IonIcon
-                        icon={getIconFromString(badge.icon)}
-                        style={{ fontSize: 'var(--app-anzeige-basis)', color: 'white' }}
-                      />
-                      <div style={{
-                        position: 'absolute',
-                        bottom: '-2px',
-                        right: '-2px',
-                        width: '18px',
-                        height: '18px',
-                        borderRadius: 'var(--app-radius-kreis)',
-                        background: 'var(--app-color-success)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        border: '2px solid white'
-                      }}>
-                        <IonIcon icon={ICON_HAKEN_GEFUELLT} style={{ fontSize: 'var(--app-text-mini)', color: 'white' }} />
-                      </div>
-                    </div>
-                    <span style={{
-                      fontSize: 'var(--app-text-meta)',
-                      fontWeight: 'var(--app-schrift-halbfett)',
-                      color: 'var(--app-text-primary)',
-                      textAlign: 'center',
-                      lineHeight: '1.2',
-                      maxWidth: '100%',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: 'vertical'
-                    }}>
-                      {badge.name || ''}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </IonCardContent>
-      </IonCard>
-    </IonList>
+    <ListSection
+      icon={ICON_POKAL_GEFUELLT}
+      title="Badges"
+      count={earnedBadges.length}
+      iconColorClass="badges"
+      emptyIcon={ICON_POKAL}
+      emptyTitle="Keine Badges"
+      emptyMessage="Noch keine Badges erreicht"
+      emptyIconColor="var(--app-color-badges)"
+    >
+      <KachelRaster
+        eintraege={earnedBadges.map((badge) => ({
+          schluessel: badge.id,
+          icon: getIconFromString(badge.icon),
+          name: badge.name || '',
+          farbe: getBadgeColor(badge),
+          // Diese Ansicht laedt ausschliesslich ERREICHTE Abzeichen,
+          // der Haken ist deshalb immer richtig.
+          zeichen: true
+        }))}
+        onKachelClick={(schluessel, e) => {
+          const badge = earnedBadges.find((b) => b.id === schluessel);
+          if (badge) handleBadgeClick(badge, e);
+        }}
+      />
+    </ListSection>
   );
 };
 

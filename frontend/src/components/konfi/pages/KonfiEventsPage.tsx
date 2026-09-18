@@ -24,6 +24,7 @@ import {
 
 // useLocation für die Auswertung von ?segment=... (React Router v5 API)
 import { ICON_HINZUFUEGEN_GEFUELLT, ICON_QRCODE } from '../../shared/icons';
+import { zaehltAlsMeiner } from '../../shared';
 import { useApp } from '../../../contexts/AppContext';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
@@ -212,7 +213,7 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
               await api.delete(`/konfi/requests/${request.id}`);
               refreshRequests();
             } catch (error) {
-              setError(fehlerText(error, 'Fehler beim Löschen der Aktivität'));
+              setError(fehlerText(error, 'Fehler beim Löschen der Aktivität'), { ort: 'antrag-loeschen-konfi', fehler: error });
             }
           }
         }
@@ -228,10 +229,15 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
     let filteredEvents;
     switch (activeTab) {
       case 'meine':
-        // Persönliche Event-Historie: alle Events wo angemeldet (inkl. vergangene, abgesagte, opted_out)
-        filteredEvents = allEvents.filter(event =>
-          event.is_registered || event.booking_status === 'opted_out'
-        );
+        // Persönliche Event-Historie: alle Events mit eigener Buchung, egal in
+        // welchem Zustand (bestätigt, Warteliste, selbst abgemeldet, abgesagt).
+        //
+        // zaehltAlsMeiner() statt einer eigenen Regel: Die Regel stand hier,
+        // in EventsView und in TeamerEventsPage in drei Varianten nebeneinander
+        // — und genau dadurch fehlte an jeder Stelle etwas anderes. Hier war es
+        // die Warteliste: Das Backend setzt is_registered nur bei 'confirmed',
+        // ein Wartelistenplatz fiel damit aus dem Reiter heraus.
+        filteredEvents = allEvents.filter(zaehltAlsMeiner);
         break;
       case 'alle':
         // NUR zukünftige Events (keine vergangenen), keine Konfirmation

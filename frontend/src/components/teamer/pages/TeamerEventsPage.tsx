@@ -32,9 +32,10 @@ import {
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
 import { fehlerText } from '../../../utils/fehler';
+import { hatAbgesagt, zusageBeschriftung, absageBeschriftung, absageBrauchtGrund } from '../../../utils/zusageKnoepfe';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAppLocation } from '../../../navigation/useAppLocation';
-import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonRefresher, IonRefresherContent, IonIcon, IonSegment, IonSegmentButton, IonLabel, IonButton, IonList, IonListHeader, IonCard, IonCardContent, IonItem, IonItemGroup, IonInput, IonButtons, useIonModal, useIonAlert, useIonViewWillEnter } from '@ionic/react';
+import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonRefresher, IonRefresherContent, IonIcon, IonSegment, IonSegmentButton, IonLabel, IonButton, IonList, IonListHeader, IonCard, IonCardContent, IonItem, IonItemGroup, IonInput, IonButtons, IonNote, useIonModal, useIonAlert, useIonViewWillEnter } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
 
 // useLocation bleibt für Query-Parameter Auswertung (React Router v5 API)
@@ -61,7 +62,7 @@ import { networkMonitor } from '../../../services/networkMonitor';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../../services/offlineCache';
 import { removeDeliveredForEvents } from '../../../services/notifications';
-import { SectionHeader, ListSection, EventLegendModal, EventCornerBadges, formatEventDate as formatDate, formatEventTime as formatTime, formatEventDateLong as formatDateLong, istVergangen, kategorienText, zeigtPunkteart, punkteartText } from '../../shared';
+import { SectionHeader, ListSection, EventLegendModal, EventCornerBadges, AbsageBlock, formatEventDate as formatDate, formatEventTime as formatTime, formatEventDateLong as formatDateLong, istVergangen, istAbgesagt, titelDekoration, zaehltAlsMeiner, kategorienText, zeigtPunkteart, punkteartText } from '../../shared';
 import { getStatusIcon } from '../../shared/StatusBadge';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import QRScannerModal from '../../konfi/modals/QRScannerModal';
@@ -69,9 +70,17 @@ import QRDisplayModal from '../../shared/QRDisplayModal';
 import RequestsView from '../../konfi/views/RequestsView';
 import TeamerActivityRequestModal from '../modals/TeamerActivityRequestModal';
 import TeamerAbsageModal from '../modals/TeamerAbsageModal';
+// TerminAbsagenModal (Leitungsansicht) wird hier NICHT mehr eingebunden --
+// siehe den Block "TERMINVERWALTUNG IST LEITUNGSSACHE" weiter unten.
 import RequestDetailModal from '../../konfi/modals/RequestDetailModal';
 import TeamerMaterialDetailPage from './TeamerMaterialDetailPage';
-import { Event } from '../../../types/event';
+import { Event, Participant } from '../../../types/event';
+// EINE Quelle fuer "wie heisst und wie faerbt sich eine Zeile der
+// Teilnehmerliste" -- dieselbe, aus der schon beide Leitungs-Listen lesen
+// (utils/teilnahmeStatus.ts). Die Teamer-Liste rechnet das nicht noch einmal
+// nach; sonst hiesse dieselbe Abmeldung hier anders als dort.
+import { teilnahmeDarstellung, listItemKlasse, iconKreisKlasse, eckBadgeKlasse } from '../../../utils/teilnahmeStatus';
+import { urheberZeile, notizUrheberZeile, checkinZeile } from '../../../utils/anwesenheitUrheber';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { safeUUID } from '../../../utils/uuid';
 // Kein eigener ActivityRequest mehr: Die Seite reicht die Antraege an
@@ -102,6 +111,8 @@ const TeamerEventsPage: React.FC = () => {
   const [initialEventHandled, setInitialEventHandled] = useState(false);
   const [eventMaterials, setEventMaterials] = useState<EventMaterial[]>([]);
   const [eventTimeslots, setEventTimeslots] = useState<Array<{ id: number; start_time: string; end_time: string; max_participants: number; registered_count: number; waitlist_count?: number }>>([]);
+  /** Teilnehmerliste aus GET /events/:id -- nur zum Lesen, siehe Effekt unten. */
+  const [eventTeilnehmer, setEventTeilnehmer] = useState<Participant[]>([]);
   const materialIdRef = useRef<number | null>(null);
 
   // Query-Parameter ?segment=antraege auswerten — kommt vom Redirect der alten
@@ -223,7 +234,7 @@ const TeamerEventsPage: React.FC = () => {
               await api.delete(`/teamer/requests/${request.id}`);
               refreshRequests();
             } catch (error) {
-              setError(fehlerText(error, 'Fehler beim Löschen der Aktivität'));
+              setError(fehlerText(error, 'Fehler beim Löschen der Aktivität'), { ort: 'antrag-loeschen-teamer', fehler: error });
             }
           }
         }
@@ -281,6 +292,44 @@ const TeamerEventsPage: React.FC = () => {
     }
   }, [selectedEvent?.id]);
 
+  // WARUM SIE GEFEHLT HAT: Diese Ansicht las ihren Termin ausschliesslich aus
+  // der LISTE (GET /events). Die traegt nur Zahlen (registered_count,
+  // teamer_count) -- die Namen stehen allein in der Detailantwort
+  // GET /events/:id, und die hat diese Seite nie abgerufen. Am Backend lag es
+  // nicht: routes/events/lesen.js liefert `participants: istKonfi ? [] :
+  // participants` -- Teamer:innen bekommen die Liste also seit jeher, es hat
+  // sie nur niemand angezeigt.
+  //
+  // Der Effekt unten haengt an `[selectedEvent?.id]`. Nach einer Zu-/Absage
+  // tauschte die Seite nur das Event-OBJEKT aus -- die id blieb dieselbe,
+  // der Effekt feuerte nicht, und die Teilnehmerliste blieb auf dem alten
+  // Stand stehen. Nachgeladen wurde ausserdem nur die LISTE (GET /events),
+  // und die traegt gar keine `participants`.
+  //
+  // `stand` sorgt dafuer, dass die Zahlen der LISTE nicht verloren gehen:
+  // Die Detailantwort kennt einige Felder der Listenantwort nicht
+  // (teamer_registration_status etwa), deshalb wird sie ueber den
+  // vorhandenen Stand gelegt und ersetzt ihn nicht.
+  const ladeTerminDetail = async (eventId: number) => {
+    try {
+      const res = await api.get(`/events/${eventId}`);
+      setEventTeilnehmer(res.data?.participants || []);
+      setSelectedEvent(stand => (stand && stand.id === eventId
+        ? { ...stand, ...res.data }
+        : stand));
+    } catch {
+      setEventTeilnehmer([]);
+    }
+  };
+
+  useEffect(() => {
+    if (selectedEvent) {
+      void ladeTerminDetail(selectedEvent.id);
+    } else {
+      setEventTeilnehmer([]);
+    }
+  }, [selectedEvent?.id]);
+
   // Zeitslots (samt Belegung + Warteliste) für ausgewaehltes Timeslot-Event laden
   useEffect(() => {
     if (selectedEvent?.has_timeslots) {
@@ -325,8 +374,17 @@ const TeamerEventsPage: React.FC = () => {
   const safeEvents = events || [];
 
   // Gefilterte Events per Segment
+  //
+  // zaehltAlsMeiner() statt einer eigenen Regel: Die Regel, wer unter "Meine"
+  // gehoert, stand hier, in KonfiEventsPage und in der Konfi-EventsView in drei
+  // Varianten nebeneinander — und genau dadurch fehlte an jeder Stelle etwas
+  // anderes. Hier war es gleich doppelt: `is_registered` setzt das Backend nur
+  // bei status = 'confirmed', also fielen sowohl ein Wartelistenplatz
+  // ('waitlist') als auch die eigene Absage ('opted_out') aus dem Reiter
+  // heraus. Die Kartendarstellung weiter unten kannte beide Zustaende laengst
+  // und faerbte sie ein — nur der Filter davor nicht.
   const meineEvents = useMemo(() =>
-    sortEvents(safeEvents.filter(e => e.is_registered)),
+    sortEvents(safeEvents.filter(zaehltAlsMeiner)),
   [safeEvents]);
 
   const alleEvents = useMemo(() => sortEvents(safeEvents), [safeEvents]);
@@ -372,7 +430,7 @@ const TeamerEventsPage: React.FC = () => {
     if (activeTab === 'team') {
       const gesucht = safeEvents.filter(e => e.teamer_needed && !e.teamer_only).length;
       const nurTeam = safeEvents.filter(e => e.teamer_only).length;
-      const meineImTeam = teamEvents.filter(e => e.is_registered).length;
+      const meineImTeam = teamEvents.filter(zaehltAlsMeiner).length;
       return [
         { value: gesucht, label: 'Team gesucht' },
         { value: nurTeam, label: 'Nur Team' },
@@ -383,7 +441,7 @@ const TeamerEventsPage: React.FC = () => {
     return [
       { value: alleEvents.length, label: 'Gesamt' },
       { value: alleEvents.filter(isFuture).length, label: 'Anstehend' },
-      { value: alleEvents.filter(e => e.is_registered).length, label: 'Meine' }
+      { value: alleEvents.filter(zaehltAlsMeiner).length, label: 'Meine' }
     ];
   }, [activeTab, safeEvents, meineEvents, alleEvents, teamEvents]);
 
@@ -392,10 +450,19 @@ const TeamerEventsPage: React.FC = () => {
     const body = reason && reason.trim() ? { dabei, reason: reason.trim() } : { dabei };
     try {
       if (networkMonitor.isOnline) {
-        await api.post(`/teamer/events/${event.id}/zusage`, body);
-        const updated = (await api.get('/events')).data.find((e: Event) => e.id === event.id);
-        if (updated) setSelectedEvent(updated);
-        setSuccess(dabei ? 'Du bist dabei' : 'Absage gespeichert');
+        const res = await api.post(`/teamer/events/${event.id}/zusage`, body);
+        // Termin UND Teilnehmerliste frisch aus der Detailantwort -- die
+        // Liste (GET /events) traegt keine `participants`, und ein blosser
+        // Objekttausch liess den Lade-Effekt kalt (Begruendung oben bei
+        // ladeTerminDetail).
+        await ladeTerminDetail(event.id);
+        // Die Warteliste braucht eine eigene Rueckmeldung: Zugesagt hat man,
+        // aber einen Platz hat man noch nicht.
+        if (dabei && res.data?.status === 'waitlist') {
+          setSuccess('Du stehst auf der Warteliste. Wird ein Platz frei, rückst du automatisch nach.');
+        } else {
+          setSuccess(dabei ? 'Du bist dabei' : 'Absage gespeichert');
+        }
       } else {
         await writeQueue.enqueue({
           method: 'POST',
@@ -420,17 +487,11 @@ const TeamerEventsPage: React.FC = () => {
   };
 
   // Nimmt DIESE Absage eine Zusage zurueck? Dann verlangt das Backend einen
-  // Grund (confirmed ODER waitlist — die Aussage "Ich bin dabei" zaehlt,
-  // nicht der zugeteilte Platz). 'pending' ist ein Alt-Status mit derselben
-  // Bedeutung wie waitlist und wird gleich behandelt.
-  const absageBrauchtGrund = (event: Event): boolean =>
-    event.booking_status === 'confirmed' ||
-    event.booking_status === 'waitlist' ||
-    event.booking_status === 'pending';
-
+  // Grund. Die Regel steht in utils/zusageKnoepfe.ts -- dieselbe Stelle, aus
+  // der sich auch die Leitungssicht bedient.
   const [presentAbsageModal, dismissAbsageModal] = useIonModal(TeamerAbsageModal, {
     eventName: selectedEvent?.name || '',
-    grundPflicht: selectedEvent ? absageBrauchtGrund(selectedEvent) : false,
+    grundPflicht: selectedEvent ? absageBrauchtGrund(selectedEvent.booking_status) : false,
     onAbsage: (reason: string) => {
       if (selectedEvent) handleZusage(selectedEvent, false, reason);
     },
@@ -440,6 +501,29 @@ const TeamerEventsPage: React.FC = () => {
   const oeffneAbsage = () => {
     presentAbsageModal({ presentingElement: presentingElement || pageRef.current || undefined });
   };
+
+  // Woertlich: "teamer erstellen keine veranstaltungen fertig. das machen
+  // admins und org admins. das ist einfach nicht der weg. ich halte das fuer
+  // zu komplex. lass es uns rausnehmen. also auch nicht loeschen und absagen"
+  //
+  // HIER STAND BIS ZUM SELBEN TAG das Gegenteil: ein eingebundenes
+  // TerminAbsagenModal, handleTerminAbsagen(), handleAbsageZuruecknehmen(),
+  // ein "Event absagen"-Knopf in der Detailansicht und drei Wisch-Aktionen an
+  // der Liste. Das war am Vormittag gebaut worden und ist am Nachmittag wieder
+  // herausgenommen worden -- keine Fehlkorrektur, sondern eine geaenderte
+  // Anforderung.
+  //
+  // GESPERRT IST ES IN BEIDEN EBENEN: Das Backend laesst POST /events,
+  // PUT /events/:id, DELETE /events/:id, PUT /events/:id/cancel,
+  // /absagegrund und /reaktivieren seither nur noch mit requireAdmin durch
+  // (org_admin, admin) und antwortet einer Teamer:in mit 403. Eine Sperre nur
+  // in der Oberflaeche waere keine.
+  //
+  // WAS DEM TEAM BLEIBT: die eigene Zu- und Absage der TEILNAHME (oeffneAbsage
+  // oben, POST /teamer/events/:id/zusage), der QR-Code zum Einchecken, der
+  // Termin-Chat und alles Lesende. Ein abgesagter Termin ist weiterhin als
+  // solcher zu SEHEN -- der AbsageBlock steht unveraendert im Detail und an
+  // der Zeile, samt Grund. Nur aendern laesst er sich hier nicht mehr.
 
   /**
    * Die Zusage/Absage-Knoepfe. EINE Stelle fuer alle vier Faelle, in denen
@@ -453,6 +537,10 @@ const TeamerEventsPage: React.FC = () => {
    *
    * Immer fill="outline". Der eigene Stand steht im Eck-Zeichen der Karte und
    * in den Eckdaten, nicht in einem gefuellten Knopf.
+   *
+   * Welcher Zustand welche Knoepfe zeigt und wie sie heissen, entscheidet
+   * utils/zusageKnoepfe.ts -- dieselbe Stelle bedient die Leitungssicht
+   * (admin/views/EventDetailView.tsx), damit beide nicht auseinanderlaufen.
    */
   const ZusageKnoepfe: React.FC<{
     event: Event;
@@ -461,7 +549,10 @@ const TeamerEventsPage: React.FC = () => {
     /** Kein Platz mehr frei: Zusagen geht nicht, absagen schon. */
     zusageMoeglich?: boolean;
   }> = ({ event, zusageText, zusageMoeglich = true }) => {
-    const abgesagt = event.booking_status === 'opted_out';
+    // is_registered statt hatZugesagt(booking_status): Die Listen-Route
+    // setzt das Flag, und es deckt auch Buchungen ab, die ueber den
+    // regulaeren Weg (/events/:id/book) entstanden sind.
+    const abgesagt = hatAbgesagt(event.booking_status);
     const zugesagt = event.is_registered;
 
     const zusageKnopf = (
@@ -470,7 +561,7 @@ const TeamerEventsPage: React.FC = () => {
         expand="block"
         fill="outline"
         color="success"
-        onClick={() => handleBook(event)}
+        onClick={() => handleZusage(event, true)}
         disabled={bookingLoading || !isOnline || !zusageMoeglich}
       >
         <IonIcon icon={bookingLoading || isOnline ? ICON_ZUSAGE_GEFUELLT : ICON_OFFLINE} slot="start" />
@@ -478,7 +569,7 @@ const TeamerEventsPage: React.FC = () => {
           ? 'Wird verarbeitet...'
           : !isOnline
             ? 'Du bist offline'
-            : abgesagt ? 'Doch dabei' : (zusageText || 'Dabei')}
+            : zusageBeschriftung(abgesagt ? 'opted_out' : null, zusageText)}
       </IonButton>
     );
 
@@ -494,7 +585,7 @@ const TeamerEventsPage: React.FC = () => {
         <IonIcon icon={ICON_ABSAGE} slot="start" />
         {bookingLoading
           ? 'Wird verarbeitet...'
-          : zugesagt ? 'Nicht mehr dabei' : 'Nicht dabei'}
+          : absageBeschriftung(zugesagt ? 'confirmed' : null)}
       </IonButton>
     );
 
@@ -534,7 +625,7 @@ const TeamerEventsPage: React.FC = () => {
     let statusColor = C.neutral;
     let statusText = 'Nur Info';
 
-    if (event.registration_status === 'cancelled') {
+    if (istAbgesagt(event)) {
       statusColor = C.danger;
       statusText = 'Abgesagt';
     } else if (isPastEvent && event.is_registered) {
@@ -585,49 +676,21 @@ const TeamerEventsPage: React.FC = () => {
     return { statusColor, statusText, statusIcon, isPastEvent, shouldGrayOut };
   };
 
-  // Buchung/Storno
-  const handleBook = async (event: Event) => {
-    setBookingLoading(true);
-    try {
-      if (networkMonitor.isOnline) {
-        const res = await api.post(`/events/${event.id}/book`);
-        // Bei voller Buchung kann der Status confirmed ODER waitlist sein -
-        // für die Warteliste braucht der Teamer eine sichtbare Rueckmeldung.
-        if (res.data?.status === 'waitlist') {
-          setSuccess('Du stehst auf der Warteliste. Wird ein Platz frei, rückst du automatisch nach.');
-        }
-        await refresh();
-        // Update selectedEvent
-        const updated = (await api.get('/events')).data.find((e: Event) => e.id === event.id);
-        if (updated) setSelectedEvent(updated);
-      } else {
-        // Bis hierher wurde sie in die Warteschlange gelegt und die Antwort
-        // des Servers verworfen. Genau darin steckt aber, ob der Platz
-        // sicher ist oder nur die Warteliste: Der Online-Zweig oben liest
-        // `res.data.status === 'waitlist'` aus und sagt es. Nachgereicht
-        // erfuhr das niemand — die App bestaetigte "wird gesendet", und wer
-        // spaeter auf der Warteliste stand, merkte es nicht.
-        //
-        // Die Konfi-Anmeldung loest das seit jeher so: Der Knopf ist offline
-        // deaktiviert (`EventDetailView.tsx`, `disabled={!isOnline}`). Hier
-        // jetzt genauso, statt eine Zusage zu geben, die der Server erst
-        // spaeter einschraenken koennte.
-        setError('Für die Buchung brauchst du eine Verbindung — sonst wüsstest du nicht, ob du einen Platz oder die Warteliste bekommst.');
-      }
-    } catch (err) {
-      setError(fehlerText(err, 'Fehler bei der Buchung'));
-    } finally {
-      setBookingLoading(false);
-    }
-  };
-
-  // KEIN handleUnbook (DELETE /events/:id/book) mehr: Der
-  // Loesch-Weg protokollierte nichts — wer nach einer Zusage abserang, war
-  // fuer die Leitung nicht von "hat nie reagiert" zu unterscheiden, und der
-  // Pflicht-Grund liess sich gar nicht erst abgeben. Jede Absage laeuft
-  // jetzt ueber die Zusage-Route (oeffneAbsage -> handleZusage dabei=false),
-  // die den Zustand als 'opted_out' samt Grund stehen laesst. Die
-  // DELETE-Route selbst bleibt im Backend — Store-Apps rufen sie noch.
+  // KEIN handleBook (POST /events/:id/book) und kein handleUnbook
+  // (DELETE /events/:id/book) mehr. BEIDE RICHTUNGEN NEHMEN DIESELBE ROUTE:
+  // POST /teamer/events/:id/zusage (handleZusage, dabei=true/false).
+  //
+  // GEPRUEFT, dass die Zusage-Route alles kann, was /book konnte
+  // (backend/utils/bookingUtils.js): Kontingent und Warteliste rechnet
+  // setzeTeamerZusage mit denselben Bausteinen wie bucheTermin
+  // (zaehleBuchungen/determineBookingStatus auf der Team-Seite), die
+  // Jahrgangsgrenze prueft sie ebenso (darfTeamerAnDiesenTermin), einen
+  // abgesagten Termin sperrt sie ebenso. Ein Anmeldefenster gilt fuer das
+  // Team auf KEINEM der beiden Wege, Zeitfenster hat eine Teamer-Buchung
+  // nie. Die Antwort traegt wie /book ein `status` ('confirmed' oder
+  // 'waitlist') — daran haengt die Wartelisten-Meldung.
+  //
+  // Die DELETE-Route selbst bleibt im Backend — Store-Apps rufen sie noch.
 
   // Status-Farben für SectionHeader — globale Tokens
   // Darf sich ein Teamer zu diesem Event überhaupt anmelden? Nur bei
@@ -650,7 +713,7 @@ const TeamerEventsPage: React.FC = () => {
     // Logik 1:1 wie Konfi (EventDetailView) — EINZIGER Unterschied: ein "offenes"
     // Event, zu dem sich der Teamer NICHT anmelden kann, wird NICHT gruen, sondern
     // neutral ("Nur Info"), damit keine Anmeldung suggeriert wird.
-    if (event.registration_status === 'cancelled') return danger;
+    if (istAbgesagt(event)) return danger;
     if (isPastEvent && event.attendance_status === 'present') return success;
     if (isPastEvent && event.attendance_status === 'absent') return danger;
     if (isPastEvent && event.is_registered && !event.attendance_status) return bonus;
@@ -670,7 +733,7 @@ const TeamerEventsPage: React.FC = () => {
     const isPastEvent = istVergangen(event);
     const isOnWaitlist = event.booking_status === 'waitlist' || event.booking_status === 'pending';
 
-    if (event.registration_status === 'cancelled') return 'Abgesagt';
+    if (istAbgesagt(event)) return 'Abgesagt';
     if (isPastEvent && event.attendance_status === 'present') return 'Anwesend';
     if (isPastEvent && event.attendance_status === 'absent') return 'Abwesend';
     if (isPastEvent && event.is_registered && !event.attendance_status) return 'Ausstehend';
@@ -752,10 +815,16 @@ const TeamerEventsPage: React.FC = () => {
             </IonToolbar>
           </IonHeader>
 
+          {/* HERUNTERZIEHEN HOLT DEN TERMIN, NICHT DIE LISTE.
+              Hier stand vorher `safeEvents.find(...)` -- gelesen aus der
+              Render-Closure, also aus dem Stand VOR `await refresh()`. Das
+              Herunterziehen schrieb damit genau den alten Wert zurueck, den
+              es auffrischen sollte. Jetzt dieselbe Quelle wie ueberall
+              sonst auf dieser Seite: die Detailantwort, samt
+              Teilnehmerliste. */}
           <IonRefresher slot="fixed" onIonRefresh={async (e) => {
             await refresh();
-            const updated = safeEvents.find(ev => ev.id === selectedEvent.id);
-            if (updated) setSelectedEvent(updated);
+            await ladeTerminDetail(selectedEvent.id);
             e.detail.complete();
           }} onIonPull={triggerPullHaptic}>
             <IonRefresherContent />
@@ -792,6 +861,14 @@ const TeamerEventsPage: React.FC = () => {
               />
             );
           })()}
+
+          {/*
+              NICHT zu verwechseln mit "Abgesagt von dir" weiter oben: Das
+              meint die eigene Teilnahme, hier geht es um den TERMIN. */}
+          <AbsageBlock
+            event={selectedEvent}
+            variante="kasten"
+          />
 
           {/* Details Card - wie Admin EventDetailView */}
           <IonList className="app-section-inset" inset={true}>
@@ -1072,16 +1149,17 @@ const TeamerEventsPage: React.FC = () => {
             </IonList>
           )}
 
-          <IonList className="app-section-inset" inset={true}>
-            <IonListHeader>
-              <div className="app-section-icon app-section-icon--events">
-                <IonIcon icon={ICON_GRUPPE_GEFUELLT} />
-              </div>
-              <IonLabel>Bist du dabei?</IonLabel>
-            </IonListHeader>
-            <IonCard className="app-card">
-              <IonCardContent className="app-card-content">
-                {isPast ? (
+          {(() => {
+            const zusageKarteInhalt = istAbgesagt(selectedEvent) ? (
+              // NUR HIER: Der Termin bleibt in der LISTE rot, in beiden
+              // Rollen, ebenso das rote Eck-Badge und die gemeinsame Legende.
+              // Rot heisst dort "Absage" als Zustand des Termins; hier steht
+              // ein Hinweis an der Stelle, wo sonst ein Knopf waere.
+              <IonNote color="medium" style={{ display: 'block', textAlign: 'center', fontSize: 'var(--app-text-betont)' }}>
+                <IonIcon icon={ICON_ABSAGE} style={{ verticalAlign: 'middle', marginRight: 'var(--app-abstand-kompakt)' }} />
+                Dieser Termin ist abgesagt
+              </IonNote>
+            ) : isPast ? (
                   selectedEvent.is_registered ? (
                     <div style={{ textAlign: 'center' }}>
                       {selectedEvent.attendance_status === 'present' && (
@@ -1156,10 +1234,139 @@ const TeamerEventsPage: React.FC = () => {
                       Nur zur Info - keine Anmeldung
                     </div>
                   )
-                )}
-              </IonCardContent>
-            </IonCard>
-          </IonList>
+                );
+
+            // GAR KEINE KARTE, wenn es nichts zu zeigen gibt: ein vergangener
+            // Termin, bei dem man nicht dabei war, hat unter "Bist du dabei?"
+            // nichts zu sagen. Frueher blieb hier der leere weisse Rahmen
+            // stehen.
+            if (!zusageKarteInhalt) return null;
+
+            return (
+              <IonList className="app-section-inset" inset={true}>
+                <IonListHeader>
+                  <div className="app-section-icon app-section-icon--events">
+                    <IonIcon icon={ICON_GRUPPE_GEFUELLT} />
+                  </div>
+                  <IonLabel>Bist du dabei?</IonLabel>
+                </IonListHeader>
+                <IonCard className="app-card">
+                  <IonCardContent className="app-card-content">
+                    {zusageKarteInhalt}
+                  </IonCardContent>
+                </IonCard>
+              </IonList>
+            );
+          })()}
+
+          {eventTeilnehmer.length > 0 && (() => {
+            const konfis = eventTeilnehmer.filter(p => p.role_name === 'konfi');
+            const team = eventTeilnehmer.filter(p => p.role_name !== 'konfi');
+
+            const Zeile = (p: Participant) => {
+              const darstellung = teilnahmeDarstellung(p);
+              return (
+                <div
+                  key={p.id}
+                  className={`app-list-item ${listItemKlasse(darstellung)}`}
+                  style={{ marginBottom: 'var(--app-abstand-eng)' }}
+                >
+                  <div className="app-corner-badges">
+                    <div
+                      className={`app-corner-badge ${eckBadgeKlasse(darstellung)}`}
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
+                      title={darstellung.statusText}
+                    >
+                      <IonIcon icon={getStatusIcon(darstellung.statusText) || ICON_GRUPPE_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
+                    </div>
+                  </div>
+                  <div className="app-list-item__row">
+                    <div className="app-list-item__main">
+                      <div className={`app-icon-circle ${iconKreisKlasse(darstellung)}`}>
+                        <IonIcon icon={darstellung.istAbgemeldet ? ICON_ABSAGE : ICON_GRUPPE_GEFUELLT} />
+                      </div>
+                      <div className="app-list-item__content">
+                        <div className="app-list-item__title">{p.participant_name}</div>
+                        <div className="app-list-item__meta">
+                          <span className="app-list-item__meta-item">{darstellung.statusText}</span>
+                          {p.jahrgang_name && (
+                            <span className="app-list-item__meta-item">{p.jahrgang_name}</span>
+                          )}
+                        </div>
+                        {/*
+                            Bis hierher standen hier nur Name, Status und
+                            Jahrgang. Eine Notiz erreichte damit ausgerechnet
+                            die Leute NICHT, die am Termin vor Ort sind.
+
+                            Dieselben Hilfsfunktionen und derselbe Aufbau wie
+                            in der Leitungsansicht (admin/views/
+                            EventDetailView) -- eine Regel, ein Ort. Nur
+                            LESEN: Verbucht wird weiter von der Leitung
+                            (requireAdmin), deshalb gibt es hier keine
+                            Knoepfe. */}
+                        {darstellung.istAbgemeldet && p.excuse_reason && (
+                          <div style={{ color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                            <strong>Abgemeldet: </strong>{p.excuse_reason}
+                          </div>
+                        )}
+                        {urheberZeile(p) && (
+                          <div style={{ color: 'var(--app-text-tertiary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                            {urheberZeile(p)}
+                          </div>
+                        )}
+                        {checkinZeile(p) && (
+                          <div style={{ color: 'var(--app-text-tertiary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                            {checkinZeile(p)}
+                          </div>
+                        )}
+                        {p.attendance_note && (
+                          <div style={{ color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                            <strong>Notiz: </strong>{p.attendance_note}
+                          </div>
+                        )}
+                        {notizUrheberZeile(p) && (
+                          <div style={{ color: 'var(--app-text-tertiary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
+                            {notizUrheberZeile(p)}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            };
+
+            return (
+              <IonList className="app-section-inset" inset={true}>
+                <IonListHeader>
+                  <div className="app-section-icon app-section-icon--events">
+                    <IonIcon icon={ICON_GRUPPE_GEFUELLT} />
+                  </div>
+                  <IonLabel>Wer kommt ({eventTeilnehmer.length})</IonLabel>
+                </IonListHeader>
+                <IonCard className="app-card">
+                  <IonCardContent className="app-card-content">
+                    {konfis.length > 0 && (
+                      <>
+                        <div className="app-list-item__meta" style={{ marginBottom: 'var(--app-abstand-eng)' }}>
+                          Konfis ({konfis.length})
+                        </div>
+                        {konfis.map(Zeile)}
+                      </>
+                    )}
+                    {team.length > 0 && (
+                      <>
+                        <div className="app-list-item__meta" style={{ marginTop: konfis.length > 0 ? 'var(--app-abstand-basis)' : 0, marginBottom: 'var(--app-abstand-eng)' }}>
+                          Team ({team.length})
+                        </div>
+                        {team.map(Zeile)}
+                      </>
+                    )}
+                  </IonCardContent>
+                </IonCard>
+              </IonList>
+            );
+          })()}
 
           {/* Material — die id ist das Sprungziel des Material-Hinweises in
               den Eckdaten: bei mehreren Materialien scrollt der
@@ -1381,10 +1588,9 @@ const TeamerEventsPage: React.FC = () => {
                 const { statusColor, statusText, statusIcon, isPastEvent, shouldGrayOut } = getEventStatusInfo(event);
                 const showBadge = !isPastEvent || event.is_registered;
 
-                // Kein IonItemSliding: es gab hier nie IonItemOptions, das Item
-                // liess sich also anwischen und federte wirkungslos zurück —
-                // das wirkt kaputt.
-                return (
+                // LOESCHEN FEHLT hier bewusst: Das nimmt Chat, Anmeldungen und
+                // ausgedruckte QR-Codes mit und ist keine Absage.
+                const zeile = (
                     <IonItem
                       key={event.id}
                       button
@@ -1437,7 +1643,8 @@ const TeamerEventsPage: React.FC = () => {
                               <div
                                 className="app-list-item__title app-list-item__title--events"
                                 style={{
-                                  color: shouldGrayOut ? 'var(--app-text-muted)' : undefined,
+                                  color: istAbgesagt(event) || shouldGrayOut ? 'var(--app-text-muted)' : undefined,
+                                  textDecoration: titelDekoration('liste', event),
                                   paddingRight: showBadge ? 'var(--app-freiraum-aktion-l)' : '0',
                                   paddingTop: showBadge ? 'var(--app-abstand-mini)' : '0'
                                 }}
@@ -1449,6 +1656,8 @@ const TeamerEventsPage: React.FC = () => {
                                   {event.jahrgang_names.split(',').join(' · ')}
                                 </div>
                               )}
+
+                              <AbsageBlock event={event} variante="zeile" />
 
                               <div className="app-list-item__meta">
                                 {event.teamer_only ? (
@@ -1564,6 +1773,8 @@ const TeamerEventsPage: React.FC = () => {
                       </div>
                     </IonItem>
                 );
+
+                return zeile;
               })}
             </ListSection>
 

@@ -413,9 +413,19 @@ server.on('request', (req, res) => {
 // ====================================================================
 // CHAT SYSTEM INITIALIZATION
 // ====================================================================
-
-const { initializeChatRooms } = require('./utils/chatUtils');
-setImmediate(() => initializeChatRooms(db));
+//
+// Der Aufruf ist ersatzlos entfallen, statt ihn scharf zu schalten: Die Anlage
+// der Jahrgangs-Chats erledigt `syncJahrgangChat` (utils/jahrgangChat.js) —
+// beim Anlegen eines Jahrgangs, beim Zuweisen von Konfis und Teamer:innen und
+// beim Laden der Raeume (GET /chat/rooms). Diese Fassung ist idempotent, nimmt
+// geloeschte und inaktive Konten aus, setzt Admins und Teamer:innen nach der
+// Zuweisungsregel und traegt den anlegenden Nutzer als created_by ein.
+//
+// Die alte Fassung konnte das nicht: Sie fuegte Teilnehmer ohne
+// ON CONFLICT ein, kannte weder deleted_at noch is_active, trug ausser Konfis
+// niemanden ein und fiel fuer created_by auf die feste Nutzer-ID 1 zurueck —
+// die je nach Organisation einem fremden Konto gehoert. Ein Scharfschalten
+// haette diese Fehler nach 14 Monaten erstmals wirksam gemacht.
 
 // ====================================================================
 // BACKGROUND SERVICES INITIALIZATION
@@ -472,7 +482,10 @@ server.listen(PORT, () => {
 // GRACEFUL SHUTDOWN
 // ====================================================================
 
-const gracefulShutdown = (signal) => {
+// exitCode: 0 bei einem regulaeren Signal, 1 nach einem Absturz. Sonst meldet
+// der Container "sauber beendet", obwohl eine unbehandelte Exception ihn
+// heruntergefahren hat — in der Neustart-Statistik nicht mehr unterscheidbar.
+const gracefulShutdown = (signal, exitCode = 0) => {
   console.warn(`${signal} empfangen - Graceful Shutdown...`);
   server.close(async () => {
     console.warn('HTTP-Server geschlossen.');
@@ -488,7 +501,7 @@ const gracefulShutdown = (signal) => {
     } catch (err) {
       console.error('Fehler beim Schliessen des Adapter-Pools:', err.message);
     }
-    process.exit(0);
+    process.exit(exitCode);
   });
 
   setTimeout(() => {
@@ -499,3 +512,29 @@ const gracefulShutdown = (signal) => {
 
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// ====================================================================
+// LETZTES NETZ: UNBEHANDELTE FEHLER
+// ====================================================================
+
+// Eine unbehandelte Promise-Ablehnung beendet den Prozess (Node-Standard seit 15).
+// Genau das ist hier falsch: Ein einzelner fehlgeschlagener Hintergrund-Job (etwa
+// ein Erstlauf, dessen Tabelle beim Boot noch nicht migriert ist) wuerde mit
+// `restart: unless-stopped` eine Neustartschleife ausloesen. Und weil nur die
+// Cron-Leader-Replica die Hintergrund-Jobs startet, antwortet die zweite Replica
+// dabei weiter — der Ausfall bliebe von aussen unsichtbar, waehrend Erinnerungen,
+// Token-Cleanup, Auto-Loeschung und APM stillstehen.
+// Deshalb: NUR LOGGEN, nicht beenden. Der Prozesszustand ist nach einer
+// abgelehnten Promise unveraendert; der Aufrufer gehoert repariert, nicht der
+// Server neu gestartet.
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unbehandelte Promise-Ablehnung (Prozess laeuft weiter):', reason, promise);
+});
+
+// Bei einer unbehandelten Exception ist der Prozesszustand dagegen unklar
+// (halb ausgefuehrte Handler, offene Transaktionen). Hier ist der geordnete
+// Shutdown richtig — der Orchestrator startet danach sauber neu.
+process.on('uncaughtException', (err) => {
+  console.error('Unbehandelte Exception - geordneter Shutdown:', err);
+  gracefulShutdown('uncaughtException', 1);
+});

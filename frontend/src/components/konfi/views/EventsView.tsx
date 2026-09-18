@@ -28,7 +28,7 @@ import {
   ICON_UNENDLICH,
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
-import { SectionHeader, ListSection, EventLegendModal, EventCornerBadges, formatEventDate as formatDate, formatEventTime as formatTime, istVergangen, kategorienText, zeigtPunkteart, punkteartText } from '../../shared';
+import { SectionHeader, ListSection, EventLegendModal, EventCornerBadges, AbsageBlock, formatEventDate as formatDate, formatEventTime as formatTime, istVergangen, istAbgesagt, titelDekoration, zaehltAlsMeiner, kategorienText, zeigtPunkteart, punkteartText } from '../../shared';
 import { getStatusIcon } from '../../shared/StatusBadge';
 import { Event } from '../../../types/event';
 
@@ -81,10 +81,10 @@ const EventsView: React.FC<EventsViewProps> = ({
   // sagte das Abzeichen 'laeuft', die Liste zeigte sie aber nicht mehr an.
   const eventCounts = useMemo(() => ({
     all: events.length,
-    meine: events.filter(e => e.is_registered || e.booking_status === 'opted_out').length,
+    meine: events.filter(zaehltAlsMeiner).length,
     alle: nonKonfirmationEvents.filter(e => !istVergangen(e)).length,
-    meineUpcoming: events.filter(e => (e.is_registered || e.booking_status === 'opted_out') && !istVergangen(e)).length,
-    meinePast: events.filter(e => (e.is_registered || e.booking_status === 'opted_out') && istVergangen(e)).length,
+    meineUpcoming: events.filter(e => zaehltAlsMeiner(e) && !istVergangen(e)).length,
+    meinePast: events.filter(e => zaehltAlsMeiner(e) && istVergangen(e)).length,
     konfirmation: konfirmationEvents.length,
     konfirmationUpcoming: konfirmationEvents.filter(e => !istVergangen(e)).length,
     konfirmationRegistered: konfirmationEvents.filter(e => e.is_registered).length
@@ -151,7 +151,10 @@ const EventsView: React.FC<EventsViewProps> = ({
     const attendanceStatus = event.attendance_status;
     // Warteliste: booking_status kann 'waitlist' oder 'pending' sein (Backend sendet beides)
     const isOnWaitlist = event.booking_status === 'waitlist' || event.booking_status === 'pending';
-    const isCancelled = event.cancelled;
+    // istAbgesagt() statt event.cancelled von Hand: Die Konfi-Liste kommt
+    // aus GET /konfi/events und traegt beide Felder -- die Pruefung muss
+    // dieselbe sein wie in Leitung und Team.
+    const isCancelled = istAbgesagt(event);
     const isKonfirmationEvent = event.is_konfirmation;
     // Ausstehend: vergangen, angemeldet (confirmed), aber noch keine attendance
     const isAusstehend = isPastEvent && event.is_registered && !isOnWaitlist && !attendanceStatus;
@@ -231,8 +234,11 @@ const EventsView: React.FC<EventsViewProps> = ({
   const getFilteredEvents = () => {
     switch (activeTab) {
       case 'meine':
-        return events.filter(e => e.is_registered || e.booking_status === 'opted_out');
+        return events.filter(zaehltAlsMeiner);
       case 'alle':
+        // ABGESAGTE BLEIBEN AN IHRER DATUMSPOSITION.
+        // Der Server liefert nach event_date aufsteigend; hier wird bewusst
+        // nicht umsortiert. Ausfuehrliche Begruendung in shared/eventFormatting.ts.
         return nonKonfirmationEvents.filter(e => !istVergangen(e));
       case 'konfirmation':
         return konfirmationEvents;
@@ -323,7 +329,7 @@ const EventsView: React.FC<EventsViewProps> = ({
           const statusInfo = getEventStatusInfo(event);
           const { statusColor, statusIcon, isPastEvent, shouldGrayOut, isParticipated, isKonfirmationEvent } = statusInfo;
           let statusText = statusInfo.statusText;
-          const isCancelled = event.cancelled;
+          const isCancelled = istAbgesagt(event);
           const isOptedOut = event.is_opted_out || event.booking_status === 'opted_out';
           // Konfirmations-Sperre: anderer Konfirmationstermin schon gebucht -> dieses
           // (nicht gebuchte, zukuenftige) Konfirmations-Event ist gesperrt/ausgegraut.
@@ -391,12 +397,14 @@ const EventsView: React.FC<EventsViewProps> = ({
                           className="app-list-item__title app-list-item__title--events"
                           style={{
                             color: isCancelled || shouldGrayOut ? 'var(--app-text-muted)' : undefined,
-                            textDecoration: isCancelled ? 'line-through' : 'none',
+                            textDecoration: titelDekoration('liste', event),
                             paddingRight: showBadge ? 'var(--app-freiraum-aktion-l)' : '0'
                           }}
                         >
                           {event.name}
                         </div>
+
+                        <AbsageBlock event={event} variante="zeile" />
 
                         {/* Zeile 2: Buchungen + Warteliste + Punkte */}
                         <div className="app-list-item__meta">

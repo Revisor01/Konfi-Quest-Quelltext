@@ -33,6 +33,7 @@ import {
 } from '@ionic/react';
 import {
   ICON_BEARBEITEN,
+  ICON_FUNKELN,
   ICON_GRUPPE,
   ICON_GRUPPE_GEFUELLT,
   ICON_HAKEN,
@@ -47,11 +48,13 @@ import {
   ICON_PLUS_KREIS,
   ICON_SCHILD,
   ICON_SCHLIESSEN,
+  ICON_SICHTBAR,
   ICON_SUCHE,
   ICON_TELEFON,
   ICON_TERMIN,
   ICON_TEXTDOKUMENT,
   ICON_UHRZEIT,
+  ICON_VERBORGEN,
   ICON_WARNHINWEIS,
   ICON_WELT,
 } from '../../shared/icons';
@@ -61,6 +64,7 @@ import { useActionGuard } from '../../../hooks/useActionGuard';
 import api from '../../../services/api';
 import AdminPasswordResetModal from './AdminPasswordResetModal';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
+import { generateStrongPassword } from '../../../utils/passwortVorschlag';
 import { tageBis } from '../../shared/eventFormatting';
 
 interface Organization {
@@ -227,6 +231,15 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
     setIsTrial(value);
     if (initializedRef.current) setIsDirty(true);
   };
+  // Passwort des ersten Admins sichtbar machen — ein Vorschlag, den niemand
+  // lesen kann, laesst sich auch nicht weitergeben.
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+
+  const handleAdminPasswordVorschlag = () => {
+    setFormData(prev => ({ ...prev, admin_password: generateStrongPassword() }));
+    setShowAdminPassword(true);
+  };
+
   const [orgAdmins, setOrgAdmins] = useState<OrgAdmin[]>([]);
   const [showAddAdmin, setShowAddAdmin] = useState(false);
   const [newAdminData, setNewAdminData] = useState({ display_name: '', username: '', password: '' });
@@ -959,9 +972,18 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                   </IonItem>
                   <IonItem lines="none" style={{ '--background': 'transparent' }}>
                     <IonLabel position="stacked">Passwort *</IonLabel>
-                    <IonInput type="password" value={formData.admin_password} onIonInput={(e) => setFormData({ ...formData, admin_password: e.detail.value! })} placeholder="Mind. 8 Zeichen, Groß/Klein, Zahl, Sonderzeichen" disabled={isSubmitting} />
+                    <IonInput type={showAdminPassword ? 'text' : 'password'} value={formData.admin_password} onIonInput={(e) => setFormData({ ...formData, admin_password: e.detail.value! })} placeholder="Mind. 8 Zeichen, Groß/Klein, Zahl, Sonderzeichen" disabled={isSubmitting} />
+                    <IonButton aria-label="Passwort anzeigen oder verbergen" slot="end" fill="clear" onClick={() => setShowAdminPassword(v => !v)}>
+                      <IonIcon icon={showAdminPassword ? ICON_VERBORGEN : ICON_SICHTBAR} />
+                    </IonButton>
                   </IonItem>
                 </IonList>
+
+                {/* Gleicher Knopf wie beim Zuruecksetzen eines Passworts */}
+                <IonButton expand="block" fill="outline" onClick={handleAdminPasswordVorschlag} disabled={isSubmitting} style={{ marginTop: 'var(--app-abstand-mittel)' }}>
+                  <IonIcon icon={ICON_FUNKELN} slot="start" />
+                  Sicheres Passwort vorschlagen
+                </IonButton>
 
                 <IonItem lines="none" style={{ '--background': 'rgba(var(--app-color-users-rgb), 0.08)', borderRadius: 'var(--app-radius-knopf)', marginTop: 'var(--app-abstand-mittel)' }}>
                   <IonIcon icon={ICON_SCHILD} slot="start" style={{ color: 'var(--app-color-users)' }} />

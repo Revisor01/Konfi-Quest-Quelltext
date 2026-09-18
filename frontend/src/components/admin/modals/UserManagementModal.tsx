@@ -187,7 +187,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
       }
     } catch (err) {
  console.error('Error loading initial data:', err);
-      setError('Fehler beim Laden der Daten');
+      setError('Fehler beim Laden der Daten', { ort: 'benutzer-verwaltung-laden', fehler: err });
     } finally {
       if (!isEditMode) setLoading(false);
     }

@@ -65,13 +65,27 @@ export interface Event {
   max_waitlist_size?: number;
   waitlist_count?: number;
   waitlist_position?: number;
-  // Booking
-  booking_status?: 'confirmed' | 'waitlist' | 'pending' | 'opted_out' | null;
+  booking_status?: 'confirmed' | 'waitlist' | 'pending' | 'opted_out' | 'excused' | null;
   registration_status_detail?: string;
   is_opted_out?: boolean;
-  // Attendance
-  attendance_status?: 'present' | 'absent' | null;
+  // Attendance ('excused' seit Migration 147: nachgetragene Abmeldung)
+  attendance_status?: 'present' | 'absent' | 'excused' | null;
   cancelled?: boolean;
+  // Absage: Grund und Urheber (Migration 150). Der Grund ist freiwillig --
+  // null heisst "kein Grund angegeben" und ist der Normalfall. Der Name fehlt
+  // bei Terminen, die vor der Migration abgesagt wurden; dann faellt die
+  // Urheberzeile ersatzlos weg (siehe absageUrheberZeile).
+  cancelled_at?: string | null;
+  cancelled_reason?: string | null;
+  cancelled_by?: number | null;
+  cancelled_by_name?: string | null;
+  // Wer den Grund zuletzt gesetzt hat (Migration 152). Beim Absagen dieselbe
+  // Person wie cancelled_by; erst nach einer nachtraeglichen Korrektur gehen
+  // die beiden auseinander (siehe absagegrundUrheberZeile).
+  cancelled_reason_set_by?: number | null;
+  cancelled_reason_set_by_name?: string | null;
+  cancelled_reason_set_at?: string | null;
+  durch_absage_abgemeldet_count?: number;
   // Timeslots
   has_timeslots?: boolean;
   booked_timeslot_id?: number;
@@ -90,6 +104,13 @@ export interface Event {
   teamer_waitlist_enabled?: boolean;
   teamer_max_waitlist_size?: number;
   teamer_waitlist_count?: number;
+  /**
+   * Abgemeldete Konfis -- Selbstabmeldung und Abmeldung durch die Leitung
+   * zusammen. KONFI-rein wie registered_count; das Team zaehlt
+   * hier nicht mit. Optional, weil aeltere Serverstaende das Feld nicht
+   * liefern.
+   */
+  abgemeldet_count?: number;
   // Serien
   is_series?: boolean;
   series_id?: number;
@@ -121,8 +142,34 @@ export interface Participant {
   jahrgang_name?: string;
   role_name?: string;
   created_at: string;
-  status?: 'confirmed' | 'waitlist' | 'pending' | 'opted_out';
-  attendance_status?: 'present' | 'absent' | null;
+  status?: 'confirmed' | 'waitlist' | 'pending' | 'opted_out' | 'excused';
+  attendance_status?: 'present' | 'absent' | 'excused' | null;
+  /** Grund der nachgetragenen Abmeldung; gehoert zu attendance_status='excused'. */
+  excuse_reason?: string | null;
+  /** Freie Notiz unabhaengig vom Status ("ging um 14 Uhr"). */
+  attendance_note?: string | null;
+  /**
+   * NULL/fehlend heisst UNBEKANNT, nicht "niemand": Bestandszeilen von vor
+   * der Migration und Selbst-Check-ins per QR-Code haben keinen Urheber.
+   * Die Anzeige laesst die Zeile dann weg.
+   */
+  attendance_set_by?: number | null;
+  attendance_set_by_name?: string | null;
+  attendance_set_at?: string | null;
+  note_set_by?: number | null;
+  note_set_by_name?: string | null;
+  note_set_at?: string | null;
+  /**
+   * Ergaenzt die Urheber-Felder, ersetzt sie nicht: Beim QR-Check-in bleibt
+   * attendance_set_by bewusst leer (Migration 148) -- ein Selbst-Check-in ist
+   * keine Leitungsentscheidung und traegt keinen Namen. Vorher stand er damit
+   * im selben NULL wie der Altbestand; die Quelle trennt beides.
+   *
+   * NULL/fehlend heisst weiterhin UNBEKANNT: Bestandszeilen von vor der
+   * Migration. Dort faellt jede Zeile weg.
+   */
+  checkin_quelle?: 'qr' | 'manuell' | null;
+  checked_in_at?: string | null;
   timeslot_id?: number;
   timeslot_start_time?: string;
   timeslot_end_time?: string;

@@ -1,6 +1,6 @@
 import React from 'react';
 import { IonIcon } from '@ionic/react';
-import { getIconFromIoniconsName } from '../../../utils/badgeIcons';
+import { getIconFromIoniconsName, istEmojiIcon } from '../../../utils/badgeIcons';
 import SlideBase from './SlideBase';
 
 /**
@@ -67,7 +67,9 @@ const SeltenstesAbzeichenSlide: React.FC<Props> = ({ isActive, abzeichen }) => {
       {/* Das Abzeichen selbst, gross und in seiner eigenen Farbe --
           es ist der Held der Seite, nicht eine Statistikzeile. */}
       <div className="selt-abzeichen" style={{ backgroundColor: abzeichen.color || 'var(--app-color-badges)' }}>
-        <IonIcon icon={getIconFromIoniconsName(abzeichen.icon)} />
+        {istEmojiIcon(abzeichen.icon)
+          ? <span className="selt-abzeichen-emoji">{abzeichen.icon}</span>
+          : <IonIcon icon={getIconFromIoniconsName(abzeichen.icon)} />}
       </div>
 
       <div className="selt-name">{abzeichen.name}</div>

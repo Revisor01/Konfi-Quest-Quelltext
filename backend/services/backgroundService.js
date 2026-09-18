@@ -1,10 +1,12 @@
 const PushService = require('./pushService');
 const cron = require('node-cron');
 const { deleteKonfiCascade } = require('../utils/konfiDeletion');
+const { meldeNachrueckern } = require('../utils/nachrueckMeldung');
 const emailService = require('./emailService');
 const apm = require('../utils/apm');
 const { formatUhrzeit, heuteBerlin } = require('../utils/zeitformat');
 const { appIconSummenFuerAlle } = require('../utils/appIconBadge');
+const { abzeichenFingerabdruecke } = require('../utils/abzeichenKandidaten');
 
 // Vorlauf für die Lizenz-Ablauf-Erinnerung (Tage vor trial_ends_at)
 const LICENSE_REMINDER_DAYS = 14;
@@ -25,6 +27,29 @@ class BackgroundService {
   // jeder Takt dieselbe Zahl erneut schickt, und erlaubt trotzdem das
   // Zuruecknehmen auf null (siehe updateAllUserBadges).
   static letzterZaehler = new Map();
+  // Fingerabdruck der Datenlage je Person beim letzten Abzeichen-Lauf. Wer
+  // denselben Abdruck hat wie vorher, kann kein Abzeichen neu verdient haben
+  // und wird uebersprungen (Begruendung in utils/abzeichenKandidaten.js).
+  static letzterAbzeichenAbdruck = new Map();
+
+  // Wie viele Personen am Stueck geprueft werden, bevor der Lauf kurz
+  // pausiert. Die Pause gibt die Pool-Verbindung frei, damit ein grosser
+  // Lauf nicht dauerhaft einen von 20 Plaetzen belegt.
+  static ABZEICHEN_BLOCK = 50;
+  static ABZEICHEN_PAUSE_MS = 50;
+
+  // Mit der Grenze bearbeitet ein Lauf hoechstens 800 Personen (gemessen
+  // rund 10 Sekunden) und der Rest kommt in den naechsten Laeufen dran. Ein
+  // Kaltstart mit 10.000 Personen ist so nach 13 Stunden aufgearbeitet, ohne
+  // dass irgendein Lauf den Pool blockiert. Das ist vertretbar: Der Kaltstart
+  // holt ohnehin nur nach, was waehrend der Auszeit liegen blieb, und der
+  // regulaere Weg (Aktivitaet eintragen) vergibt weiterhin sofort.
+  //
+  // Wer zuerst: die kleinsten user_id zuerst waere unfair gegenueber den
+  // hinteren. Deshalb merkt sich der Dienst, wo er stehen geblieben ist, und
+  // setzt dort fort (abzeichenZeiger).
+  static ABZEICHEN_MAX_JE_LAUF = 800;
+  static abzeichenZeiger = 0;
 
   /**
    * Startet regelmäßige Badge Updates für alle User (alle 5 Minuten)
@@ -211,6 +236,73 @@ class BackgroundService {
         }
       }
 
+      // AUSWAHL FUER DIE ABZEICHEN-PRUEFUNG.
+      //
+      // Bis hierher lief die teure Pruefung ueber JEDE Person, jede Stunde —
+      // rund 27 Abfragen und 12,9 ms pro Person, gemessen gegen eine echte
+      // Postgres-Instanz. Bei 110 Personen faellt das nicht auf; bei 2.500
+      // waeren es 67.000 Abfragen und rund 32 Sekunden, bei 10.000 rund
+      // 268.000 Abfragen und ueber zwei Minuten am Stueck, die ganze Zeit auf
+      // einer von 20 Pool-Verbindungen.
+      //
+      // Kein Kriterium kann allein durch Zeitablauf neu erfuellt werden
+      // (Herleitung Kriterium fuer Kriterium in utils/abzeichenKandidaten.js).
+      // Wessen Datenlage sich seit dem letzten Lauf nicht geaendert hat, kann
+      // also auch kein Abzeichen neu verdient haben. Der Fingerabdruck kostet
+      // sieben Abfragen fuer ALLE zusammen — unabhaengig von der Anzahl.
+      //
+      // Beim ERSTEN Lauf nach dem Start ist der Merker leer: dann steht jeder
+      // auf der Liste. Das ist Absicht — ein Neustart darf nichts
+      // verschlucken, was waehrend der Auszeit faellig wurde. Damit dieser
+      // eine Lauf den Pool nicht minutenlang belegt, begrenzt
+      // ABZEICHEN_MAX_JE_LAUF ihn; der Rest kommt in den Folgelaeufen dran.
+      const abzeichenPersonen = (!nurZaehler)
+        ? users.filter(u => u.user_type === 'konfi' || u.user_type === 'teamer')
+        : [];
+      let zuPruefen = new Set();
+      let neueAbdruecke = null;
+      if (abzeichenPersonen.length > 0) {
+        try {
+          neueAbdruecke = await abzeichenFingerabdruecke(db, abzeichenPersonen);
+          for (const u of abzeichenPersonen) {
+            const jetzt = neueAbdruecke.get(u.user_id);
+            const vorher = this.letzterAbzeichenAbdruck.get(u.user_id);
+            // Unbekannt (erster Lauf, neues Konto) ODER veraendert -> pruefen.
+            if (vorher === undefined || vorher !== jetzt) zuPruefen.add(u.user_id);
+          }
+        } catch (abdruckErr) {
+          // Der Fingerabdruck ist eine Abkuerzung, kein Tor. Faellt er aus,
+          // wird geprueft wie frueher — lieber zu viel Arbeit als ein
+          // verschlucktes Abzeichen.
+          console.error('Abzeichen-Fingerabdruck fehlgeschlagen, prüfe alle:', abdruckErr);
+          neueAbdruecke = null;
+          zuPruefen = new Set(abzeichenPersonen.map(u => u.user_id));
+        }
+
+        // Obergrenze je Lauf (siehe ABZEICHEN_MAX_JE_LAUF). Nur wenn mehr
+        // anstehen, als ein Lauf tragen soll — im Regelbetrieb greift das nie.
+        if (zuPruefen.size > this.ABZEICHEN_MAX_JE_LAUF) {
+          // Ab dem Zeiger weiterlaufen und hinten wieder vorn anfangen, damit
+          // ueber die Laeufe hinweg jeder drankommt und niemand dauerhaft
+          // hinten liegen bleibt.
+          const warteschlange = abzeichenPersonen
+            .map(u => u.user_id)
+            .filter(id => zuPruefen.has(id));
+          const start = this.abzeichenZeiger % warteschlange.length;
+          const dranheute = new Set();
+          for (let i = 0; i < this.ABZEICHEN_MAX_JE_LAUF; i++) {
+            dranheute.add(warteschlange[(start + i) % warteschlange.length]);
+          }
+          this.abzeichenZeiger = (start + this.ABZEICHEN_MAX_JE_LAUF) % warteschlange.length;
+          console.warn(
+            `Abzeichen-Prüfung: ${zuPruefen.size} Personen stehen an, ` +
+            `${dranheute.size} in diesem Lauf — der Rest folgt in den nächsten Läufen.`
+          );
+          zuPruefen = dranheute;
+        }
+      }
+
+      let geprueft = 0;
       for (const user of users) {
         try {
           // App-Icon-Zähler nachfuehren. Nur für Geraete mit Token — ohne
@@ -239,15 +331,46 @@ class BackgroundService {
             }
           }
 
-          if (!nurZaehler && (user.user_type === 'konfi' || user.user_type === 'teamer')) {
+          if (!nurZaehler && zuPruefen.has(user.user_id)) {
             await checkAndAwardBadges(db, user.user_id);
+            geprueft++;
+
+            // In Bloecken arbeiten statt am Stueck: Nach je
+            // ABZEICHEN_BLOCK Personen einen Takt pausieren. Das gibt die
+            // Pool-Verbindung zwischendurch frei, damit ein grosser Lauf
+            // nicht dauerhaft einen von 20 Plaetzen belegt und die API
+            // daneben weiter antworten kann.
+            if (geprueft % this.ABZEICHEN_BLOCK === 0) {
+              await new Promise(r => setTimeout(r, this.ABZEICHEN_PAUSE_MS));
+            }
           }
         } catch (error) {
           console.error(`Badge update failed for user ${user.user_id}:`, error);
         }
       }
 
-      return { updated: updatedCount, total: users.length };
+      // Den Merker erst NACH dem Lauf fortschreiben, und nur fuer die
+      // Personen, die auch tatsaechlich geprueft wurden. Waere er vorher
+      // gesetzt, ginge eine Aenderung verloren, sobald eine Pruefung
+      // unterwegs scheitert — beim naechsten Lauf sähe der Abdruck dann
+      // unveraendert aus und die Person fiele still heraus.
+      if (neueAbdruecke) {
+        for (const u of abzeichenPersonen) {
+          if (zuPruefen.has(u.user_id)) {
+            this.letzterAbzeichenAbdruck.set(u.user_id, neueAbdruecke.get(u.user_id));
+          }
+        }
+        // Geloeschte Konten aus dem Merker werfen, sonst waechst er mit der
+        // Laufzeit (dieselbe Vorsorge wie bei letzterZaehler oben).
+        if (this.letzterAbzeichenAbdruck.size > abzeichenPersonen.length) {
+          const aktuell = new Set(abzeichenPersonen.map(u => u.user_id));
+          for (const id of this.letzterAbzeichenAbdruck.keys()) {
+            if (!aktuell.has(id)) this.letzterAbzeichenAbdruck.delete(id);
+          }
+        }
+      }
+
+      return { updated: updatedCount, total: users.length, geprueft };
 
     } catch (error) {
       console.error('Error in updateAllUserBadges:', error);
@@ -267,8 +390,14 @@ class BackgroundService {
       return;
     }
 
-    // Sofort einmal ausfuehren, dann alle 15 Minuten
-    this.sendEventReminders(db);
+    // Sofort einmal ausfuehren, dann alle 15 Minuten.
+    // .catch() ist Pflicht: sendEventReminders wirft den Fehler weiter (rethrow),
+    // ein nackter Aufruf ohne await/catch wuerde als unhandled rejection den
+    // Prozess beenden — und mit `restart: unless-stopped` eine Neustartschleife
+    // ausloesen, die von aussen unsichtbar bleibt (nur die Cron-Leader-Replica
+    // startet die Hintergrund-Jobs, die API antwortet weiter).
+    this.sendEventReminders(db).catch(err =>
+      console.error('Event reminder (initial) failed:', err));
 
     const FIFTEEN_MINUTES = 15 * 60 * 1000;
     this.eventReminderInterval = setInterval(async () => {
@@ -339,7 +468,7 @@ class BackgroundService {
         UPDATE events
         SET registration_open_notified = true
         WHERE registration_open_notified = false
-          AND cancelled = false
+          AND cancelled IS NOT TRUE
           AND (teamer_only IS NULL OR teamer_only = false)
           AND (mandatory IS NULL OR mandatory = false)
           AND (registration_opens_at IS NULL OR registration_opens_at <= NOW())
@@ -433,6 +562,14 @@ class BackgroundService {
 
   /**
    * Sendet Event-Erinnerungen (1 Tag und 1 Stunde vorher)
+   *
+   * Der Filter haengt bewusst NICHT an eb.status: sollte das Abmelden spaeter
+   * zusaetzlich status='excused' setzen, greift `attendance_status IS NULL`
+   * unveraendert. `eb.status = 'confirmed'` bleibt als Positivliste stehen —
+   * ein kuenftiges 'excused' faellt dort ohnehin heraus, das ist dieselbe
+   * Entscheidung, nur doppelt getroffen. Eine Aufweichung zu
+   * `status <> 'cancelled'` waere falsch: Warteliste und Absage duerfen keine
+   * Erinnerung bekommen.
    */
   static async sendEventReminders(db) {
     try {
@@ -448,6 +585,7 @@ class BackgroundService {
         FROM events e
         JOIN event_bookings eb ON e.id = eb.event_id
         WHERE eb.status = 'confirmed'
+          AND eb.attendance_status IS NULL
           AND e.cancelled IS NOT TRUE
           AND e.event_date::date = $1::date
           AND NOT EXISTS (
@@ -498,6 +636,7 @@ class BackgroundService {
         FROM events e
         JOIN event_bookings eb ON e.id = eb.event_id
         WHERE eb.status = 'confirmed'
+          AND eb.attendance_status IS NULL
           AND e.cancelled IS NOT TRUE
           AND e.event_date BETWEEN $1 AND $2
           AND NOT EXISTS (
@@ -628,8 +767,11 @@ class BackgroundService {
       return;
     }
 
-    // Sofort einmal ausfuehren
-    this.cleanupStaleTokens(db);
+    // Sofort einmal ausfuehren. .catch() ist Pflicht — cleanupStaleTokens wirft
+    // den Fehler weiter (rethrow), ein nackter Aufruf wuerde den Prozess ueber
+    // eine unhandled rejection beenden (siehe startEventReminderService).
+    this.cleanupStaleTokens(db).catch(err =>
+      console.error('Token cleanup (initial) failed:', err));
 
     const SIX_HOURS = 6 * 60 * 60 * 1000;
     this.tokenCleanupInterval = setInterval(async () => {
@@ -1023,7 +1165,7 @@ class BackgroundService {
               WHERE eja.jahrgang_id = $1
                 AND e.is_konfirmation = true
                 AND e.organization_id = $2
-                AND (e.cancelled IS NULL OR e.cancelled = false)`,
+                AND e.cancelled IS NOT TRUE`,
             [jg.id, jg.organization_id]
           );
           const stichtag = stichtagRows[0] && stichtagRows[0].stichtag;
@@ -1140,7 +1282,7 @@ class BackgroundService {
             WHERE eja.jahrgang_id = $1
               AND e.is_konfirmation = true
               AND e.organization_id = $2
-              AND (e.cancelled IS NULL OR e.cancelled = false)`,
+              AND e.cancelled IS NOT TRUE`,
           [jg.id, jg.organization_id]
         );
         const stichtag = stichtagRows[0] && stichtagRows[0].stichtag;
@@ -1180,9 +1322,12 @@ class BackgroundService {
           }
           try {
             await client.query('BEGIN');
-            await deleteKonfiCascade(client, konfi.id, jg.organization_id);
+            const nachgerueckt = await deleteKonfiCascade(client, konfi.id, jg.organization_id);
             await client.query('COMMIT');
             totalHard++;
+            // Benachrichtigung nach dem COMMIT; Fehler werden dort je Person
+            // geschluckt und duerfen den Lauf nicht abbrechen.
+            await meldeNachrueckern(db, jg.organization_id, nachgerueckt);
           } catch (delErr) {
             try { await client.query('ROLLBACK'); } catch (_) { /* ignore */ }
             console.error(`Auto-Deletion: Hard-Delete fuer Konfi ${konfi.id} (Jahrgang ${jg.id}) fehlgeschlagen:`, delErr.message);
@@ -1244,8 +1389,10 @@ class BackgroundService {
            VALUES ($1, $2, $3, $4, $5)`,
           [s.totalRequests, s.totalErrors, s.maxInFlight, s.worstP95Ms, s.worstRoute]
         );
-        // Aufräumen: nur die letzten 30 Tage behalten.
-        await db.query("DELETE FROM apm_snapshots WHERE captured_at < NOW() - INTERVAL '30 days'");
+        // Aufräumen: die letzten zwei Jahre behalten — bewusst grosszügig,
+        // damit sich das Wachstum überhaupt erst beobachten lässt und danach
+        // mit Zahlen entschieden werden kann.
+        await db.query("DELETE FROM apm_snapshots WHERE captured_at < NOW() - INTERVAL '2 years'");
       } catch (error) {
         console.error('APM-Snapshot fehlgeschlagen:', error.message);
       }

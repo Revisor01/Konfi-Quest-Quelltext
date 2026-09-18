@@ -50,10 +50,10 @@ import {
   ICON_ZUSAGE,
 } from '../../shared/icons';
 import { Capacitor } from '@capacitor/core';
-import { Share } from '@capacitor/share';
+import { teilen } from '../../../services/systemDialoge';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { useApp } from '../../../contexts/AppContext';
-import api from '../../../services/api';
+import api, { DATEI_TIMEOUT_MS } from '../../../services/api';
 import { EmptyState, SectionHeader, AudioPlayer } from '../../shared';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
@@ -62,11 +62,21 @@ import MusikLink from '../../shared/MusikLink';
 import ChallengeSubmitModal from '../../konfi/modals/ChallengeSubmitModal';
 import { getChallengeStatus } from '../views/ChallengesManageView';
 import { anzahlBeitraege } from '../../../utils/challengeTexte';
+import { trackHandlung } from '../../../services/analytics';
 import type {
   AdminChallenge,
   KonfiChallenge,
   ChallengeSubmission
 } from '../../../types/challenges';
+
+// Die vier Moderations-Aktionen als grobe Messwerte. Fest verdrahtet, damit
+// nie ein technischer Bezeichner aus dem Backend an die Messung durchrutscht.
+const MODERATION_MESSWERT: Record<'approve' | 'hide' | 'unhide' | 'anonymize', string> = {
+  approve: 'freigegeben',
+  hide: 'ausgeblendet',
+  unhide: 'wieder-sichtbar',
+  anonymize: 'anonymisiert'
+};
 
 // VEREINTES Challenge-Detail für Leitung und Teamer:innen (11.08.): Verwalten
 // UND Mitmachen in EINEM Modal, statt eines Segments, das die ganze Seite
@@ -94,7 +104,7 @@ const ChallengeMedia: React.FC<{
     let objectUrl = '';
     (async () => {
       try {
-        const res = await api.get(`/challenges/files/${filePath}`, { responseType: 'blob' });
+        const res = await api.get(`/challenges/files/${filePath}`, { responseType: 'blob', timeout: DATEI_TIMEOUT_MS });
         if (cancelled) return;
         objectUrl = URL.createObjectURL(res.data as Blob);
         setSrc(objectUrl);
@@ -433,6 +443,10 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
         // — das Ausblenden scheitert NIE am fehlenden Grund.
         ...(reason ? { reason } : {})
       });
+      // Anonyme Messung NACH der erfolgreichen Antwort: der Beitrag wurde
+      // wirklich durchgesehen. Nur die Entscheidung — kein Beitrag, keine
+      // Person, keine Begruendung.
+      trackHandlung('beitrag-moderiert', { entscheidung: MODERATION_MESSWERT[action] });
       await loadSubmissions();
       onChanged?.();
     } catch (err) {
@@ -607,7 +621,7 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
           encoding: Encoding.UTF8
         });
         const uri = await Filesystem.getUri({ path: fileName, directory: Directory.Cache });
-        await Share.share({ title: challenge.title, files: [uri.uri] });
+        await teilen({ title: challenge.title, files: [uri.uri] });
       } else {
         const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
         const url = URL.createObjectURL(blob);
@@ -774,7 +788,7 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
                           ? 'Sobald Beiträge freigegeben sind, erscheinen sie hier — wie bei den Konfis.'
                           : 'Hier ist gerade nichts.'
                     }
-                    iconColor="var(--app-color-teamer)"
+                    iconColor="var(--app-color-challenges)"
                   />
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-schmal)' }}>

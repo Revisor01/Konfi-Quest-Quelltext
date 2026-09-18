@@ -30,6 +30,7 @@ const KANAL_JE_TYP = {
   event_registered: KANAL_TERMINE,
   event_unregistered: KANAL_TERMINE,
   event_cancelled: KANAL_TERMINE,
+  event_reactivated: KANAL_TERMINE,
   event_changed: KANAL_TERMINE,
   event_reminder: KANAL_TERMINE,
   event_attendance: KANAL_TERMINE,

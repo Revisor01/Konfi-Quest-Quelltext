@@ -27,6 +27,7 @@ const { formatUhrzeit, formatDatum } = require('../utils/zeitformat');
  * event_registered            | sendEventRegisteredToTeamer          | Teamer:in       | ja
  * waitlist_promotion          | sendWaitlistPromotionToTeamer        | Teamer:in       | ja
  * event_cancelled             | sendEventCancellationToKonfis        | Konfi (multi)   | ja
+ * event_reactivated           | sendEventReactivationToKonfis        | Konfi (multi)   | ja
  * event_changed               | sendEventChangedToKonfis             | Konfi (multi)   | ja
  * new_event                   | sendNewEventToOrgKonfis              | Org-Konfis      | ja
  * event_attendance            | sendEventAttendanceToKonfi           | Konfi           | ja
@@ -1022,8 +1023,24 @@ class PushService {
 
   /**
    * Event abgesagt - Push an alle angemeldeten Konfis
+   *
+   * @param {string|null} grund - Freiwilliger Absagegrund (Migration 150).
+   *
+   * @param {number|null} eventId - Termin-Kennung fuer den Sprung beim Antippen.
+   *
+   * WARUM DIE KENNUNG FEHLTE UND JETZT DAZUKOMMT: Jeder
+   * vergleichbare Termin-Push traegt sie (sendEventChangedToKonfis,
+   * sendMandatoryEventCreated, sendEventRegisteredToKonfi) — der Absage-Push
+   * als einziger nicht. Ein Tipp auf "Leider abgesagt" landete deshalb auf
+   * der Terminliste statt am Termin, und genau dort steht der Grund
+   * ausfuehrlich, samt "Abgesagt von ...".
+   *
+   * OHNE KENNUNG BLEIBT ES BEIM ALTEN: Der Parameter steht am Ende und ist
+   * optional; faellt er weg, fehlt der Schluessel im data-Teil und die App
+   * landet wie bisher auf der Terminliste. Genau so ruft ihn die Loeschroute,
+   * denn einen geloeschten Termin gibt es nicht mehr aufzuschlagen.
    */
-  static async sendEventCancellationToKonfis(db, userIds, eventName, eventDate, organizationId = null) {
+  static async sendEventCancellationToKonfis(db, userIds, eventName, eventDate, organizationId = null, grund = null, eventId = null) {
     try {
 
       let dateInfo = eventDate;
@@ -1032,12 +1049,26 @@ class PushService {
         dateInfo = `${formatDatum(date, { weekday: 'short', day: '2-digit', month: '2-digit' })} um ${formatUhrzeit(date)} Uhr`;
       }
 
+      const grundText = typeof grund === 'string' && grund.trim() !== '' ? grund.trim() : null;
+
       const notification = {
         title: 'Event abgesagt',
-        body: `Leider abgesagt: "${eventName}" am ${dateInfo}`,
+        body: `Leider abgesagt: "${eventName}" am ${dateInfo}`
+          + (grundText ? `. ${grundText}` : ''),
         data: {
           type: 'event_cancelled',
           event_name: eventName,
+          // Additiv im data-Teil: Alte App-Fassungen lesen den Schluessel
+          // nicht und ignorieren ihn. Ohne Grund faellt er ganz weg, statt
+          // als leerer String dazustehen.
+          ...(grundText ? { cancelled_reason: grundText } : {}),
+          // Termin-Kennung fuer den Sprung beim Antippen. Wie beim Grund
+          // daneben faellt der Schluessel ganz weg, statt als leerer String
+          // dazustehen: Die Loeschroute ruft ohne Kennung, und ein
+          // event_id: '' an einem Termin, den es nicht mehr gibt, waere eine
+          // Behauptung ueber ein Ziel. Alte App-Fassungen lesen den Schluessel
+          // nicht und ignorieren ihn.
+          ...(eventId != null ? { event_id: String(eventId) } : {}),
           // Event-Org explizit: unter den Gebuchten können Teamer:innen mit
           // anderer Primär-Org sein.
           ...(organizationId != null ? { organization_id: String(organizationId) } : {})
@@ -1047,6 +1078,63 @@ class PushService {
       return await this.sendToMultipleUsers(db, userIds, notification);
     } catch (error) {
  console.error('sendEventCancellationToKonfis error:', error);
+      return { success: false, error: error.message };
+    }
+  }
+
+  /**
+   * Die Absage ist zurueckgenommen — der Termin findet doch statt
+   * Das Gegenstueck zu sendEventCancellationToKonfis.
+   *
+   * Der Hinweis gehoert in den Text, nicht in die App: Wer die Absage gelesen
+   * und sich anderweitig verabredet hat, muss die Nachricht als AUFFORDERUNG
+   * verstehen, nicht als blosse Mitteilung. Deshalb steht die Rueckfrage
+   * ausdruecklich drin — die Anmeldung ist wieder da, ohne dass jemand
+   * zugestimmt haette, und wer nicht kann, meldet sich ab.
+   *
+   * NUR AN DIE WIEDER ANGEMELDETEN (Route: die Rueckgabe von
+   * hebeAbsageAbmeldungenAuf). Wer vor der Absage selbst oder von der Leitung
+   * abgemeldet war, bleibt abgemeldet und bekommt DIESEN Push nicht: "Du bist
+   * wieder angemeldet" waere fuer sie schlicht falsch, und eine Nachricht
+   * ueber einen Termin, an dem sie nicht teilnehmen, ist Laerm.
+   *
+   * KEIN GRUND IM TEXT: Der Absagegrund ("Heizung defekt") beschreibt eine
+   * Absage, die es nicht mehr gibt. Ihn hier mitzuschicken wuerde die
+   * Nachricht in ihr Gegenteil verkehren.
+   *
+   * @param {Array<number>} userIds - die wieder Angemeldeten
+   * @param {string} eventName
+   * @param {string|Date} eventDate - Datum fuer die Zeile im Text
+   * @param {number|null} organizationId - Organisation des TERMINS
+   * @param {number|null} eventId - Sprungziel beim Antippen
+   */
+  static async sendEventReactivationToKonfis(db, userIds, eventName, eventDate, organizationId = null, eventId = null) {
+    try {
+      let dateInfo = eventDate;
+      if (eventDate) {
+        const date = new Date(eventDate);
+        dateInfo = `${formatDatum(date, { weekday: 'short', day: '2-digit', month: '2-digit' })} um ${formatUhrzeit(date)} Uhr`;
+      }
+
+      const notification = {
+        title: 'Termin findet doch statt',
+        body: `"${eventName}" am ${dateInfo} findet doch statt.`
+          + ' Du bist wieder angemeldet – prüf bitte, ob du Zeit hast, und melde dich sonst ab.',
+        data: {
+          type: 'event_reactivated',
+          event_name: eventName,
+          // Wie bei der Absage: faellt ganz weg statt als leerer String
+          // dazustehen. Alte App-Fassungen lesen den Schluessel nicht.
+          ...(eventId != null ? { event_id: String(eventId) } : {}),
+          // Event-Org explizit: unter den Gebuchten können Teamer:innen mit
+          // anderer Primär-Org sein.
+          ...(organizationId != null ? { organization_id: String(organizationId) } : {})
+        }
+      };
+
+      return await this.sendToMultipleUsers(db, userIds, notification);
+    } catch (error) {
+      console.error('sendEventReactivationToKonfis error:', error);
       return { success: false, error: error.message };
     }
   }
@@ -1401,10 +1489,20 @@ class PushService {
     try {
 
       const isPresent = status === 'present';
+      // 'excused' braucht einen EIGENEN Wortlaut. Der Text fuer
+      // 'absent' waere hier schlicht falsch: "nicht erschienen" klingt nach
+      // unentschuldigtem Fehlen, dabei wurde ordentlich abgemeldet -- meist
+      // von den Eltern. Die Konfi soll sehen, dass es angekommen ist, nicht
+      // einen Vorwurf lesen.
+      const isExcused = status === 'excused';
       const notification = {
-        title: isPresent ? 'Teilnahme bestätigt!' : 'Nicht erschienen',
+        title: isPresent ? 'Teilnahme bestätigt!'
+          : isExcused ? 'Abmeldung eingetragen'
+          : 'Nicht erschienen',
         body: isPresent
           ? `Deine Teilnahme an "${eventName}" wurde bestätigt.${points > 0 ? ` Du erhältst +${points} Punkte!` : ''}`
+          : isExcused
+          ? `Deine Abmeldung für "${eventName}" wurde eingetragen.`
           : `Du wurdest als "nicht erschienen" für "${eventName}" markiert.`,
         data: {
           type: 'event_attendance',

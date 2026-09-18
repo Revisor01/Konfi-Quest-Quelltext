@@ -16,6 +16,25 @@ const MATERIAL_DIR = path.join(__dirname, '../uploads/material');
 // gespeicherten Dateinamens. Gibt true zurück, wenn gelöscht wurde, false
 // wenn nichts zu tun war. Wirft NICHT — Fehler werden geloggt, damit ein
 // fehlendes File nie eine DB-Operation (Antrag/User/Beitrag löschen) blockiert.
+// Die Upload-Routen erzeugen ihre Dateinamen als
+// crypto.randomBytes(32).toString('hex') — also immer genau 64 Hexzeichen.
+// Etwas anderes darf gar nicht erst in einen Pfad geraten.
+const HEX_NAME = /^[a-f0-9]{64}$/;
+
+/**
+ * Ist das ein unbedenklicher, selbst erzeugter Dateiname?
+ *
+ * Gedacht fuer den LESEpfad, wo ein Wert aus der Datenbank in path.join()
+ * geht: Bestandsdaten koennen aus der Zeit vor der Eingangspruefung stammen
+ * 
+ * Deshalb wird am Ausgang erneut geprueft, nicht nur am Eingang.
+ *
+ * Strenger als basename(): '..' allein waere auch ein gueltiger Basename.
+ */
+function istSichererDateiname(filename) {
+  return typeof filename === 'string' && HEX_NAME.test(filename);
+}
+
 async function deleteFileInDir(dir, filename, label) {
   if (!filename) return false;
 
@@ -64,5 +83,6 @@ async function deleteMaterialFile(filename) {
 
 module.exports = {
   deletePhotoFile, deleteChallengeFile, deleteChatFile, deleteMaterialFile,
+  istSichererDateiname,
   REQUESTS_DIR, CHALLENGES_DIR, CHAT_DIR, MATERIAL_DIR,
 };

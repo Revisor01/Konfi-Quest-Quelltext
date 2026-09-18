@@ -15,7 +15,7 @@ import {
 } from '@ionic/react';
 import { ICON_FUNKELN_GEFUELLT, ICON_PROFIL, ICON_SCHLIESSEN } from '../../shared/icons';
 import KonfiOnboardingModal from '../modals/KonfiOnboardingModal';
-import KonfiUpdate211WalkthroughModal from '../modals/KonfiUpdate211WalkthroughModal';
+import KonfiUpdate220WalkthroughModal from '../modals/KonfiUpdate220WalkthroughModal';
 import { useOnboardingWithUpdateOnce } from '../../../hooks/useOnboardingOnce';
 import NeuerungenBanner from '../../shared/NeuerungenBanner';
 import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
@@ -265,12 +265,13 @@ const KonfiDashboardPage: React.FC = () => {
     });
   };
 
-  // --- Onboarding-Tour (frische Accounts) bzw. Neuigkeiten-Karte
-  // "Was ist neu in Version 2.0" (Bestandsnutzer) — nie beides. Der
-  // Walkthrough poppt nicht mehr von selbst auf, sondern öffnet sich über
-  // die Karte oder dauerhaft über "Was ist neu?" im Profil.
+  // --- Onboarding-Tour (Neuinstallation) bzw. Änderungsanzeige nach einem
+  // Update (Bestandsnutzer) — nie beides, dafür sorgt der Hook. Die Anzeige
+  // meldet sich genau einmal je Minor-Version von selbst; dauerhaft
+  // erreichbar bleibt sie über "Was ist neu?" im Profil.
   const {
     showOnboarding, closeOnboarding,
+    showNeuerungen, schliesseNeuerungen,
     showUpdateHinweis, markUpdateHinweisGesehen,
     showMitmachenHinweis, markMitmachenHinweisGesehen
   } = useOnboardingWithUpdateOnce('konfi_onboarding_seen', user?.id);
@@ -295,22 +296,43 @@ const KonfiDashboardPage: React.FC = () => {
     event.detail.complete();
   };
 
-  if (loading) {
-    return <LoadingSpinner fullScreen message="Konfi Quest wird geladen..." />;
-  }
-
-  if (!dashboardData) {
+  // Bis hierher standen an dieser Stelle zwei fruehe Ausstiege, die je eine
+  // EIGENE IonPage zurueckgaben -- der Ladebildschirm sogar seine eigene aus
+  // LoadingSpinner. Die Startseite rendert dann nacheinander ZWEI verschiedene
+  // IonPage-ELEMENTE, und daran haengt der weisse Start:
+  //
+  //   1. Ladebildschirm -> Element A. Ionic haengt im ref-Callback synchron
+  //      `ion-page-invisible` an (@ionic/react, IonPage.stableMergedRefs).
+  //      Der Wechsel in den Tab laeuft als Uebergang und nimmt die Klasse ab.
+  //   2. Daten da, `loading` faellt -> React wirft A weg und baut Element B.
+  //      Dessen ref-Callback haengt `ion-page-invisible` ERNEUT an. Nur: Die
+  //      Route hat sich nicht geaendert, es laeuft kein zweiter Uebergang,
+  //      und niemand nimmt die Klasse je wieder ab.
+  //
+  // Ergebnis ist genau das beobachtete Bild: Die Tab-Leiste steht (sie haengt
+  // ausserhalb des Router-Outlets), der Seiteninhalt ist unsichtbar -- weiss.
+  // Wegnavigieren und zurueck loest einen echten Uebergang aus, der die Klasse
+  // abnimmt; deshalb war "danach alles da".
+  //
+  // Deshalb haelt die Seite ueber ALLE drei Zustaende (laedt / kein Ergebnis /
+  // Daten da) EINE einzige IonPage. Die Leitungsseiten machen das schon immer
+  // so -- deshalb war die Leitung als einzige Rolle nicht betroffen.
+  if (loading || !dashboardData) {
     return (
-      <IonPage>
-        <IonHeader>
+      <IonPage ref={pageRef}>
+        <IonHeader translucent={true}>
           <IonToolbar>
             <IonTitle>Konfi Quest</IonTitle>
           </IonToolbar>
         </IonHeader>
-        <IonContent>
-          <p style={{ textAlign: 'center', marginTop: 'var(--app-freiraum-kopf-m)' }}>
-            Deine Startseite konnte nicht geladen werden. Zieh die Seite nach unten, um es erneut zu versuchen.
-          </p>
+        <IonContent className="app-gradient-background" fullscreen>
+          {loading ? (
+            <LoadingSpinner message="Konfi Quest wird geladen..." />
+          ) : (
+            <p style={{ textAlign: 'center', marginTop: 'var(--app-freiraum-kopf-m)' }}>
+              Deine Startseite konnte nicht geladen werden. Zieh die Seite nach unten, um es erneut zu versuchen.
+            </p>
+          )}
         </IonContent>
       </IonPage>
     );
@@ -483,9 +505,17 @@ const KonfiDashboardPage: React.FC = () => {
         />
       )}
 
-      {/* "Was ist neu"-Walkthrough — geöffnet über die Neuigkeiten-Karte */}
+      {/* Änderungsanzeige nach einem Update — meldet sich VON SELBST, genau
+          einmal je Minor-Version (useOnboardingWithUpdateOnce). Sie und die
+          Onboarding-Tour schließen sich gegenseitig aus; die Neuigkeiten-
+          Karte bleibt weg, solange sie offen ist. */}
+      {showNeuerungen && (
+        <KonfiUpdate220WalkthroughModal onClose={schliesseNeuerungen} />
+      )}
+
+      {/* Derselbe Walkthrough — hier über die Neuigkeiten-Karte geöffnet. */}
       {showUpdateWalkthrough && (
-        <KonfiUpdate211WalkthroughModal
+        <KonfiUpdate220WalkthroughModal
           onClose={() => setShowUpdateWalkthrough(false)}
         />
       )}

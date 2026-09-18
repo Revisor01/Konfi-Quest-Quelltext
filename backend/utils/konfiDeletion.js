@@ -5,6 +5,7 @@
 // auseinanderlaufen.
 
 const { deletePhotoFile, deleteChallengeFile, deleteChatFile } = require('./photoStorage');
+const { rueckeNach } = require('./bookingUtils');
 
 /**
  * Loescht einen Konfi und alle 16 abhaengigen Tabellen in der korrekten
@@ -21,13 +22,45 @@ const { deletePhotoFile, deleteChallengeFile, deleteChatFile } = require('./phot
  * @param {import('pg').PoolClient} client - DB-Client (Transaktion vom Aufrufer gesteuert)
  * @param {number} userId - ID des zu loeschenden Konfis
  * @param {number} organizationId - Organisation des Konfis (Scope-Schutz)
+ * @returns {Promise<Array<{eventId: number, userId: number, seite: 'konfi'|'team'}>>}
+ *   Wer von einer Warteliste auf die frei gewordenen Plaetze nachgerueckt ist.
+ *   Die Aufrufer geben das an utils/nachrueckMeldung.meldeNachrueckern weiter
+ *   (nach dem COMMIT); das Nachruecken selbst ist bereits erledigt und Teil
+ *   derselben Transaktion.
  */
 async function deleteKonfiCascade(client, userId, organizationId) {
   // Reihenfolge MUSS erhalten bleiben (FK-Constraints).
   await client.query("DELETE FROM user_activities WHERE user_id = $1 AND organization_id = $2", [userId, organizationId]);
   await client.query("DELETE FROM bonus_points WHERE konfi_id = $1 AND organization_id = $2", [userId, organizationId]);
   await client.query("DELETE FROM event_points WHERE konfi_id = $1 AND organization_id = $2", [userId, organizationId]);
+
+  // Die Kontingent-Seite folgt der Rolle der geloeschten Person: Diese
+  // Funktion loescht auch Teamer- und Admin-Konten (Selbstloeschung ueber
+  // /auth/delete-account, alle Rollen), und ein frei gewordener Team-Platz
+  // darf nicht an eine wartende Konfi gehen.
+  const { rows: [rolle] } = await client.query(
+    "SELECT COALESCE(r.name, '') <> 'konfi' AS ist_team FROM users u LEFT JOIN roles r ON u.role_id = r.id WHERE u.id = $1",
+    [userId]
+  );
+  const seite = rolle?.ist_team ? 'team' : 'konfi';
+  const { rows: freiwerdend } = await client.query(
+    `SELECT event_id, timeslot_id FROM event_bookings
+      WHERE user_id = $1 AND organization_id = $2 AND status = 'confirmed'`,
+    [userId, organizationId]
+  );
+
   await client.query("DELETE FROM event_bookings WHERE user_id = $1 AND organization_id = $2", [userId, organizationId]);
+
+  const nachgerueckt = [];
+  for (const platz of freiwerdend) {
+    const [promoted] = await rueckeNach(client, {
+      eventId: platz.event_id,
+      timeslotId: seite === 'team' ? null : platz.timeslot_id,
+      seite
+    });
+    if (promoted) nachgerueckt.push({ eventId: platz.event_id, userId: promoted, seite });
+  }
+
   await client.query("DELETE FROM user_badges WHERE user_id = $1", [userId]);
   // Nachweisfotos der Anträge dieses Konfis vor dem DB-Delete einsammeln,
   // damit die Dateien anschliessend vom Dateisystem entfernt werden können.
@@ -122,6 +155,8 @@ async function deleteKonfiCascade(client, userId, organizationId) {
   for (const row of chatFileRows) {
     await deleteChatFile(row.file_path);
   }
+
+  return nachgerueckt;
 }
 
 module.exports = { deleteKonfiCascade };

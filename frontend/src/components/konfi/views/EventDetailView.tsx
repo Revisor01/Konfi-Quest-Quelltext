@@ -58,7 +58,7 @@ import { track } from '../../../services/analytics';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import LoadingSpinner from '../../common/LoadingSpinner';
-import { SectionHeader, formatEventDateLong as formatDate, formatEventTime as formatTime, istVergangen } from '../../shared';
+import { SectionHeader, AbsageBlock, formatEventDateLong as formatDate, formatEventTime as formatTime, istVergangen, istAbgesagt } from '../../shared';
 import UnregisterModal from '../modals/UnregisterModal';
 import QRScannerModal from '../modals/QRScannerModal';
 import { Event } from '../../../types/event';
@@ -469,7 +469,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     const isOnWaitlist = eventData.booking_status === 'waitlist' || eventData.booking_status === 'pending';
     const isAusstehend = isPastEvent && eventData.is_registered && !isOnWaitlist && !eventData.attendance_status;
 
-    if (eventData.cancelled) return danger;
+    if (istAbgesagt(eventData)) return danger;
     if (eventData.is_opted_out || eventData.booking_status === 'opted_out') return events;
     if (isKonfi && !isPastEvent) return info; // Konfirmation = blau (analog Admin)
     if (isPastEvent && eventData.attendance_status === 'present') return success;
@@ -493,7 +493,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     const isOnWaitlist = eventData.booking_status === 'waitlist' || eventData.booking_status === 'pending';
     const isAusstehend = isPastEvent && eventData.is_registered && !isOnWaitlist && !eventData.attendance_status;
 
-    if (eventData.cancelled) return 'Abgesagt';
+    if (istAbgesagt(eventData)) return 'Abgesagt';
     if (eventData.is_opted_out || eventData.booking_status === 'opted_out') return 'Abgemeldet';
     if (isKonfi && !isPastEvent) return eventData.is_registered ? 'Angemeldet' : 'Konfirmation';
     if (isPastEvent && eventData.attendance_status === 'present') return 'Verbucht';
@@ -560,6 +560,15 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
   const isUnlimited = (eventData.max_participants || 0) === 0;
   const spotsLeft = isUnlimited ? null : eventData.max_participants - konfiRegistered;
 
+  // ABGESAGTE TERMINE ZEIGEN KEINE PLATZ-ZAHLEN.
+  //
+  // NICHT die urspruengliche Zahl in registered_count stehen lassen: Das Feld
+  // heisst ueberall "wer ist angemeldet". Waere es bei einer Absage etwas
+  // anderes, haette derselbe Name wieder zwei Bedeutungen -- genau die
+  // Fehlerklasse, gegen die event_booking_stats gebaut wurde.
+  const istAbgesagterTermin = istAbgesagt(eventData);
+  const abgemeldetCount = eventData.abgemeldet_count ?? 0;
+
   return (
     <IonPage ref={pageRef}>
       <IonHeader translucent>
@@ -615,7 +624,12 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           colors={getStatusColors()}
           stats={[
             // Unbegrenzt -> "∞ Frei" statt einer irrefuehrenden 0.
-            { value: isUnlimited ? '∞' : Math.max(0, spotsLeft ?? 0), label: 'Frei' },
+            // Abgesagt: keine Platz-Zahl, sondern wie viele der Termin
+            // erreicht hat (Begruendung oben bei istAbgesagterTermin).
+            // Sonst: unbegrenzt -> "∞ Frei" statt einer irrefuehrenden 0.
+            istAbgesagterTermin
+              ? { value: abgemeldetCount, label: 'Abgemeldet' }
+              : { value: isUnlimited ? '∞' : Math.max(0, spotsLeft ?? 0), label: 'Frei' },
             // Punkte-Kachel nur, wenn es welche gibt (Pflicht/Konfirmation: 0).
             ...((eventData.points || 0) > 0 && !eventData.mandatory && !eventData.is_konfirmation
               ? [{ value: eventData.points, label: 'Punkte' }]
@@ -623,6 +637,11 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
             { value: konfiRegistered, label: 'Dabei' }
           ]}
         />
+
+        {/*
+            Ohne Grund faellt der ganze Block weg — die Absage allein steht
+            schon im Kopf, eine leere Box daruntersagt nichts. */}
+        <AbsageBlock event={eventData} variante="kasten" />
 
         {/* QR Check-in Status / Button */}
         {eventData.attendance_status === 'present' ? (
@@ -731,7 +750,11 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                 <IonIcon icon={ICON_GRUPPE_GEFUELLT} className="app-info-row__icon app-icon-color--participants" />
                 <div>
                   <div className="app-info-row__label">Teilnehmer:innen</div>
-                  <div className="app-info-row__value">{(eventData.registered_count || 0)} / {eventData.max_participants > 0 ? eventData.max_participants : <IonIcon icon={ICON_UNENDLICH} style={{ verticalAlign: 'middle', fontSize: 'var(--app-icon-inline)' }} />}</div>
+                  <div className="app-info-row__value">
+                    {istAbgesagterTermin
+                      ? `${abgemeldetCount} abgemeldet`
+                      : <>{(eventData.registered_count || 0)} / {eventData.max_participants > 0 ? eventData.max_participants : <IonIcon icon={ICON_UNENDLICH} style={{ verticalAlign: 'middle', fontSize: 'var(--app-icon-inline)' }} />}</>}
+                  </div>
                 </div>
               </div>
 
@@ -899,6 +922,22 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                   const isPastEvent = istVergangen(eventData);
                   const isOptedOut = eventData.is_opted_out || eventData.booking_status === 'opted_out';
 
+                  // ZU EINEM ABGESAGTEN TERMIN MELDET SICH NIEMAND (WIEDER) AN
+                  // Wer
+                  // sich von einem Pflichttermin abgemeldet hatte und danach
+                  // die Absage erlebte, sah weiter "Wieder anmelden" — und der
+                  // Knopf ging auch durch. Vor isPastEvent und isOptedOut:
+                  // Abgesagt schlaegt alles, egal in welchem Zustand die
+                  // eigene Buchung ist.
+                  if (istAbgesagt(eventData)) {
+                    return (
+                      <IonNote color="medium" style={{ display: 'block', textAlign: 'center', fontSize: 'var(--app-text-betont)' }}>
+                        <IonIcon icon={ICON_ABSAGE} style={{ verticalAlign: 'middle', marginRight: 'var(--app-abstand-kompakt)' }} />
+                        Dieser Termin ist abgesagt
+                      </IonNote>
+                    );
+                  }
+
                   if (isPastEvent) {
                     return (
                       <IonNote color="medium" style={{ display: 'block', textAlign: 'center', fontSize: 'var(--app-text-betont)' }}>
@@ -993,6 +1032,11 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                     </IonButton>
                   )}
                 </div>
+              ) : istAbgesagt(eventData) ? (
+                <IonNote color="medium" style={{ display: 'block', textAlign: 'center', fontSize: 'var(--app-text-betont)' }}>
+                  <IonIcon icon={ICON_ABSAGE} style={{ verticalAlign: 'middle', marginRight: 'var(--app-abstand-kompakt)' }} />
+                  Dieser Termin ist abgesagt
+                </IonNote>
               ) : (isKonfirmationEvent(eventData) && hasExistingKonfirmation) ? (
                 <IonButton
                   className="app-action-button"
@@ -1003,7 +1047,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                   <IonIcon icon={ICON_WARNUNG_GEFUELLT} slot="start" />
                   Konfirmationstermin bereits gebucht
                 </IonButton>
-              ) : eventData.can_register && eventData.registration_status === 'open' && (eventData.max_participants === 0 || eventData.registered_count < eventData.max_participants) ? (
+              ) : eventData.can_register && eventData.registration_status === 'open' && (eventData.max_participants === 0 || (eventData.registered_count || 0) < eventData.max_participants) ? (
                 <IonButton
                   className="app-action-button"
                   expand="block"
@@ -1012,9 +1056,15 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                   onClick={handleRegister}
                 >
                   <IonIcon icon={ICON_ZUSAGE_GEFUELLT} slot="start" />
-                  {!isOnline ? <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Du bist offline</> : `Anmelden (${eventData.registered_count}/${eventData.max_participants})`}
+                  {/* `|| 0` wie in der Wartelisten-Zeile darunter: Ein Termin
+                      ohne jede Buchung lieferte die Zahl als null, auf dem
+                      Knopf stand "Anmelden (null/4)". Das Backend gibt jetzt
+                      0 zurueck; die Absicherung bleibt trotzdem stehen, weil
+                      ausgelieferte App-Fassungen auch gegen aeltere Staende
+                      laufen. */}
+                  {!isOnline ? <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Du bist offline</> : `Anmelden (${eventData.registered_count || 0}/${eventData.max_participants})`}
                 </IonButton>
-              ) : eventData.waitlist_enabled && eventData.max_participants > 0 && eventData.registered_count >= eventData.max_participants && eventData.registration_status === 'open' ? (
+              ) : eventData.waitlist_enabled && eventData.max_participants > 0 && (eventData.registered_count || 0) >= eventData.max_participants && eventData.registration_status === 'open' ? (
                 <IonButton
                   className="app-action-button"
                   expand="block"

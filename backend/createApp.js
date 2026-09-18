@@ -384,7 +384,11 @@ function createApp(db, options = {}) {
     if (!req.user?.is_super_admin) {
       return res.status(403).json({ error: 'Zugriff verweigert' });
     }
-    const days = Math.min(30, Math.max(1, parseInt(req.query.days, 10) || 7));
+    // Bis zu zwei Jahre abrufbar, so weit die Aufbewahrung reicht
+    // (backgroundService räumt Älteres weg). Die Vorgabe bleibt eine Woche:
+    // Wer nichts angibt, will den aktuellen Verlauf, nicht die Historie.
+    // Der Index auf captured_at DESC trägt auch den grossen Bereich.
+    const days = Math.min(730, Math.max(1, parseInt(req.query.days, 10) || 7));
     try {
       const { rows } = await db.query(
         `SELECT captured_at, total_requests, total_errors, max_in_flight, worst_p95_ms, worst_route

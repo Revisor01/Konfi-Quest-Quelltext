@@ -123,8 +123,13 @@
 
 <!-- Umami-Reichweitenmessung (self-hosted, cookiefrei, ohne personenbezogene Daten).
      Nur Seitenaufrufe — das ausfuehrliche Interaktions-Tracking laeuft
-     ausschliesslich auf der Landingpage. -->
-<script defer src="https://t.godsapp.de/script.js" data-website-id="dfd37276-5ad4-474d-8306-bf3ed9a3a5d3"></script>
+     ausschliesslich auf der Landingpage.
+
+     data-domains sperrt jede fremde Domain aus. Ohne das Attribut zaehlt Umami
+     von ueberall, wo diese Datei geoeffnet wird — auch von localhost aus der
+     Entwicklung und aus dem App-WebView, in das Capacitor diese Seite mit
+     hineinkopiert. Der Hostname wird EXAKT gegen diese Liste geprueft. -->
+<script defer src="https://t.godsapp.de/script.js" data-website-id="dfd37276-5ad4-474d-8306-bf3ed9a3a5d3" data-domains="konfi-quest.de,www.konfi-quest.de"></script>
 </head>
 <body>
     <div class="container">

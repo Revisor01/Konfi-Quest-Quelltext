@@ -1,19 +1,15 @@
 import { fehlerText } from '../../../utils/fehler';
 import React, { useState } from 'react';
-import { IonButton, IonCard, IonCardContent, IonIcon, IonLabel, IonList, IonListHeader, IonProgressBar, useIonModal, useIonAlert } from '@ionic/react';
+import { IonButton, IonCard, IonCardContent, IonIcon, IonLabel, IonList, IonListHeader, useIonModal, useIonAlert } from '@ionic/react';
 import {
   ICON_ABMELDEN,
-  ICON_AKTION_GEFUELLT,
   ICON_BUCH,
   ICON_GALERIE,
-  ICON_HAKEN_GEFUELLT,
   ICON_KOMPASS,
   ICON_LOESCHEN,
   ICON_MAIL,
   ICON_ORT,
   ICON_PERSON,
-  ICON_POKAL_GEFUELLT,
-  ICON_RAKETE,
   ICON_SCHLUESSEL,
   ICON_STERN,
   ICON_TERMIN,
@@ -22,12 +18,14 @@ import {
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
 import type { BadgeUebersicht } from '../../../types/dashboard';
+import type { ChallengeMark } from '../../../types/challenges';
 import { setUser as setTokenStoreUser } from '../../../services/tokenStore';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { SectionHeader } from '../../shared';
 import { useMediaCacheControl } from '../../../hooks/useMediaCacheControl';
 import ChangePasswordModal from '../../shared/ChangePasswordModal';
+import AppSperreSchalter from '../../shared/AppSperreSchalter';
 import ChangeEmailModal from '../../shared/ChangeEmailModal';
 import DeleteAccountModal from '../../shared/DeleteAccountModal';
 import BibleTranslationModal, { getTranslationName } from '../../shared/BibleTranslationModal';
@@ -35,7 +33,7 @@ import SpiritFooter from '../../shared/SpiritFooter';
 import PointsHistoryModal from '../modals/PointsHistoryModal';
 import WrappedModal from '../../wrapped/WrappedModal';
 import KonfiOnboardingModal from '../modals/KonfiOnboardingModal';
-import KonfiUpdate211WalkthroughModal from '../modals/KonfiUpdate211WalkthroughModal';
+import KonfiUpdate220WalkthroughModal from '../modals/KonfiUpdate220WalkthroughModal';
 import type { WrappedHistoryEntry } from '../../../types/wrapped';
 import { safeUUID } from '../../../utils/uuid';
 import NeuerungenBanner from '../../shared/NeuerungenBanner';
@@ -66,25 +64,10 @@ interface KonfiProfile {
   pending_requests: number;
   rank_in_jahrgang?: number;
   total_in_jahrgang?: number;
-  recent_activities: RecentActivity[];
   progress_overview: ProgressOverview;
 }
 
-interface RecentActivity {
-  id: number;
-  title: string;
-  type: 'activity' | 'event' | 'badge' | 'request';
-  points: number;
-  date: string;
-  icon?: string;
-}
-
 interface ProgressOverview {
-  next_badge?: {
-    name: string;
-    points_needed: number;
-    progress_percentage: number;
-  };
   monthly_points: {
     month: string;
     points: number;
@@ -110,9 +93,10 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
 
   const [selectedTranslation, setSelectedTranslation] = useState<string>(profile.bible_translation || 'LUT');
   const [earnedBadgesCount, setEarnedBadgesCount] = useState<number>(0);
-  // Anzahl der eigenen Challenge-Stempel (marks). Schlanker Zusatzabruf —
-  // fällt er aus, bleibt die Kachel bei 0 statt das Profil zu stoeren.
-  const [challengeMarksCount, setChallengeMarksCount] = useState<number>(0);
+  // Die eigenen Challenge-Stempel (marks). Schlanker Zusatzabruf — faellt er
+  // aus, bleibt die Kachel bei 0 und der Stempel-Abschnitt aus, statt das
+  // Profil zu stoeren.
+  const [challengeMarks, setChallengeMarks] = useState<ChallengeMark[]>([]);
   const { cacheLabel, clearMediaCache: handleClearMediaCache } = useMediaCacheControl();
   const [wrappedHistory, setWrappedHistory] = useState<WrappedHistoryEntry[]>([]);
   // Wrapped-Historie laden
@@ -162,14 +146,13 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
     loadBadges();
   }, []);
 
-  // Challenge-Stempel zählen. Fehler bewusst still: die Kachel zeigt dann 0.
   React.useEffect(() => {
     api.get('/challenges/konfi')
       .then(res => {
         const marks = Array.isArray(res.data?.marks) ? res.data.marks : [];
-        setChallengeMarksCount(marks.length);
+        setChallengeMarks(marks);
       })
-      .catch(() => { /* optionale Kachel — stiller Fehler */ });
+      .catch(() => { /* optionaler Zusatz — stiller Fehler */ });
   }, []);
 
   const handleTranslationChange = async (translation: string) => {
@@ -288,17 +271,6 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
   });
 
 
-  const getActivityIcon = (activity: RecentActivity) => {
-    switch (activity.type) {
-      case 'badge': return ICON_POKAL_GEFUELLT;
-      case 'event': return ICON_TERMIN;
-      case 'activity': return ICON_AKTION_GEFUELLT;
-      case 'request': return ICON_HAKEN_GEFUELLT;
-      default: return ICON_STERN;
-    }
-  };
-
-
   const formatDate = (dateString: string | undefined) => {
     if (!dateString) return 'Unbekannt';
     const date = new Date(dateString);
@@ -307,18 +279,6 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
       day: 'numeric',
       month: 'short',
       year: 'numeric'
-    });
-  };
-
-  const formatDateTime = (dateString: string | undefined) => {
-    if (!dateString) return 'Unbekannt';
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'Ungültiges Datum';
-    return date.toLocaleDateString('de-DE', {
-      day: 'numeric',
-      month: 'short',
-      hour: '2-digit',
-      minute: '2-digit'
     });
   };
 
@@ -335,7 +295,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
         stats={[
           { value: profile.total_points || 0, label: 'PUNKTE' },
           { value: earnedBadgesCount, label: 'BADGES' },
-          { value: challengeMarksCount, label: 'CHALLENGES' }
+          { value: challengeMarks.length, label: 'CHALLENGES' }
         ]}
       />
 
@@ -453,73 +413,6 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
           </div>
         </div>
       </div>
-      )}
-
-      {/* Next Badge Progress */}
-      {profile.progress_overview?.next_badge && (
-        <IonCard style={{ margin: 'var(--app-abstand-basis)', borderRadius: 'var(--app-radius-klein)' }}>
-          <IonCardContent>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 'var(--app-abstand-mittel)' }}>
-              <IonIcon icon={ICON_RAKETE} style={{ fontSize: 'var(--app-text-untertitel)', color: 'var(--app-color-rakete)', marginRight: 'var(--app-abstand-eng)' }} />
-              <h3 style={{ margin: '0', fontSize: 'var(--app-text-gross)', fontWeight: 'var(--app-schrift-halbfett)' }}>
-                Nächstes Badge
-              </h3>
-            </div>
-            <p style={{ margin: '0 0 var(--app-abstand-eng) 0', fontSize: 'var(--app-text-standard)', fontWeight: 'var(--app-schrift-mittel)' }}>
-              {profile.progress_overview.next_badge.name}
-            </p>
-            <IonProgressBar 
-              value={profile.progress_overview.next_badge.progress_percentage / 100}
-              style={{ 
-                height: '8px', 
-                borderRadius: 'var(--app-radius-fein)',
-                marginBottom: 'var(--app-abstand-eng)',
-                '--progress-background': 'var(--app-gradient-rakete-quer)'
-              }}
-            />
-            <p style={{ margin: '0', fontSize: 'var(--app-text-sekundaer)', color: 'var(--app-text-secondary)' }}>
-              Noch {profile.progress_overview.next_badge.points_needed} Punkte bis zum nächsten Badge
-              ({Math.round(profile.progress_overview.next_badge.progress_percentage)}%)
-            </p>
-          </IonCardContent>
-        </IonCard>
-      )}
-
-      {/* Recent Activities */}
-      {profile.recent_activities && profile.recent_activities.length > 0 && (
-        <IonCard style={{ margin: 'var(--app-abstand-basis)', borderRadius: 'var(--app-radius-klein)' }}>
-          <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
-            <h3 style={{ margin: '0 0 var(--app-abstand-mittel) 0', fontSize: 'var(--app-text-gross)', fontWeight: 'var(--app-schrift-halbfett)' }}>
-              Letzte Aktivitäten
-            </h3>
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              {profile.recent_activities.slice(0, 5).map((activity, index) => {
-                const colorVariant = activity.type === 'badge' ? 'warning' : activity.type === 'event' ? 'info' : activity.type === 'activity' ? 'success' : 'warning';
-                return (
-                  <div key={index} className={`app-list-item app-list-item--${colorVariant}`}>
-                    <div className="app-list-item__row">
-                      <div className="app-list-item__main">
-                        <div className={`app-icon-circle app-icon-circle--${colorVariant}`}>
-                          <IonIcon icon={getActivityIcon(activity)} />
-                        </div>
-                        <div className="app-list-item__content">
-                          <div className="app-list-item__title">
-                            {activity.title}
-                          </div>
-                          <div className="app-list-item__meta">
-                            <span className="app-list-item__meta-item">
-                              {formatDateTime(activity.date)} -- {activity.points} {activity.points === 1 ? 'Punkt' : 'Punkte'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </IonCardContent>
-        </IonCard>
       )}
 
       <NeuerungenBanner
@@ -702,8 +595,10 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                 </div>
               </div>
 
-              {/* Biometrische Anmeldung (blendet sich selbst aus, wenn das
-                  Geraet keine eingerichtete Biometrie hat) */}
+              {/* App-Sperre: Face ID / Fingerabdruck vor der laufenden App.
+                  Blendet sich selbst aus, wenn das Geraet keine eingerichtete
+                  Biometrie hat. */}
+              <AppSperreSchalter variante="purple" />
 
               {/* Medien-Cache leeren */}
               <div
@@ -736,12 +631,8 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
           expand="block"
           fill="outline"
           color="danger"
+          className="app-gefahr-knopf"
           onClick={handleLogout}
-          style={{
-            height: '48px',
-            borderRadius: 'var(--app-radius-karte)',
-            fontWeight: 'var(--app-schrift-halbfett)'
-          }}
         >
           <IonIcon icon={ICON_ABMELDEN} slot="start" />
           Abmelden
@@ -751,13 +642,8 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
           expand="block"
           fill="outline"
           color="danger"
+          className="app-gefahr-knopf"
           onClick={() => presentDeleteAccount({ presentingElement: pageRef?.current || presentingElement || undefined })}
-          style={{
-            height: '48px',
-            marginTop: 'var(--app-abstand-eng)',
-            borderRadius: 'var(--app-radius-karte)',
-            fontWeight: 'var(--app-schrift-halbfett)'
-          }}
         >
           <IonIcon icon={ICON_LOESCHEN} slot="start" />
           Account löschen
@@ -776,11 +662,12 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
         />
       )}
 
-      {/* "Was ist neu?" — derselbe Walkthrough wie nach dem Update */}
+      {/* "Was ist neu?" — derselbe Walkthrough wie nach dem Update. Ohne
+          displayName: Die Begrüßung mit Namen gehört zur Onboarding-Tour,
+          nicht zur Änderungsanzeige. */}
       {showUpdateWalkthrough && (
-        <KonfiUpdate211WalkthroughModal
+        <KonfiUpdate220WalkthroughModal
           onClose={() => setShowUpdateWalkthrough(false)}
-          displayName={(user?.display_name || profile.display_name || '').split(' ')[0]}
         />
       )}
 
