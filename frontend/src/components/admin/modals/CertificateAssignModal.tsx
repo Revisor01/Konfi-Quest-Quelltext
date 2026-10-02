@@ -6,6 +6,7 @@ import api from '../../../services/api';
 import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import { ICON_CHOICES } from '../../../utils/badgeIcons';
+import { tastaturKlick } from '../../../utils/tastatur';
 
 
 interface CertificateAssignModalProps {
@@ -100,7 +101,7 @@ const CertificateAssignModal: React.FC<CertificateAssignModalProps> = ({
                   const iconData = ct.icon ? ICON_CHOICES[ct.icon] : null;
                   const isSelected = selectedTypeId === ct.id;
                   return (
-                    <div
+                    <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                       key={ct.id}
                       className="app-list-item"
                       onClick={() => setSelectedTypeId(ct.id)}
@@ -143,8 +144,8 @@ const CertificateAssignModal: React.FC<CertificateAssignModalProps> = ({
             <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
               <p className="app-text-sub" style={{ marginBottom: 'var(--app-abstand-mini)' }}>Erhalten</p>
               <IonDatetimeButton datetime="cert-start-date" style={{ justifyContent: 'flex-start' }} />
-              <IonModal keepContentsMounted={true}>
-                <IonDatetime
+              <IonModal aria-label="Erhalten am: Datum wählen" keepContentsMounted={true}>
+                <IonDatetime aria-label="Erhalten am"
                   id="cert-start-date"
                   presentation="date"
                   firstDayOfWeek={1}
@@ -160,7 +161,7 @@ const CertificateAssignModal: React.FC<CertificateAssignModalProps> = ({
               </IonModal>
               <p className="app-text-sub" style={{ marginTop: 'var(--app-abstand-mittel)', marginBottom: 'var(--app-abstand-mini)' }}>Laufzeit (Monate): {durationMonths || '0'}</p>
               <div style={{ padding: '0 var(--app-abstand-basis)' }}>
-                <IonRange
+                <IonRange aria-label="Laufzeit (Monate)"
                   min={0}
                   max={36}
                   step={1}

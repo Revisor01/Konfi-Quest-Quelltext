@@ -2,8 +2,10 @@ import React, { useEffect, useCallback } from 'react';
 import { Navigate, Route } from 'react-router-dom';
 import { IonApp, IonRouterOutlet, IonSpinner, setupIonicReact, isPlatform, useIonAlert } from '@ionic/react';
 import { IonReactRouter } from '@ionic/react-router';
-// iOS26 Theme Animationen
-import { iosTransitionAnimation, popoverEnterAnimation, popoverLeaveAnimation } from '@rdlabo/ionic-theme-ios26';
+// Animationen des iOS-Themes (ios27)
+import { iosTransitionAnimation, popoverEnterAnimation, popoverLeaveAnimation } from '@rdlabo/ionic-theme-ios27';
+import { segmentGlasAnschalten } from './utils/segmentGlas';
+import { modalNamenAnschalten } from './utils/modalNamen';
 // Material Design 3 Animationen
 import { mdTransitionAnimation } from '@rdlabo/ionic-theme-md3';
 // Icons sind jetzt in MainTabs.tsx
@@ -17,11 +19,14 @@ import ResetPasswordPage from './components/auth/ResetPasswordPage';
 import MainTabs from './components/layout/MainTabs';
 import ErrorBoundary from './components/common/ErrorBoundary';
 import GlobalToasts from './components/common/GlobalToasts';
-import WartendeVorgaengeLeiste from './components/common/WartendeVorgaengeLeiste';
+import PostfachModal from './components/common/PostfachModal';
 import AppSperrbildschirm from './components/common/AppSperrbildschirm';
 import AppAbdeckung from './components/common/AppAbdeckung';
+import MindestversionHinweis from './components/common/MindestversionHinweis';
+import { beobachteBetriebsstatus } from './services/betriebsstatus';
 import { useAppSperre } from './hooks/useAppSperre';
 import { useSeitenBereit } from './navigation/useSeitenBereit';
+import PushZielNavigation from './navigation/PushZielNavigation';
 
 /**
  * Ladebildschirm VOR dem Router — bewusst KEINE IonPage.
@@ -46,26 +51,41 @@ import '@ionic/react/css/typography.css';
 
 /* Optional CSS utils that can be commented out */
 import '@ionic/react/css/padding.css';
-import '@ionic/react/css/float-elements.css';
+// float-elements.css (Ionics Hilfsklassen zum Umfliessen) steht hier nicht
+// Keine Stelle der App nutzt diese
+// Klassen, und die Datei war die einzige Quelle der Build-Warnung
+// "'host-context' is not recognized" (zehn :host-context([dir=rtl])-Regeln,
+// 2.952 Bytes). startBuendel.test.ts schlaegt an, wenn eine Klasse davon
+// auftaucht.
 import '@ionic/react/css/text-alignment.css';
 import '@ionic/react/css/text-transformation.css';
 import '@ionic/react/css/flex-utils.css';
 import '@ionic/react/css/display.css';
 
 /**
- * Ionic Dark Mode - DISABLED
+ * Dunkelmodus: folgt der Systemeinstellung des Geraets.
  * -----------------------------------------------------
- * Dark Mode ist deaktiviert bis zur vollständigen Implementierung
+ * Ionics System-Palette stellt Hintergrund, Text und die ion-color-Stufen
+ * um. Die passende Variante des iOS-Themes (-dark-system) liegt in
+ * theme/variables.css bei den Theme-Imports, die dunklen Werte unserer
+ * eigenen Farbtokens stehen dort in EINEM @media-Block. Die Palette muss
+ * VOR variables.css geladen werden, damit unsere Werte gewinnen.
  */
-
-/* import '@ionic/react/css/palettes/dark.always.css'; */
-/* import '@ionic/react/css/palettes/dark.class.css'; */
-/* import '@ionic/react/css/palettes/dark.system.css'; */
+import '@ionic/react/css/palettes/dark.system.css';
 
 /* Theme variables */
 import './theme/variables.css';
+/* Fokusringe, nackte Knöpfe und Links der Anmeldeseiten -- muss NACH
+   variables.css kommen, siehe Kopf der Datei. */
+import './theme/barrierefreiheit.css';
+import { bewegungReduziert } from './utils/bewegung';
+import { anmeldeHinweisMerken } from './utils/anmeldeHinweis';
 
 setupIonicReact({
+  // Seitenuebergaenge, Modale und Popover laufen als Web Animations, nicht
+  // per CSS -- wer im System „Bewegung reduzieren" eingeschaltet hat,
+  // bekommt sie hier abgeschaltet.
+  animated: !bewegungReduziert(),
   rippleEffect: true,
   inputBlurring: true,
   scrollPadding: true,
@@ -81,6 +101,24 @@ setupIonicReact({
 
 const AppContent: React.FC = () => {
   const { user, setUser, orgVersion, signOut } = useApp();
+
+  // Glas-Effekt fuer alle Segmente anschalten (Begruendung in segmentGlas.ts).
+  // Einmal fuer die ganze App: Der Beobachter dort faengt auch Segmente, die
+  // erst spaeter in einem Modal auftauchen.
+  useEffect(() => segmentGlasAnschalten(), []);
+
+  // Jedes Modal traegt seinen Titel als Namen fuer Vorlesehilfen (Begruendung
+  // in modalNamen.ts). Ebenfalls einmal fuer die ganze App: Es gilt fuer die
+  // 92 per useIonModal geoeffneten Modale und jedes kuenftige.
+  useEffect(() => modalNamenAnschalten(), []);
+
+  // Mindestversion und Wartungshinweis: EINE Pruefung
+  // fuer die ganze App, beim Start und bei jeder Rueckkehr in die App.
+  // Die Hinweise lesen nur den Stand (services/betriebsstatus.ts).
+  // Laeuft auch vor der Anmeldung -- der Endpunkt braucht keine, und ein zu
+  // altes Geraet soll schon an der Anmeldeseite erfahren, dass es ein Update
+  // braucht.
+  useEffect(() => beobachteBetriebsstatus(), []);
 
   // App-Sperre: Face ID / Fingerabdruck vor der bereits angemeldeten App.
   // Der Hook laeuft immer mit (er muss den Hintergrundwechsel auch dann
@@ -124,13 +162,12 @@ const AppContent: React.FC = () => {
   // crashen. Jetzt setzen wir nur den User auf null -> React rendert sofort die
   // Login-Route (AppContent unten). Der Hinweis "Sitzung abgelaufen" geht per
   // sessionStorage an die LoginView.
+  // Bei einer Zugangs-Sperre traegt das Ereignis die Meldung des Servers; sie
+  // ersetzt dann "Sitzung abgelaufen".
   useEffect(() => {
-    const handler = () => {
-      try {
-        sessionStorage.setItem('session_expired', '1');
-      } catch {
-        // sessionStorage nicht verfuegbar -> Hinweis entfaellt, Login kommt trotzdem
-      }
+    const handler = (ereignis: Event) => {
+      const detail = (ereignis as CustomEvent<{ sperrMeldung?: string | null } | undefined>).detail;
+      anmeldeHinweisMerken(detail?.sperrMeldung);
       setUser(null);
     };
     window.addEventListener('auth:relogin-required', handler);
@@ -146,10 +183,38 @@ const AppContent: React.FC = () => {
   //   };
   // }, [user, refreshFromAPI]);
 
-  if (!user) {
-    return (
-      <IonApp>
+  // ---------------------------------------------------------------------------
+  // EIN EINZIGER EINHAENGEPUNKT fuer Sperrbildschirm und Abdeckung.
+  //
+  // Vorher stand der Sperrbildschirm in JEDEM Rueckgabezweig einmal — im
+  // Ladezweig an zweiter Stelle hinter dem Ladebildschirm, im fertigen Zweig an
+  // vierter hinter Router, Toasts und Vorgangsleiste. React gleicht Kinder nach
+  // POSITION ab: verschiebt sich die Stelle, wird die Komponente nicht
+  // abgeglichen, sondern NEU MONTIERT. Nachgemessen in
+  // __tests__/components/appSperreErsterVersuch.test.tsx: gleiche Position ->
+  // eine Montage, verschobene Position -> zwei.
+  //
+  // Beim Kaltstart mit eingeschalteter Sperre passiert genau das. `gesperrt`
+  // steht fruehestens (useAppSperre braucht zwei Aufrufe ueber die
+  // Capacitor-Bruecke), `seitenBereit` spaeter (useSeitenBereit wartet auf
+  // dynamische Importe). Der Sperrbildschirm erscheint also erst im Ladezweig
+  // und wandert dann in den fertigen — und sein Effekt beim Einblenden, der die
+  // Biometrie von selbst abfragt, lief ein ZWEITES Mal.
+  //
+  // Nur der INHALT wechselt jetzt den Zweig, die Huelle steht fest. Damit
+  // wandert der Sperrbildschirm nie mehr, wird nie mehr neu montiert und fragt
+  // genau einmal.
+  // ---------------------------------------------------------------------------
+  const inhalt = (() => {
+    if (!user) {
+      return (
         <IonReactRouter>
+          {/* Auch hier, nicht nur im angemeldeten Zweig: Ein App-Link auf
+              /register?code=... oder /reset-password?token=... wird gerade von
+              denen angetippt, die noch nicht angemeldet sind (utils/deepLinks).
+              Das Ziel kommt ueber denselben Merker wie ein Push-Ziel; ohne
+              diese Komponente holte es im Login-Router niemand ab. */}
+          <PushZielNavigation />
           <IonRouterOutlet>
             <Route path="/login" element={<LoginView />} />
             <Route path="/register" element={<KonfiRegisterPage />} />
@@ -164,14 +229,31 @@ const AppContent: React.FC = () => {
             <Route path="*" element={<Navigate to="/login" replace />} />
           </IonRouterOutlet>
         </IonReactRouter>
-        {/* Auch hier: Auf der Anmeldeseite kann ein eingetippter Benutzername
-            stehen, und nach dem Abmelden ist die letzte Ansicht unter Umstaenden
-            noch im Vorschaubild. Die Abdeckung liegt deshalb ueber JEDEM
-            Zustand, nicht nur ueber der angemeldeten App. */}
-        {verdeckt && <AppAbdeckung />}
-      </IonApp>
+      );
+    }
+
+    // Angemeldet, aber noch nicht bereit: Ladebildschirm. Die Begruendung, WARUM
+    // hier gewartet wird statt zu rendern, steht unten ausfuehrlich.
+    if (!seitenBereit || !startGeklaert) return <AppLaedt />;
+
+    return (
+      <>
+        <IonReactRouter key={orgVersion}>
+          <PushZielNavigation />
+          <IonRouterOutlet>
+            {/* Anstatt die Tabs hier inline zu rendern, rendern wir nur noch eine Route auf MainTabs */}
+            <Route path="/*" element={<MainTabs />} />
+          </IonRouterOutlet>
+        </IonReactRouter>
+        <GlobalToasts />
+        {/* Das Postfach (Mitteilungen + Warteschlange) haengt EINMAL hier und
+            wird von der Glocke in der Kopfzeile geoeffnet (shared/PostfachGlocke,
+            utils/postfach). Neben dem Router, nicht darin: kein Seitenwechsel,
+            und es ueberlebt den Remount bei einem Gemeinde-Wechsel. */}
+        <PostfachModal />
+      </>
     );
-  }
+  })();
 
   // Die Render-Logik wird jetzt super einfach:
   // key={orgVersion}: Bei einem Org-Wechsel (Multi-Org-Switcher) wird orgVersion
@@ -191,36 +273,15 @@ const AppContent: React.FC = () => {
   // verschwindet. Ein Aufblitzen gegen ein anderes zu tauschen waere kein
   // Gewinn. Im Browser steht `startGeklaert` sofort auf true und diese
   // Bedingung kostet dort nichts.
-  if (!seitenBereit || !startGeklaert) {
-    return (
-      <IonApp>
-        <AppLaedt />
-        {gesperrt && (
-          <AppSperrbildschirm
-            onEntsperrt={entsperren}
-            onAbmelden={async () => { entsperren(); await signOut(); }}
-          />
-        )}
-        {verdeckt && <AppAbdeckung />}
-      </IonApp>
-    );
-  }
-
   return (
     <IonApp>
-      <IonReactRouter key={orgVersion}>
-        <IonRouterOutlet>
-          {/* Anstatt die Tabs hier inline zu rendern, rendern wir nur noch eine Route auf MainTabs */}
-          <Route path="/*" element={<MainTabs />} />
-        </IonRouterOutlet>
-      </IonReactRouter>
-      <GlobalToasts />
-      <WartendeVorgaengeLeiste />
+      {inhalt}
       {/* Der Sperrbildschirm liegt OBEN DRAUF, statt den Baum zu ersetzen.
           Ein Austausch wuerde MainTabs bei jedem Sperren neu montieren — genau
           das Muster, das in dieser App schon zu weissen Seiten gefuehrt hat
           (siehe Kommentar zum orgVersion-Schluessel oben). Verdeckt wird
-          vollstaendig und deckend, es scheint nichts durch. */}
+          vollstaendig und deckend, es scheint nichts durch.
+          */}
       {gesperrt && (
         <AppSperrbildschirm
           onEntsperrt={entsperren}
@@ -233,10 +294,15 @@ const AppContent: React.FC = () => {
           }}
         />
       )}
+      <MindestversionHinweis zurueckhalten={gesperrt || !startGeklaert} />
       {/* Die Abdeckung steht ZULETZT und damit ueber dem Sperrbildschirm.
           Beim Wegwechseln kann beides gleichzeitig anstehen — dann gehoert
           ins Vorschaubild die neutrale Flaeche, nicht der bedienbare
-          Sperrbildschirm. */}
+          Sperrbildschirm.
+
+          Sie liegt ueber JEDEM Zustand, auch ueber der Anmeldeseite: Dort kann
+          ein eingetippter Benutzername stehen, und nach dem Abmelden ist die
+          letzte Ansicht unter Umstaenden noch im Vorschaubild. */}
       {verdeckt && <AppAbdeckung />}
     </IonApp>
   );

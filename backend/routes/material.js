@@ -4,9 +4,10 @@ const path = require('path');
 const fs = require('fs');
 const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
-const { encryptBuffer, decryptBuffer } = require('../utils/photoCrypto');
+const { encryptFileToFile, decryptFileToStream, leseKopfBytes } = require('../utils/photoCrypto');
 const { allIdsBelongToOrg } = require('../utils/orgOwnership');
 const liveUpdate = require('../utils/liveUpdate');
+const { istTextTyp, pruefeTextDatei, textInhaltsTyp } = require('../utils/textDatei');
 
 module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
   const { requireTeamer, requireAdmin } = roleHelpers;
@@ -124,7 +125,7 @@ module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
   // ohnehin unbenutzbar). Gleiche Groessenordnung wie die 10 Dateien pro
   // Upload-Anfrage.
   const MAX_LINKS = 20;
-  const LINK_ANZAHL_FEHLER = `Hoechstens ${MAX_LINKS} Links pro Material`;
+  const LINK_ANZAHL_FEHLER = `Höchstens ${MAX_LINKS} Links pro Material`;
 
   // Prueft ein link_urls-Array: jede Adresse einzeln ueber pruefeLink,
   // leere Eintraege fallen still heraus (das Formular schickt keine mit,
@@ -333,6 +334,18 @@ module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
       const eventId = req.params.eventId;
       const schranke = jahrgangsSchranke(req.user, '$3');
 
+      // Fremder oder unbekannter Termin -> 404 statt 200 [].
+      // Beide Apps (2.2.0, 2.3.0) fangen den
+      // Fehler ab und zeigen dann keine Materialien -- wie bei der leeren
+      // Liste.
+      const { rows: [termin] } = await db.query(
+        'SELECT id FROM events WHERE id = $1 AND organization_id = $2',
+        [eventId, orgId]
+      );
+      if (!termin) {
+        return res.status(404).json({ error: 'Event nicht gefunden' });
+      }
+
       const { rows: materials } = await db.query(
         `SELECT m.id, m.title, m.description, m.link_url, m.ist_global, m.created_at,
                 m.created_by, u.display_name as created_by_name,
@@ -464,10 +477,10 @@ module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
 
       // Org-Isolation: fremde IDs abweisen (Cross-Org-Referenzen)
       if (!(await allIdsBelongToOrg(db, 'events', event_ids, req.user.organization_id))) {
-        return res.status(400).json({ error: 'Mindestens ein Event gehört nicht zu deiner Organisation' });
+        return res.status(400).json({ error: 'Mindestens ein Event gehört nicht zu deiner Gemeinde' });
       }
       if (!(await allIdsBelongToOrg(db, 'jahrgaenge', jahrgang_ids, req.user.organization_id))) {
-        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Organisation' });
+        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Gemeinde' });
       }
 
       const { rows: [material] } = await db.query(
@@ -577,10 +590,10 @@ module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
 
       // Org-Isolation: fremde IDs abweisen (Cross-Org-Referenzen)
       if (!(await allIdsBelongToOrg(db, 'events', event_ids, req.user.organization_id))) {
-        return res.status(400).json({ error: 'Mindestens ein Event gehört nicht zu deiner Organisation' });
+        return res.status(400).json({ error: 'Mindestens ein Event gehört nicht zu deiner Gemeinde' });
       }
       if (!(await allIdsBelongToOrg(db, 'jahrgaenge', jahrgang_ids, req.user.organization_id))) {
-        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Organisation' });
+        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Gemeinde' });
       }
 
       const updates = [];
@@ -783,9 +796,11 @@ module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
         return res.status(400).json({ error: 'Keine Dateien hochgeladen' });
       }
 
-      // Magic-Bytes-Validierung auf den Buffern (echte Dateitypen erzwingen).
+      // Magic-Bytes-Validierung auf den Kopfbytes der Temporaerdateien (echte
+      // Dateitypen erzwingen). diskStorage liefert file.path statt file.buffer;
+      // zehn Dateien a 20 MB lagen sonst gleichzeitig im Arbeitsspeicher.
+      // Geprueft wird weiterhin ALLES, bevor die ERSTE Datei abgelegt wird.
       const { fileTypeFromBuffer } = await import('file-type');
-      const textMimes = ['text/plain', 'text/csv'];
       const allowedPrefixes = [
         'image/', 'video/', 'audio/', 'application/pdf',
         'application/vnd.openxmlformats', 'application/msword',
@@ -794,11 +809,19 @@ module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
         'application/zip', 'application/x-cfb'
       ];
       for (const file of req.files) {
-        if (!file.buffer) {
+        if (!file.path) {
           return res.status(400).json({ error: 'Datei konnte nicht gelesen werden' });
         }
-        if (textMimes.includes(file.mimetype)) { continue; }
-        const detected = await fileTypeFromBuffer(file.buffer);
+        // Text hat keine Magic Bytes: Inhalt pruefen statt dem Header zu
+        // vertrauen.
+        if (istTextTyp(file.mimetype)) {
+          const befund = await pruefeTextDatei(file.path, file.size, req.app.locals.zwischenlager);
+          if (befund) {
+            return res.status(befund.status).json({ error: `${befund.error} (${file.originalname})` });
+          }
+          continue;
+        }
+        const detected = await fileTypeFromBuffer(await leseKopfBytes(file.path));
         if (!detected || !allowedPrefixes.some(p => detected.mime.startsWith(p))) {
           return res.status(415).json({ error: `Dateityp nicht verifizierbar: ${file.originalname}` });
         }
@@ -813,7 +836,7 @@ module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
         // Zufaelliger Hex-Dateiname; verschlüsselt schreiben
         const storedName = crypto.randomBytes(32).toString('hex');
         const storedPath = path.join(materialDir, storedName);
-        await fs.promises.writeFile(storedPath, encryptBuffer(file.buffer));
+        await encryptFileToFile(file.path, storedPath);
 
         const { rows: [inserted] } = await db.query(
           `INSERT INTO material_files (material_id, original_name, stored_name, mime_type, file_size)
@@ -871,21 +894,29 @@ module.exports = (db, rbacVerifier, roleHelpers, materialUpload) => {
         return res.status(404).json({ error: 'Datei nicht auf dem Server gefunden' });
       }
 
-      if (fileRecord.mime_type) {
+      // Textdateien immer als text/plain bzw. text/csv mit charset, nicht
+      // mit dem beim Hochladen angegebenen Wert.
+      const textTyp = istTextTyp(fileRecord.mime_type)
+        ? textInhaltsTyp({ mimetype: fileRecord.mime_type })
+        : null;
+      if (textTyp) {
+        res.setHeader('Content-Type', textTyp);
+      } else if (fileRecord.mime_type) {
         res.setHeader('Content-Type', fileRecord.mime_type);
       }
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(fileRecord.original_name)}"`);
 
-      // Datei lesen und (falls verschlüsselt) entschluesseln, dann senden.
-      const fileBuffer = await fs.promises.readFile(filePath);
-      let dataBuffer;
+      // Stromweise entschluesseln und senden (frueher: ganze Datei in den
+      // Arbeitsspeicher).
       try {
-        dataBuffer = decryptBuffer(fileBuffer);
+        await decryptFileToStream(filePath, res);
       } catch (decErr) {
         console.error('Error decrypting material file:', decErr);
-        return res.status(500).json({ error: 'Datei konnte nicht entschlüsselt werden' });
+        if (!res.headersSent) {
+          return res.status(500).json({ error: 'Datei konnte nicht entschlüsselt werden' });
+        }
+        res.destroy();
       }
-      res.send(dataBuffer);
     } catch (err) {
       console.error('Fehler beim Herunterladen der Datei:', err.message);
       res.status(500).json({ error: 'Fehler beim Herunterladen der Datei' });

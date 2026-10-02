@@ -3,6 +3,7 @@ import { IonIcon } from '@ionic/react';
 import { ICON_CHALLENGE_GEFUELLT, ICON_SPERRE_GEFUELLT, ICON_ZUSAGE_GEFUELLT } from './icons';
 import { getIconFromString } from '../../utils/badgeIcons';
 import type { ChallengeMark, OffenerStempel } from '../../types/challenges';
+import { datumKurz } from '../../utils/dateUtils';
 
 /**
  * Aufbau, Maße und Bedienung sind bewusst die des Abzeichen-Popovers
@@ -68,7 +69,7 @@ const StempelPopoverContent: React.FC<{
   const hinweis = erhalten ? null : offenerHinweis(stempel as OffenerStempel);
 
   return (
-    <div style={{ padding: 'var(--app-abstand-mittel)', background: 'white', maxWidth: '100%', overflow: 'hidden' }}>
+    <div style={{ padding: 'var(--app-abstand-mittel)', background: 'var(--app-surface-card)', maxWidth: '100%', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)' }}>
         <div style={{
           width: '48px',
@@ -143,9 +144,7 @@ const StempelPopoverContent: React.FC<{
             </div>
             {datum && (
               <span style={{ fontSize: 'var(--app-text-meta)', color: 'var(--app-text-tertiary)' }}>
-                {new Date(datum).toLocaleDateString('de-DE', {
-                  day: 'numeric', month: 'short', year: 'numeric',
-                })}
+                {datumKurz(datum)}
               </span>
             )}
           </>

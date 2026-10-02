@@ -53,21 +53,39 @@ import { Capacitor } from '@capacitor/core';
 import { teilen } from '../../../services/systemDialoge';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import { useApp } from '../../../contexts/AppContext';
-import api, { DATEI_TIMEOUT_MS } from '../../../services/api';
-import { EmptyState, SectionHeader, AudioPlayer } from '../../shared';
+import api from '../../../services/api';
+import { EmptyState, SectionHeader } from '../../shared';
+import ChallengeMedium from '../../shared/ChallengeMedium';
+import { useDateiOeffnen } from '../../../hooks/useDateiOeffnen';
+import { medienVergessen } from '../../../services/mediaCache';
+import { netzZuerstLaden } from '../../../services/netzZuerst';
+import { CACHE_TTL } from '../../../services/offlineCache';
+import OfflinePlatzhalter from '../../shared/OfflinePlatzhalter';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 import { istWebLink } from '../../../utils/linkDisplay';
 import MusikLink from '../../shared/MusikLink';
 import ChallengeSubmitModal from '../../konfi/modals/ChallengeSubmitModal';
 import { getChallengeStatus } from '../views/ChallengesManageView';
-import { anzahlBeitraege } from '../../../utils/challengeTexte';
+import { anzahlBeitraege, wartenAufFreigabeKurz } from '../../../utils/challengeTexte';
+import SegmentZahl from '../../shared/SegmentZahl';
 import { trackHandlung } from '../../../services/analytics';
 import type {
   AdminChallenge,
   KonfiChallenge,
   ChallengeSubmission
 } from '../../../types/challenges';
+import { datumUhrzeit } from '../../../utils/dateUtils';
+
+// Welcher Zustand nach einer Moderations-Aktion gilt -- fuer die sofortige
+// Anzeige, bevor die Liste nachgeladen ist. Anonymisieren aendert ihn nicht.
+// Dieselbe Zuordnung wie im Server (PUT /challenges/admin/submissions/:id/moderate).
+const MODERATION_NEUER_STATUS: Record<'approve' | 'hide' | 'unhide' | 'anonymize', ChallengeSubmission['moderation_status'] | null> = {
+  approve: 'approved',
+  hide: 'hidden',
+  unhide: 'approved',
+  anonymize: null
+};
 
 // Die vier Moderations-Aktionen als grobe Messwerte. Fest verdrahtet, damit
 // nie ein technischer Bezeichner aus dem Backend an die Messung durchrutscht.
@@ -85,91 +103,6 @@ const MODERATION_MESSWERT: Record<'approve' | 'hide' | 'unhide' | 'anonymize', s
 //
 // Die beiden Ursprungs-Modals bleiben unverändert bestehen:
 // ChallengeDetailModal wird weiterhin von Konfis genutzt.
-
-// Medienvorschau für Challenge-Beitraege (Foto/Audio/Video). Bewusst eine
-// eigene, schlanke Variante statt des Chat-LazyImage: der mediaCache-Service
-// ist fest auf /chat/files/ verdrahtet, Challenges liegen unter
-// /challenges/files/. Geladen wird per axios (Auth-Header) in eine
-// Object-URL, freigegeben beim Unmount.
-const ChallengeMedia: React.FC<{
-  filePath: string;
-  fileName?: string | null;
-  mediaType: 'photo' | 'audio' | 'video';
-}> = ({ filePath, fileName, mediaType }) => {
-  const [src, setSrc] = useState<string>('');
-  const [failed, setFailed] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    let objectUrl = '';
-    (async () => {
-      try {
-        const res = await api.get(`/challenges/files/${filePath}`, { responseType: 'blob', timeout: DATEI_TIMEOUT_MS });
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(res.data as Blob);
-        setSrc(objectUrl);
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [filePath]);
-
-  if (failed) {
-    return (
-      <div style={{ padding: 'var(--app-abstand-mittel)', color: 'var(--app-text-muted)', fontSize: 'var(--app-text-hinweis)' }}>
-        Datei konnte nicht geladen werden
-      </div>
-    );
-  }
-
-  if (!src) {
-    return (
-      <div
-        style={{
-          marginTop: 'var(--app-abstand-eng)',
-          borderRadius: 'var(--app-radius-knopf)',
-          background: 'var(--app-surface-dim)',
-          minHeight: '80px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center'
-        }}
-      >
-        <span style={{ color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-sekundaer)' }}>Wird geladen...</span>
-      </div>
-    );
-  }
-
-  if (mediaType === 'photo') {
-    return (
-      <div style={{ marginTop: 'var(--app-abstand-eng)', borderRadius: 'var(--app-radius-knopf)', overflow: 'hidden' }}>
-        <img
-          src={src}
-          alt={fileName || 'Beitrag'}
-          style={{ width: '100%', maxHeight: '260px', objectFit: 'cover', display: 'block' }}
-        />
-      </div>
-    );
-  }
-
-  if (mediaType === 'video') {
-    return (
-      <video
-        src={src}
-        controls
-        playsInline
-        style={{ width: '100%', maxHeight: '260px', marginTop: 'var(--app-abstand-eng)', borderRadius: 'var(--app-radius-knopf)', display: 'block' }}
-      />
-    );
-  }
-
-  // audio
-  return <AudioPlayer src={src} />;
-};
 
 const MEDIA_ICON: Record<string, string> = {
   text: ICON_TEXTDOKUMENT,
@@ -238,8 +171,7 @@ const formatDateTime = (value?: string) => {
   if (!value) return '';
   const d = new Date(value);
   if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
-    + ', ' + d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+  return datumUhrzeit(d);
 };
 
 export interface ChallengeLeitungModalProps {
@@ -281,13 +213,26 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
 
   const challengeId = challenge?.id;
 
+  // Ohne Netz und ohne gespeicherten Stand: sagen, dass die Beiträge offline
+  // fehlen, statt "keine Beiträge" zu behaupten.
+  const [offlineOhneStand, setOfflineOhneStand] = useState(false);
+  const benutzerId = user?.id;
+
   const loadSubmissions = useCallback(async () => {
     if (!challengeId) return;
     try {
-      const res = await api.get(`/challenges/admin/${challengeId}/submissions`);
+      // Netz zuerst wie in der Konfi-Ansicht: Bei Netz gilt der
+      // Server, ohne Netz der zuletzt geladene Stand samt Fotos vom Gerät.
+      const { daten } = await netzZuerstLaden<unknown>(
+        `leitung:challenge-beitraege:${benutzerId}:${challengeId}`,
+        () => api.get(`/challenges/admin/${challengeId}/submissions`).then((res) => res.data),
+        CACHE_TTL.REQUESTS
+      );
+      setOfflineOhneStand(false);
+      const antwort = daten as { submissions?: ChallengeSubmission[] } | ChallengeSubmission[] | null;
       // Backend liefert { challenge, submissions } — die Liste daraus ziehen und
       // den Konfi-Namen aus display_name normalisieren.
-      const raw = Array.isArray(res.data) ? res.data : (res.data?.submissions || []);
+      const raw = Array.isArray(antwort) ? antwort : (antwort?.submissions || []);
       setSubmissions(
         // display_name ist die Altform des Namensfeldes — deshalb hier
         // zusaetzlich zum Typ des Beitrags aufgefuehrt.
@@ -297,11 +242,15 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
         }))
       );
     } catch (err) {
-      setError(fehlerText(err, 'Fehler beim Laden der Beiträge'));
+      if ((err as { response?: unknown })?.response === undefined) {
+        setOfflineOhneStand(true);
+      } else {
+        setError(fehlerText(err, 'Fehler beim Laden der Beiträge'));
+      }
     } finally {
       setLoading(false);
     }
-  }, [challengeId, setError]);
+  }, [challengeId, benutzerId, setError]);
 
   useEffect(() => {
     setLoading(true);
@@ -430,6 +379,14 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
     return list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [submissions, effectiveFilter, user?.id]);
 
+  const { dateiOeffnen } = useDateiOeffnen({
+    quelle: 'challenges',
+    fehlerOrt: 'challenge-leitung-datei',
+    kontext: () => filtered
+      .filter((b) => b.media_type === 'photo' && b.file_path)
+      .map((b) => ({ pfad: b.file_path!, name: b.file_name })),
+  });
+
   const moderate = async (
     submission: ChallengeSubmission,
     action: 'approve' | 'hide' | 'unhide' | 'anonymize',
@@ -447,6 +404,16 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
       // wirklich durchgesehen. Nur die Entscheidung — kein Beitrag, keine
       // Person, keine Begruendung.
       trackHandlung('beitrag-moderiert', { entscheidung: MODERATION_MESSWERT[action] });
+      // Den neuen Zustand SOFORT uebernehmen, nicht erst mit dem Nachladen:
+      // Die orange Zahl am Reiter "Wartet" und die Kachel gehen damit im
+      // selben Augenblick mit. Das Nachladen bestaetigt danach
+      // den Stand des Servers.
+      const neuerStatus = MODERATION_NEUER_STATUS[action];
+      if (neuerStatus) {
+        setSubmissions((prev) => prev.map((s) => (
+          s.id === submission.id ? { ...s, moderation_status: neuerStatus } : s
+        )));
+      }
       await loadSubmissions();
       onChanged?.();
     } catch (err) {
@@ -473,6 +440,9 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
     setBusyId(submission.id);
     try {
       await api.delete(`/challenges/admin/submissions/${submission.id}`);
+      if (submission.file_path) {
+        await medienVergessen(submission.file_path, 'challenges');
+      }
       await loadSubmissions();
       onChanged?.();
     } catch (err) {
@@ -753,7 +723,9 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
                 Moderation ist jeder Beitrag sofort freigegeben, der Filter
                 waere immer leer. */}
             {challenge.moderated && (
-              <IonSegmentButton value="pending"><IonLabel>Wartet</IonLabel></IonSegmentButton>
+              <IonSegmentButton value="pending">
+                <IonLabel>Wartet<SegmentZahl anzahl={counts.pending} label={wartenAufFreigabeKurz(counts.pending)} /></IonLabel>
+              </IonSegmentButton>
             )}
             {challenge.visibility !== 'private' && (
               <IonSegmentButton value="hidden"><IonLabel>Abgelehnt</IonLabel></IonSegmentButton>
@@ -767,6 +739,8 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
           <div style={{ display: 'flex', justifyContent: 'center', padding: 'var(--app-abstand-block)' }}>
             <IonSpinner name="crescent" />
           </div>
+        ) : offlineOhneStand ? (
+          <OfflinePlatzhalter was="Die Liste der Beiträge" />
         ) : (
           <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
             <IonListHeader>
@@ -840,6 +814,8 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
                                       className="app-corner-badge"
                                       style={{ backgroundColor: consent.color, padding: 'var(--app-abstand-mini) var(--app-abstand-kompakt)' }}
                                       title={consent.label}
+                                      role="img"
+                                      aria-label={consent.label}
                                     >
                                       <IonIcon icon={consent.icon} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)', display: 'block' }} />
                                     </div>
@@ -850,6 +826,8 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
                                   className="app-corner-badge"
                                   style={{ backgroundColor: status.color, padding: 'var(--app-abstand-mini) var(--app-abstand-kompakt)' }}
                                   title={status.label}
+                                  role="img"
+                                  aria-label={status.label}
                                 >
                                   <IonIcon icon={status.icon} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)', display: 'block' }} />
                                 </div>
@@ -871,7 +849,7 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
                                   {istEigener && (
                                     <div style={{
                                       fontSize: 'var(--app-text-hinweis)', fontWeight: 'var(--app-schrift-fett)',
-                                      color: 'var(--app-color-challenges)',
+                                      color: 'var(--app-text-challenges)',
                                       textTransform: 'uppercase', letterSpacing: '0.03em'
                                     }}>
                                       Dein Beitrag
@@ -910,11 +888,13 @@ const ChallengeLeitungModal: React.FC<ChallengeLeitungModalProps> = ({
                                 // Audio-/Video-Steuerung braucht ihre eigenen Klicks
                                 // (Play, Scrubben) — ohne diesen Stopper landet jeder
                                 // Griff zum Player im Aktions-Menue des Items.
-                                <div onClick={(e) => e.stopPropagation()}>
-                                  <ChallengeMedia
+                                <div role="presentation" onClick={(e) => e.stopPropagation()}>
+                                  <ChallengeMedium
                                     filePath={submission.file_path}
                                     fileName={submission.file_name}
                                     mediaType={submission.media_type}
+                                    maxHoehe={260}
+                                    onOeffnen={(pfad, name) => { void dateiOeffnen(pfad, name); }}
                                   />
                                 </div>
                               )}

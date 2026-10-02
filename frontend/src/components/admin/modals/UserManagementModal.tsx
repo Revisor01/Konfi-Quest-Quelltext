@@ -1,6 +1,5 @@
 import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useRef } from 'react';
-import { FARBEN } from '../../../theme/colors';
 import {
   IonHeader,
   IonToolbar,
@@ -34,6 +33,9 @@ import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import api from '../../../services/api';
 import { AdminUser } from '../../../types/user';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { datumKurz } from '../../../utils/dateUtils';
+import { rollenName, rollenFarbeVar, rollenTonVar } from '../../../utils/rollenNamen';
 
 interface Role {
   id: number;
@@ -109,6 +111,12 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
   const [roles, setRoles] = useState<Role[]>([]);
   const [jahrgaenge, setJahrgaenge] = useState<Jahrgang[]>([]);
   const [user, setUser] = useState<AdminUser | null>(null);
+  // Ueber eine Gemeinde-Einladung dabei:
+  // Das Konto ist in einer anderen Gemeinde zuhause. Hier gibt es nur Rolle
+  // und Jahrgaenge; Name, Benutzername, E-Mail, Passwort und Sperre sind
+  // gesperrt, und gespeichert wird nur die Rolle -- das Backend weist alles
+  // andere mit 400 ab.
+  const nurRolle = !!userId && user?.mitgliedschaft === 'weitere';
 
   // Jahrgang assignments
   const [jahrgangAssignments, setJahrgangAssignments] = useState<{ [key: number]: boolean }>({});
@@ -270,7 +278,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
 
         let userIdForAssignments = userId;
         if (isEditMode) {
-          await api.put(`/users/${userId}`, userData);
+          await api.put(`/users/${userId}`, nurRolle ? { role_id: formData.role_id } : userData);
         } else {
           const response = await api.post('/users', userData);
           userIdForAssignments = response.data.id;
@@ -311,25 +319,8 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
     return roles.filter(role => canAssignRole(role.name));
   };
 
-  // Echte Hexwerte (theme/colors.ts): Die Rollenfarbe wird teils per
-  // Alpha-Suffix weiterverrechnet, var()-Strings scheiden aus.
-  const getRoleColor = (roleName: string) => {
-    switch (roleName) {
-      case 'org_admin': return FARBEN.users;
-      case 'admin': return FARBEN.users;
-      case 'teamer': return FARBEN.teamer;
-      default: return FARBEN.neutral;
-    }
-  };
-
-  const getRoleDisplayName = (roleName: string) => {
-    switch (roleName) {
-      case 'org_admin': return 'Org-Admin';
-      case 'admin': return 'Admin';
-      case 'teamer': return 'Teamer:in';
-      default: return roleName;
-    }
-  };
+  const getRoleColor = (roleName: string) => rollenFarbeVar(roleName);
+  const getRoleTint = (roleName: string) => rollenTonVar(roleName);
 
   // Klare Beschreibung je Rolle (unabhaengig vom technischen DB-Text).
   const getRoleDescription = (roleName: string) => {
@@ -395,14 +386,21 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
           </IonListHeader>
           <IonCard className="app-card">
             <IonCardContent>
+              {nurRolle && (
+                <p style={{ margin: '0 0 var(--app-abstand-basis) 0', color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-hinweis)' }}>
+                  Diese Person ist in einer anderen Gemeinde zuhause. Hier änderst du
+                  nur ihre Rolle und ihre Jahrgänge; Name, Benutzername, E-Mail,
+                  Passwort und Sperre verwaltet ihre Stamm-Gemeinde.
+                </p>
+              )}
               <div style={{ display: 'flex', flexDirection: 'column' }}>
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Anzeigename *</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Anzeigename" aria-required="true"
                     value={formData.display_name}
                     onIonInput={(e) => setFormData({ ...formData, display_name: e.detail.value! })}
                     placeholder="Max Mustermann"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || nurRolle}
                   />
                 </IonItem>
 
@@ -412,33 +410,33 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                 {!nameAutomatisch && (
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Benutzername *</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Benutzername" aria-required="true"
                     value={formData.username}
                     onIonInput={(e) => setFormData({ ...formData, username: e.detail.value! })}
                     placeholder="max.mustermann"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || nurRolle}
                   />
                 </IonItem>
                 )}
 
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Funktionsbeschreibung (optional)</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Funktionsbeschreibung (optional)"
                     value={formData.role_title}
                     onIonInput={(e) => setFormData({ ...formData, role_title: e.detail.value! })}
                     placeholder="z.B. Pastor, Diakonin, Jugendmitarbeiter"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || nurRolle}
                   />
                 </IonItem>
 
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">E-Mail (optional)</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="E-Mail (optional)"
                     type="email"
                     value={formData.email}
                     onIonInput={(e) => setFormData({ ...formData, email: e.detail.value! })}
                     placeholder="max@example.com"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || nurRolle}
                   />
                 </IonItem>
 
@@ -446,12 +444,12 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                   <IonLabel position="stacked">
                     Passwort {!isEditMode && <span style={{ color: 'var(--app-color-danger)' }}>*</span>}
                   </IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Passwort"
                     type="password"
                     value={formData.password}
                     onIonInput={(e) => setFormData({ ...formData, password: e.detail.value! })}
                     placeholder={isEditMode ? "Leer lassen um nicht zu ändern" : "Passwort eingeben"}
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || nurRolle}
                   />
                 </IonItem>
               </div>
@@ -483,7 +481,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                     const roleColor = getRoleColor(role.name);
 
                     return (
-                      <div
+                      <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                         key={role.id}
                         className="app-list-item"
                         onClick={() => !isSubmitting && setFormData({ ...formData, role_id: role.id })}
@@ -495,7 +493,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                           justifyContent: 'space-between',
                           marginBottom: '0',
                           borderLeftColor: roleColor,
-                          background: isSelected ? `${roleColor}15` : undefined
+                          background: isSelected ? getRoleTint(role.name) : undefined
                         }}
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)' }}>
@@ -507,7 +505,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                           </div>
                           <div>
                             <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-primary)', display: 'block' }}>
-                              {getRoleDisplayName(role.name)}
+                              {rollenName(role.name)}
                             </span>
                             {getRoleDescription(role.name) && (
                               <span style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)', display: 'block', marginTop: 'var(--app-abstand-winzig)', lineHeight: 1.35 }}>
@@ -537,11 +535,11 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                     Benutzer kann sich anmelden
                   </p>
                 </div>
-                <IonToggle
+                <IonToggle aria-label="Konto aktiv"
                   className={`app-toggle--${farbe}`}
                   checked={formData.is_active}
                   onIonChange={(e) => setFormData({ ...formData, is_active: e.detail.checked })}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || nurRolle}
                 />
               </div>
               )}
@@ -576,7 +574,7 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                   const isAssigned = jahrgangAssignments[jahrgang.id] || false;
 
                   return (
-                    <div
+                    <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                       key={jahrgang.id}
                       className={`app-list-item app-list-item--${farbe}`}
                       onClick={() => !isSubmitting && handleJahrgangAssignment(jahrgang.id, !isAssigned)}
@@ -623,13 +621,13 @@ const UserManagementModal: React.FC<UserManagementModalProps> = ({
                         gap: 'var(--app-abstand-schmal)'
                       }}
                     >
-                      <IonIcon icon={ICON_ZUSAGE_GEFUELLT} style={{ color: 'var(--app-color-users)', fontSize: 'var(--app-text-gross)', flexShrink: 0 }} />
+                      <IonIcon icon={ICON_ZUSAGE_GEFUELLT} style={{ color: 'var(--app-text-users)', fontSize: 'var(--app-text-gross)', flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <span style={{ fontWeight: 'var(--app-schrift-mittel)', fontSize: 'var(--app-text-basis)', color: 'var(--app-text-primary)', display: 'block' }}>
                           {assignment.name}
                         </span>
                         <span style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)' }}>
-                          {assignment.assigned_at && new Date(assignment.assigned_at).toLocaleDateString('de-DE')}
+                          {assignment.assigned_at && datumKurz(assignment.assigned_at)}
                           {assignment.assigned_by_name && ` von ${assignment.assigned_by_name}`}
                         </span>
                       </div>

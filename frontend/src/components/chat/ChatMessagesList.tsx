@@ -1,6 +1,7 @@
 import React from 'react';
 import { Message } from '../../types/chat';
 import MessageBubble from './MessageBubble';
+import { datumKurz } from '../../utils/dateUtils';
 
 /**
  * Nachrichtenliste des Chatraums (beim Aufteilen von ChatRoom.tsx hierher
@@ -14,7 +15,7 @@ const formatDayDivider = (d: Date): string => {
   const yest = new Date(); yest.setDate(today.getDate() - 1);
   if (d.toDateString() === today.toDateString()) return 'Heute';
   if (d.toDateString() === yest.toDateString()) return 'Gestern';
-  return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return datumKurz(d);
 };
 
 // Pro Raum: Message-ID, an der der "Neue Nachrichten"-Trenner bereits gezeigt
@@ -96,7 +97,7 @@ const ChatMessagesList: React.FC<ChatMessagesListProps> = ({
               >
                 <span style={{
                   fontSize: 'var(--app-text-meta)', fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-body)',
-                  background: 'rgba(245,245,247,0.95)',
+                  background: 'var(--app-surface-muted)',
                   padding: 'var(--app-abstand-mini) var(--app-abstand-mittelweit)', borderRadius: 'var(--app-radius-karte)', boxShadow: 'var(--app-schatten-flach)'
                 }}>
                   {formatDayDivider(created!)}
@@ -106,7 +107,7 @@ const ChatMessagesList: React.FC<ChatMessagesListProps> = ({
             {showNewDivider && (
               <div ref={newDividerRef} style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-eng)', margin: 'var(--app-abstand-schmal) var(--app-abstand-mittel)' }}>
                 <div style={{ flex: 1, height: '1px', background: 'var(--app-color-events)' }} />
-                <span style={{ fontSize: 'var(--app-text-meta)', fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-color-events)' }}>Neue Nachrichten</span>
+                <span style={{ fontSize: 'var(--app-text-meta)', fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-text-events)' }}>Neue Nachrichten</span>
                 <div style={{ flex: 1, height: '1px', background: 'var(--app-color-events)' }} />
               </div>
             )}

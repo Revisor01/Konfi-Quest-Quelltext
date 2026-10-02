@@ -7,15 +7,11 @@ import {
   ICON_LOESCHEN,
   ICON_MEHR_VERTIKAL,
   ICON_SENDEN_GEFUELLT,
-  ICON_ZURUECK,
 } from '../shared/icons';
 import React from 'react';
 import {
-  IonHeader,
   IonToolbar,
-  IonTitle,
   IonButton,
-  IonButtons,
   IonIcon,
   IonTextarea,
   IonFooter,
@@ -24,6 +20,7 @@ import {
 import { Message, ChatUserType } from '../../types/chat';
 import { formatFileSize } from '../../utils/helpers';
 import { Capacitor } from '@capacitor/core';
+import AppKopfzeile from '../shared/AppKopfzeile';
 
 // Validiert URLs für img src, erlaubt nur sichere Protokolle (blob: und data:)
 export const getSafePreviewUrl = (url: string | null | undefined): string | null => {
@@ -63,18 +60,18 @@ export const ChatHeader = React.memo<ChatHeaderProps>(({
   onClearChat
 }) => {
   return (
-    // translucent bewusst AUS: Der Chat-Content ist nicht fullscreen (Footer mit
-    // Eingabefeld), daher wuerde ein translucent-Header die Safe-Area oben falsch
-    // behandeln -> Header sitzt unter Notch/Statusbar. Opaker Header sitzt korrekt.
-    <IonHeader>
-      <IonToolbar>
-        <IonButtons slot="start">
-          <IonButton aria-label="Zurück" onClick={onBack}>
-            <IonIcon icon={ICON_ZURUECK} />
-          </IonButton>
-        </IonButtons>
-        <IonTitle>{roomName}</IonTitle>
-        <IonButtons slot="end">
+    // Die gemeinsame Kopfzeile (Glocke, Gemeinde-Umschalter) -- ein Chatraum
+    // ist eine Seite mit eigener Route, kein Modal. translucent bewusst AUS:
+    // Der Chat-Content ist nicht fullscreen (Footer mit Eingabefeld), daher
+    // wuerde ein translucent-Header die Safe-Area oben falsch behandeln ->
+    // Header sitzt unter Notch/Statusbar. Opaker Header sitzt korrekt.
+    <AppKopfzeile
+      titel={roomName}
+      onZurueck={onBack}
+      translucent={false}
+      gemeindeUmschalter={false}
+      rechts={(
+        <>
           {roomType !== 'direct' && (
             <IonButton aria-label="Mitglieder anzeigen" onClick={onOpenMembers}>
               <IonIcon icon={ICON_GRUPPE_GEFUELLT} />
@@ -100,9 +97,9 @@ export const ChatHeader = React.memo<ChatHeaderProps>(({
               <IonIcon icon={ICON_MEHR_VERTIKAL} />
             </IonButton>
           )}
-        </IonButtons>
-      </IonToolbar>
-    </IonHeader>
+        </>
+      )}
+    />
   );
 });
 
@@ -122,9 +119,9 @@ export const ReplyPreview = React.memo<ReplyPreviewProps>(({ replyToMessage, onC
     borderLeft: '3px solid var(--app-color-chat)',
     gap: 'var(--app-abstand-eng)'
   }}>
-    <IonIcon icon={ICON_ANTWORTEN} style={{ fontSize: 'var(--app-text-untertitel)', color: 'var(--app-color-chat)' }} />
+    <IonIcon icon={ICON_ANTWORTEN} style={{ fontSize: 'var(--app-text-untertitel)', color: 'var(--app-text-chat)' }} />
     <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ fontWeight: 'var(--app-schrift-halbfett)', fontSize: 'var(--app-text-hinweis)', color: 'var(--app-color-chat)' }}>
+      <div style={{ fontWeight: 'var(--app-schrift-halbfett)', fontSize: 'var(--app-text-hinweis)', color: 'var(--app-text-chat)' }}>
         {replyToMessage.sender_name}
       </div>
       <div style={{
@@ -147,7 +144,7 @@ export const ReplyPreview = React.memo<ReplyPreviewProps>(({ replyToMessage, onC
       fill="clear"
       size="small"
       onClick={onClear}
-      style={{ '--padding-start': '4px', '--padding-end': '4px' }}
+      style={{ '--padding-start': 'var(--app-abstand-mini)', '--padding-end': 'var(--app-abstand-mini)' }}
     >
       <IonIcon icon={ICON_ABSAGE} style={{ fontSize: 'var(--app-text-untertitel)', color: 'var(--app-text-system)' }} />
     </IonButton>
@@ -202,7 +199,7 @@ export const FilePreviewBar = React.memo<FilePreviewBarProps>(({ selectedFile, s
         justifyContent: 'center',
         flexShrink: 0
       }}>
-        <IonIcon icon={ICON_ANHANG_GEFUELLT} style={{ fontSize: 'var(--app-text-titel-gross)', color: 'var(--app-color-chat)' }} />
+        <IonIcon icon={ICON_ANHANG_GEFUELLT} style={{ fontSize: 'var(--app-text-titel-gross)', color: 'var(--app-text-chat)' }} />
       </div>
     )}
     <div style={{ flex: 1, minWidth: 0 }}>
@@ -216,7 +213,7 @@ export const FilePreviewBar = React.memo<FilePreviewBarProps>(({ selectedFile, s
       }}>
         {selectedFile.name}
       </div>
-      <div style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-color-chat)', fontWeight: 'var(--app-schrift-mittel)' }}>
+      <div style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-chat)', fontWeight: 'var(--app-schrift-mittel)' }}>
         {formatFileSize(selectedFile.size)}
       </div>
     </div>
@@ -224,7 +221,7 @@ export const FilePreviewBar = React.memo<FilePreviewBarProps>(({ selectedFile, s
       fill="clear"
       size="small"
       onClick={onClear}
-      style={{ '--padding-start': '6px', '--padding-end': '6px' }}
+      style={{ '--padding-start': 'var(--app-abstand-kompakt)', '--padding-end': 'var(--app-abstand-kompakt)' }}
     >
       <IonIcon icon={ICON_ABSAGE} style={{ fontSize: 'var(--app-text-titel-gross)', color: 'var(--app-text-system)' }} />
     </IonButton>
@@ -239,11 +236,11 @@ interface MessageInputProps {
   selectedFilePreview: string | null;
   replyToMessage: Message | null;
   textareaRef: React.RefObject<HTMLIonTextareaElement | null>;
-  fileInputRef: React.RefObject<HTMLInputElement | null>;
   onTextChange: (value: string) => void;
   onFocus: () => void;
   onSend: () => void;
-  onFileSelect: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  /** Öffnet die Dateiauswahl (useChatDateien.dateiWaehlen, über die Hülle in services/systemDialoge). */
+  onDateiWaehlen: () => void;
   onClearFile: () => void;
   onClearReply: () => void;
 }
@@ -255,11 +252,10 @@ export const MessageInput = React.memo<MessageInputProps>(({
   selectedFilePreview,
   replyToMessage,
   textareaRef,
-  fileInputRef,
   onTextChange,
   onFocus,
   onSend,
-  onFileSelect,
+  onDateiWaehlen,
   onClearFile,
   onClearReply
 }) => {
@@ -284,7 +280,7 @@ export const MessageInput = React.memo<MessageInputProps>(({
   }, [messageText, resizeTextarea]);
 
   return (
-  <IonFooter style={{ backgroundColor: 'rgba(248, 249, 250, 0.95)', backdropFilter: 'blur(10px)' }}>
+  <IonFooter style={{ backgroundColor: 'var(--app-surface-soft)', backdropFilter: 'blur(10px)' }}>
     {/* Reply Preview */}
     {replyToMessage && (
       <ReplyPreview replyToMessage={replyToMessage} onClear={onClearReply} />
@@ -302,10 +298,10 @@ export const MessageInput = React.memo<MessageInputProps>(({
     <IonToolbar style={{
       '--background': 'transparent',
       '--min-height': 'auto',
-      '--padding-start': '12px',
-      '--padding-end': '12px',
-      '--padding-top': '8px',
-      '--padding-bottom': '8px'
+      '--padding-start': 'var(--app-abstand-mittel)',
+      '--padding-end': 'var(--app-abstand-mittel)',
+      '--padding-top': 'var(--app-abstand-eng)',
+      '--padding-bottom': 'var(--app-abstand-eng)'
     }}>
       {/* Flex-Container für Input und Buttons - vertikal zentriert */}
       <div style={{
@@ -314,14 +310,14 @@ export const MessageInput = React.memo<MessageInputProps>(({
         gap: 'var(--app-abstand-eng)',
         width: '100%'
       }}>
-        <IonButton aria-label="Datei anhängen"
+        <IonButton aria-label="Datei anhängen" className="app-beruehrungsziel"
           fill="clear"
           size="small"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => onDateiWaehlen()}
           style={{
-            '--padding-start': '4px',
-            '--padding-end': '4px',
-            '--color': 'var(--app-color-chat)',
+            '--padding-start': 'var(--app-abstand-mini)',
+            '--padding-end': 'var(--app-abstand-mini)',
+            '--color': 'var(--app-text-chat)',
             '--height': '38px',
             '--min-height': '38px',
             fontSize: 'var(--app-icon-chat-anhang)'
@@ -332,7 +328,7 @@ export const MessageInput = React.memo<MessageInputProps>(({
 
         <div style={{
           flex: 1,
-          backgroundColor: 'white',
+          backgroundColor: 'var(--app-surface-card)',
           borderRadius: 'var(--app-radius-gross)',
           border: '1.5px solid rgba(var(--app-color-chat-rgb), 0.3)',
           overflow: 'hidden',
@@ -340,7 +336,7 @@ export const MessageInput = React.memo<MessageInputProps>(({
           display: 'flex',
           alignItems: 'center'
         }}>
-          <IonTextarea
+          <IonTextarea aria-label="Nachricht schreiben"
             ref={textareaRef}
             value={messageText}
             onIonInput={(e) => { onTextChange(e.detail.value || ''); resizeTextarea(); }}
@@ -355,10 +351,10 @@ export const MessageInput = React.memo<MessageInputProps>(({
             style={{
               '--background': 'transparent',
               '--border-radius': '0',
-              '--padding-start': '14px',
-              '--padding-end': '14px',
-              '--padding-top': '10px',
-              '--padding-bottom': '10px',
+              '--padding-start': 'var(--app-abstand-mittelweit)',
+              '--padding-end': 'var(--app-abstand-mittelweit)',
+              '--padding-top': 'var(--app-abstand-schmal)',
+              '--padding-bottom': 'var(--app-abstand-schmal)',
               '--box-shadow': 'none',
               margin: '0',
               '--color': 'var(--app-text-emphasis)',
@@ -381,7 +377,7 @@ export const MessageInput = React.memo<MessageInputProps>(({
           />
         </div>
 
-        <IonButton
+        <IonButton className="app-beruehrungsziel"
           fill="solid"
           shape="round"
           size="small"
@@ -404,7 +400,7 @@ export const MessageInput = React.memo<MessageInputProps>(({
             '--background-hover': 'var(--app-color-chat-dunkel)',
             '--height': '38px',
             '--min-height': '38px',
-            '--border-radius': '19px',
+            '--border-radius': 'var(--app-radius-kreis)',
             '--padding-start': '0',
             '--padding-end': '0',
             '--box-shadow': '0 2px 8px rgba(var(--app-color-chat-rgb), 0.35)',
@@ -415,43 +411,11 @@ export const MessageInput = React.memo<MessageInputProps>(({
         >
           {uploading ? <IonSpinner name="dots" /> : <IonIcon icon={ICON_SENDEN_GEFUELLT} />}
         </IonButton>
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          style={{ display: 'none' }}
-          onChange={onFileSelect}
-          accept="image/*,video/*,.pdf,.doc,.docx,.txt"
-        />
       </div>
     </IonToolbar>
   </IonFooter>
   );
 });
 
-// Auto-capitalize für das Eingabefeld: schreibt den ersten Buchstaben sowie den
-// ersten Buchstaben nach einem Satzende (. ! ?) oder Zeilenumbruch gross. Greift nur
-// am Ende der Eingabe (= das gerade getippte Zeichen), damit der Cursor nicht springt
-// und bereits getippter Text nicht nachträglich umgeschrieben wird.
-export const autoCapitalize = (value: string): string => {
-  if (!value) return '';
-
-  const newChar = value.slice(-1);
-  // Nur Kleinbuchstaben (inkl. Umlaute) hochstellen, alles andere unverändert lassen.
-  if (newChar === newChar.toUpperCase() || !/[a-z\u00e4\u00f6\u00fc]/.test(newChar)) {
-    return value;
-  }
-
-  // Am Satzanfang? = erstes Zeichen überhaupt ODER vor dem letzten Zeichen steht
-  // (ggf. mit einem Space) ein Satzende-Zeichen bzw. ein Zeilenumbruch.
-  const before = value.slice(0, -1);
-  const atStart = before.length === 0;
-  const afterSentenceEnd = /([.!?]\s|\n)\s*$/.test(before);
-
-  if (atStart || afterSentenceEnd) {
-    return before + newChar.toUpperCase();
-  }
-
-  return value;
-};
+export { autoCapitalize } from '../../utils/chatGrossschreibung';
 

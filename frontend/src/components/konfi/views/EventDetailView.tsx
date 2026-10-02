@@ -1,4 +1,3 @@
-import { FARBEN } from '../../../theme/colors';
 import {
   ICON_ABSAGE,
   ICON_CHAT,
@@ -22,18 +21,13 @@ import {
   ICON_UNENDLICH,
   ICON_WARNUNG_GEFUELLT,
   ICON_WARTEND_GEFUELLT,
-  ICON_ZURUECK,
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
 import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
-  IonButtons,
   IonButton,
   IonIcon,
   IonCard,
@@ -58,13 +52,19 @@ import { track } from '../../../services/analytics';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import LoadingSpinner from '../../common/LoadingSpinner';
-import { SectionHeader, AbsageBlock, formatEventDateLong as formatDate, formatEventTime as formatTime, istVergangen, istAbgesagt } from '../../shared';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
+import { SectionHeader, AbsageBlock, formatEventTime as formatTime, zeitraumText, istVergangen, istAbgesagt } from '../../shared';
 import UnregisterModal from '../modals/UnregisterModal';
 import QRScannerModal from '../modals/QRScannerModal';
 import { Event } from '../../../types/event';
 import { useLiveUpdate, useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { safeUUID } from '../../../utils/uuid';
+import { sendenOderEinreihen } from '../../../utils/sendenOderEinreihen';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { datumKurz } from '../../../utils/dateUtils';
+import { useActionGuard } from '../../../hooks/useActionGuard';
+import { linkOeffnen } from '../../../services/systemDialoge';
 
 interface EventDetailViewProps {
   eventId: number;
@@ -123,32 +123,41 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
 
     const clientId = safeUUID();
 
-    if (networkMonitor.isOnline) {
-      try {
-        await api.post(`/konfi/events/${eventData.id}/opt-out`, {
+    try {
+      // Offline -- oder online, aber das Netz reisst ab: in die
+      // Warteschlange statt in eine Fehlermeldung.
+      // Ein zweiter Eingang ist harmlos: Der
+      // Server antwortet dann 200 mit bereits_abgemeldet.
+      const { weg } = await sendenOderEinreihen({
+        online: networkMonitor.isOnline,
+        methode: 'POST',
+        idempotent: true,
+        senden: () => api.post(`/konfi/events/${eventData.id}/opt-out`, {
           reason: reason.trim(),
           client_id: clientId,
-        });
-        // Kein Erfolgs-Toast: der Server schickt bereits einen Push.
-        await refreshEvents();
-        triggerRefresh('events');
-      } catch (err) {
-        setError(fehlerText(err, 'Fehler bei der Abmeldung'));
-      }
-    } else {
-      await writeQueue.enqueue({
-        method: 'POST',
-        url: `/konfi/events/${eventData.id}/opt-out`,
-        body: { reason: reason.trim(), client_id: clientId },
-        maxRetries: 5,
-        hasFileUpload: false,
-        metadata: {
-          type: 'opt-out',
-          clientId,
-          label: `Abmeldung von "${eventData.name}"`,
-        },
+        }),
+        einreihen: () => writeQueue.enqueue({
+          method: 'POST',
+          url: `/konfi/events/${eventData.id}/opt-out`,
+          body: { reason: reason.trim(), client_id: clientId },
+          maxRetries: 5,
+          hasFileUpload: false,
+          metadata: {
+            type: 'opt-out',
+            clientId,
+            label: `Abmeldung von "${eventData.name}"`,
+          },
+        }),
       });
-      setSuccess('Abmeldung wird gesendet sobald du wieder online bist');
+      if (weg === 'eingereiht') {
+        setSuccess('Abmeldung wird gesendet sobald du wieder online bist');
+        return;
+      }
+      // Kein Erfolgs-Toast: der Server schickt bereits einen Push.
+      await refreshEvents();
+      triggerRefresh('events');
+    } catch (err) {
+      setError(fehlerText(err, 'Fehler bei der Abmeldung'));
     }
   };
 
@@ -177,27 +186,33 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     // vom Anmelden, das wegen der begrenzten Plaetze gesperrt bleibt.
     const clientId = safeUUID();
 
-    if (!networkMonitor.isOnline) {
-      await writeQueue.enqueue({
-        method: 'DELETE',
-        url: `/konfi/events/${eventData.id}/register`,
-        body: { reason: reason.trim(), client_id: clientId },
-        maxRetries: 5,
-        hasFileUpload: false,
-        metadata: {
-          type: 'opt-out',
-          clientId,
-          label: `Abmeldung von "${eventData.name}"`,
-        },
-      });
-      setSuccess('Abmeldung wird gesendet sobald du wieder online bist');
-      return;
-    }
-
     try {
-      await api.delete(`/konfi/events/${eventData.id}/register`, {
-        data: { reason: reason.trim(), client_id: clientId }
+      // Wie beim Opt-out: auch ein Netzabbruch im Online-Zweig landet in der
+      // Warteschlange (utils/sendenOderEinreihen.ts). DELETE ist
+      // wiederholbar -- eine zweite Abmeldung gibt keinen zweiten Platz frei.
+      const { weg } = await sendenOderEinreihen({
+        online: networkMonitor.isOnline,
+        methode: 'DELETE',
+        senden: () => api.delete(`/konfi/events/${eventData.id}/register`, {
+          data: { reason: reason.trim(), client_id: clientId }
+        }),
+        einreihen: () => writeQueue.enqueue({
+          method: 'DELETE',
+          url: `/konfi/events/${eventData.id}/register`,
+          body: { reason: reason.trim(), client_id: clientId },
+          maxRetries: 5,
+          hasFileUpload: false,
+          metadata: {
+            type: 'opt-out',
+            clientId,
+            label: `Abmeldung von "${eventData.name}"`,
+          },
+        }),
       });
+      if (weg === 'eingereiht') {
+        setSuccess('Abmeldung wird gesendet sobald du wieder online bist');
+        return;
+      }
 
       // Kein Erfolgs-Toast: der Server schickt bereits einen Push.
       await refreshEvents();
@@ -342,6 +357,18 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     }
   };
 
+  // Sperre gegen den Doppeltipp: Ohne sie
+  // schickte ein ungeduldiger zweiter Tipp einen zweiten POST, der Server
+  // antwortete 409 "bereits angemeldet", und die Konfi sah diese Meldung in
+  // Rot, obwohl die Anmeldung geklappt hatte. Die Sperre umfasst den ganzen
+  // Weg bis zum POST -- auch die Vorabfrage bei Konfirmationen und die
+  // Zeitfenster-Auswahl -- und gibt die Knoepfe erst frei, wenn die Liste neu
+  // geladen ist. Ein abgewiesener zweiter Tipp tut still nichts.
+  const { isSubmitting: anmeldungLaeuft, guard: anmeldungGuard } = useActionGuard();
+  const gesperrt = (aktion: () => Promise<void>) => {
+    anmeldungGuard(aktion).catch(() => undefined);
+  };
+
   const doRegister = async (timeslotId?: number) => {
     if (!eventData) return;
 
@@ -369,7 +396,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     }
   };
 
-  const handleRegister = async () => {
+  const handleRegister = () => gesperrt(async () => {
     if (!eventData) return;
 
     // Zeitfenster-Event, dessen Zeitfenster nicht geladen werden konnten:
@@ -431,7 +458,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
               setError('Dieser Zeitslot ist ausgebucht und hat keine Warteliste.');
               return false;
             }
-            doRegister(slot.id);
+            gesperrt(() => doRegister(slot.id));
           },
           cssClass: blocked ? 'action-sheet-disabled' : ''
         };
@@ -450,8 +477,8 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
       return;
     }
 
-    doRegister();
-  };
+    await doRegister();
+  });
 
   // Status-Farben für SectionHeader — alle aus globalen Tokens
   const getStatusColors = (): { primary: string; secondary: string } => {
@@ -460,7 +487,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     const info = { primary: 'var(--app-color-info)', secondary: 'var(--app-color-info)' }; // Konfirmation=blau, Pflicht-angemeldet=blau
     const success = { primary: 'var(--app-color-success)', secondary: 'var(--app-color-success)' };
     const bonus = { primary: 'var(--app-color-bonus)', secondary: 'var(--app-color-bonus)' };
-    const past = { primary: FARBEN.neutral, secondary: FARBEN.neutral };
+    const past = { primary: 'var(--app-color-neutral)', secondary: 'var(--app-color-neutral)' };
 
     if (!eventData) return events;
 
@@ -471,6 +498,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
 
     if (istAbgesagt(eventData)) return danger;
     if (eventData.is_opted_out || eventData.booking_status === 'opted_out') return events;
+    if (eventData.booking_status === 'excused' && !isPastEvent) return events;
     if (isKonfi && !isPastEvent) return info; // Konfirmation = blau (analog Admin)
     if (isPastEvent && eventData.attendance_status === 'present') return success;
     if (isPastEvent && eventData.attendance_status === 'absent') return danger;
@@ -495,6 +523,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
 
     if (istAbgesagt(eventData)) return 'Abgesagt';
     if (eventData.is_opted_out || eventData.booking_status === 'opted_out') return 'Abgemeldet';
+    if (eventData.booking_status === 'excused' && !isPastEvent) return 'Abgemeldet';
     if (isKonfi && !isPastEvent) return eventData.is_registered ? 'Angemeldet' : 'Konfirmation';
     if (isPastEvent && eventData.attendance_status === 'present') return 'Verbucht';
     if (isPastEvent && eventData.attendance_status === 'absent') return 'Verpasst';
@@ -514,18 +543,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
   if (loading) {
     return (
       <IonPage ref={pageRef}>
-        <IonHeader translucent>
-          <IonToolbar>
-            {!hideBackButton && (
-              <IonButtons slot="start">
-                <IonButton aria-label="Zurück" onClick={onBack}>
-                  <IonIcon icon={ICON_ZURUECK} />
-                </IonButton>
-              </IonButtons>
-            )}
-            <IonTitle>Event Details</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeile titel="Event-Details" onZurueck={hideBackButton ? undefined : onBack} gemeindeUmschalter={false} />
         <IonContent fullscreen>
           <LoadingSpinner message="Event wird geladen..." />
         </IonContent>
@@ -536,18 +554,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
   if (!eventData) {
     return (
       <IonPage ref={pageRef}>
-        <IonHeader translucent>
-          <IonToolbar>
-            {!hideBackButton && (
-              <IonButtons slot="start">
-                <IonButton aria-label="Zurück" onClick={onBack}>
-                  <IonIcon icon={ICON_ZURUECK} />
-                </IonButton>
-              </IonButtons>
-            )}
-            <IonTitle>Event nicht gefunden</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeile titel="Event nicht gefunden" onZurueck={hideBackButton ? undefined : onBack} gemeindeUmschalter={false} />
         <IonContent fullscreen />
       </IonPage>
     );
@@ -571,43 +578,30 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent>
-        <IonToolbar>
-          {!hideBackButton && (
-            <IonButtons slot="start">
-              <IonButton aria-label="Zurück" onClick={onBack}>
-                <IonIcon icon={ICON_ZURUECK} />
-              </IonButton>
-            </IonButtons>
-          )}
-          <IonTitle>{eventData.name}</IonTitle>
-          {/* Einstieg in den Event-Chat — bisher hatte ihn nur die Leitung
-              (`admin/views/EventDetailView.tsx`), obwohl Konfis beim Buchen
-              ohnehin Mitglied des Raums werden (`addToEventChat`). Sie fanden
-              ihn nur ueber die Chat-Uebersicht.
-              Der Knopf erscheint nur, wenn es einen Raum gibt UND diese Konfi
-              darin Mitglied ist: `chat_room_id` kommt aus `/konfi/events` und
-              ist sonst null (konfi.js). Erstellen bleibt der Leitung
-              vorbehalten (`POST /events/:id/chat` verlangt requireTeamer). */}
-          {eventData.chat_room_id && (
-            <IonButtons slot="end">
-              <IonButton
-                aria-label="Event-Chat öffnen"
-                onClick={() => router.push(`/konfi/chat/room/${eventData.chat_room_id}`, 'root')}
-              >
-                <IonIcon icon={ICON_CHAT} slot="icon-only" />
-              </IonButton>
-            </IonButtons>
-          )}
-        </IonToolbar>
-      </IonHeader>
+      {/* Einstieg in den Event-Chat rechts — bisher hatte ihn nur die Leitung
+          (`admin/views/EventDetailView.tsx`), obwohl Konfis beim Buchen
+          ohnehin Mitglied des Raums werden (`addToEventChat`). Sie fanden
+          ihn nur ueber die Chat-Uebersicht.
+          Der Knopf erscheint nur, wenn es einen Raum gibt UND diese Konfi
+          darin Mitglied ist: `chat_room_id` kommt aus `/konfi/events` und
+          ist sonst null (konfi.js). Erstellen bleibt der Leitung
+          vorbehalten (`POST /events/:id/chat` verlangt requireTeamer). */}
+      <AppKopfzeile
+        titel={eventData.name}
+        onZurueck={hideBackButton ? undefined : onBack}
+        gemeindeUmschalter={false}
+        rechts={eventData.chat_room_id ? (
+          <IonButton
+            aria-label="Event-Chat öffnen"
+            onClick={() => router.push(`/konfi/chat/room/${eventData.chat_room_id}`, 'root')}
+          >
+            <IonIcon icon={ICON_CHAT} slot="icon-only" />
+          </IonButton>
+        ) : undefined}
+      />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">{eventData.name}</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel={eventData.name} />
 
         <IonRefresher slot="fixed" onIonRefresh={(e) => {
           refreshEvents();
@@ -681,10 +675,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                 <div>
                   <div className="app-info-row__label">Datum</div>
                   <div className="app-info-row__value">
-                    {formatDate(eventData.event_date)}
-                    {' · '}
-                    {formatTime(eventData.event_date)}
-                    {eventData.event_end_time && ` – ${formatTime(eventData.event_end_time)}`}
+                    {zeitraumText(eventData)}
                   </div>
                 </div>
               </div>
@@ -730,11 +721,11 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                     {eventData.registration_opens_at ? (
                       <>
                         <div className="app-info-row__value">
-                          von {new Date(eventData.registration_opens_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })} – {formatTime(eventData.registration_opens_at)}
+                          von {datumKurz(eventData.registration_opens_at)} – {formatTime(eventData.registration_opens_at)}
                         </div>
                         {eventData.registration_closes_at && (
                           <div className="app-info-row__value">
-                            bis {new Date(eventData.registration_closes_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })} – {formatTime(eventData.registration_closes_at)}
+                            bis {datumKurz(eventData.registration_closes_at)} – {formatTime(eventData.registration_closes_at)}
                           </div>
                         )}
                       </>
@@ -813,13 +804,13 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
               {eventData.location && (
                 <div className="app-info-row">
                   <IonIcon icon={ICON_ORT_GEFUELLT} className="app-info-row__icon app-icon-color--location" />
-                  <div
+                  <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                     onClick={() => {
                       if (eventData.location_maps_url) {
-                        window.open(eventData.location_maps_url, '_blank');
+                        linkOeffnen(eventData.location_maps_url);
                       } else if (eventData.location) {
                         const mapsUrl = `https://maps.apple.com/?q=${encodeURIComponent(eventData.location)}`;
-                        window.open(mapsUrl, '_blank');
+                        linkOeffnen(mapsUrl);
                       }
                     }}
                   >
@@ -850,7 +841,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                 <div className="app-info-row">
                   <IonIcon icon={ICON_KOPIEREN_GEFUELLT} className="app-info-row__icon app-icon-color--events" />
                   <div>
-                    <div className="app-info-row__label">Terminreihe</div>
+                    <div className="app-info-row__label">Event-Serie</div>
                     <div className="app-info-row__value">Teil einer Serie</div>
                   </div>
                 </div>
@@ -933,7 +924,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                     return (
                       <IonNote color="medium" style={{ display: 'block', textAlign: 'center', fontSize: 'var(--app-text-betont)' }}>
                         <IonIcon icon={ICON_ABSAGE} style={{ verticalAlign: 'middle', marginRight: 'var(--app-abstand-kompakt)' }} />
-                        Dieser Termin ist abgesagt
+                        Dieses Event ist abgesagt
                       </IonNote>
                     );
                   }
@@ -962,6 +953,33 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                         >
                           <IonIcon icon={ICON_ZUSAGE_GEFUELLT} slot="start" />
                           Wieder anmelden
+                        </IonButton>
+                      </div>
+                    );
+                  }
+
+                  // VON DER LEITUNG ABGEMELDET am Pflichttermin:
+                  // status 'excused' ist weder
+                  // opted_out noch is_registered und fiel deshalb auf den
+                  // stummen Hinweis "Pflicht-Event". Zurueck geht es ueber
+                  // die normale Anmeldung (POST /register), nicht ueber
+                  // Opt-in -- dessen UPDATE greift nur bei 'opted_out'.
+                  if (eventData.booking_status === 'excused') {
+                    return (
+                      <div style={{ textAlign: 'center' }}>
+                        <div className="app-status-box app-status-box--events" style={{ marginBottom: 'var(--app-abstand-mittel)' }}>
+                          <IonIcon icon={ICON_ABSAGE} />
+                          Von der Leitung abgemeldet
+                        </div>
+                        <IonButton
+                          className="app-action-button"
+                          expand="block"
+                          color="success"
+                          disabled={!isOnline || anmeldungLaeuft}
+                          onClick={handleRegister}
+                        >
+                          <IonIcon icon={ICON_ZUSAGE_GEFUELLT} slot="start" />
+                          {!isOnline ? <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Du bist offline</> : 'Wieder anmelden'}
                         </IonButton>
                       </div>
                     );
@@ -1035,8 +1053,76 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
               ) : istAbgesagt(eventData) ? (
                 <IonNote color="medium" style={{ display: 'block', textAlign: 'center', fontSize: 'var(--app-text-betont)' }}>
                   <IonIcon icon={ICON_ABSAGE} style={{ verticalAlign: 'middle', marginRight: 'var(--app-abstand-kompakt)' }} />
-                  Dieser Termin ist abgesagt
+                  Dieses Event ist abgesagt
                 </IonNote>
+              ) : (eventData.booking_status === 'waitlist' || eventData.booking_status === 'pending') ? (
+                // WARTELISTE: is_registered
+                // ist nur bei 'confirmed' wahr. Ohne diesen Zweig fiel die
+                // Wartende unten in "Warteliste offen" -- einen Anmelde-Knopf,
+                // der mit 409 "bereits angemeldet" endete; herunter kam sie
+                // nicht. Die Zwei-Tage-Frist (canUnregister) gilt hier nicht:
+                // Ein Wartender belegt keinen Platz, das Backend nimmt ihn
+                // von der Frist aus. Gleicher Dialog wie beim Abmelden.
+                <div style={{ textAlign: 'center' }}>
+                  <div className="app-status-box app-status-box--events" style={{ marginBottom: 'var(--app-abstand-mittel)' }}>
+                    <IonIcon icon={ICON_WARTEND_GEFUELLT} />
+                    Du stehst auf Platz {eventData.waitlist_position || '?'} der Warteliste
+                  </div>
+                  <IonButton
+                    className="app-action-button"
+                    expand="block"
+                    fill="outline"
+                    color="danger"
+                    onClick={() => presentUnregisterModal({
+                      presentingElement: pageRef.current || undefined
+                    })}
+                  >
+                    <IonIcon icon={ICON_ABSAGE} slot="start" />
+                    {!isOnline
+                      ? <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Von der Warteliste abmelden (wird gesendet)</>
+                      : 'Von der Warteliste abmelden'}
+                  </IonButton>
+                </div>
+              ) : eventData.booking_status === 'excused' ? (
+                (() => {
+                  const voll = eventData.max_participants > 0 && (eventData.registered_count || 0) >= eventData.max_participants;
+                  const wartelisteOffen = voll && !!eventData.waitlist_enabled;
+                  const darfZurueck = !!eventData.can_register && eventData.registration_status === 'open' && (!voll || wartelisteOffen);
+                  return (
+                    <div style={{ textAlign: 'center' }}>
+                      <div className="app-status-box app-status-box--events" style={{ marginBottom: 'var(--app-abstand-mittel)' }}>
+                        <IonIcon icon={ICON_ABSAGE} />
+                        Von der Leitung abgemeldet
+                      </div>
+                      {darfZurueck ? (
+                        <IonButton
+                          className="app-action-button"
+                          expand="block"
+                          color="success"
+                          disabled={!isOnline || anmeldungLaeuft}
+                          onClick={handleRegister}
+                        >
+                          <IonIcon icon={ICON_ZUSAGE_GEFUELLT} slot="start" />
+                          {!isOnline
+                            ? <><IonIcon icon={ICON_OFFLINE} style={{ marginRight: 'var(--app-abstand-mini)'}} /> Du bist offline</>
+                            : wartelisteOffen ? 'Wieder anmelden (Warteliste)' : 'Wieder anmelden'}
+                        </IonButton>
+                      ) : (
+                        <IonButton
+                          className="app-action-button"
+                          expand="block"
+                          disabled
+                          color="medium"
+                        >
+                          <IonIcon icon={ICON_INFO_GEFUELLT} slot="start" />
+                          {eventData.registration_status === 'open'
+                            ? 'Ausgebucht'
+                            : eventData.registration_status === 'upcoming' ? 'Anmeldung noch nicht offen' : 'Anmeldung geschlossen'}
+                        </IonButton>
+                      )}
+                    </div>
+                  );
+                })()
               ) : (isKonfirmationEvent(eventData) && hasExistingKonfirmation) ? (
                 <IonButton
                   className="app-action-button"
@@ -1052,7 +1138,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                   className="app-action-button"
                   expand="block"
                   color="success"
-                  disabled={!isOnline}
+                  disabled={!isOnline || anmeldungLaeuft}
                   onClick={handleRegister}
                 >
                   <IonIcon icon={ICON_ZUSAGE_GEFUELLT} slot="start" />
@@ -1069,7 +1155,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                   className="app-action-button"
                   expand="block"
                   color="warning"
-                  disabled={!isOnline}
+                  disabled={!isOnline || anmeldungLaeuft}
                   onClick={handleRegister}
                 >
                   <IonIcon icon={ICON_WARTEND_GEFUELLT} slot="start" />

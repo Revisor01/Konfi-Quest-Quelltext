@@ -154,7 +154,7 @@ const AdminPasswordResetModal: React.FC<AdminPasswordResetModalProps> = ({ admin
               <IonList style={{ background: 'transparent', padding: '0' }}>
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Neues Passwort *</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Neues Passwort" aria-required="true"
                     type={showPasswords.new ? 'text' : 'password'}
                     value={newPassword}
                     onIonInput={(e) => setNewPassword(e.detail.value!)}
@@ -168,7 +168,7 @@ const AdminPasswordResetModal: React.FC<AdminPasswordResetModalProps> = ({ admin
 
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Neues Passwort bestätigen *</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Neues Passwort bestätigen" aria-required="true"
                     type={showPasswords.confirm ? 'text' : 'password'}
                     value={confirmPassword}
                     onIonInput={(e) => setConfirmPassword(e.detail.value!)}

@@ -3,9 +3,12 @@ import axiosRetry from 'axios-retry';
 import { getToken, getRefreshToken, setToken, setRefreshToken, clearAuth, isLoggingOut, getActiveOrgId, setActiveOrgId } from './tokenStore';
 import { networkMonitor } from './networkMonitor';
 // Kein Zirkelbezug: biometrics.ts importiert nur tokenStore/Preferences, nie api.
-import { rotationUebernehmen } from './biometrics';
+import { rotationUebernehmen, istBiometrieAktiv } from './biometrics';
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://konfi-quest.de/api';
+import { API_BASE_URL } from './apiBasis';
+import { refreshAnfordern } from './refreshAnfrage';
+import { sperrMeldungAus } from '../utils/anmeldeHinweis';
+import { fehlerFuersProtokoll, fehlerEntschaerfen, istEntschaerft } from '../utils/fehler';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -24,11 +27,46 @@ const api = axios.create({
  */
 export const DATEI_TIMEOUT_MS = 180000;
 
+/**
+ * Header, mit dem ein Aufrufer einen schreibenden Request als wiederholbar
+ * kennzeichnet. Wer ihn setzt, verspricht: Der Server erkennt den zweiten
+ * Versuch am Schluessel und fuehrt ihn nicht doppelt aus. Die Server-Seite
+ * dafuer ist ein eigener Schritt (bisher kennt das Backend nur client_id
+ * fuer Antraege); bis dahin setzt ihn niemand, und POST/PATCH werden nie
+ * wiederholt.
+ */
+export const IDEMPOTENCY_HEADER = 'Idempotency-Key';
+
+// Methoden, die der Server nicht folgenlos zweimal ausfuehren kann.
+const NICHT_IDEMPOTENT = new Set(['post', 'patch']);
+
+const hatIdempotenzSchluessel = (config: { headers?: unknown } | undefined): boolean => {
+  const headers = config?.headers as
+    | { get?: (name: string) => unknown; [key: string]: unknown }
+    | undefined;
+  if (!headers) return false;
+  const wert = typeof headers.get === 'function'
+    ? headers.get(IDEMPOTENCY_HEADER)
+    : headers[IDEMPOTENCY_HEADER];
+  return typeof wert === 'string' && wert.length > 0;
+};
+
 // Automatischer Retry für transiente Fehler (5xx, 408) — NICHT für 429.
 // WICHTIG: 429 (Rate-Limit) darf NICHT retried werden. Ein Retry-auf-429 zählt
 // erneut gegen das Limit und macht die Ueberschreitung schlimmer (Retry-Lawine) —
 // genau das war die Ursache für das sporadische "Zu viele Anfragen". Bei 429
 // sagt der Server "warte", die richtige Antwort ist warten, nicht sofort 3x nachfeuern.
+//
+// NUR IDEMPOTENTE METHODEN: axios-retry
+// schliesst POST in isNetworkOrIdempotentRequestError bewusst aus; die
+// Klauseln `status >= 500` und ECONNABORTED darunter hoben das fuer jede
+// Methode auf. Ein POST, dessen Antwort nach 20 s nicht da war, obwohl der
+// Server laengst geschrieben hatte, ging bis zu dreimal neu hinaus -- 3
+// Bonuspunkte wurden 6, 9 oder 12, ein Termin entstand mehrfach, eine
+// Anmeldung endete als Fehler "bereits angemeldet", obwohl sie stand. Ob der
+// Request angekommen ist, laesst sich beim Timeout nicht unterscheiden;
+// deshalb werden POST/PATCH nur wiederholt, wenn der Aufrufer einen
+// Idempotency-Key mitgibt (siehe IDEMPOTENCY_HEADER).
 axiosRetry(api, {
   retries: 3,
   retryDelay: (retryCount) => {
@@ -37,6 +75,8 @@ axiosRetry(api, {
   retryCondition: (error) => {
     const status = error.response?.status;
     if (status === 429) return false;
+    const methode = (error.config?.method || 'get').toLowerCase();
+    if (NICHT_IDEMPOTENT.has(methode) && !hatIdempotenzSchluessel(error.config)) return false;
     // Timeout (ECONNABORTED/ETIMEDOUT) durch Netzwerkwechsel ebenfalls wiederholen.
     if (error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT') return true;
     return axiosRetry.isNetworkOrIdempotentRequestError(error) || (status !== undefined && status >= 500);
@@ -92,13 +132,18 @@ const addRefreshSubscriber = (onSuccess: (token: string) => void, onFail: (err: 
 
 // Refresh-Request selbst (direktes axios, nicht api — vermeidet Interceptor-Loop).
 // Aktive Org mitsenden, damit das neue Token den Org-Claim behält.
+// Mit Zeitlimit 20 s wie die Instanz:
+// ohne es hing bei einem Netzwechsel die ganze App am Refresh.
 const performRefresh = async (refreshToken: string): Promise<string> => {
   const activeOrgId = getActiveOrgId();
-  const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
-    refresh_token: refreshToken
-  }, activeOrgId ? { headers: { 'X-Active-Organization': String(activeOrgId) } } : undefined);
+  const response = await refreshAnfordern(
+    { refresh_token: refreshToken },
+    activeOrgId ? { 'X-Active-Organization': String(activeOrgId) } : undefined
+  );
 
   const { token: newToken, refresh_token: newRefreshToken } = response.data;
+
+  const nurGesichert = await istBiometrieAktiv();
 
   // REIHENFOLGE IST KRITISCH (Android-Session-Verlust, 1.5.0):
   // Der Server rotiert bei jedem Refresh und REVOKED den alten Refresh-Token
@@ -109,7 +154,9 @@ const performRefresh = async (refreshToken: string): Promise<string> => {
   // daher MUSS der Refresh-Token ZUERST und bestaetigt persistiert werden.
   // Der Access-Token ist unkritisch: geht er bei einem Crash verloren, holt ihn
   // der nächste ensureFreshToken() über den (gesicherten) Refresh-Token neu.
-  await setRefreshToken(newRefreshToken);
+  // Bei eingeschalteter Biometrie ist die dauerhafte Ablage der sichere
+  // Speicher (rotationUebernehmen unten); hier nur der Arbeitsspeicher.
+  await setRefreshToken(newRefreshToken, { klartext: !nurGesichert });
   await setToken(newToken);
 
   // Ist die biometrische Anmeldung aktiv, muss die gesichert abgelegte Sitzung
@@ -175,24 +222,63 @@ export const ensureFreshToken = async (marginSeconds = 30): Promise<string | nul
   }
 };
 
+// Ein Token OHNE Org-Claim beschaffen.
+//
+// Nach dem Rueckfall auf die Stamm-Gemeinde reicht es nicht, den Header
+// X-Active-Organization wegzulassen: Das Access-Token traegt weiter den
+// Claim active_organization_id der entzogenen Gemeinde, und rbac.js greift
+// OHNE Header genau auf diesen Claim zurueck -> wieder 403, bei jedem
+// Request, bis das Token ablaeuft (bis zu 15 Minuten). Der Weg zu einem
+// Token ohne Claim ist POST /auth/refresh ohne Org-Header (auth.js laesst den
+// Claim dann weg); switch-org auf die Stamm-Gemeinde ginge nicht, es verlangt
+// eine Zeile in user_organizations, die es fuer die Stamm-Gemeinde meist
+// nicht gibt.
+//
+// Muss NACH setActiveOrgId(null) laufen -- performRefresh liest die aktive
+// Org fuer den Header. Ein bereits laufender Refresh kann noch mit dem alten
+// Header unterwegs sein; auf ihn warten und dann selbst einmal refreshen.
+// Scheitert der Refresh (Funkloch), bleibt die Sitzung bestehen -- das
+// entscheidet allein der 401-Interceptor -- und der Zustand ist der von
+// vorher: das alte Token wirkt bis zu seinem Ablauf nach.
+const tokenOhneOrgClaimBeschaffen = async (): Promise<string | null> => {
+  if (isRefreshing) {
+    await new Promise<void>((resolve) => addRefreshSubscriber(() => resolve(), () => resolve()));
+  }
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return null;
+  isRefreshing = true;
+  try {
+    const neu = await performRefresh(refreshToken);
+    isRefreshing = false;
+    onTokenRefreshed(neu);
+    return neu;
+  } catch (err) {
+    isRefreshing = false;
+    onTokenRefreshFailed(err);
+    // Nur Status und Code: `config.data` des Refresh-Fehlers traegt den
+    // Refresh-Token im Klartext.
+    console.warn('Token ohne Gemeinde-Claim konnte nicht beschafft werden:', fehlerFuersProtokoll(err));
+    return null;
+  }
+};
+
 // Handle auth errors and rate limiting
-api.interceptors.response.use(
-  (response) => response,
-  async (error) => {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- axios reicht den Fehler untypisiert herein; wie bisher im Interceptor.
+const fehlerBehandeln = async (error: any): Promise<unknown> => {
     const originalRequest = error.config;
 
-    // SICHERHEITSNETZ Multi-Org: Wenn ein Request mit aktivem Org-Header ein
-    // 403 "Kein Zugriff auf diese Organisation" bekommt (z.B. Mitgliedschaft
-    // entzogen, oder Token-Claim nach Refresh verloren), fällt die App auf die
-    // Primaer-Org zurück und laedt neu — statt dauerhaft alles leer zu zeigen.
+    const daten = error.response?.data;
     if (
       error.response?.status === 403 &&
-      error.response?.data?.error === 'Kein Zugriff auf diese Organisation' &&
+      (daten?.error_code === 'org_kein_zugriff' || daten?.error === 'Kein Zugriff auf diese Organisation') &&
       getActiveOrgId()
     ) {
-      // Aktive Org zuruecksetzen und den AppContext per Event zum Remount bringen
-      // (KEIN window.location-Reload -> der zerschiesst den nativen WebView).
+      // Aktive Org zuruecksetzen, ein Token OHNE Org-Claim holen und erst
+      // dann den AppContext per Event zum Remount bringen -- der baut damit
+      // auch den Socket mit dem neuen Token auf (KEIN window.location-Reload
+      // -> der zerschiesst den nativen WebView).
       await setActiveOrgId(null);
+      await tokenOhneOrgClaimBeschaffen();
       window.dispatchEvent(new CustomEvent('auth:org-fallback'));
       return Promise.reject(error);
     }
@@ -203,6 +289,16 @@ api.interceptors.response.use(
 
       // Login- und Refresh-Requests nicht retry'en
       if (isLoginRequest || isRefreshRequest) {
+        return Promise.reject(error);
+      }
+
+      // Schon einmal nach einem Refresh wiederholt und wieder 401? Dann liegt
+      // es nicht am Token -- durchreichen. Ohne
+      // diesen Merker drehte der Client im Kreis, rotierte in jeder Runde den
+      // Refresh-Token und kam nie zurueck (gemessen: 8 Versuche, 7 Refreshs
+      // bis zur Notbremse des Tests). Die Sitzung bleibt bestehen: Sie wurde
+      // gerade erst erneuert.
+      if (originalRequest?._retry) {
         return Promise.reject(error);
       }
 
@@ -231,6 +327,7 @@ api.interceptors.response.use(
           addRefreshSubscriber(
             (newToken: string) => {
               originalRequest.headers.Authorization = `Bearer ${newToken}`;
+              originalRequest._retry = true;
               resolve(api(originalRequest));
             },
             (err) => reject(err)
@@ -246,8 +343,9 @@ api.interceptors.response.use(
         isRefreshing = false;
         onTokenRefreshed(newToken);
 
-        // Original-Request mit neuem Token wiederholen
+        // Original-Request mit neuem Token wiederholen -- genau einmal (_retry).
         originalRequest.headers.Authorization = `Bearer ${newToken}`;
+        originalRequest._retry = true;
         return api(originalRequest);
       } catch (refreshError) {
         isRefreshing = false;
@@ -258,9 +356,24 @@ api.interceptors.response.use(
           await clearAuth();
           return Promise.reject(refreshError);
         }
-        // Refresh fehlgeschlagen → Re-Login-Dialog
+        // Keine Antwort des Servers (Zeitlimit, Netz weg): Die Sitzung
+        // bleibt, die Anfrage scheitert als Netzfehler -- wie im
+        // Offline-Zweig oben. Seit der Refresh ein Zeitlimit hat,
+        // kaeme ein Netzwechsel sonst nach 20 s als
+        // "Sitzung abgelaufen" an; vorher hing die App, und ein Neustart
+        // behielt die Sitzung. Ob der Token noch gilt, sagt nur der Server.
+        if (!(refreshError as { response?: unknown })?.response) {
+          return Promise.reject(refreshError);
+        }
+        // Refresh vom Server abgelehnt → Re-Login-Dialog. Ist es eine
+        // Zugangs-Sperre (403 mit error_code: Konto deaktiviert, Gemeinde
+        // gesperrt, Testphase vorbei), geht die Meldung des Servers mit --
+        // die Anmeldeseite zeigt dann den Grund statt "Sitzung abgelaufen"
+        // 
         await clearAuth();
-        window.dispatchEvent(new CustomEvent('auth:relogin-required'));
+        window.dispatchEvent(new CustomEvent('auth:relogin-required', {
+          detail: { sperrMeldung: sperrMeldungAus(refreshError) },
+        }));
         return Promise.reject(refreshError);
       }
     }
@@ -284,6 +397,29 @@ api.interceptors.response.use(
     }
 
     return Promise.reject(error);
+};
+
+// Jeder Fehler, den die Instanz an einen Aufrufer weitergibt, ist vorher
+// entschaerft: ohne Zugangs-Token, Anfragekoerper und Leitung.
+// Rund
+// 100 Stellen geben gefangene Fehler roh an die Konsole -- hier wird es EINMAL
+// geloest statt an jeder Stelle.
+//
+// ERST AM ENDE: fehlerBehandeln braucht Kopfzeilen und Koerper noch, um die
+// Anfrage nach einem Refresh zu wiederholen; axios-retry (vor diesem
+// Interceptor registriert) hat seine Entscheidung schon getroffen. Ein Fehler,
+// der hier schon einmal durchlief -- er kommt aus der Kette einer Wiederholung
+// zurueck --, geht unveraendert weiter; sonst liefen Rueckfall, Refresh und
+// Rate-Limit-Meldung doppelt.
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (istEntschaerft(error)) throw error;
+    try {
+      return await fehlerBehandeln(error);
+    } catch (endgueltig) {
+      throw fehlerEntschaerfen(endgueltig);
+    }
   }
 );
 

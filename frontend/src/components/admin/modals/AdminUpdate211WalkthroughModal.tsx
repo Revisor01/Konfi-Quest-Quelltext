@@ -34,7 +34,7 @@ export const SLIDES: OnboardingSlide[] = [
     color: 'var(--app-color-events)',
     rgb: '--app-color-events-rgb',
     title: 'Wer kommt, wer nicht',
-    text: 'Das Team sagt zu Terminen jetzt ausdrücklich zu oder ab. In der Terminansicht siehst du, wer abgesagt hat und warum — eine Absage nach vorheriger Zusage ist eigens gekennzeichnet, denn dann hast du mit dieser Person schon geplant. Bei einer Absage wird der Platz frei und die Warteliste rückt nach.',
+    text: 'Das Team sagt zu Events jetzt ausdrücklich zu oder ab. Im Event siehst du, wer abgesagt hat und warum — eine Absage nach vorheriger Zusage ist eigens gekennzeichnet, denn dann hast du mit dieser Person schon geplant. Bei einer Absage wird der Platz frei und die Warteliste rückt nach.',
   },
   {
     icon: ICON_LINK,
@@ -48,7 +48,7 @@ export const SLIDES: OnboardingSlide[] = [
     color: 'var(--app-color-jahrgang)',
     rgb: '--app-color-jahrgang-rgb',
     title: 'Rollen und Jahrgänge',
-    text: 'Als Admin siehst du jetzt überall nur die Jahrgänge, die dir zugewiesen sind — bei Konfis, Anträgen, Terminen und im Rückblick. Das Team bleibt davon ausgenommen, das erreichst du ganz. Bleibt eine Liste leer, steht künftig dabei, dass dir noch kein Jahrgang zugewiesen ist; das ist kein Fehler. Org-Admins dürfen weiterhin alles, und nur sie legen Jahrgänge an.',
+    text: 'Als Leitung siehst du jetzt überall nur die Jahrgänge, die dir zugewiesen sind — bei Konfis, Anträgen, Events und im Rückblick. Das Team bleibt davon ausgenommen, das erreichst du ganz. Bleibt eine Liste leer, steht künftig dabei, dass dir noch kein Jahrgang zugewiesen ist; das ist kein Fehler. Die Gemeindeleitung darf weiterhin alles, und nur sie legt Jahrgänge an.',
   },
   {
     icon: ICON_FUNKELN,

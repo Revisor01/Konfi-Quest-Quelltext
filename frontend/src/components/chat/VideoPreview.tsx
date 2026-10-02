@@ -1,29 +1,62 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { haptik, ImpactStyle } from '../../utils/haptics';
-import { getMediaBlob } from '../../services/mediaCache';
-import { Message } from '../../types/chat';
+import type { MedienQuelle } from '../../services/mediaCache';
+import { useMedienDatei } from '../../hooks/useMedienDatei';
+import MedienPlatzhalter from '../shared/MedienPlatzhalter';
 import { formatFileSize } from '../../utils/helpers';
 
 interface VideoPreviewProps {
-  message: Message;
-  onError: (error: string) => void;
+  filePath: string;
+  fileName?: string | null;
+  fileSize?: number | null;
+  /** Woher das Video kommt; ohne Angabe der Chat. */
+  quelle?: MedienQuelle;
+  onError?: (error: string) => void;
+  /** Volle Breite der Karte (Challenge-Beiträge) statt höchstens 280 px. */
+  vollbreite?: boolean;
 }
 
-const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
-  const [videoUrl, setVideoUrl] = useState<string>('');
+// Typ für die Wiedergabe aus dem Dateinamen. Die Server vergeben Dateinamen
+// ohne Endung, und aus dem Cache kommt der Blob ohne Typ zurück — ohne
+// richtigen Typ spielt iOS das Video nicht ab.
+const videoTyp = (name: string | null | undefined): string => {
+  const fileName = name?.toLowerCase() || '';
+  if (fileName.endsWith('.mov')) return 'video/quicktime';
+  if (fileName.endsWith('.mp4')) return 'video/mp4';
+  if (fileName.endsWith('.webm')) return 'video/webm';
+  if (fileName.endsWith('.avi')) return 'video/x-msvideo';
+  if (fileName.endsWith('.m4v')) return 'video/x-m4v';
+  return 'video/mp4';
+};
+
+const VideoPreview: React.FC<VideoPreviewProps> = ({
+  filePath,
+  fileName,
+  fileSize,
+  quelle = 'chat',
+  onError,
+  vollbreite = false,
+}) => {
   const [thumbnailUrl, setThumbnailUrl] = useState<string>('');
-  const [loading, setLoading] = useState(true);
-  const [hasError, setHasError] = useState(false);
+  const [abspielFehler, setAbspielFehler] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [showControls, setShowControls] = useState(false);
   const [duration, setDuration] = useState<string>('');
   const videoRef = useRef<HTMLVideoElement>(null);
   // onError als Ref (MessageBubble liefert einen Inline-Arrow, der bei jedem
-  // Render neu entsteht). In der useEffect-Dependency-Liste wuerde das den
-  // Lade-Effekt staendig neu auslösen -> Video-Reload-Loop. Über die Ref
-  // bleibt der Effekt an `message.file_path` gebunden und läuft pro Video EINMAL.
+  // Render neu entsteht). In einer Abhängigkeitsliste würde das den
+  // Lade-Effekt ständig neu auslösen -> Video-Reload-Loop.
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+
+  // Eigener, typisierter Blob (typ gesetzt): Die URL gehört dieser Vorschau
+  // und wird beim Abhängen freigegeben — auch wenn der Download dann noch lief
+  // 
+  const { url: videoUrl, zustand, prozent, erneutVersuchen } = useMedienDatei(filePath, {
+    quelle,
+    typ: videoTyp(fileName),
+    onFehler: () => onErrorRef.current?.('Fehler beim Laden des Videos'),
+  });
 
   // Canvas-basierte Thumbnail-Generierung (kein sichtbares play/pause)
   const generateThumbnail = useCallback((blobUrl: string) => {
@@ -57,7 +90,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
           setThumbnailUrl(dataUrl);
         }
       } catch (error) {
-        console.warn('Canvas-Thumbnail fehlgeschlagen:', message.file_name, error);
+        console.warn('Canvas-Thumbnail fehlgeschlagen:', fileName, error);
       }
       // Offscreen-Video aufräumen
       offscreenVideo.removeAttribute('src');
@@ -65,86 +98,18 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
     });
 
     offscreenVideo.addEventListener('error', () => {
-      console.warn('Offscreen-Video-Fehler bei Thumbnail-Generierung:', message.file_name);
+      console.warn('Offscreen-Video-Fehler bei Thumbnail-Generierung:', fileName);
     });
 
     offscreenVideo.src = blobUrl;
-  }, [message.file_name]);
+  }, [fileName]);
 
   useEffect(() => {
-    let blobUrl = '';
-    // Abbruch-Merker wie in LazyImage: Ohne ihn las die
-    // Aufraeumfunktion `blobUrl` aus dem Effekt-Scope, waehrend der Download
-    // noch lief — sie sah dann den leeren Anfangswert, und die DANACH erzeugte
-    // Object-URL wurde nie freigegeben. Ein Video im Chat wegzuscrollen, bevor
-    // es fertig geladen war, hinterliess damit ein Leck bis zum App-Neustart.
-    // Ausserdem feuerte der Fehlerzweig einen Hinweis fuer eine Nachricht, die
-    // laengst nicht mehr auf dem Bildschirm steht.
-    let cancelled = false;
-
-    const loadVideoBlob = async () => {
-      try {
-        setLoading(true);
-        setHasError(false);
-
-        // Aus lokalem Cache laden (oder einmalig vom Server + cachen).
-        const blob = await getMediaBlob(message.file_path!);
-        const fileName = message.file_name?.toLowerCase() || '';
-        let mimeType = blob.type;
-
-        if (!mimeType || mimeType === 'application/octet-stream') {
-          if (fileName.endsWith('.mov')) {
-            mimeType = 'video/quicktime';
-          } else if (fileName.endsWith('.mp4')) {
-            mimeType = 'video/mp4';
-          } else if (fileName.endsWith('.webm')) {
-            mimeType = 'video/webm';
-          } else if (fileName.endsWith('.avi')) {
-            mimeType = 'video/x-msvideo';
-          } else if (fileName.endsWith('.m4v')) {
-            mimeType = 'video/x-m4v';
-          } else {
-            mimeType = 'video/mp4';
-          }
-        }
-
-        const correctedBlob = new Blob([blob], { type: mimeType });
-        blobUrl = URL.createObjectURL(correctedBlob);
-
-        // Waehrend des Ladens abgehaengt: die eben erzeugte URL sofort wieder
-        // freigeben und nichts mehr in einen toten Zustand schreiben.
-        if (cancelled) {
-          URL.revokeObjectURL(blobUrl);
-          blobUrl = '';
-          return;
-        }
-
-        setVideoUrl(blobUrl);
-        generateThumbnail(blobUrl);
-        setLoading(false);
-      } catch (error) {
-        if (cancelled) return;
-        console.error('Fehler beim Laden des Video-Blobs:', error);
-        setHasError(true);
-        setLoading(false);
-        onErrorRef.current('Fehler beim Laden des Videos');
-      }
-    };
-
-    if (message.file_path) {
-      loadVideoBlob();
-    }
-
-    return () => {
-      cancelled = true;
-      if (blobUrl) {
-        URL.revokeObjectURL(blobUrl);
-      }
-    };
-    // NUR an file_path gebunden — file_name/generateThumbnail/onError bewusst
-    // ausgeklammert, sonst Reload-Loop (s. onErrorRef).
+    if (videoUrl) generateThumbnail(videoUrl);
+    // NUR an der URL — generateThumbnail ändert sich mit dem Namen, nicht
+    // mit dem Video.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [message.file_path]);
+  }, [videoUrl]);
 
   const handleVideoClick = async () => {
     try {
@@ -163,7 +128,7 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
       }
     } catch (error) {
       console.error('Video-Wiedergabe-Fehler:', error);
-      onError('Fehler beim Abspielen des Videos');
+      onErrorRef.current?.('Fehler beim Abspielen des Videos');
     }
   };
 
@@ -172,35 +137,39 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
     setShowControls(false);
   };
 
+  const breite = vollbreite ? '100%' : '280px';
+
   const placeholderStyle: React.CSSProperties = {
     position: 'relative',
-    maxWidth: '280px',
-    height: '200px',
+    maxWidth: breite,
+    width: vollbreite ? '100%' : undefined,
+    minHeight: '200px',
     borderRadius: 'var(--app-radius-karte)',
     backgroundColor: 'var(--app-surface-dark)',
+    color: 'white',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center'
   };
 
-  if (loading) {
+  if (!videoUrl) {
     return (
       <div style={placeholderStyle}>
-        <div style={{ color: 'white', opacity: 0.7 }}>Video wird geladen...</div>
+        <MedienPlatzhalter zustand={zustand} prozent={prozent} was="Das Video" onErneut={erneutVersuchen} dunkel />
       </div>
     );
   }
 
-  if (hasError) {
+  if (abspielFehler) {
     return (
       <div style={placeholderStyle}>
-        <div style={{ color: 'white', opacity: 0.7 }}>Fehler beim Laden</div>
+        <div style={{ opacity: 0.7, fontSize: 'var(--app-text-sekundaer)' }}>Das Video kann nicht abgespielt werden.</div>
       </div>
     );
   }
 
   return (
-    <div style={{ position: 'relative', maxWidth: '280px', borderRadius: 'var(--app-radius-karte)', overflow: 'hidden' }}>
+    <div style={{ position: 'relative', maxWidth: breite, width: vollbreite ? '100%' : undefined, borderRadius: 'var(--app-radius-karte)', overflow: 'hidden' }}>
       <video
         ref={videoRef}
         src={videoUrl}
@@ -208,11 +177,11 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
         style={{
           width: '100%',
           height: 'auto',
-          maxHeight: '200px',
+          maxHeight: vollbreite ? '320px' : '200px',
           minHeight: '120px',
           display: 'block',
           borderRadius: 'var(--app-radius-karte)',
-          backgroundColor: 'black',
+          backgroundColor: 'var(--app-schwarz)',
           cursor: 'pointer',
           objectFit: 'cover',
           border: '1px solid rgba(255,255,255,0.1)'
@@ -226,9 +195,9 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
         onPause={() => setIsPlaying(false)}
         onPlay={() => setIsPlaying(true)}
         onError={() => {
-          console.error('Video-Element-Fehler für:', message.file_name);
-          setHasError(true);
-          onError('Video kann nicht abgespielt werden');
+          console.error('Video-Element-Fehler für:', fileName);
+          setAbspielFehler(true);
+          onErrorRef.current?.('Video kann nicht abgespielt werden');
         }}
       />
 
@@ -286,21 +255,23 @@ const VideoPreview: React.FC<VideoPreviewProps> = ({ message, onError }) => {
         )}
       </div>
 
-      <div style={{
-        position: 'absolute',
-        bottom: '8px',
-        right: '8px',
-        backgroundColor: 'rgba(0, 0, 0, 0.8)',
-        color: 'white',
-        padding: 'var(--app-abstand-mini) var(--app-abstand-eng)',
-        borderRadius: 'var(--app-radius-karte)',
-        fontSize: 'var(--app-text-klein)',
-        fontWeight: 'var(--app-schrift-mittel)',
-        pointerEvents: 'none',
-        zIndex: 5
-      }}>
-        {message.file_size && formatFileSize(message.file_size)}
-      </div>
+      {fileSize ? (
+        <div style={{
+          position: 'absolute',
+          bottom: '8px',
+          right: '8px',
+          backgroundColor: 'rgba(0, 0, 0, 0.8)',
+          color: 'white',
+          padding: 'var(--app-abstand-mini) var(--app-abstand-eng)',
+          borderRadius: 'var(--app-radius-karte)',
+          fontSize: 'var(--app-text-klein)',
+          fontWeight: 'var(--app-schrift-mittel)',
+          pointerEvents: 'none',
+          zIndex: 5
+        }}>
+          {formatFileSize(fileSize)}
+        </div>
+      ) : null}
     </div>
   );
 };

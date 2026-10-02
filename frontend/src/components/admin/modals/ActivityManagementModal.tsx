@@ -14,6 +14,8 @@ import api from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
+import { sendenOderEinreihen } from '../../../utils/sendenOderEinreihen';
+import { tastaturKlick } from '../../../utils/tastatur';
 
 interface Activity {
   id: number;
@@ -196,36 +198,38 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
         target_role: formData.target_role
       };
 
-      if (networkMonitor.isOnline) {
-        // Online-Pfad: direkt senden
-        if (currentActivity) {
-          await api.put(`/admin/activities/${currentActivity.id}`, payload);
-        } else {
-          await api.post('/admin/activities', payload);
-        }
-      } else {
-        // Offline-Pfad: Queue-Fallback
-        if (currentActivity) {
-          await writeQueue.enqueue({
+      // Bearbeiten (PUT) faellt auch bei einem Netzabbruch im Online-Zweig in
+      // die Warteschlange; Anlegen (POST ohne Idempotenzschluessel) nur
+      // offline -- nach einem Abbruch bleibt es dort beim Fehler, sonst
+      // entstuende der Eintrag womoeglich doppelt.
+      const { weg } = await sendenOderEinreihen({
+        online: networkMonitor.isOnline,
+        methode: currentActivity ? 'PUT' : 'POST',
+        senden: () => (currentActivity
+          ? api.put(`/admin/activities/${currentActivity.id}`, payload)
+          : api.post('/admin/activities', payload)),
+        einreihen: () => (currentActivity
+          ? writeQueue.enqueue({
             method: 'PUT',
             url: `/admin/activities/${currentActivity.id}`,
             body: payload,
             maxRetries: 5,
             hasFileUpload: false,
             metadata: { type: 'admin', clientId: safeUUID(), label: 'Aktivität bearbeiten' },
-          });
-          setSuccess('Aktivität wird aktualisiert sobald du wieder online bist');
-        } else {
-          await writeQueue.enqueue({
+          })
+          : writeQueue.enqueue({
             method: 'POST',
             url: '/admin/activities',
             body: payload,
             maxRetries: 5,
             hasFileUpload: false,
             metadata: { type: 'admin', clientId: safeUUID(), label: 'Aktivität erstellen' },
-          });
-          setSuccess('Aktivität wird erstellt sobald du wieder online bist');
-        }
+          })),
+      });
+      if (weg === 'eingereiht') {
+        setSuccess(currentActivity
+          ? 'Aktivität wird aktualisiert sobald du wieder online bist'
+          : 'Aktivität wird erstellt sobald du wieder online bist');
       }
 
       setIsDirty(false);
@@ -285,7 +289,7 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
           <IonCard className="app-card">
             <IonCardContent>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-eng)' }}>
-                <div
+                <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                   className="app-list-item"
                   onClick={() => !loading && setFormData({ ...formData, target_role: 'konfi', points: formData.target_role === 'teamer' ? 1 : formData.points, type: formData.target_role === 'teamer' ? 'gottesdienst' : formData.type })}
                   style={{
@@ -300,7 +304,7 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
                 >
                   <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-primary)' }}>Konfis</span>
                 </div>
-                <div
+                <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                   className="app-list-item"
                   onClick={() => !loading && setFormData({ ...formData, target_role: 'teamer', points: 0, type: '' })}
                   style={{
@@ -334,7 +338,7 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
               <IonList style={{ background: 'transparent', padding: '0' }}>
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Name *</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Name" aria-required="true"
                     value={formData.name}
                     onIonInput={(e) => setFormData({ ...formData, name: e.detail.value! })}
                     placeholder="z.B. Sonntagsgottesdienst"
@@ -354,8 +358,15 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
                   <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Punkte * <span style={{ fontWeight: 'var(--app-schrift-fett)', color: 'var(--ion-color-primary)' }}>{formData.points}</span></IonLabel>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-eng)', width: '100%' }}>
                     <span style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)', minWidth: '24px', textAlign: 'center' }}>1</span>
-                    <IonRange
+                    <IonRange aria-label="Punkte" aria-required="true"
                       min={1} max={5} step={1}
+                  /* Rastermarken: Bei 1-5 Punkten sind die Stufen abzaehlbar,
+                     das trifft man schneller als per Ziehen. `ticks` zeigt sie,
+                     `snaps` laesst den Regler einrasten — Ionic zeichnet die
+                     Marken nur, wenn beides gesetzt ist. Bei den groesseren
+                     Reglern (Level 1-40, Abzeichen 1-26) bewusst NICHT: Dort
+                     stuenden die Marken zu dicht. */
+                  ticks={true} snaps={true}
                       pin={true} pinFormatter={(value: number) => `${value}`}
                       value={formData.points}
                       onIonChange={(e) => setFormData({ ...formData, points: e.detail.value as number })}
@@ -374,7 +385,7 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
                   <span style={{ fontSize: 'var(--app-text-basis)', fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-secondary)', padding: '0 var(--app-abstand-basis)' }}>Typ *</span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-eng)' }}>
-                  <div
+                  <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                     className="app-list-item"
                     onClick={() => !loading && setFormData({ ...formData, type: 'gottesdienst' })}
                     style={{
@@ -390,7 +401,7 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
                   >
                     <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-primary)' }}>Gottesdienst</span>
                   </div>
-                  <div
+                  <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                     className="app-list-item"
                     onClick={() => !loading && setFormData({ ...formData, type: 'gemeinde' })}
                     style={{
@@ -432,7 +443,7 @@ const ActivityManagementModal: React.FC<ActivityManagementModalProps> = ({
                 {categories.map((category, index) => {
                   const isChecked = formData.category_ids.includes(category.id);
                   return (
-                    <div
+                    <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                       key={category.id}
                       className="app-list-item app-list-item--categories"
                       onClick={() => {

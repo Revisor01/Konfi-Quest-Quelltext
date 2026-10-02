@@ -118,7 +118,7 @@ const AnwesenheitNotizModal: React.FC<AnwesenheitNotizModalProps> = ({
             <IonCardContent>
               <IonList style={{ background: 'transparent', padding: '0' }}>
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
-                  <IonTextarea
+                  <IonTextarea aria-label={`Notiz zu ${teilnehmerName}`}
                     value={text}
                     onIonInput={(e) => setText(e.detail.value ?? '')}
                     placeholder="z. B. „ging um 14 Uhr“"

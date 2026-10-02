@@ -1,6 +1,18 @@
 import { Preferences } from '@capacitor/preferences';
+import { getUser } from './tokenStore';
 
 const CACHE_PREFIX = 'cache:';
+
+// Der gespeicherte Stand gehört zum Konto:
+// Jeder Schlüssel trägt die Kennung des angemeldeten Kontos.
+// Der bewusste Logout leert den Cache; eine ABGELAUFENE Sitzung nicht — meldete
+// sich danach jemand anderes am Gerät an, zeigte die App dessen Listen und
+// Chat-Verläufe der vorigen Person. Mit der Kennung im Schlüssel findet ein
+// anderes Konto nichts, dieselbe Person nach neuer Anmeldung ihren Stand.
+// Einträge aus der Zeit davor (ohne Kennung) findet niemand mehr; sie werden
+// neu geladen und beim nächsten Konto-Abgleich entfernt.
+const kontoPraefix = (): string => `${CACHE_PREFIX}${getUser()?.id ?? '-'}:`;
+const schluessel = (key: string): string => kontoPraefix() + key;
 
 interface CacheEntry<T> {
   data: T;
@@ -23,7 +35,7 @@ export const CACHE_TTL = {
 };
 
 async function get<T>(key: string): Promise<CacheEntry<T> | null> {
-  const prefKey = CACHE_PREFIX + key;
+  const prefKey = schluessel(key);
   try {
     const result = await Preferences.get({ key: prefKey });
     if (!result.value) return null;
@@ -36,7 +48,7 @@ async function get<T>(key: string): Promise<CacheEntry<T> | null> {
 }
 
 async function set<T>(key: string, data: T, ttl: number): Promise<void> {
-  const prefKey = CACHE_PREFIX + key;
+  const prefKey = schluessel(key);
   const entry: CacheEntry<T> = {
     data,
     timestamp: Date.now(),
@@ -50,7 +62,7 @@ function isStale(entry: CacheEntry<unknown>): boolean {
 }
 
 async function remove(key: string): Promise<void> {
-  const prefKey = CACHE_PREFIX + key;
+  const prefKey = schluessel(key);
   await Preferences.remove({ key: prefKey });
 }
 
@@ -59,6 +71,22 @@ async function clearAll(): Promise<void> {
   const cacheKeys = keys.filter(k => k.startsWith(CACHE_PREFIX));
   for (const key of cacheKeys) {
     await Preferences.remove({ key });
+  }
+}
+
+/**
+ * Entfernt den gespeicherten Stand aller ANDEREN Konten (und Einträge ohne
+ * Kennung aus der Zeit vor der Kontobindung) — beim Konto-Abgleich nach der
+ * Anmeldung. Ohne angemeldetes Konto tut es nichts.
+ */
+async function fremdeKontenEntfernen(): Promise<void> {
+  if (getUser()?.id === undefined || getUser()?.id === null) return;
+  const eigenes = kontoPraefix();
+  const { keys } = await Preferences.keys();
+  for (const key of keys) {
+    if (key.startsWith(CACHE_PREFIX) && !key.startsWith(eigenes)) {
+      await Preferences.remove({ key });
+    }
   }
 }
 
@@ -85,4 +113,5 @@ export const offlineCache = {
   remove,
   clearAll,
   invalidateAll,
+  fremdeKontenEntfernen,
 };

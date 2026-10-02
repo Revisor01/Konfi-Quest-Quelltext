@@ -181,12 +181,14 @@
 
             <h3>4.3 Technische Daten</h3>
             <ul>
-                <li>Gerätetyp und Betriebssystem</li>
-                <li>Push-Notification-Token (falls aktiviert)</li>
+                <li><strong>Geräte-Kennung:</strong> Das Betriebssystem teilt der App eine Kennung zu — auf iPhone und iPad die Kennung für die Apps eines Anbieters, auf Android die Android-ID der App; im Browser erzeugt die App einmal eine zufällige Kennung und legt sie dort ab. Die App sendet sie bei der Anmeldung, bei der Registrierung und bei jeder Verlängerung der Anmeldung. Wir speichern sie zu Ihrer Anmeldung, damit diese nur auf dem Gerät gilt, auf dem sie entstanden ist, und — wenn Push-Benachrichtigungen aktiviert sind — zum Push-Token, damit ein Gerät jede Benachrichtigung nur einmal bekommt. Die Kennung enthält weder Namen noch Telefonnummer; sie wechselt, wenn die App neu installiert wird (auf iPhone und iPad nur, wenn keine andere App desselben Anbieters mehr installiert ist) oder das Gerät zurückgesetzt wird.</li>
+                <li><strong>Push-Token</strong> (falls aktiviert): die Adresse, unter der Firebase Cloud Messaging Ihr Gerät erreicht, zusammen mit der Plattform (iOS oder Android), der Fassung und Build-Nummer der App und dem Zeitpunkt der letzten Aktualisierung.</li>
                 <li>Zeitpunkt der letzten Anmeldung</li>
                 <li>IP-Adresse (temporär für technische Zwecke)</li>
                 <li>anonyme Nutzungsstatistik ohne Personenbezug (siehe Abschnitt 9a)</li>
             </ul>
+            <p>Gerätemodell und Betriebssystemfassung speichern wir nicht; sie stehen nur in Absturzberichten (Abschnitt&nbsp;9b).</p>
+            <p>Die Geräte-Kennung wird mit dem gelöscht, woran sie hängt. Eine Anmeldung endet mit dem Abmelden oder nach 90 Tagen ohne Nutzung und wird danach vom Server gelöscht. Je Konto bleiben höchstens zehn Anmeldungen und je Gerät eine bestehen; kommt eine weitere hinzu, endet die am längsten unbenutzte. Den Push-Token löschen wir beim Abmelden, wenn das Gerät 30 Tage lang weder die App geöffnet noch eine Benachrichtigung erhalten hat, wenn die Zustellung wiederholt scheitert und wenn keine gültige Anmeldung mehr besteht. Mit dem Löschen des Kontos verschwinden beide. In den Protokollen des Servers erscheinen davon höchstens die ersten 12 Zeichen der Geräte-Kennung und die letzten 6 Zeichen des Push-Tokens.</p>
         </div>
 
         <div class="section">
@@ -225,6 +227,7 @@
             </ul>
             <p>Der Hostingdienstleister hat als Auftragsverarbeiter technisch Zugriff auf die Daten und ist vertraglich zur Einhaltung des DSG-EKD verpflichtet.</p>
             <p>Beim Versand von Push-Benachrichtigungen werden das Push-Token und der Inhalt der Benachrichtigung an den Dienst Firebase Cloud Messaging von Google übermittelt (siehe Abschnitt&nbsp;9).</p>
+            <p>Stürzt die App ab oder fängt sie einen Programmfehler ab, werden technische Angaben dazu an den Dienst Firebase Crashlytics von Google übermittelt, solange Sie die Absturzberichte nicht im Profil abgeschaltet haben (siehe Abschnitt&nbsp;9b).</p>
             <p>Eine Weitergabe an sonstige Dritte erfolgt nicht, es sei denn, eine gesetzliche Verpflichtung besteht.</p>
         </div>
 
@@ -239,12 +242,14 @@
         <div class="section">
             <h2>8. Chat-Funktion</h2>
             <p>Die App enthält eine Chat-Funktion zur Kommunikation. Chat-Nachrichten werden auf unserem Server gespeichert und sind nur für die jeweiligen Chat-Teilnehmer:innen sichtbar. Administrator:innen haben zu Moderationszwecken Zugriff auf die Nachrichten.</p>
+            <p>Haben Empfänger:innen Push-Benachrichtigungen aktiviert, erhalten sie zu einer neuen Nachricht eine Benachrichtigung mit dem Namen der absendenden Person bzw. des Chats und der Art der Nachricht — <strong>ohne ihren Text</strong>, ohne Dateinamen und ohne die Frage einer Umfrage. Sie geht über Firebase Cloud Messaging und auf iPhone und iPad zusätzlich über Apple (siehe Abschnitt&nbsp;9).</p>
         </div>
 
         <div class="section">
             <h2>9. Push-Benachrichtigungen (Firebase Cloud Messaging)</h2>
             <p>Die App bietet optionale Push-Benachrichtigungen an, etwa über neue Chat-Nachrichten, Veranstaltungen oder vergebene Punkte. Hierfür wird ein gerätespezifisches Push-Token gespeichert.</p>
-            <p>Für den technischen Versand der Push-Benachrichtigungen nutzen wir den Dienst <strong>Firebase Cloud Messaging (FCM)</strong> der Google Ireland Limited, Gordon House, Barrow Street, Dublin 4, Irland. An Firebase werden das Push-Token Ihres Geräts sowie der Inhalt der jeweiligen Benachrichtigung (z.&nbsp;B. Titel und Text) übermittelt, damit diese an Ihr Gerät zugestellt werden kann.</p>
+            <p>Für den technischen Versand der Push-Benachrichtigungen nutzen wir den Dienst <strong>Firebase Cloud Messaging (FCM)</strong> der Google Ireland Limited, Gordon House, Barrow Street, Dublin 4, Irland. An Firebase werden das Push-Token Ihres Geräts sowie der Inhalt der jeweiligen Benachrichtigung (Titel und Text) übermittelt, damit diese an Ihr Gerät zugestellt werden kann. Auf iPhone und iPad stellt Firebase die Benachrichtigung über den Apple Push Notification Service zu; dabei erhält auch Apple den Inhalt.</p>
+            <p>Was in einer Benachrichtigung steht: Bei <strong>Chat-Nachrichten</strong> der Name der absendenden Person bzw. des Chats und die Art der Nachricht (Nachricht, Foto, Video, Sprachnachricht, Datei, Umfrage) — <strong>nicht ihr Text</strong>, keine Dateinamen und nicht die Frage einer Umfrage. Bei anderen Benachrichtigungen sind es zum Beispiel Namen von Konfirmand:innen, Aktivitäten, Veranstaltungen, Badges und die Zahl der Punkte.</p>
             <p>Dabei kann es zu einer Übermittlung von Daten an Server der Google LLC in den USA kommen. Für diese Übermittlung in ein Drittland stützen wir uns auf die von der EU-Kommission erlassenen Standardvertragsklauseln. Es besteht das Risiko, dass US-Behörden unter bestimmten Voraussetzungen auf diese Daten zugreifen können.</p>
             <p>Die Verarbeitung erfolgt ausschließlich auf Grundlage Ihrer Einwilligung, die Sie durch das Aktivieren der Push-Benachrichtigungen erteilen. Rechtsgrundlage: § 6 Nr. 2 DSG-EKD. Sie können Push-Benachrichtigungen jederzeit in den Einstellungen Ihres Geräts deaktivieren und damit Ihre Einwilligung mit Wirkung für die Zukunft widerrufen.</p>
         </div>
@@ -252,12 +257,30 @@
         <div class="section">
             <h2>9a. Reichweitenmessung auf Website und in der App (Umami Analytics)</h2>
             <p>Zur Verbesserung unseres Angebots setzen wir Umami Analytics ein — sowohl auf unserer Website als auch in der App. Umami wird von uns selbst auf einem Server in Deutschland gehostet; es werden keine Daten an Dritte weitergegeben.</p>
-            <p>Umami arbeitet ohne Cookies und ohne geräteübergreifende Wiedererkennung. Erfasst werden lediglich anonymisierte Angaben wie aufgerufene Seiten, ungefähre Gerätekategorie, Browsertyp und das Herkunftsland. Ein Rückschluss auf Ihre Person ist dabei nicht möglich.</p>
+            <p>Umami arbeitet ohne Cookies und ohne geräteübergreifende Wiedererkennung; IP-Adressen werden nicht gespeichert. Um mehrere Aufrufe einer Sitzung zusammenzufassen, bildet Umami aus IP-Adresse, Browserkennung und einem geheimen Wert einen verschlüsselten Prüfwert (Hash). Der geheime Wert wechselt jeden Monat; innerhalb eines Kalendermonats können Aufrufe desselben Geräts deshalb derselben Sitzung zugeordnet werden, darüber hinaus nicht. Erfasst werden aufgerufene Seiten, die ungefähre Gerätekategorie, Browser und Betriebssystem sowie der aus der IP-Adresse abgeleitete ungefähre Standort (Land, Region und Stadt). Wir werten diese Angaben nur zusammengefasst aus und führen sie nicht mit anderen Daten zusammen; einzelne Personen erkennen wir daraus nicht.</p>
             <p>Auf unserer Startseite werten wir zusätzlich anonym aus, wie die Seite genutzt wird: welche Schaltflächen und Links angeklickt werden, wie weit gescrollt wird, welche Abschnitte betrachtet und welche FAQ-Fragen aufgeklappt werden, sowie die ungefähre Verweildauer in Zeitstufen. Diese Angaben werden ausschließlich zusammengefasst ausgewertet, um die Seite verständlicher zu gestalten. Es werden dabei keine Eingaben aus Formularen, keine Texteingaben und keine personenbezogenen Daten erfasst.</p>
             <p><strong>In der App (iOS und Android)</strong> werten wir seit Version 2.0 ebenfalls anonym aus, wie die App genutzt wird — mit demselben, selbst betriebenen Umami. Erfasst wird, welche Bereiche geöffnet werden, welche Funktionen genutzt werden (zum Beispiel eine Anmeldung zu einer Veranstaltung oder ein Beitrag zu einer Challenge), wie weit auf der Startseite gescrollt wird und an welchen Stellen Fehlermeldungen erscheinen. Zusätzlich wird die Rolle in grober Einteilung übermittelt (Konfirmand:in, Teamer:in oder Leitung), damit wir erkennen, für welche Gruppe etwas nicht funktioniert.</p>
-            <p>Von der Arbeit mit der App halten wir fest, <em>welche Art</em> von Handlung stattgefunden hat — etwa dass Punkte vergeben, eine Anwesenheit eingetragen, ein Beitrag durchgesehen, ein Termin angelegt oder Material bereitgestellt wurde. Dazu kommt eine grobe Einordnung der Handlung, zum Beispiel ob ein Termin einzeln oder als Serie angelegt wurde. <strong>Wer</strong> etwas getan hat, <strong>für wen</strong> und <strong>mit welchem Inhalt</strong>, wird dabei nicht übertragen — auch keine Anzahlen und keine Punktwerte. Bei einer Fehlermeldung vermerken wir zusätzlich die Art des Fehlers (etwa Zeitüberschreitung oder fehlende Verbindung) und die Stelle der App, an der er auftrat.</p>
-            <p>Ausdrücklich <strong>nicht</strong> erfasst werden: Name, Benutzername oder Nutzerkennung, Jahrgang, Gemeinde, Inhalte von Beiträgen, Fotos oder Chat-Nachrichten sowie Eingaben aus Formularen. Eine Zuordnung zu einer bestimmten Person ist nicht möglich, und es findet keine geräteübergreifende Wiedererkennung statt. Die Angaben werden ausschließlich zusammengefasst ausgewertet, um Fehler zu finden und die App verständlicher zu machen.</p>
+            <p>Von der Arbeit mit der App halten wir fest, <em>welche Art</em> von Handlung stattgefunden hat — etwa dass Punkte vergeben, ein Antrag angenommen oder abgelehnt, eine Anwesenheit eingetragen, ein Beitrag durchgesehen, ein Termin angelegt, Material bereitgestellt oder geöffnet oder ein Konfirmationsspruch gespeichert wurde. Dazu kommt eine grobe Einordnung der Handlung, zum Beispiel ob ein Termin einzeln oder als Serie angelegt wurde, ob ein Antrag von einer Konfirmand:in oder einer Teamer:in stammte, ob Material eine Datei oder einen Link enthielt oder ob ein Spruch aus den Vorschlägen gewählt wurde und in welcher Bibelübersetzung. <strong>Wer</strong> etwas getan hat, <strong>für wen</strong> und <strong>mit welchem Inhalt</strong>, wird dabei nicht übertragen — auch keine Anzahlen und keine Punktwerte. Bei einer Fehlermeldung vermerken wir die Stelle der App, an der sie erschien, und die Art des Fehlers (etwa Zeitüberschreitung oder fehlende Verbindung). Den Wortlaut der Meldung übertragen wir nur, wenn er fest in der App hinterlegt ist oder zu wenigen festen Hinweisen bei der An- und Abmeldung zu Veranstaltungen gehört (etwa „Anmeldung bereits geschlossen“); Zahlen darin werden unkenntlich gemacht. Jede andere Meldung — insbesondere Meldungen unseres Servers, die Namen, Titel oder Dateinamen enthalten können — wird durch einen allgemeinen Hinweis ersetzt.</p>
+            <p>Ausdrücklich <strong>nicht</strong> erfasst werden: Name, Benutzername oder Nutzerkennung, Jahrgang, Gemeinde, Inhalte von Beiträgen, Fotos oder Chat-Nachrichten, Titel und Dateinamen von Material, der gewählte Konfirmationsspruch und seine Bibelstelle, eine Begründung für die Ablehnung eines Antrags, der Wortlaut von Fehlermeldungen des Servers (bis auf die genannten festen Hinweise) sowie Eingaben aus Formularen. Eine Zuordnung zu einer bestimmten Person ist nicht möglich, und es findet keine geräteübergreifende Wiedererkennung statt. Die Angaben werden ausschließlich zusammengefasst ausgewertet, um Fehler zu finden und die App verständlicher zu machen.</p>
             <p>Rechtsgrundlage ist unser berechtigtes Interesse an einer bedarfsgerechten Gestaltung und der Verbesserung unseres Angebots (§ 6 Nr. 8 DSG-EKD).</p>
+        </div>
+
+        <div class="section">
+            <h2>9b. Absturzberichte in der App (Firebase Crashlytics)</h2>
+            <p>Damit wir Fehler finden und beheben können, die zum Absturz der App führen, setzen wir in der App (iOS und Android) den Dienst <strong>Firebase Crashlytics</strong> der Google Ireland Limited, Gordon House, Barrow Street, Dublin 4, Irland ein. Ein Bericht entsteht, wenn die App abstürzt, und wenn sie einen Programmfehler abfängt — auch einen, der im Hintergrund auftritt und die Bedienung nicht unterbricht. Von abgefangenen Fehlern überträgt die App je Fehlerart höchstens einen Bericht und insgesamt höchstens 20 Berichte, bis sie neu gestartet wird. Daneben meldet der Dienst bei jedem Start der App den Beginn einer Sitzung, damit sich der Anteil der Sitzungen ohne Absturz berechnen lässt.</p>
+            <p>Übermittelt werden dabei:</p>
+            <ul>
+                <li>technische Angaben zum Absturz oder Fehler: die Fehlermeldung (auf 200 Zeichen gekürzt) und die Stelle im Programm, an der er auftrat (Stapelverlauf),</li>
+                <li>die zuletzt angezeigten Fehlermeldungen der App, in derselben Form wie bei der Reichweitenmessung (Abschnitt&nbsp;9a) — also ohne Meldungstexte unseres Servers, die Namen, Titel oder Dateinamen enthalten können —, damit wir sehen, was einem Absturz vorausging,</li>
+                <li>Angaben zum Gerät und zum Betriebssystem: Modell, Betriebssystemfassung, verfügbarer Speicher, ob das Gerät verändert wurde (&#8222;Jailbreak&#8220;/&#8222;Root&#8220;),</li>
+                <li>die Fassung der App und die Plattform (iOS oder Android),</li>
+                <li>die Rolle in grober Einteilung (Konfirmand:in, Teamer:in oder Leitung) sowie die Nummer der Gemeinde, damit wir erkennen, wen ein Fehler betrifft,</li>
+                <li>eine von Google vergebene, zufällige Installationskennung des Geräts sowie Beginn und Dauer der Sitzungen.</li>
+            </ul>
+            <p>Ausdrücklich <strong>nicht</strong> übermittelt werden: Name, Benutzername oder Nutzerkennung, E-Mail-Adresse, Jahrgang, der Name der Gemeinde, Inhalte von Beiträgen, Fotos oder Chat-Nachrichten sowie Eingaben aus Formularen. Wir setzen bewusst <strong>keine eigene Nutzer- oder Gerätekennung</strong>, über die sich Berichte einer Person zuordnen ließen.</p>
+            <p>Dabei kann es zu einer Übermittlung von Daten an Server der Google LLC in den USA kommen. Für diese Übermittlung in ein Drittland stützen wir uns auf die von der EU-Kommission erlassenen Standardvertragsklauseln. Es besteht das Risiko, dass US-Behörden unter bestimmten Voraussetzungen auf diese Daten zugreifen können.</p>
+            <p><strong>Abschalten:</strong> Im Profil der App steht unter „Konto-Einstellungen“ der Schalter <strong>„Absturzberichte senden“</strong>. Er ist eingeschaltet, bis Sie ihn ausschalten. Ausgeschaltet sendet die App keine Berichte, Fehlermeldungen und Merkmale mehr an Firebase Crashlytics, und was noch nicht gesendet auf dem Gerät liegt, wird verworfen. Das Sammeln durch den Dienst selbst endet mit dem nächsten Start der App; ein Absturz vor diesem Neustart wird noch aufgezeichnet, beim Neustart aber verworfen statt gesendet. Die Einstellung gilt für das Gerät und bleibt auch nach dem Abmelden bestehen.</p>
+            <p>Rechtsgrundlage ist unser berechtigtes Interesse an einem stabilen und sicheren Betrieb der App (§ 6 Nr. 8 DSG-EKD). Mit dem Schalter können Sie dieser Verarbeitung jederzeit und ohne Angabe von Gründen widersprechen (§ 25 DSG-EKD). Absturzberichte werden bei Firebase Crashlytics nach 90 Tagen gelöscht.</p>
         </div>
 
         <div class="section">
@@ -317,7 +340,7 @@
             <p>Wir behalten uns vor, diese Datenschutzerklärung anzupassen, um sie an geänderte Rechtslagen oder bei Änderungen der App anzupassen. Die aktuelle Version ist stets unter dieser Adresse abrufbar.</p>
         </div>
 
-        <p class="last-update">Stand: Juni 2026</p>
+        <p class="last-update">Stand: 1. Oktober 2026</p>
     </div>
 </body>
 </html>

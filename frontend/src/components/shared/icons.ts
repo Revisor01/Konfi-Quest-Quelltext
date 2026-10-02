@@ -73,7 +73,6 @@ export {
   chevronDownOutline as ICON_AUFKLAPPEN,
   chevronUp as ICON_ZUKLAPPEN,
   chevronForward as ICON_WEITER_GEFUELLT,
-  chevronForwardOutline as ICON_WEITER,
   close as ICON_SCHLIESSEN_GEFUELLT,
   closeOutline as ICON_SCHLIESSEN,
   create as ICON_BEARBEITEN_GEFUELLT,
@@ -129,6 +128,7 @@ export {
   infinite as ICON_UNENDLICH,
   pulseOutline as ICON_PULS,
   notifications as ICON_BENACHRICHTIGUNG,
+  notificationsOutline as ICON_GLOCKE,
 
   // --- Termine & Zeit ---
   calendar as ICON_TERMIN_GEFUELLT,
@@ -268,6 +268,7 @@ export {
   prismOutline as ICON_PRISMA,
   flask as ICON_EXPERIMENT,
   sunny as ICON_SONNE,
+  moon as ICON_MOND,
   arrowUpCircleOutline as ICON_UPGRADE,
 
 } from 'ionicons/icons';

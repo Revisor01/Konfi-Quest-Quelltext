@@ -1,0 +1,170 @@
+/* ===================================================================
+   Barrierefreiheit der Anmeldeseiten
+
+   Eigene Datei statt variables.css: Dort laufen zeitgleich die
+   Dunkelmodus-Korrekturen derselben Seiten. App.tsx lädt diese Datei NACH
+   variables.css; sie setzt nur Eigenschaften, die die Auth-Klassen dort
+   nicht setzen, und ändert deshalb nichts am abgenommenen Layout.
+
+   1. Nackte Knöpfe. Der Augen-Umschalter am Passwortfeld und das
+      Schließen-Kreuz der Fehlermeldung sind echte <button>, damit sie
+      Rolle, Namen und Tastatur haben (vorher: ion-icon mit onClick, weder
+      fokussierbar noch benannt). Ionics normalize.css nimmt einem <button>
+      schon Rand, Innenabstand und Zeilenhöhe; hier fällt der
+      Systemhintergrund weg und das Symbol sitzt mittig. Der Knopf ist so
+      groß wie vorher das Symbol -- die Klassen .app-auth-input__toggle und
+      .app-auth-error__close liefern weiter Größe, Farbe und Abstand.
+
+   2. Links. „Passwort vergessen?", „Zurück zum Login" usw. sind <a href>
+      (vorher <span onClick>). Der Browser unterstreicht Links; die
+      Gestaltung der Seiten kennt keine Unterstreichung.
+   */
+
+/* Nackter Knopf, app-weit:
+   ein
+   <button>, der aussieht wie das div/span/ion-icon, das er ersetzt. Ionics
+   normalize.css nimmt ihm schon Rand, Innenabstand und line-height; hier
+   fallen Systemhintergrund und -optik weg. */
+.app-knopf-nackt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+/* Schrift und Farbe erbt der Knopf von seiner Umgebung -- mit Spezifitaet 0
+   (:where), damit jede Klasse der Stelle (etwa .app-auth-input__toggle mit
+   eigener font-size und Farbe) weiter gewinnt. Ohne diese Regel setzt der
+   Browser 13,3 px Systemschrift und Schwarz. */
+:where(.app-knopf-nackt) {
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  text-align: inherit;
+}
+
+a.app-auth-link {
+  text-decoration: none;
+}
+
+.app-auth-link:focus-visible,
+.app-knopf-nackt:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  border-radius: var(--app-radius-fein);
+}
+
+/* Klickbare Zeilen, Kacheln und Chips, die kein <button> sind, tragen
+   role="button" tabIndex={0} und onKeyDown={tastaturKlick} (utils/tastatur.ts).
+   Damit sieht man per Tab auch, wo man ist. Nur bei Tastaturbedienung
+   (:focus-visible), nicht beim Antippen; der Radius folgt dem Element. */
+[role="button"]:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.app-beruehrungsziel {
+  position: relative;
+}
+.app-beruehrungsziel::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, 44px);
+  height: max(100%, 44px);
+  transform: translate(-50%, -50%);
+}
+
+/* Aktionen zu einer Chat-Nachricht. Der Knopf steht neben jeder
+   Blase und öffnet dieselbe Auswahl wie der lange Druck (Reaktion,
+   Antworten, Teilen, Löschen). Geparkt mit Deckkraft 0 statt display:none,
+   damit Tab ihn immer erreicht:
+   - am Rechner (feiner Zeiger mit Hover) beim Überfahren der Nachricht und
+     solange die Auswahl offen ist,
+   - per Tastatur bei Fokus (:focus-visible),
+   - auf Touch-Geräten sonst ohne Trefffläche -- kein unsichtbares Ziel neben
+     der Blase; dort bleibt der lange Druck. */
+.app-chat-aktionen-knopf {
+  flex-shrink: 0;
+  align-self: center;
+  width: 28px;
+  height: 28px;
+  margin: 0 var(--app-abstand-mini);
+  border-radius: var(--app-radius-kreis);
+  color: var(--app-text-secondary);
+  font-size: var(--app-text-gross);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .app-chat-nachricht:hover .app-chat-aktionen-knopf,
+  .app-chat-aktionen-knopf[aria-expanded="true"] {
+    opacity: 1;
+  }
+}
+.app-chat-aktionen-knopf:focus-visible {
+  opacity: 1;
+}
+@media not all and (hover: hover) and (pointer: fine) {
+  .app-chat-aktionen-knopf:not(:focus-visible) {
+    pointer-events: none;
+  }
+}
+
+/* Bewegung reduzieren: Wer es im System eingeschaltet hat, bekam
+   bisher nur Wrapped und das „Was ist neu"-Banner ruhig -- Login-Schuetteln,
+   pulsierende Ladepunkte, Kacheln, Karten und alle Uebergaenge liefen
+   weiter. Diese Regel stellt ALLES still, was zur App gehoert:
+   - jede Klasse mit unserem Praefix app- (samt ::before/::after),
+   - jedes Element mit Inline-animation/-transition (Ladepunkte, Abzeichen-
+     Puls, Karten-Uebergaenge stehen im style-Attribut).
+   Dauer 0,01 ms statt 0: animationend/transitionend feuern weiterhin, Code,
+   der darauf wartet, bleibt heil; Endzustand wie authored (fill-mode).
+   !important, weil die Stellen ihre Dauer per Klasse oder inline setzen.
+   Wrapped bleibt aussen vor: seine Klassen heissen wrapped-/teamer-/
+   konfetti-, kein Inline-Style -- es behaelt seine eigenen, bewusst
+   gestalteten Reduktionsregeln (WrappedModal.css, drei Bloecke).
+   Ionics Seitenuebergaenge laufen als Web Animations, nicht per CSS; die
+   schaltet App.tsx ueber utils/bewegung.ts ab, ebenso den Wisch der
+   Einfuehrung (OnboardingTour, Swiper speed). */
+@media (prefers-reduced-motion: reduce) {
+  [class*="app-"],
+  [class*="app-"]::before,
+  [class*="app-"]::after,
+  [style*="animation"],
+  [style*="transition"] {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.app-auth-button.ion-focused::part(native),
+.app-auth-button:focus-visible::part(native) {
+  outline: 3px solid var(--app-weiss);
+  outline-offset: 0;
+}
+.app-auth-button.ion-focused,
+.app-auth-button:focus-visible {
+  outline: 3px solid var(--app-color-konfis);
+  outline-offset: 3px;
+  border-radius: var(--border-radius);
+}
+
+.app-auth-retry-button.ion-focused::part(native),
+.app-auth-retry-button:focus-visible::part(native),
+.app-auth-biometrie-button.ion-focused::part(native),
+.app-auth-biometrie-button:focus-visible::part(native) {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+.app-whatsnew__text:focus-visible {
+  outline-color: var(--app-weiss);
+  border-radius: var(--app-radius-fein);
+}

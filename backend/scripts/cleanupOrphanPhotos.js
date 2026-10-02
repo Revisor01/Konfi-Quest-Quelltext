@@ -1,7 +1,9 @@
-// Orphan-Cleanup: löscht Medien-Dateien in uploads/requests/ und uploads/chat/,
-// die in KEINER DB-Spalte mehr referenziert sind (activity_requests.photo_filename
-// bzw. chat_messages.file_path) — z.B. Reste aus der Zeit, bevor das Löschen
-// beim Antrag-/User-/Nachrichten-Löschen implementiert war.
+// Orphan-Cleanup: löscht Medien-Dateien in uploads/requests/, uploads/chat/,
+// uploads/material/ und uploads/challenges/, die in KEINER DB-Spalte mehr
+// referenziert sind (activity_requests.photo_filename, chat_messages.file_path,
+// material_files.stored_name, challenge_submissions.file_path) — z.B. Reste
+// aus der Zeit, bevor das Löschen beim Antrag-/User-/Nachrichten-Löschen
+// implementiert war, oder aus einem Löschpfad, der mittendrin abbrach.
 //
 // Eigener Pool (NICHT database.js importieren — das wuerde Migrationen starten).
 //
@@ -15,20 +17,30 @@ const { Pool } = require('pg');
 
 const DRY_RUN = process.argv.includes('--dry-run');
 
-const TARGETS = [
-  {
-    dir: path.join(__dirname, '../uploads/requests'),
-    query: 'SELECT photo_filename AS f FROM activity_requests WHERE photo_filename IS NOT NULL',
-  },
-  {
-    dir: path.join(__dirname, '../uploads/chat'),
-    query: 'SELECT file_path AS f FROM chat_messages WHERE file_path IS NOT NULL',
-  },
-  {
-    dir: path.join(__dirname, '../uploads/material'),
-    query: 'SELECT stored_name AS f FROM material_files WHERE stored_name IS NOT NULL',
-  },
-];
+// Je Verzeichnis die Spalte, die seine Dateien referenziert. Als Funktion,
+// damit die Tests ein eigenes Upload-Verzeichnis einsetzen koennen.
+function zieleFuer(uploadsDir) {
+  return [
+    {
+      dir: path.join(uploadsDir, 'requests'),
+      query: 'SELECT photo_filename AS f FROM activity_requests WHERE photo_filename IS NOT NULL',
+    },
+    {
+      dir: path.join(uploadsDir, 'chat'),
+      query: 'SELECT file_path AS f FROM chat_messages WHERE file_path IS NOT NULL',
+    },
+    {
+      dir: path.join(uploadsDir, 'material'),
+      query: 'SELECT stored_name AS f FROM material_files WHERE stored_name IS NOT NULL',
+    },
+    {
+      dir: path.join(uploadsDir, 'challenges'),
+      query: 'SELECT file_path AS f FROM challenge_submissions WHERE file_path IS NOT NULL',
+    },
+  ];
+}
+
+const TARGETS = zieleFuer(path.join(__dirname, '../uploads'));
 
 async function cleanupTarget(pool, { dir, query }) {
   if (!fs.existsSync(dir)) {
@@ -85,7 +97,12 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error('Unerwarteter Fehler:', err);
-  process.exit(1);
-});
+// Nur als Skript starten, nicht beim require aus einem Test.
+if (require.main === module) {
+  main().catch((err) => {
+    console.error('Unerwarteter Fehler:', err);
+    process.exit(1);
+  });
+}
+
+module.exports = { zieleFuer, cleanupTarget };

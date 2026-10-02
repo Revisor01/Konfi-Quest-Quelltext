@@ -8,16 +8,22 @@ import { networkMonitor } from '../services/networkMonitor';
 import { ensureSocketConnected, reconnectWithToken } from '../services/websocket';
 import { App } from '@capacitor/app';
 import { PushNotifications } from '@capacitor/push-notifications';
-import { removeDeliveredById, removeAllDelivered, benachrichtigungskanaeleAnlegen } from '../services/notifications';
+import { FirebaseMessaging } from '@capacitor-firebase/messaging';
+import { removeDeliveredById, benachrichtigungskanaeleAnlegen, aufraeumenNachholen } from '../services/notifications';
+import { appSymbolAngaben } from '../services/appSymbolZahl';
 import { writeQueue } from '../services/writeQueue';
 import { offlineCache } from '../services/offlineCache';
+import { clearMediaCache, medienCacheKontoPruefen } from '../services/mediaCache';
 import { logout as performLogout } from '../services/auth';
 import { clearAuth } from '../services/tokenStore';
 import { BackgroundTask } from '@capawesome/capacitor-background-task';
 import { BaseUser } from '../types/user';
-import { setAnalyticsRole, trackFehler, trackSitzungsstart, istGueltigeArt, istGueltigerOrt } from '../services/analytics';
-import { fehlerArt } from '../utils/fehler';
-import { buildPushTargetUrl, resolveOrgForPush, PushUserType } from '../utils/pushNavigation';
+import { setAnalyticsRole, trackFehler, trackSitzungsstart, istGueltigeArt, istGueltigerOrt, fehlerStelle } from '../services/analytics';
+import { diagnoseMerkmaleSetzen, wegmarke } from '../services/absturzdiagnose';
+import { ermittleAppVersion } from '../utils/appVersion';
+import { fehlerArt, fehlerFuersProtokoll, herkunftDesFehlertexts } from '../utils/fehler';
+import { buildPushTargetUrl, resolveOrgForPush, pushZielMelden, PushUserType } from '../utils/pushNavigation';
+import { deepLinksAnschliessen } from '../utils/deepLinks';
 
 // FCM Token wird über Window Events empfangen (siehe AppDelegate.swift)
 
@@ -29,6 +35,155 @@ interface FCMPlugin {
 // Typsichere Bridge zum nativen FCM-Plugin (registriert via AppDelegate.swift)
 const FCM = registerPlugin<FCMPlugin>('FCM');
 
+/*
+ * Den Token AKTIV abfragen — der fehlende Weg auf Android.
+ *
+ * Bis hierher gab es auf Android genau EINEN Weg zum Token: register()
+ * aufrufen und darauf warten, dass das System 'registration' feuert. Dieses
+ * Ereignis feuert bei UNVERAENDERTER Installation aber nicht wieder — FCM
+ * liefert denselben Token und meldet ihn nur einmal pro Installation.
+ * MainActivity ist eine reine BridgeActivity und reicht nichts nach; das
+ * FCM-Plugin oben haengt an AppDelegate.swift und ist damit iOS-only.
+ *
+ * Folge: Nach einem App-Update (Installation bleibt, Prozess ist neu, alle
+ * Merker leer) kam auf Android kein Token mehr zustande. Nachgemessen an
+ * Produktion: Ein Tester meldete sich um 18:25 und 18:30 Uhr an — in den
+ * Server-Logs kein einziger POST /device-token, kein Fehler, nichts. Die
+ * Berechtigung stand auf 'granted'.
+ *
+ * FirebaseMessaging.getToken() fragt direkt bei Firebase, ohne Ereignis, auf
+ * beiden Plattformen. Die optionale Web-Abhaengigkeit `firebase` wird NICHT
+ * mitinstalliert — auf den Geraeten laeuft das native SDK.
+ */
+/*
+ * Fassung der laufenden App — fuer das Protokoll auf dem Server.
+ *
+ * Ohne diese Angabe war bei der Android-Fehlersuche nicht zu unterscheiden, ob
+ * ein Fix nicht wirkt oder auf dem Geraet noch die alte Fassung laeuft. Beides
+ * sah serverseitig gleich aus. Einmal ermittelt und gemerkt: App.getInfo() ist
+ * ein Bruecken-Aufruf, der sich zur Laufzeit nicht aendert.
+ */
+let appFassung: { version: string | null; build: string | null } | null = null;
+
+const fassungHolen = async (): Promise<{ version: string | null; build: string | null }> => {
+  if (appFassung) return appFassung;
+  try {
+    const info = await App.getInfo();
+    appFassung = { version: info.version || null, build: info.build || null };
+  } catch {
+    // Im Browser gibt es getInfo nicht — dann bleibt die Angabe leer, und der
+    // Server schreibt "unbekannt". Kein Grund, die Registrierung zu stoppen.
+    appFassung = { version: null, build: null };
+  }
+  return appFassung;
+};
+
+/*
+ * Dem Server melden, wenn KEIN Token zustande kommt.
+ */
+const pushDiagnoseMelden = async (grund: string, hinweis?: string) => {
+  try {
+    const fassung = await fassungHolen();
+    let berechtigung = '?';
+    try {
+      berechtigung = (await PushNotifications.checkPermissions()).receive;
+    } catch { /* ignorieren */ }
+    await api.post('/notifications/push-diagnose', {
+      grund,
+      berechtigung,
+      plattform: Capacitor.getPlatform(),
+      app_version: fassung.version,
+      app_build: fassung.build,
+      ...(hinweis ? { hinweis: String(hinweis).slice(0, 200) } : {}),
+    });
+  } catch { /* stille Meldung, best effort */ }
+};
+
+/*
+ * Wartezeiten zwischen den Versuchen, den Token zu holen — 1s, dann 3s
+ * 
+ *
+ * WARUM DREI VERSUCHE UND GENAU DIESE ABSTAENDE: Die App startet in diesem
+ * Moment gerade. Wer laenger wartet, hilft niemandem — die Nutzerin ist dann
+ * schon in der App unterwegs, und die Wiederholung soll ein kurzer Aussetzer
+ * ueberbruecken, keine Dauerkampagne werden. Nach 4 Sekunden Gesamtwartezeit
+ * ist der dritte Versuch durch; das deckt die Faelle ab, die es abzudecken
+ * gibt (Mobilfunk greift wieder, Flugmodus gerade aus, kurzer Aussetzer bei
+ * Firebase) und ist immer noch innerhalb der Zeit, in der die App ohnehin
+ * ihre Startdaten laedt. Die Abstaende wachsen, damit ein Geraet ohne Netz
+ * nicht dreimal in derselben Sekunde gegen die Wand laeuft.
+ *
+ * Mehr Versuche brachten nichts: Bleibt der Fehler nach vier Sekunden
+ * bestehen, ist er nicht transient, und der naechste App-Start fasst ohnehin
+ * neu nach (der Merker `letzterBekannterFcmToken` ist dann leer).
+ */
+const TOKEN_ABRUF_WARTEZEITEN_MS = [1000, 3000];
+
+/*
+ * Den Token aktiv holen, mit Wiederholung bei wachsendem Abstand.
+ *
+ * DIE LUECKE VORHER: Genau EIN Versuch. Scheiterte der, blieb das Geraet bis
+ * zur naechsten Anmeldung ohne Token — still. In den Server-Protokollen ist
+ * bei einem Nutzer belegt, dass mehrere Anmeldungen noetig waren, bis
+ * ueberhaupt ein Token entstand.
+ *
+ * DAUERHAFT ODER TRANSIENT — EHRLICH GESAGT NICHT ZU UNTERSCHEIDEN:
+ * Auf Android lautet der gemeldete Fehler `java.io.IOException:
+ * FIS_AUTH_ERROR`. Das Firebase-SDK faltet darin mehrere Ursachen zusammen:
+ * eine falsch gesetzte Anwendungseinschraenkung am API-Schluessel (dauerhaft,
+ * nur in der Firebase-Konsole zu beheben) sieht genauso aus wie ein Aussetzer
+ * des Installations-Dienstes oder ein abgerissenes Netz (transient). Der
+ * Fehlertext traegt weder Statuscode noch Grund. Eine Unterscheidung am Text
+ * waere also eine Behauptung, die nicht traegt — deshalb wird in BEIDEN
+ * Faellen wiederholt. Drei Versuche in vier Sekunden kosten bei einem
+ * dauerhaften Fehler wenig; ein stilles Geraet ohne Push kostet mehr.
+ *
+ * AUFRAEUMEN NUR VOR DEM LETZTEN VERSUCH: `deleteToken()` verwirft den lokal
+ * gespeicherten Token und zwingt Firebase, einen neuen zu beschaffen. Das
+ * loest einen verdorbenen lokalen Zustand — kann aber bei einem bloss
+ * abgerissenen Netz einen voellig gueltigen Token wegwerfen. Deshalb erst
+ * vor dem LETZTEN Versuch, wenn die harmlosen Erklaerungen durch sind.
+ *
+ * GEMELDET WIRD EINMAL, am Ende, mit der Zahl der Versuche. Drei Meldungen
+ * fuer einen Vorgang machen das Protokoll unlesbar und den Zaehler falsch.
+ */
+const tokenAktivHolen = async (): Promise<string | null> => {
+  if (!Capacitor.isNativePlatform()) return null;
+
+  const gesamtVersuche = TOKEN_ABRUF_WARTEZEITEN_MS.length + 1;
+  let letzterFehler: unknown = null;
+
+  for (let versuch = 1; versuch <= gesamtVersuche; versuch++) {
+    if (versuch > 1) {
+      await new Promise<void>((weiter) =>
+        setTimeout(weiter, TOKEN_ABRUF_WARTEZEITEN_MS[versuch - 2])
+      );
+      // Vor dem LETZTEN Versuch den lokalen Zustand raeumen (Begruendung oben).
+      if (versuch === gesamtVersuche) {
+        try {
+          await FirebaseMessaging.deleteToken();
+        } catch { /* Raeumen ist eine Zugabe, kein Grund aufzuhoeren */ }
+      }
+    }
+
+    try {
+      const { token } = await FirebaseMessaging.getToken();
+      if (token) return token;
+      // Kein Fehler, aber auch kein Token: genauso behandeln wie einen Fehler,
+      // sonst bleibt der leere Fall ohne zweiten Anlauf.
+      letzterFehler = new Error('leere Antwort');
+    } catch (err) {
+      letzterFehler = err;
+      // Kein harter Fehler: Der 'registration'-Weg bleibt daneben bestehen.
+      console.warn(`Token konnte nicht aktiv abgefragt werden (Versuch ${versuch}/${gesamtVersuche}):`, err);
+    }
+  }
+
+  const text = letzterFehler instanceof Error ? letzterFehler.message : String(letzterFehler);
+  pushDiagnoseMelden('getToken-fehler', `versuche=${gesamtVersuche} ${text}`);
+  return null;
+};
+
 // ANTI-SPAM: Verhindere mehrfache Push-Registrierung (Global Scope)
 let pushRegistrationInProgress = false;
 let pushAlreadyRegistered = false;
@@ -38,12 +193,34 @@ let fcmTokenSent: string | null = null;
 let fcmTokenLastSent: number = 0;
 let pendingFcmToken: string | null = null;
 
+/*
+ * Der LETZTE von Firebase gemeldete Token — unabhaengig davon, ob er schon
+ * gesendet wurde.
+ *
+ * `pendingFcmToken` haelt nur FEHLGESCHLAGENE Sendungen, `fcmTokenSent` nur
+ * erfolgreiche, und beide werden beim Abmelden geraeumt. Damit gab es nach
+ * einer Anmeldung keinen Weg, einen bereits bekannten Token erneut zu senden:
+ * Auf Android feuert 'registration' pro Installation praktisch nur EINMAL,
+ * weil FCM bei unveraenderter Installation denselben Token liefert. Wer sich
+ * abmeldete und wieder anmeldete, hatte serverseitig keinen Token mehr — und
+ * die App keinen Anlass, einen zu schicken.
+ *
+ * Dieser Merker ueberlebt das Abmelden bewusst: Er ist kein Zustand der
+ * Sitzung, sondern eine Eigenschaft der Installation.
+ */
+let letzterBekannterFcmToken: string | null = null;
+
 // 12 Stunden — Sendefenster für einen UNVERAENDERTEN Token.
 const TOKEN_RESEND_WINDOW_MS = 12 * 60 * 60 * 1000;
 
 // Funktion, um Duplikate zu vermeiden
 const sendTokenToServer = async (token: string, retryCount = 0) => {
   const now = Date.now();
+
+  // Den Token merken, bevor irgendeine Sperre greift: Nach einer Anmeldung
+  // braucht es ihn, und Firebase meldet ihn auf Android pro Installation
+  // praktisch nur einmal (siehe letzterBekannterFcmToken oben).
+  letzterBekannterFcmToken = token;
 
   // ANTI-SPAM (In-Memory-Zusatzschutz): gleicher Token in den letzten 10s -> raus.
   // Faengt schnelle Doppel-Feuerungen innerhalb einer Session ab.
@@ -84,17 +261,25 @@ const sendTokenToServer = async (token: string, retryCount = 0) => {
   }
 
   try {
+    const fassung = await fassungHolen();
     await api.post('/notifications/device-token', {
       token,
       platform: Capacitor.getPlatform(),
-      device_id: deviceId
+      device_id: deviceId,
+      // Damit im Protokoll steht, WELCHE Fassung sich gemeldet hat
+      // (Migration 156). Aeltere Server ignorieren die Felder.
+      app_version: fassung.version,
+      app_build: fassung.build,
+      ...(await appSymbolAngaben())
     });
 
     fcmTokenSent = token; // Markiere Token als gesendet
     fcmTokenLastSent = now; // Timestamp setzen
     await setPushTokenTimestamp(now); // Bug 3: Timestamp nach jedem Send persistieren
   } catch (err) {
-    console.error('Fehler beim Senden des FCM-Tokens:', err);
+    // Nur Status, Code und Servertext: der axios-Fehler traegt den Push-Token
+    // im Koerper und das Zugangs-Token im Header.
+    console.error('Fehler beim Senden des FCM-Tokens:', fehlerFuersProtokoll(err));
     // Retry mit steigendem Abstand (5s, 15s, 30s), danach bei naechstem Online-Wechsel
     const retryDelays = [5000, 15000, 30000];
     if (retryCount < retryDelays.length) {
@@ -163,9 +348,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isOnline, setIsOnline] = useState<boolean>(true);
 
   // Jede Fehlermeldung, die tatsaechlich jemand zu sehen bekommt, fliesst in
-  // die anonyme Messung ein — DAS beantwortet "wo klemmt es". Uebertragen wird
-  // nur eine gekuerzte, entschaerfte Fassung des Textes: keine Namen, keine
-  // IDs, keine Freitexte aus Beitraegen (Zahlen werden ersetzt).
+  // die anonyme Messung ein — DAS beantwortet "wo klemmt es". Den Text selbst
+  // gibt es dort nur, wenn er ein Text der App ist (Positivliste in
+  // utils/bekannteFehlertexte.ts, Ziffern zu #). Ein Text vom Server kann
+  // Namen, Titel oder Dateinamen tragen und wird ersetzt: durch den
+  // Ersatztext, den die Aufrufstelle an `fehlerText` gegeben hat, sonst durch
+  // `andere-meldung`.
   //
   // Der zweite Parameter ist rein diagnostisch und beruehrt die Anzeige NICHT:
   //   `ort`    — ein im Code fest vergebenes Kuerzel. Loest das Problem, dass
@@ -179,21 +367,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setError(meldung);
     if (!meldung) return;
 
-    const anonym = meldung
-      .replace(/\d+/g, '#')
-      .slice(0, 80);
+    // Kam der Text gerade aus `fehlerText(err, 'Ersatz')` statt des
+    // Ersatztextes? Dann steht der Ersatztext fuer die Stelle, und die Art
+    // kommt aus dem Fehlerobjekt — auch wenn die Aufrufstelle keine Diagnose
+    // mitgibt (das sind die meisten).
+    const herkunft = herkunftDesFehlertexts(meldung);
+    const stelle = fehlerStelle(meldung, herkunft?.ersatz);
 
     // Beide Zusatzangaben werden gegen ihr Muster geprueft, bevor sie das
     // Geraet verlassen. Was nicht passt, faellt weg — lieber ein Eintrag ohne
     // Ursache als einer mit einem durchgereichten Dateinamen.
-    const art = diagnose && 'fehler' in diagnose ? fehlerArt(diagnose.fehler) : undefined;
+    const art = diagnose && 'fehler' in diagnose ? fehlerArt(diagnose.fehler) : herkunft?.art;
     const ort = diagnose?.ort;
 
-    trackFehler(
-      anonym,
-      art && istGueltigeArt(art) ? art : undefined,
-      ort && istGueltigerOrt(ort) ? ort : undefined
-    );
+    const gepruefteArt = art && istGueltigeArt(art) ? art : undefined;
+    const geprueftesOrt = ort && istGueltigerOrt(ort) ? ort : undefined;
+
+    trackFehler(stelle, gepruefteArt, geprueftesOrt);
+
+    // Dieselbe entschaerfte Angabe zusaetzlich als WEGMARKE ins
+    // Absturzprotokoll. Bewusst `wegmarke` und NICHT `fehlerMelden`:
+    //
+    // Diese Meldungen sind abgefangene, oft erwartbare Fehler — "keine
+    // Verbindung", "Sitzung abgelaufen". Als einzelne Berichte waeren sie
+    // Rauschen und wuerden bei vielen tausend Nutzenden die Drosselung
+    // verbrauchen, die fuer die ECHTEN Abstuerze gebraucht wird. Als Wegmarke
+    // kosten sie nichts und stehen genau dort, wo sie zaehlen: in den letzten
+    // Zeilen VOR einem Absturz. Ein Absturz nach drei "keine Verbindung" ist
+    // eine andere Geschichte als einer aus dem Stand.
+    //
+    // Es geht derselbe gepruefte Inhalt raus wie an die Nutzungsmessung —
+    // keine weitere Zeichenkette, kein Fehlerobjekt, kein Server-Text. Das
+    // Absturzprotokoll ist Firebase Crashlytics (Google): Die Wegmarken
+    // stehen im naechsten Absturz- oder Fehlerbericht des Geraets.
+    void wegmarke(`fehler ${geprueftesOrt ?? 'ohne-ort'} ${gepruefteArt ?? 'ohne-art'}: ${stelle}`);
   }, []);
 
   // Rolle für die anonyme Nutzungsmessung mitfuehren (konfi/teamer/admin) —
@@ -208,25 +415,86 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (user?.role_name) trackSitzungsstart();
   }, [user?.role_name]);
 
+  // Medien-Cache ans angemeldete Konto binden: Meldet sich ein
+  // anderes Konto an als das, dessen Chat- und Challenge-Medien auf dem Gerät
+  // liegen, wird der Cache geleert. Das Abmelden leert ihn ohnehin; hier geht
+  // es um die Wege daran vorbei (abgelaufene Sitzung, Face ID, Fehlerseite).
+  // Hier und nicht beim Login, weil JEDER Weg zu einem Konto über diesen
+  // Zustand läuft.
+  //
+  // Dasselbe für den gespeicherten Stand und die Warteschlange:
+  // Beide gehören zum Konto (offlineCache.ts,
+  // writeQueue.ts, kontoPruefen). Lesen und Senden prüfen das selbst; hier
+  // verschwindet der Stand anderer Konten zusätzlich vom Gerät.
+  useEffect(() => {
+    if (!user?.id) return;
+    void medienCacheKontoPruefen(user.id).catch(() => { /* best-effort */ });
+    // Über Promise.resolve().then: auch ein synchroner Fehler bleibt hier
+    // best-effort und hält den übrigen Effekt nicht auf.
+    void Promise.resolve().then(() => offlineCache.fremdeKontenEntfernen()).catch(() => { /* best-effort */ });
+    void Promise.resolve().then(() => writeQueue.kontoPruefen()).catch(() => { /* best-effort */ });
+  }, [user?.id]);
+
   // Push notifications state
   const [pushNotificationsPermission, setPushNotificationsPermission] = useState<string>('prompt');
 
-  // Account-Wechsel-Erkennung für den FCM-Token: Nach Logout+Login mit einem
-  // ANDEREN Account hängt der Token serverseitig noch am alten User (das
-  // 12h-Sendefenster verhindert den erneuten POST). Bei einem Wechsel innerhalb
-  // der Session das Fenster aufheben und den bekannten Token sofort für den
-  // neuen User registrieren — der Server hängt ihn dabei um (DELETE fremder
-  // Bindungen in POST /device-token).
+  /*
+   * Bei JEDER Anmeldung den bekannten Token registrieren.
+   *
+   * Vorher stand hier nur die Erkennung eines Account-WECHSELS: `prev !== null
+   * && prev !== user.id`. Damit waren zwei Faelle nicht abgedeckt, die in der
+   * Praxis genau die haeufigen sind:
+   *
+   *   1. Abmelden und mit DEMSELBEN Konto wieder anmelden. Der Logout loescht
+   *      den Token serverseitig, `prev === user.id` liess den Nachfass-Weg
+   *      aber ausfallen — dauerhaft kein Push, ohne Fehler irgendwo.
+   *   2. App-Start mit bestehender Sitzung ("bin schon eingeloggt"), wenn
+   *      serverseitig kein Token steht. `prev === null` schloss das aus.
+   *
+   * Jetzt: Sobald eine Nutzer-ID vorliegt UND ein Token bekannt ist, wird er
+   * gesendet. `sendTokenToServer` faengt ueberfluessige POSTs selbst ab (10s-
+   * Sperre und 12h-Fenster bei UNVERAENDERTEM Token) — bei einem Wechsel
+   * hebt der Code hier das Fenster zusaetzlich auf, weil der Server den Token
+   * dann umhaengen muss.
+   */
   const prevPushUserIdRef = useRef<number | null>(null);
   useEffect(() => {
     if (!user?.id) return; // Logout: vorherige ID absichtlich behalten
     const prev = prevPushUserIdRef.current;
     prevPushUserIdRef.current = user.id;
-    if (prev !== null && prev !== user.id && fcmTokenSent) {
-      const t = fcmTokenSent;
-      fcmTokenSent = null; // In-Memory-Sperre aufheben
-      setPushTokenTimestamp(0).finally(() => sendTokenToServer(t));
+
+    const bekannt = fcmTokenSent || pendingFcmToken || letzterBekannterFcmToken;
+
+    // Ist kein Token bekannt, AKTIV bei Firebase fragen. Auf Android ist das
+    // der einzige Weg nach einem Update: 'registration' feuert dort bei
+    // unveraenderter Installation nicht wieder (siehe tokenAktivHolen).
+    if (!bekannt) {
+      // Nebenher, ohne den Anmeldeweg aufzuhalten: tokenAktivHolen wiederholt
+      // bei einem Fehler bis zu vier Sekunden lang.
+      tokenAktivHolen()
+        .then((t) => {
+          if (t) return sendTokenToServer(t);
+          return pushDiagnoseMelden('kein-token-nach-anmeldung');
+        })
+        .catch((err) => console.warn('Aktiver Token-Abruf gescheitert:', err));
+      return;
     }
+    const token = bekannt;
+
+    const kontoWechsel = prev !== null && prev !== user.id;
+    if (kontoWechsel) {
+      // Der Token haengt serverseitig noch am alten Konto: Sperren aufheben,
+      // damit der POST wirklich rausgeht (der Server haengt ihn dann um).
+      fcmTokenSent = null;
+      setPushTokenTimestamp(0).finally(() => sendTokenToServer(token));
+      return;
+    }
+
+    // Erstanmeldung, Wiederanmeldung mit demselben Konto oder App-Start mit
+    // bestehender Sitzung. Ohne Aufheben der Sperren: Steht der Token
+    // serverseitig schon, greift das 12h-Fenster und es passiert nichts —
+    // genau richtig. Fehlt er, geht der POST raus.
+    sendTokenToServer(token);
   }, [user?.id]);
 
   // Multi-Org Switcher state
@@ -242,6 +510,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [orgVersion, setOrgVersion] = useState(0);
 
   // Badge sync through state updates only (no custom events)
+
+  // Merkmale fuer die Absturzdiagnose mitfuehren (Rolle, Organisation als
+  // Zahl, Plattform, Fassung des Web-Teils).
+  //
+  // WARUM DAS GEBRAUCHT WIRD: Bei vielen tausend Nutzenden ueber viele
+  // Gemeinden ist die erste Frage bei einem Absturz "wen trifft es" — eine
+  // Rolle oder eine besondere Datenlage einer Gemeinde. Ohne diese Merkmale
+  // steht in Crashlytics nur ein Stapelverlauf ohne Kontext.
+  //
+  // WAS BEWUSST NICHT MITGEHT: keine Nutzer-ID, kein Name, kein Jahrgang,
+  // kein Gemeindename und auch KEINE device_id — die Begruendung steht
+  // vollstaendig in services/absturzdiagnose.ts. Die Organisation geht als
+  // ZAHL, nie als Name.
+  //
+  // Haengt an denselben Werten wie die Nutzungsmessung, plus der aktiven
+  // Organisation: So stimmen die Merkmale nach Login, Logout UND
+  // Organisationswechsel ohne weiteres Zutun.
+  useEffect(() => {
+    void (async () => {
+      const fassung = await ermittleAppVersion();
+      await diagnoseMerkmaleSetzen({
+        rolle: user?.role_name ?? null,
+        organisationId: activeOrgId ?? user?.organization_id ?? null,
+        appFassung: fassung,
+      });
+    })();
+  }, [user?.role_name, user?.organization_id, activeOrgId]);
 
   // Device ID einmalig bei App-Start persistieren
   useEffect(() => {
@@ -327,12 +622,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [loadOrganizations, user?.id]);
 
   // Sicherheitsnetz: Wenn ein Request mit aktiver Org ein 403 "Kein Zugriff"
-  // bekommt (api.ts setzt dann die aktive Org auf null), hier die App auf die
-  // Primaer-Org zuruecksetzen und alle Views remounten.
+  // bekommt (api.ts setzt dann die aktive Org auf null und holt ein Token
+  // OHNE Org-Claim), hier die App auf die Primaer-Org zuruecksetzen, den
+  // Socket mit dem neuen Token neu aufbauen und alle Views remounten.
   useEffect(() => {
     const handler = async () => {
       setActiveOrgIdState(null);
       try { await offlineCache.clearAll(); } catch { /* best-effort */ }
+      // Die Medien der entzogenen Gemeinde gehen mit: Chat-
+      // Anhänge und Challenge-Dateien, die die Person dort sehen durfte.
+      try { await clearMediaCache(); } catch { /* best-effort */ }
+      // Wie beim bewussten Wechsel (switchOrg, Schritt 4b): Ohne Neuaufbau
+      // liefe der Socket mit dem Token der entzogenen Gemeinde weiter und
+      // der Server lehnte jeden Reconnect mit "Kein Zugriff auf diese
+      // Organisation" ab.
+      try {
+        const frischesToken = getToken();
+        if (frischesToken) reconnectWithToken(frischesToken);
+      } catch (socketErr) {
+        console.error('Socket-Neuaufbau nach Gemeinde-Rueckfall fehlgeschlagen:', socketErr);
+      }
       setOrgVersion(v => v + 1);
     };
     window.addEventListener('auth:org-fallback', handler);
@@ -395,6 +704,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       // 4. ALLE Offline-Caches + Schreib-Queue leeren (keine Daten der alten Org)
       await offlineCache.clearAll();
+      // Auch den Medien-Cache — die Chat- und Challenge-Dateien
+      // der alten Gemeinde. Best-effort: Ein Dateisystemfehler darf den
+      // bereits gelungenen Wechsel nicht als gescheitert melden.
+      try { await clearMediaCache(); } catch { /* best-effort */ }
       await writeQueue.clear();
 
       // Konnte der Flush oben nicht alles zustellen, ist das Verwerfen hier
@@ -415,7 +728,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // Wechsel laengst geklappt hatte. Deshalb best-effort + eigenes catch.
     } catch (err) {
       console.error('Org-Wechsel fehlgeschlagen:', err);
-      setError('Organisation konnte nicht gewechselt werden');
+      setError('Gemeinde konnte nicht gewechselt werden');
       return { ok: false };
     }
 
@@ -484,7 +797,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       console.error('Logout-Fehler (lokaler Logout wird erzwungen):', err);
       try { await clearAuth(); } catch { /* ignore */ }
       try { await offlineCache.clearAll(); } catch { /* ignore */ }
+      try { await clearMediaCache(); } catch { /* ignore */ }
     }
+    /*
+     * Der Logout loescht den Token serverseitig (auth.ts, DELETE
+     * /device-token) — die App hielt sich danach aber weiter fuer registriert:
+     *
+     *   pushAlreadyRegistered   liess requestPushPermissions sofort aussteigen
+     *   fcmTokenSent            liess die 12h-Sperre in sendTokenToServer greifen
+     *   pushTokenTimestamp      dasselbe, und ueberlebt App-Neustarts
+     *   prevPushUserIdRef       liess den Nachfass-Weg bei Wiederanmeldung mit
+     *                           DEMSELBEN Konto ausfallen (prev === user.id)
+     *
+     * Wer sich abmeldete und wieder anmeldete, bekam deshalb dauerhaft keinen
+     * Push — ohne Fehler irgendwo. Gemessen an Produktion: zwei Anmeldungen um
+     * 14:27 und 14:37 Uhr, kein einziger POST /device-token in den Logs, kein
+     * Token in der Datenbank.
+     *
+     * Der Zeitstempel wird NICHT bloss vergessen, sondern auf 0 geschrieben:
+     * Er liegt in Preferences und ueberlebt sonst den Neustart der App.
+     */
+    pushAlreadyRegistered = false;
+    pushRegistrationInProgress = false;
+    fcmTokenSent = null;
+    fcmTokenLastSent = 0;
+    pendingFcmToken = null;
+    prevPushUserIdRef.current = null;
+    try { await setPushTokenTimestamp(0); } catch { /* best-effort */ }
+
     // Garantierter Schritt: React-State leeren -> Login-Route. Nie ausgelassen.
     setOrganizations([]);
     setUser(null);
@@ -706,6 +1046,16 @@ useEffect(() => {
               // dass der Token ankam. Ein Token, der es nie zum Server schaffte,
               // sperrte so den naechsten Anlauf fuer zwoelf Stunden.
               await PushNotifications.register();
+
+              // BEWUSST NICHT abgewartet: tokenAktivHolen wiederholt bei einem
+              // Fehler bis zu vier Sekunden lang. Das darf den restlichen
+              // Aktivierungsweg (Socket, Badges, Aufraeumen) nicht hinhalten.
+              // Das .catch() ersetzt das umgebende try/catch, das durch das
+              // Nicht-Abwarten nicht mehr greift — sonst waere eine
+              // unbehandelte Promise-Ablehnung moeglich.
+              tokenAktivHolen()
+                .then((aktiv) => { if (aktiv) return sendTokenToServer(aktiv); })
+                .catch((err) => console.warn('Token refresh failed:', err));
             } catch (err) {
               console.warn('Token refresh failed:', err);
             }
@@ -729,19 +1079,6 @@ useEffect(() => {
 
           handleAppActive();
 
-          // Admins bekommen ohnehin laufend Erinnerungen -> beim Aktiv-werden
-          // global aufräumen. Konfis/Teamer NICHT (dort gezielt pro Bereich/
-          // beim Antippen, damit ungelesene Erinnerungen nicht verschwinden).
-          if (user?.type === 'admin') {
-            // Deshalb danach ausdruecklich neu setzen. Der Effekt in
-            // BadgeContext haengt an [totalBadgeCount] und feuert NICHT, wenn
-            // sich der Wert nicht geaendert hat -- das Icon bliebe sonst leer,
-            // bis zufaellig eine neue Zahl hereinkommt.
-            removeAllDelivered().finally(() => {
-              window.dispatchEvent(new CustomEvent('badge:resync'));
-            });
-          }
-          // Koordinierte Resume-Sequenz: flush -> invalidate -> badges
           writeQueue.flush().then(async (result) => {
             if (result.failed.length > 0) {
               console.warn('Queue flush failures:', result.failed.length);
@@ -776,6 +1113,27 @@ useEffect(() => {
     };
   }, [user]);
 
+  // App Links: Ein Link auf konfi-quest.de (Einladung, Passwort-Reset, Login)
+  // oeffnet die App, Android und iOS liefern die Adresse ueber 'appUrlOpen'. Bewusst
+  // OHNE [user]-Abhaengigkeit und ausserhalb des Push-Effekts: Die Einladung
+  // wird gerade von denen angetippt, die noch NICHT angemeldet sind. Das Ziel
+  // geht ueber pushZielMelden an den Router (siehe utils/deepLinks.ts).
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    let abbauen: (() => void) | null = null;
+    let abgebaut = false;
+    deepLinksAnschliessen()
+      .then((f) => {
+        if (abgebaut) f();
+        else abbauen = f;
+      })
+      .catch((err) => console.warn('App-Link-Lauscher nicht angeschlossen:', err));
+    return () => {
+      abgebaut = true;
+      abbauen?.();
+    };
+  }, []);
+
   // Push notifications setup and listeners
   useEffect(() => {
     if (!user) return;
@@ -787,10 +1145,13 @@ useEffect(() => {
         PushNotifications.addListener('registration', (token) => {
           // Token an Server senden
           sendTokenToServer(token.value);
+          aufraeumenNachholen();
         });
 
         PushNotifications.addListener('registrationError', (error) => {
           console.error('Push registration error:', error);
+          // Auch der Fehlschlag hebt die Sperre im iOS-Plugin auf.
+          aufraeumenNachholen();
         });
 
         // Registriere Listener
@@ -810,16 +1171,26 @@ useEffect(() => {
           const notificationData = action.notification.data as Record<string, unknown> | undefined;
           const notificationType = action.notification.data?.type;
 
-          // Use timeout to ensure navigation happens after app is fully loaded
-          setTimeout(async () => {
+          // Hier stand ein `setTimeout(..., 100)` mit der Begruendung, die
+          // Navigation solle erst laufen, "wenn die App fertig geladen ist".
+          // Die Wartezeit hat das aber nie zugesichert: 100 ms sind kein
+          // Zustand, sondern eine Hoffnung — und am Ende stand ein harter
+          // Reload, der die gerade hochfahrende Activity abgeraeumt hat.
+          //
+          // Die Frage "ist der Router schon da?" beantwortet jetzt der
+          // Empfaenger selbst: pushZielMelden legt das Ziel ab und feuert;
+          // PushZielNavigation holt es beim Montieren nach, falls es zu
+          // frueh kam. Damit ist die Wartezeit nicht nur unnoetig, sie waere
+          // schaedlich — sie verzoegert die Navigation sichtbar und laesst
+          // den Nutzer auf der zuletzt geoeffneten Seite stehen.
+          void (async () => {
             // Multi-Org: Der Push trägt die Organisation seines Inhalts. Weicht
             // sie von der gerade aktiven Org ab, ERST über den bestehenden
-            // switchOrg-Flow wechseln und den Abschluss abwarten — der harte
-            // Reload unten würde die asynchronen Preferences-Writes sonst
-            // abschneiden. Frische Werte über die tokenStore-Getter, nicht aus
-            // dem Effect-Closure ([user]-Dependency -> stale). Fehlt die Org im
-            // Payload oder schlägt der Wechsel fehl, bleibt alles beim heutigen
-            // Verhalten (direkt navigieren).
+            // switchOrg-Flow wechseln und den Abschluss abwarten. Frische Werte
+            // über die tokenStore-Getter, nicht aus dem Effect-Closure
+            // ([user]-Dependency -> stale). Fehlt die Org im Payload oder
+            // schlägt der Wechsel fehl, bleibt alles beim heutigen Verhalten
+            // (direkt navigieren).
             const currentType = (getUser()?.type || user?.type || 'konfi') as PushUserType;
             const effectiveType = await resolveOrgForPush(notificationData, currentType, {
               getActiveOrgId,
@@ -828,12 +1199,11 @@ useEffect(() => {
             });
             const targetUrl = buildPushTargetUrl(notificationType, notificationData, effectiveType);
 
-            if (targetUrl) {
-              // Hard navigation (intentional): App kommt aus Background/Killed-State,
-              // React Router State kann veraltet sein. Full Reload sichert frische Daten.
-              window.location.href = targetUrl;
-            }
-          }, 100);
+            // Ziel an den Router uebergeben (siehe PUSH_ZIEL_EVENT in
+            // utils/pushNavigation und navigation/PushZielNavigation). Der
+            // frueher hier stehende Reload war die Absturzursache.
+            pushZielMelden(targetUrl);
+          })();
         });
 
         // Jetzt: Registrierung

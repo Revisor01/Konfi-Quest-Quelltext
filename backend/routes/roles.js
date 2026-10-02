@@ -102,7 +102,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       });
 
     } catch (err) {
- console.error(`Database error in GET /roles/${id}:`, err);
+ console.error('Database error in GET /roles/%s:', id, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -161,7 +161,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
 function getRolePermissions(roleName) {
   const permissions = {
     'super_admin': [
-      { name: 'organizations.manage', description: 'Organisationen verwalten' }
+      { name: 'organizations.manage', description: 'Gemeinden verwalten' }
     ],
     'org_admin': [
       { name: 'users.manage', description: 'Alle Benutzer verwalten' },

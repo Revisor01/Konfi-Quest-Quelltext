@@ -16,13 +16,27 @@
 -- Umgekehrt wird auch nichts uebernommen, was selbst nur der Default ist:
 -- kp.bible_translation muss gesetzt und von 'LUT' verschieden sein, sonst
 -- aendert die Zeile ohnehin nichts.
-UPDATE users u
-   SET bible_translation = kp.bible_translation
-  FROM konfi_profiles kp
- WHERE kp.user_id = u.id
-   AND kp.bible_translation IS NOT NULL
-   AND kp.bible_translation <> 'LUT'
-   AND u.bible_translation = 'LUT';
+--
+-- IDEMPOTENZ: Schritt 1 laeuft nur,
+-- solange es die Spalte noch gibt. Vorher las ein zweiter Lauf
+-- kp.bible_translation nach dem DROP aus Schritt 2 und scheiterte. Vermerkte
+-- Staende betrifft das nicht (der Migrationslauf vergleicht nur den Namen).
+-- Waechter: tests/schema/migrationenIdempotent.test.js.
+DO $migration$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'konfi_profiles'
+               AND column_name = 'bible_translation') THEN
+    EXECUTE $sql$
+      UPDATE users u
+         SET bible_translation = kp.bible_translation
+        FROM konfi_profiles kp
+       WHERE kp.user_id = u.id
+         AND kp.bible_translation IS NOT NULL
+         AND kp.bible_translation <> 'LUT'
+         AND u.bible_translation = 'LUT'
+    $sql$;
+  END IF;
+END $migration$;
 
 -- Schritt 2: Die Doppelspalte entfernen. Ab hier ist
 -- users.bible_translation die einzige Quelle fuer alle Rollen.

@@ -57,6 +57,8 @@ const WartendeVorgaengeKarte: React.FC<WartendeVorgaengeKarteProps> = ({
                       className="app-corner-badge"
                       style={{ background: 'var(--app-color-warning)', padding: 'var(--app-abstand-mini) var(--app-abstand-kompakt)' }}
                       title="Wartend — wird gesendet, sobald du wieder online bist"
+                      role="img"
+                      aria-label="Wartend — wird gesendet, sobald du wieder online bist"
                     >
                       <IonIcon icon={ICON_UHRZEIT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)', display: 'block' }} />
                     </div>

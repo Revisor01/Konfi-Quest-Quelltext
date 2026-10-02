@@ -42,7 +42,7 @@ export const SLIDES: OnboardingSlide[] = [
     color: 'var(--app-color-material)',
     rgb: '--app-color-material-rgb',
     title: 'Material mit Links',
-    text: 'Wenn dein Team Material teilt, kann jetzt beides zusammen dabei sein: eine Datei zum Herunterladen und Links, zum Beispiel zu einem Video. Und wo ein Termin Material hat, kommst du direkt aus dem Termin dorthin.',
+    text: 'Wenn dein Team Material teilt, kann jetzt beides zusammen dabei sein: eine Datei zum Herunterladen und Links, zum Beispiel zu einem Video. Und wo ein Event Material hat, kommst du direkt aus dem Event dorthin.',
   },
 ];
 

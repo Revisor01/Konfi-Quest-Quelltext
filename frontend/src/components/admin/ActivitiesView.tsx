@@ -162,7 +162,7 @@ const ActivitiesView: React.FC<ActivitiesViewProps> = ({
           <IonCardContent style={{ padding: 'var(--app-abstand-eng) var(--app-abstand-basis)' }}>
             <div className="app-search-bar" style={{ padding: 0 }}>
               <IonIcon icon={ICON_SUCHE_GEFUELLT} className="app-search-bar__icon" />
-              <IonInput
+              <IonInput aria-label="Aktivität suchen"
                 value={searchTerm}
                 onIonInput={(e) => setSearchTerm(e.detail.value!)}
                 placeholder="Aktivität suchen..."
@@ -289,7 +289,7 @@ const ActivitiesView: React.FC<ActivitiesViewProps> = ({
                           <div className="app-list-item__meta">
                             {activity.categories && activity.categories.length > 0 && (
                               <span className="app-list-item__meta-item">
-                                <IonIcon icon={ICON_KATEGORIE_GEFUELLT} style={{ color: 'var(--app-color-categories)' }} />
+                                <IonIcon icon={ICON_KATEGORIE_GEFUELLT} style={{ color: 'var(--app-text-categories)' }} />
                                 {activity.categories.map(cat => cat.name).join(', ')}
                               </span>
                             )}

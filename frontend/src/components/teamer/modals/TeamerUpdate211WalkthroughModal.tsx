@@ -28,21 +28,21 @@ export const SLIDES: OnboardingSlide[] = [
     color: 'var(--app-color-events)',
     rgb: '--app-color-events-rgb',
     title: 'Zusagen und absagen',
-    text: 'Bei einem Termin sagst du jetzt ausdrücklich zu oder ab — „Bin dabei" oder „Bin nicht dabei". Du kannst deine Antwort jederzeit ändern, auch zurück zur Zusage. Ein Grund ist freiwillig; nur wenn du nach einer Zusage doch absagst, brauchen wir einen, damit die Leitung umplanen kann. Bei einer Absage wird dein Platz frei und die Warteliste rückt nach.',
+    text: 'Bei einem Event sagst du jetzt ausdrücklich zu oder ab — „Bin dabei" oder „Bin nicht dabei". Du kannst deine Antwort jederzeit ändern, auch zurück zur Zusage. Ein Grund ist freiwillig; nur wenn du nach einer Zusage doch absagst, brauchen wir einen, damit die Leitung umplanen kann. Bei einer Absage wird dein Platz frei und die Warteliste rückt nach.',
   },
   {
     icon: ICON_FUNKELN,
     color: 'var(--app-color-wrapped)',
     rgb: '--app-color-wrapped-rgb',
     title: 'Dein Jahresrückblick',
-    text: 'Auch du hast einen Rückblick — mit den Terminen, die du begleitet hast, deinen Abzeichen und deinen Jahren im Team. Er liegt auf deiner Startseite und dauerhaft in deinem Profil. Jedes Jahr kommt ein neuer dazu, die alten bleiben stehen.',
+    text: 'Auch du hast einen Rückblick — mit den Events, die du begleitet hast, deinen Badges und deinen Jahren im Team. Er liegt auf deiner Startseite und dauerhaft in deinem Profil. Jedes Jahr kommt ein neuer dazu, die alten bleiben stehen.',
   },
   {
     icon: ICON_LINK,
     color: 'var(--app-color-material)',
     rgb: '--app-color-material-rgb',
     title: 'Material mit Dateien und Links',
-    text: 'Material trägt jetzt beides zusammen: eine Datei und dazu mehrere Links, zum Beispiel ein PDF und zwei Videos. Wer das Material sieht, entscheidet allein der Jahrgang — ohne Jahrgang sieht es das ganze Team der Gemeinde. Aus einem Termin heraus kommst du direkt zum passenden Material.',
+    text: 'Material trägt jetzt beides zusammen: eine Datei und dazu mehrere Links, zum Beispiel ein PDF und zwei Videos. Wer das Material sieht, entscheidet allein der Jahrgang — ohne Jahrgang sieht es das ganze Team der Gemeinde. Aus einem Event heraus kommst du direkt zum passenden Material.',
   },
 ];
 

@@ -58,6 +58,13 @@ const canCreateRole = (userRole, targetRole) => {
 };
 
 /**
+ * @param {{ role_name?: string, is_super_admin?: boolean }} konto
+ * @returns {boolean}
+ */
+const istSuperAdminKonto = (konto) =>
+  konto?.role_name === 'super_admin' || konto?.is_super_admin === true;
+
+/**
  * Middleware für User-Management-Operationen
  * Prüft ob der aktuelle User die Ziel-User-Rolle verwalten darf
  */
@@ -88,16 +95,36 @@ const checkUserHierarchy = (operation = 'manage') => {
 
       // Bei Update/Delete/View-Operationen müssen wir erst den Ziel-User laden
       if (targetUserId) {
+        // DIE ROLLE GILT JE GEMEINDE: user_organizations traegt ein eigenes
+        // role_id. Geprueft wird die Rolle in DIESER Gemeinde, nicht die am
+        // Konto -- sonst liesse sich eine Person, die hier org_admin und in
+        // ihrer Stamm-Gemeinde Teamer:in ist, von einem Admin verwalten.
+        // Fuehren beide Quellen dieselbe Gemeinde, gewinnt die Rolle am
+        // Nutzerkonto (wie in GET /auth/my-organizations und orgMitglieder.js).
         const query = `
-          SELECT u.id, u.role_id, r.name as role_name
+          SELECT u.id, r.id AS role_id, r.name as role_name, u.is_super_admin
           FROM users u
-          JOIN roles r ON u.role_id = r.id
+          JOIN roles r ON r.id = u.role_id
           WHERE u.id = $1 AND u.organization_id = $2
+          UNION ALL
+          SELECT u.id, r.id AS role_id, r.name as role_name, u.is_super_admin
+          FROM user_organizations uo
+          JOIN users u ON u.id = uo.user_id
+          JOIN roles r ON r.id = uo.role_id
+          WHERE uo.user_id = $1 AND uo.organization_id = $2
+            AND u.organization_id <> $2
+          LIMIT 1
         `;
         const { rows: [targetUser] } = await req.db.query(query, [targetUserId, req.user.organization_id]);
 
         if (!targetUser) {
-          return res.status(404).json({ error: 'Zielbenutzer nicht in deiner Organisation gefunden' });
+          return res.status(404).json({ error: 'Zielbenutzer nicht in deiner Gemeinde gefunden' });
+        }
+
+        if (istSuperAdminKonto(targetUser) && req.user.is_super_admin !== true) {
+          return res.status(403).json({
+            error: 'Super-Admin-Konten kann nur ein Super-Admin bearbeiten.'
+          });
         }
         if (!canManageRole(userRole, targetUser.role_name)) {
           return res.status(403).json({
@@ -149,6 +176,7 @@ module.exports = {
   ROLE_HIERARCHY,
   canManageRole,
   canCreateRole,
+  istSuperAdminKonto,
   checkUserHierarchy,
   filterUsersByHierarchy,
   filterRolesByHierarchy

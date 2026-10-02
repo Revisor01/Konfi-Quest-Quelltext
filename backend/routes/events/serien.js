@@ -3,7 +3,8 @@ const liveUpdate = require('../../utils/liveUpdate');
 const { formatDatum } = require('../../utils/zeitformat');
 const { allIdsBelongToOrg } = require('../../utils/orgOwnership');
 const { darfJahrgang } = require('../../utils/jahrgangsZugriff');
-const { validateTeamerQuota, pruefeAnmeldeschluss } = require('./validierung');
+const { validateTeamerQuota, pruefeAnmeldeschluss, pruefeEndeNachBeginn } = require('./validierung');
+const { abfragenBuendeln } = require('../../utils/abfragenBuendeln');
 
 // Deshalb requireAdmin (org_admin, admin) statt des frueheren requireTeamer.
 // Gesperrt wird in BEIDEN Ebenen: Oberflaeche und Backend.
@@ -51,6 +52,14 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
       return res.status(400).json({ error: seriesSchlussFehler });
     }
 
+    // Ende nicht vor dem Beginn -- wie in POST / und PUT /:id. Geprueft wird
+    // die Eingabe fuer den ersten Termin; die Folgetermine erben weiter unten
+    // dieselbe DAUER und stehen damit ebenso stimmig.
+    const seriesEndeFehler = pruefeEndeNachBeginn(event_date, event_end_time);
+    if (seriesEndeFehler) {
+      return res.status(400).json(seriesEndeFehler);
+    }
+
     // DIESELBEN Zwangsregeln wie POST / — vorher wendete die Serien-Route
     // KEINE davon an: eine Serie mit mandatory bekam Punkte, Teilnehmerzahl,
     // Warteliste und Timeslots wie gesendet, eine Konfirmations-Serie ebenso.
@@ -73,7 +82,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
     const SERIES_INTERVALS = ['day', 'week', '2weeks', 'month'];
 
     if (!Number.isInteger(series_count) || series_count > SERIES_MAX_COUNT) {
-      return res.status(400).json({ error: `Eine Serie darf höchstens ${SERIES_MAX_COUNT} Termine haben` });
+      return res.status(400).json({ error: `Eine Serie darf höchstens ${SERIES_MAX_COUNT} Events haben` });
     }
     if (series_interval !== undefined && !SERIES_INTERVALS.includes(series_interval)) {
       return res.status(400).json({ error: 'Ungültiges Serien-Intervall. Erlaubt: day, week, 2weeks, month' });
@@ -82,10 +91,10 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
     // Org-Isolation: fremde jahrgang_ids/category_ids abweisen (Cross-Org-Referenzen)
     try {
       if (!(await allIdsBelongToOrg(db, 'jahrgaenge', jahrgang_ids, req.user.organization_id))) {
-        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Organisation' });
+        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Gemeinde' });
       }
       if (!(await allIdsBelongToOrg(db, 'categories', category_ids, req.user.organization_id))) {
-        return res.status(400).json({ error: 'Mindestens eine Kategorie gehört nicht zu deiner Organisation' });
+        return res.status(400).json({ error: 'Mindestens eine Kategorie gehört nicht zu deiner Gemeinde' });
       }
 
       // Jahrgangs-Bindung, wortgleich zu POST / in verwaltung.js.
@@ -142,13 +151,20 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
         const date = seriesDates[i];
         const eventName = `${name} #${i + 1}`;
 
-        // Calculate dates for this specific event in series
+        // Ende jedes Termins: dieselbe DAUER wie beim ersten.
+        // Vorher wurde nur die UHRZEIT des Endes auf den Tag
+        // des jeweiligen Termins gesetzt (setHours). Endete der erste Termin
+        // an einem spaeteren Tag -- ein Wochenende, eine Nacht ueber
+        // Mitternacht --, lag das Ende jedes Serientermins damit VOR seinem
+        // Beginn: genau der Widerspruch, den pruefeEndeNachBeginn oben
+        // abweist, nur vom Server selbst erzeugt. Fuer Termine, die am selben
+        // Tag enden (der Normalfall), kommt dasselbe heraus wie vorher.
+        // Dasselbe Prinzip wie beim Anmeldefenster darunter: Der Abstand in
+        // Millisekunden traegt, die Uhrzeit allein nicht.
         const eventStartDate = new Date(date);
-        const eventEndDate = event_end_time ? new Date(date) : null;
-        if (eventEndDate && event_end_time) {
-          const endTime = new Date(event_end_time);
-          eventEndDate.setHours(endTime.getHours(), endTime.getMinutes(), 0, 0);
-        }
+        const eventEndDate = event_end_time
+          ? new Date(date.getTime() + (new Date(event_end_time) - new Date(event_date)))
+          : null;
 
         // Anmeldefenster: derselbe zeitliche Abstand wie beim ersten Termin
         // 
@@ -251,16 +267,19 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
           eventId = newEvent.id;
         }
 
-        // IMPORTANT: Create relationPromises array INSIDE the loop for each event
-        // This prevents promises from previous events being executed again
-        const relationPromises = [];
+        // Zuordnungen DIESES Termins. Als Aufgaben gesammelt und ueber
+        // abfragenBuendeln ausgefuehrt -- auf dem Client der Transaktion eine
+        // nach der anderen. Bis dahin liefen sie per Promise.all
+        // gleichzeitig auf einer Verbindung: pg 8 reiht das ein und warnt ab
+        // der dritten, pg 9 nicht mehr.
+        const zuordnungen = [];
         if (category_ids && category_ids.length) {
           const catQuery = "INSERT INTO event_categories (event_id, category_id) SELECT $1, unnest($2::int[]) ON CONFLICT DO NOTHING";
-          relationPromises.push(client.query(catQuery, [eventId, category_ids]));
+          zuordnungen.push(() => client.query(catQuery, [eventId, category_ids]));
         }
         if (jahrgang_ids && jahrgang_ids.length) {
           const jahrQuery = "INSERT INTO event_jahrgang_assignments (event_id, jahrgang_id) SELECT $1, unnest($2::int[]) ON CONFLICT DO NOTHING";
-          relationPromises.push(client.query(jahrQuery, [eventId, jahrgang_ids]));
+          zuordnungen.push(() => client.query(jahrQuery, [eventId, jahrgang_ids]));
         }
         if (has_timeslots && timeslots && timeslots.length) {
           const tsQuery = "INSERT INTO event_timeslots (event_id, start_time, end_time, max_participants, organization_id) VALUES ($1, $2, $3, $4, $5)";
@@ -274,7 +293,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
             adjustedStart.setHours(slotStart.getHours(), slotStart.getMinutes(), 0, 0);
             adjustedEnd.setHours(slotEnd.getHours(), slotEnd.getMinutes(), 0, 0);
 
-            relationPromises.push(client.query(tsQuery, [
+            zuordnungen.push(() => client.query(tsQuery, [
               eventId,
               adjustedStart.toISOString(),
               adjustedEnd.toISOString(),
@@ -283,8 +302,8 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
             ]));
           });
         }
-        // Wait for all relations of THIS event to be created before moving to next event
-        await Promise.all(relationPromises);
+        // Alle Zuordnungen DIESES Termins, bevor der naechste kommt.
+        await abfragenBuendeln(client, zuordnungen);
 
         // Auto-Enrollment für Pflicht-Events — wie in POST / (dort Z. 858ff).
         // Fehlte hier komplett: eine Pflicht-SERIE hatte in keinem Termin
@@ -315,7 +334,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
         events_created: seriesDates.length
       });
 
-      // Live-Update an die ganze Org (analog Einzel-Create events.js:766): neue
+      // Live-Update an die ganze Org (analog zum Einzel-Create in routes/events/verwaltung.js): neue
       // Serien-Events erschienen -> Konfis + Admins/Teamer:innen aktualisieren.
       liveUpdate.sendToOrg(req.user.organization_id, 'events', 'create', { seriesId, count: seriesDates.length });
 

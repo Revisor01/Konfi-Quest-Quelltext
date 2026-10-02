@@ -7,35 +7,58 @@ export const getYearWeek = (date: Date): string => {
   return `${d.getFullYear()}-W${yearWeek.toString().padStart(2, '0')}`;
 };
 
-export const formatDate = (date: Date | string, format: string = 'DD.MM.YYYY'): string => {
-  if (!date) return '';
-  
-  const d = new Date(date);
-  const day = d.getDate().toString().padStart(2, '0');
-  const month = (d.getMonth() + 1).toString().padStart(2, '0');
-  const year = d.getFullYear();
-  
-  switch (format) {
-    case 'DD.MM.YYYY':
-      return `${day}.${month}.${year}`;
-    case 'YYYY-MM-DD':
-      return `${year}-${month}-${day}`;
-    case 'DD.MM.':
-      return `${day}.${month}.`;
-    default:
-      return d.toLocaleDateString('de-DE');
-  }
+/**
+ * DIE DATUMSFORMATE DER APP -- an dieser einen Stelle.
+ *
+ * ZEITZONE: die des Geräts, genau wie vorher (toLocale* ohne timeZone). Das
+ * Backend liefert Zeitpunkte in UTC; ein Gerät in Deutschland zeigt sie in
+ * Europe/Berlin, mit Sommer- und Winterzeit. Bewusst NICHT fest Europe/Berlin
+ * -- dieselbe Entscheidung wie bei kalendertag() in shared/eventFormatting.ts.
+ *
+ * NUR ANZEIGE: Nichts hiervon geht ans Backend. Werte für die API
+ * (JJJJ-MM-TT, ISO) entstehen anderswo und bleiben unberührt.
+ *
+ * Ungültige oder leere Eingaben ergeben '' (keine „Invalid Date").
+ * Neue Sonderformate verhindert der Test datumsformate.test.ts.
+ */
+type Zeitpunkt = Date | string | number | null | undefined;
+
+const KURZ: Intl.DateTimeFormatOptions = { day: '2-digit', month: '2-digit', year: 'numeric' };
+const KURZ_OHNE_JAHR: Intl.DateTimeFormatOptions = { day: '2-digit', month: '2-digit' };
+const KURZ_MIT_WOCHENTAG: Intl.DateTimeFormatOptions = { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' };
+const LANG: Intl.DateTimeFormatOptions = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' };
+const UHRZEIT: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' };
+
+const alsDatum = (wert: Zeitpunkt): Date | null => {
+  if (wert === null || wert === undefined || wert === '') return null;
+  const d = wert instanceof Date ? wert : new Date(wert);
+  return Number.isNaN(d.getTime()) ? null : d;
 };
 
-export const formatDateTime = (date: Date | string): string => {
-  if (!date) return '';
-  
-  const d = new Date(date);
-  const dateStr = formatDate(d);
-  const hours = d.getHours().toString().padStart(2, '0');
-  const minutes = d.getMinutes().toString().padStart(2, '0');
-  
-  return `${dateStr} ${hours}:${minutes}`;
+export const datumKurz = (
+  wert: Zeitpunkt,
+  { ohneJahr = false, mitWochentag = false }: { ohneJahr?: boolean; mitWochentag?: boolean } = {}
+): string => {
+  const d = alsDatum(wert);
+  if (!d) return '';
+  return d.toLocaleDateString('de-DE', mitWochentag ? KURZ_MIT_WOCHENTAG : ohneJahr ? KURZ_OHNE_JAHR : KURZ);
+};
+
+/** Montag, 14. September 2026 */
+export const datumLang = (wert: Zeitpunkt): string => {
+  const d = alsDatum(wert);
+  return d ? d.toLocaleDateString('de-DE', LANG) : '';
+};
+
+/** 18:00 */
+export const uhrzeit = (wert: Zeitpunkt): string => {
+  const d = alsDatum(wert);
+  return d ? d.toLocaleTimeString('de-DE', UHRZEIT) : '';
+};
+
+export const datumUhrzeit = (wert: Zeitpunkt, optionen: { ohneJahr?: boolean } = {}): string => {
+  const d = alsDatum(wert);
+  return d ? `${datumKurz(d, optionen)}, ${uhrzeit(d)}` : '';
 };
 
 export const isToday = (date: Date | string): boolean => {

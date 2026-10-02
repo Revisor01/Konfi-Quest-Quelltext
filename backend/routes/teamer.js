@@ -11,9 +11,15 @@ const liveUpdate = require('../utils/liveUpdate');
 const { addToEventChat, removeFromEventChat } = require('../utils/eventChat');
 const { deletePhotoFile } = require('../utils/photoStorage');
 const { getPunkteHistorie } = require('../utils/punkteHistorie');
+const { ladeKonfiHistorie, konfiBadgesAusKopie } = require('../utils/konfiHistorie');
 const { findeAntragZuClientId, behandleClientIdRace } = require('../utils/antragIdempotenz');
 const { BIBEL_UEBERSETZUNGEN, KONFSPRUCH_TRANSLATIONS, ladeSpruchliste, ladeKonfspruch } = require('../utils/konfspruch');
 const { heuteBerlin } = require('../utils/zeitformat');
+const { ladeLeitungZumAntrag } = require('../utils/antragLeitungSicht');
+const { ladeLeitungZumTermin } = require('../utils/terminLeitungSicht');
+const { nachAntwort } = require('../utils/nachAntwort');
+const { loescheMitteilungenZuAntraegen } = require('../utils/postfachAufraeumen');
+const { ladeRolleInGemeinde, istMitgliedDerOrganisation } = require('../utils/orgMitglieder');
 
 module.exports = (db, rbacVerifier, roleHelpers) => {
   const { requireTeamer, requireOrgAdmin, requireAdmin } = roleHelpers;
@@ -59,25 +65,39 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       const userId = req.user.id;
 
       // User-Daten aus DB laden (inkl. email, role_title, teamer_since)
+      //
+      // DIE AKTIVE GEMEINDE, nicht die am Konto: Der Join lief
+      // ueber u.organization_id -- wer ueber user_organizations in einer
+      // zweiten Gemeinde arbeitet, las im Profil trotzdem den Namen seiner
+      // Stamm-Gemeinde. req.user.organization_id traegt die aktive Gemeinde
+      // (rbac.js loest sie gegen user_organizations auf).
+      // Antwortform unveraendert -- nur der Wert stimmt jetzt.
       const userQuery = `
         SELECT u.display_name, u.username, u.email, u.role_title, u.teamer_since,
                u.bible_translation,
                o.name as organization_name
         FROM users u
-        LEFT JOIN organizations o ON u.organization_id = o.id
+        LEFT JOIN organizations o ON o.id = $2
         WHERE u.id = $1
       `;
-      const { rows: [userData] } = await db.query(userQuery, [userId]);
+      const { rows: [userData] } = await db.query(userQuery, [userId, req.user.organization_id]);
 
       // Konfi-Profildaten (eingefroren nach Transition)
+      //
+      // NUR DIE KONFI-ZEIT IN DER AKTIVEN GEMEINDE: Ohne die
+      // Grenze bekam, wer zuhause als Konfi angefangen hat und in einer
+      // zweiten Gemeinde im Team ist, dort Punkte und Jahrgang von zuhause --
+      // neben Badges und Punkte-Verlauf (GET /konfi-history), die schon je
+      // Gemeinde gelesen werden und dort leer sind. Dieselbe Grenze wie
+      // utils/punkteHistorie.js; konfi_profiles.organization_id ist NOT NULL.
       const profileQuery = `
         SELECT kp.gottesdienst_points, kp.gemeinde_points,
                j.name as jahrgang_name
         FROM konfi_profiles kp
         LEFT JOIN jahrgaenge j ON kp.jahrgang_id = j.id
-        WHERE kp.user_id = $1
+        WHERE kp.user_id = $1 AND kp.organization_id = $2
       `;
-      const { rows: [konfiProfile] } = await db.query(profileQuery, [userId]);
+      const { rows: [konfiProfile] } = await db.query(profileQuery, [userId, req.user.organization_id]);
 
       // Beförderter Teamer = hat überhaupt ein konfi_profiles (Konfi-Vergangenheit).
       // NICHT am jahrgang_name festmachen: wird der alte Jahrgang gelöscht, ist
@@ -102,8 +122,13 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
             AND b.organization_id = $2
           ORDER BY kb.awarded_date DESC
         `;
-        const result = await db.query(badgesQuery, [userId, req.user.organization_id]);
-        badges = result.rows;
+        const ausKopie = konfiBadgesAusKopie(await ladeKonfiHistorie(db, userId, req.user.organization_id));
+        if (ausKopie) {
+          badges = ausKopie;
+        } else {
+          const result = await db.query(badgesQuery, [userId, req.user.organization_id]);
+          badges = result.rows;
+        }
       }
 
       res.json({
@@ -200,6 +225,39 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
+
+  // EIGENE ROUTEN statt eines Feldes an /teamer/profile oder
+  // /teamer/konfi-history: deren Antworten lesen die Apps im Store, und die
+  // Kopie ist ein eigener Gegenstand mit eigenem Stand (erstellt_am).
+  // Antwort immer { konfi_zeit }, ohne Kopie { konfi_zeit: null }.
+
+  // GET /teamer/konfi-zeit — die eigene, in der aktiven Gemeinde.
+  router.get('/konfi-zeit', rbacVerifier, requireTeamer, async (req, res) => {
+    try {
+      const konfiZeit = await ladeKonfiHistorie(db, req.user.id, req.user.organization_id);
+      res.json({ konfi_zeit: konfiZeit });
+    } catch (err) {
+      console.error('Database error in GET /teamer/konfi-zeit:', err);
+      res.status(500).json({ error: 'Datenbankfehler' });
+    }
+  });
+
+  // GET /teamer/:userId/konfi-zeit — die einer Person, fuer deren
+  // Detailansicht bei der Leitung. Eine Kopie gibt es nur von Befoerderten,
+  // und Teamer:innen sieht die Leitung ohne Jahrgangsgrenze
+  // (utils/jahrgangsZugriff.js); die Gemeinde begrenzt die Zeile selbst.
+  router.get('/:userId/konfi-zeit', rbacVerifier, requireAdmin,
+    [param('userId').isInt({ min: 1 }).withMessage('Ungültige ID'), handleValidationErrors],
+    async (req, res) => {
+      try {
+        const konfiZeit = await ladeKonfiHistorie(db, parseInt(req.params.userId, 10), req.user.organization_id);
+        res.json({ konfi_zeit: konfiZeit });
+      } catch (err) {
+        console.error('Database error in GET /teamer/:userId/konfi-zeit:', err);
+        res.status(500).json({ error: 'Datenbankfehler' });
+      }
+    }
+  );
 
   // ====================================================================
   // TEAMER-BADGES
@@ -346,16 +404,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
     try {
       const { userId } = req.params;
 
-      // Org-Zugehoerigkeit + Teamer-Rolle prüfen (analog zur Konfi-Variante
-      // in konfi-management.js, die auf r.name = 'konfi' filtert).
-      const { rows: [teamer] } = await db.query(
-        `SELECT u.id FROM users u
-         JOIN roles r ON u.role_id = r.id
-         WHERE u.id = $1 AND r.name = 'teamer' AND u.organization_id = $2 AND u.deleted_at IS NULL`,
-        [userId, req.user.organization_id]
-      );
-
-      if (!teamer) {
+      if (await ladeRolleInGemeinde(db, userId, req.user.organization_id) !== 'teamer') {
         return res.status(404).json({ error: 'Teamer:in nicht gefunden' });
       }
 
@@ -475,6 +524,17 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
   // DELETE /teamer/certificate-types/:id - Typ löschen (nur wenn nicht zugewiesen)
   router.delete('/certificate-types/:id', rbacVerifier, requireAdmin, async (req, res) => {
     try {
+      // Erst die Gemeinde, dann die Nutzung:
+      // Vorher kam fuer einen Typ einer ANDEREN Gemeinde 409
+      // "bereits im Team vergeben" -- das verriet Existenz und Nutzung.
+      const { rows: [eigener] } = await db.query(
+        'SELECT id FROM certificate_types WHERE id = $1 AND organization_id = $2',
+        [req.params.id, req.user.organization_id]
+      );
+      if (!eigener) {
+        return res.status(404).json({ error: 'Zertifikat-Typ nicht gefunden' });
+      }
+
       // Prüfen ob Zertifikate zugewiesen sind
       const { rows: [usage] } = await db.query(
         'SELECT COUNT(*) as count FROM user_certificates WHERE certificate_type_id = $1',
@@ -509,6 +569,13 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
   // GET /teamer/:userId/certificates - Alle Zertifikate eines Teamers
   router.get('/:userId/certificates', rbacVerifier, requireAdmin, async (req, res) => {
     try {
+      // Fremde Person -> 404 statt 200 [].
+      // Mitglied ist, wer ueber eine der beiden Quellen zur
+      // aktiven Gemeinde gehoert (utils/orgMitglieder.js). Die Apps rufen
+      // diese Route nicht (2.2.0 und 2.3.0 nur POST und DELETE).
+      if (!(await istMitgliedDerOrganisation(db, req.params.userId, req.user.organization_id))) {
+        return res.status(404).json({ error: 'Person nicht gefunden' });
+      }
       const { rows } = await db.query(
         `SELECT uc.id, uc.issued_date, uc.expiry_date, uc.created_at,
                 ct.id as certificate_type_id, ct.name, ct.icon
@@ -534,15 +601,12 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
         return res.status(400).json({ error: 'Zertifikat-Typ und Ausstellungsdatum sind erforderlich' });
       }
 
-      // Prüfen: User existiert und ist Teamer
-      const { rows: [user] } = await db.query(
-        `SELECT u.id FROM users u
-         JOIN roles r ON u.role_id = r.id
-         WHERE u.id = $1 AND u.organization_id = $2 AND r.name = 'teamer'`,
-        [req.params.userId, req.user.organization_id]
-      );
-
-      if (!user) {
+      // Prüfen: Teamer:in IN DIESER GEMEINDE, ueber beide Quellen
+      // Vorher Rolle am Konto und Stamm-Gemeinde -- eine
+      // Teamer:in, die ueber user_organizations hier mitarbeitet, bekam
+      // hier kein Zertifikat (404). Das Zertifikat gehoert der Gemeinde, die
+      // es vergibt (organization_id unten, Typ aus dieser Gemeinde).
+      if (await ladeRolleInGemeinde(db, req.params.userId, req.user.organization_id) !== 'teamer') {
         return res.status(404).json({ error: 'Teamer nicht gefunden' });
       }
 
@@ -619,7 +683,8 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       const now = new Date();
       const greeting = {
         display_name: req.user.display_name,
-        hour: now.getHours()
+        hour: now.getHours(),
+        role_title: req.user.role_title || null
       };
 
       // 2. Certificates: Alle Typen der Org mit LEFT JOIN user_certificates
@@ -752,16 +817,48 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       }
 
       // Wrapped-Verfuegbarkeit prüfen (Teamer: direkt auf wrapped_snapshots)
+      // -- in der AKTIVEN Gemeinde: Sonst
+      // hiess es in Gemeinde B "Dein Team-Jahr ist da", und GET /wrapped/me
+      // zeigte dort die Zahlen aus Gemeinde A.
+      //
+      // Dazu additiv Id und Titel der Ausgabe,
+      // wie im Konfi-Dashboard (konfi.js): Die App merkt
+      // sich das Wegklicken des Hinweises unter
+      // wrapped_hinweis_t_<user>_<wrapped_ausgabe_id> -- auch die Store-Apps
+      // 2.2.x/2.3.0 bauen den Schluessel so. Ohne das Feld endete er immer
+      // auf "_alt", und wer den Hinweis einmal wegklickte, sah den naechsten
+      // Team-Rueckblick auf der Startseite nie mehr.
+      // Gemeint ist die Ausgabe, die GET /wrapped/me oeffnet: der zuletzt
+      // freigegebene Rueckblick der aktiven Gemeinde (dieselbe Auswahl und
+      // Reihenfolge wie dort). Alt-Snapshots ohne Ausgabe -> null.
       const { rows: [wrappedResult] } = await db.query(
         `SELECT EXISTS(
           SELECT 1 FROM wrapped_snapshots
-          WHERE user_id = $1 AND wrapped_type = 'teamer'
-        ) as has_wrapped`,
-        [userId]
+          WHERE user_id = $1 AND wrapped_type = 'teamer' AND organization_id = $2
+        ) as has_wrapped,
+        juengste.ausgabe_id AS wrapped_ausgabe_id,
+        juengste.titel AS wrapped_titel
+        FROM (SELECT 1) AS eins
+        LEFT JOIN LATERAL (
+          SELECT a.id AS ausgabe_id, a.titel
+            FROM wrapped_snapshots s
+            LEFT JOIN wrapped_ausgaben a ON a.id = s.ausgabe_id
+           WHERE s.user_id = $1 AND s.wrapped_type = 'teamer'
+             AND s.organization_id = $2
+             AND (a.id IS NULL OR a.freigegeben_at IS NOT NULL)
+           ORDER BY COALESCE(a.freigegeben_at, s.computed_at) DESC, s.year DESC
+           LIMIT 1
+        ) AS juengste ON true`,
+        [userId, orgId]
       );
       const has_wrapped = wrappedResult?.has_wrapped || false;
+      const wrapped_ausgabe_id = wrappedResult?.wrapped_ausgabe_id ?? null;
+      const wrapped_titel = wrappedResult?.wrapped_titel ?? null;
 
-      res.json({ greeting, certificates, events, badges, config, has_wrapped, konfspruch });
+      res.json({
+        greeting, certificates, events, badges, config, has_wrapped, konfspruch,
+        wrapped_ausgabe_id, wrapped_titel,
+      });
     } catch (err) {
       console.error('Error loading teamer dashboard:', err);
       res.status(500).json({ error: 'Fehler beim Laden des Teamer-Dashboards' });
@@ -1057,6 +1154,7 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
 
       const client = await db.getClient();
       let ergebnis;
+      let fruehAntwort = null;
       try {
         await client.query('BEGIN');
         ergebnis = await setzeTeamerZusage(client, {
@@ -1073,17 +1171,31 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
           // Apps lesen nur error, neue erkennen daran den Pflicht-Grund.
           const antwort = { error: ergebnis.error };
           if (ergebnis.error_code) antwort.error_code = ergebnis.error_code;
-          return res.status(ergebnis.status).json(antwort);
+          fruehAntwort = { status: ergebnis.status, body: antwort };
+        } else {
+          await client.query('COMMIT');
         }
+      } catch (err) {
+        try { await client.query('ROLLBACK'); } catch (_) { /* Connection evtl. tot */ }
+        console.error('Database error in POST /teamer/events/:id/zusage:', eventId, err);
+        return res.status(500).json({ error: 'Datenbankfehler' });
+      } finally {
+        client.release();
+      }
 
-        await client.query('COMMIT');
-        res.json({
-          status: ergebnis.status,
-          message: dabei ? 'Zusage gespeichert' : 'Absage gespeichert'
-        });
+      if (fruehAntwort) {
+        return res.status(fruehAntwort.status).json(fruehAntwort.body);
+      }
 
-        // Chat-Mitgliedschaft dem Stand anpassen und die Leitung informieren.
-        // NACH COMMIT und fehlertolerant: daran darf die Zusage nie scheitern.
+      res.json({
+        status: ergebnis.status,
+        message: dabei ? 'Zusage gespeichert' : 'Absage gespeichert'
+      });
+
+      // Chat-Mitgliedschaft dem Stand anpassen, danach die Live-Updates
+      // (eine offene Ansicht laedt dann schon den neuen Chat-Stand).
+      // NACH COMMIT und fehlertolerant: daran darf die Zusage nie scheitern.
+      nachAntwort(req, async () => {
         try {
           if (dabei) {
             await addToEventChat(db, eventId, req.user.id, req.user.organization_id);
@@ -1095,41 +1207,37 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
         }
         liveUpdate.sendToUserByRole(req.user.id, 'events', 'update', { eventId });
         liveUpdate.sendToOrgAdmins(req.user.organization_id, 'events', 'update', { eventId, action: 'teamer_zusage' });
+      }, 'Chat und Live-Update nach Teamer-Zusage/-Absage');
 
-        try {
-          if (dabei) {
-            await PushService.sendTeamerEventBookingToAdmins(
-              db, req.user.organization_id, req.user.display_name,
-              ergebnis.event.name, ergebnis.status, eventId
-            );
-          } else {
-            await PushService.sendTeamerEventCancellationToAdmins(
-              db, req.user.organization_id, req.user.display_name,
-              ergebnis.event.name, eventId,
-              typeof reason === 'string' && reason.trim() ? reason.trim().slice(0, 500) : null
-            );
-          }
-        } catch (pushErr) {
-          console.error('Push nach Teamer-Zusage/-Absage:', pushErr);
+      // EMPFAENGER: die Leitung, die das Event sieht
+      // (utils/terminLeitungSicht.js) -- Org-Admins immer, Admins bei
+      // Jahrgangs-Events nur mit Zuweisung, bei "Nur Team" und Events ohne
+      // Jahrgang alle. Vorher jeder Admin der Gemeinde. Die
+      // zusagende Person selbst nie: Die Route steht hinter requireTeamer,
+      // auch die Leitung sagt hier zu. Ueber nachAntwort, damit Tests darauf
+      // warten koennen.
+      const grund = typeof reason === 'string' && reason.trim() ? reason.trim().slice(0, 500) : null;
+      nachAntwort(req, async () => {
+        const empfaenger = await ladeLeitungZumTermin(db, eventId, { ausser: req.user.id });
+        if (dabei) {
+          await PushService.sendTeamerEventBookingToLeadership(
+            db, req.user.organization_id, empfaenger, req.user.display_name,
+            ergebnis.event.name, ergebnis.status, eventId, req.user.id
+          );
+        } else {
+          await PushService.sendTeamerEventCancellationToLeadership(
+            db, req.user.organization_id, empfaenger, req.user.display_name,
+            ergebnis.event.name, eventId, grund, req.user.id
+          );
         }
+      }, 'Push nach Teamer-Zusage/-Absage');
 
-        // Ist nach einer Absage jemand von der Team-Warteliste nachgerueckt,
-        // erfaehrt er das per Push — wie beim Storno-Weg.
-        if (ergebnis.promotedUserId) {
-          try {
-            await PushService.sendWaitlistPromotionToTeamer(
-              db, ergebnis.promotedUserId, ergebnis.event.name, null, eventId, req.user.organization_id
-            );
-          } catch (pushErr) {
-            console.error('Push an nachgerueckte Teamer:in:', pushErr);
-          }
-        }
-      } catch (err) {
-        try { await client.query('ROLLBACK'); } catch (_) { /* Connection evtl. tot */ }
-        console.error('Database error in POST /teamer/events/:id/zusage:', eventId, err);
-        res.status(500).json({ error: 'Datenbankfehler' });
-      } finally {
-        client.release();
+      // Ist nach einer Absage jemand von der Team-Warteliste nachgerueckt,
+      // erfaehrt er das per Push — wie beim Storno-Weg.
+      if (ergebnis.promotedUserId) {
+        nachAntwort(req, () => PushService.sendWaitlistPromotionToTeamer(
+          db, ergebnis.promotedUserId, ergebnis.event.name, null, eventId, req.user.organization_id
+        ), 'Push an nachgerueckte Teamer:in');
       }
     });
 
@@ -1182,47 +1290,39 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
 
       res.status(201).json({ id: newRequest.id, message: 'Antrag eingereicht' });
 
-      (async () => {
-        try {
-          const { rows: admins } = await db.query(
-            `SELECT u.id FROM users u
-             JOIN roles r ON u.role_id = r.id
-             WHERE r.name IN ('admin', 'org_admin') AND u.organization_id = $1`,
-            [req.user.organization_id]
-          );
+      nachAntwort(req, async () => {
+        const empfaenger = await ladeLeitungZumAntrag(db, newRequest.id);
 
-          if (admins.length > 0) {
-            await db.query(
-              `INSERT INTO notifications (user_id, title, message, type, data, organization_id)
-               SELECT unnest($1::int[]), $2, $3, $4, $5, $6`,
-              [
-                admins.map(a => a.id),
-                'Neuer Antrag eingegangen',
-                `${req.user.display_name} hat einen Antrag für "${activity.name}" (${activity.points} ${activity.points === 1 ? 'Punkt' : 'Punkte'}) eingereicht.`,
-                'new_activity_request',
-                JSON.stringify({
-                  request_id: newRequest.id,
-                  konfi_id: userId,
-                  konfi_name: req.user.display_name,
-                  activity_name: activity.name,
-                  points: activity.points
-                }),
-                req.user.organization_id
-              ]
-            );
-          }
-
-          await PushService.sendNewActivityRequestToAdmins(
-            db,
-            req.user.organization_id,
-            req.user.display_name,
-            activity.name,
-            activity.points
+        if (empfaenger.length > 0) {
+          await db.query(
+            `INSERT INTO notifications (user_id, title, message, type, data, organization_id)
+             SELECT unnest($1::int[]), $2, $3, $4, $5, $6`,
+            [
+              empfaenger,
+              'Neuer Antrag eingegangen',
+              `${req.user.display_name} hat einen Antrag für "${activity.name}" (${activity.points} ${activity.points === 1 ? 'Punkt' : 'Punkte'}) eingereicht.`,
+              'new_activity_request',
+              JSON.stringify({
+                request_id: newRequest.id,
+                konfi_id: userId,
+                konfi_name: req.user.display_name,
+                activity_name: activity.name,
+                points: activity.points
+              }),
+              req.user.organization_id
+            ]
           );
-        } catch (notifErr) {
-          console.error('Error sending admin notifications (teamer request):', notifErr);
         }
-      })();
+
+        await PushService.sendNewActivityRequestToLeadership(
+          db,
+          req.user.organization_id,
+          empfaenger,
+          req.user.display_name,
+          activity.name,
+          activity.points
+        );
+      }, 'Leitungs-Mitteilung zum neuen Teamer-Antrag');
 
       // Live-Update an alle Admins/Org-Admins/Teamer:innen der Org (neuer Antrag)
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'requests', 'create');
@@ -1250,6 +1350,11 @@ module.exports = (db, rbacVerifier, roleHelpers) => {
       }
 
       await db.query('DELETE FROM activity_requests WHERE id = $1', [requestId]);
+      // Postfach: "Antrag eingereicht" bei der Teamer:in und
+      // "Neuer Antrag eingegangen" bei der Leitung gehen mit dem Antrag --
+      // sonst fuehrte die Mitteilung in eine Liste ohne ihn
+      // (utils/postfachAufraeumen.js).
+      await loescheMitteilungenZuAntraegen(db, [requestId]);
 
       if (existing.photo_filename) {
         await deletePhotoFile(existing.photo_filename);

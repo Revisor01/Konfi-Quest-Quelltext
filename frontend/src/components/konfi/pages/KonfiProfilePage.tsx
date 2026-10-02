@@ -1,16 +1,10 @@
-import { ICON_ZURUECK } from '../../shared/icons';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import React from 'react';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
   IonRefresher,
   IonRefresherContent,
-  IonButtons,
-  IonButton,
-  IonIcon
 } from '@ionic/react';
 import { useApp } from '../../../contexts/AppContext';
 import { useModalPage } from '../../../contexts/ModalContext';
@@ -92,23 +86,10 @@ const KonfiProfilePage: React.FC = () => {
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()} aria-label="Zurück">
-              <IonIcon icon={ICON_ZURUECK} slot="icon-only" />
-            </IonButton>
-          </IonButtons>
-          <IonTitle>Profil</IonTitle>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile titel="Profil" onZurueck={() => window.history.back()} gemeindeUmschalter={false} />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Profil</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Profil" />
 
         <IonRefresher slot="fixed" onIonRefresh={async (e) => {
           await refresh();

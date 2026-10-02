@@ -1,4 +1,5 @@
 import { Preferences } from '@capacitor/preferences';
+import { alteSchluesselEntfernen } from './migrateStorage';
 import { BaseUser } from '../types/user';
 
 // In-Memory-Cache — synchrone Reads, async Writes nach Preferences
@@ -55,8 +56,18 @@ export const setPushTokenTimestamp = async (ts: number): Promise<void> => {
   await Preferences.set({ key: 'push_token_last_refresh', value: ts.toString() });
 };
 
-export const setRefreshToken = async (token: string): Promise<void> => {
+/**
+ * Refresh-Token setzen.
+ */
+export const setRefreshToken = async (
+  token: string,
+  optionen: { klartext?: boolean } = {}
+): Promise<void> => {
   _refreshToken = token;
+  if (optionen.klartext === false) {
+    await Preferences.remove({ key: 'konfi_refresh_token' });
+    return;
+  }
   await Preferences.set({ key: 'konfi_refresh_token', value: token });
 };
 
@@ -88,6 +99,9 @@ export const clearAuth = async (): Promise<void> => {
   await Preferences.remove({ key: 'konfi_refresh_token' });
   await Preferences.remove({ key: 'konfi_active_org' });
   await Preferences.remove({ key: 'push_token_last_refresh' });
+  // Alte Anmelde-Reste aus der Zeit vor der Preferences-Migration;
+  // die Geraetekennung bleibt wie oben.
+  alteSchluesselEntfernen({ nurAnmeldung: true });
 };
 
 // --- Initialisierung: Preferences -> Memory laden ---

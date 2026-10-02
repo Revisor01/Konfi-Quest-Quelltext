@@ -2,13 +2,9 @@ import { fehlerDaten, fehlerStatus, fehlerText } from '../../../utils/fehler';
 import React, { useState, useCallback } from 'react';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
   IonRefresher,
   IonRefresherContent,
-  IonButtons,
   IonButton,
   IonIcon,
   useIonModal,
@@ -19,6 +15,7 @@ import {
 import { ICON_CHECKBOX, ICON_HINZUFUEGEN_GEFUELLT } from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
+import { konfiLoeschHinweis, teamKontoLoeschHinweis } from '../../../utils/kontoLoeschen';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import api from '../../../services/api';
@@ -30,9 +27,9 @@ import KonfiModal from '../modals/KonfiModal';
 import UserManagementModal from '../modals/UserManagementModal';
 import AttendanceMatrixModal from '../modals/AttendanceMatrixModal';
 import { triggerPullHaptic } from '../../../utils/haptics';
-import { OrgSwitcherButton } from '../../shared';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import AdminOnboardingModal from '../modals/AdminOnboardingModal';
-import AdminUpdate220WalkthroughModal from '../modals/AdminUpdate220WalkthroughModal';
+import AdminUpdate230WalkthroughModal from '../modals/AdminUpdate230WalkthroughModal';
 import { useOnboardingWithUpdateOnce } from '../../../hooks/useOnboardingOnce';
 import NeuerungenBanner from '../../shared/NeuerungenBanner';
 import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
@@ -148,6 +145,8 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
 
   const [viewMode, setViewMode] = useState<'konfis' | 'teamer'>('konfis');
 
+  const seitenTitel = viewMode === 'teamer' ? 'Team' : 'Konfis';
+
   const [presentTeamerModalHook, dismissTeamerModalHook] = useIonModal(UserManagementModal, {
     userId: null,
     festeRolle: 'teamer',
@@ -172,7 +171,9 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
     if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
       header: 'Konfi wirklich löschen?',
-      message: `"${konfi.name}" wird unwiderruflich gelöscht.\n\nDabei gehen alle Punkte, Abzeichen, Aktivitäten und Chat-Nachrichten dieses Konfis dauerhaft verloren. Das lässt sich nicht rückgängig machen.`,
+      // Was wirklich verschwindet: ein
+      // Wortlaut fuer alle Konto-Loeschdialoge (utils/kontoLoeschen.ts).
+      message: konfiLoeschHinweis(konfi.name),
       buttons: [
         { text: 'Abbrechen', role: 'cancel' },
         {
@@ -195,10 +196,17 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
   // resolved — so kann KonfisView danach die lokale Teamer-Liste neu laden.
   const handleDeleteTeamer = (teamer: TeamerListenEintrag): Promise<void> => {
     if (offlineBlockiert(isOnline, setError)) return Promise.resolve();
+    const name = teamer.display_name || teamer.name;
     return new Promise<void>((resolve) => {
       presentAlert({
         header: 'Teamer:in löschen',
-        message: `Teamer:in "${teamer.display_name || teamer.name}" wirklich löschen?\n\nDas Konto wird mit allen zugehörigen Daten entfernt. Punkte und Abzeichen aus einer früheren Konfi-Zeit gehen dabei verloren.`,
+        // Derselbe Weg wie unter "Benutzer:innen" (DELETE /users/:id): Wer
+        // auch in einer anderen Gemeinde Mitglied ist, wird nur aus dieser
+        // entfernt, das Konto bleibt dort. Diese Liste
+        // (GET /admin/konfis/teamer, auch fuer Teamer:innen lesbar) sagt
+        // nicht, wer das ist -- deshalb nennt die Abfrage beide Ausgaenge,
+        // und die Erfolgsmeldung richtet sich nach der Antwort (konto_bleibt).
+        message: `Teamer:in "${name}" wirklich löschen?\n\n${teamKontoLoeschHinweis()}\n\nArbeitet die Person auch in einer anderen Gemeinde mit, wird sie nur aus deiner Gemeinde entfernt; ihr Konto bleibt dort bestehen.`,
         buttons: [
           { text: 'Abbrechen', role: 'cancel', handler: () => resolve() },
           {
@@ -206,9 +214,11 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
             role: 'destructive',
             handler: async () => {
               try {
-                await api.delete(`/users/${teamer.id}`);
+                const res = await api.delete(`/users/${teamer.id}`);
                 await refreshKonfis();
-                setSuccess(`Teamer:in "${teamer.display_name || teamer.name}" gelöscht`);
+                setSuccess(res?.data?.konto_bleibt === true
+                  ? `Teamer:in "${name}" aus deiner Gemeinde entfernt; das Konto bleibt in einer anderen Gemeinde bestehen`
+                  : `Teamer:in "${name}" gelöscht`);
               } catch (err) {
                 setError(fehlerText(err, 'Fehler beim Löschen'));
               } finally {
@@ -239,11 +249,6 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
 
   // Erfolgsbehandlung nach erfolgreichem Anlegen (auch nach Grace-Bestätigung wiederverwendet)
   const handleKonfiCreated = async (response: AxiosResponse<KonfiAngelegtAntwort>, konfiData: KonfiFormDaten) => {
-    // Automatisch Jahrgangschat erstellen/zuweisen
-    if (konfiData.jahrgang_id) {
-      await createOrJoinJahrgangChat(konfiData.jahrgang_id);
-    }
-
     const tempPassword = response.data.temporaryPassword;
     if (tempPassword) {
       presentAlert({
@@ -330,58 +335,28 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
     }
   };
 
-  const createOrJoinJahrgangChat = async (jahrgangId: number) => {
-    try {
-      // Finde den Jahrgang-Namen
-      const jahrgangResponse = await api.get(`/admin/jahrgaenge/${jahrgangId}`);
-      const jahrgangName = jahrgangResponse.data.name;
-
-      // Legt den Jahrgangschat an, falls es ihn noch nicht gibt, und traegt
-      // in beiden Faellen alle Konfis des Jahrgangs ein - auch die, die
-      // spaeter dazugekommen sind.
-      await api.post('/chat/rooms', {
-        type: 'jahrgang',
-        name: `Jahrgang ${jahrgangName}`,
-        jahrgang_id: jahrgangId
-      });
-
-    } catch (err) {
- console.error('Fehler beim Jahrgangschat:', err);
-      // Nicht als kritischer Fehler behandeln, da der Konfi bereits erstellt wurde
-    }
-  };
-
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <OrgSwitcherButton />
-          <IonTitle>Konfirmand:innen</IonTitle>
-          <IonButtons slot="end">
-            {['org_admin', 'admin'].includes(user?.role_name || '') && (
-              <>
-                <IonButton aria-label="Anwesenheit und Konfisprüche anzeigen" onClick={() => presentMatrixModal({ presentingElement: presentingElement })}>
-                  <IonIcon icon={ICON_CHECKBOX} />
-                </IonButton>
-                <IonButton
-                  aria-label={viewMode === 'teamer' ? 'Neue Teamer:in anlegen' : 'Neuen Konfi anlegen'}
-                  onClick={() => viewMode === 'teamer'
-                    ? presentTeamerModalHook({ presentingElement: presentingElement })
-                    : presentKonfiModal()}
-                >
-                  <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
-                </IonButton>
-              </>
-            )}
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile
+        titel={seitenTitel}
+        rechts={['org_admin', 'admin'].includes(user?.role_name || '') ? (
+          <>
+            <IonButton aria-label="Anwesenheit und Konfisprüche anzeigen" onClick={() => presentMatrixModal({ presentingElement: presentingElement })}>
+              <IonIcon icon={ICON_CHECKBOX} />
+            </IonButton>
+            <IonButton
+              aria-label={viewMode === 'teamer' ? 'Neue Teamer:in anlegen' : 'Neuen Konfi anlegen'}
+              onClick={() => viewMode === 'teamer'
+                ? presentTeamerModalHook({ presentingElement: presentingElement })
+                : presentKonfiModal()}
+            >
+              <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
+            </IonButton>
+          </>
+        ) : undefined}
+      />
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Konfirmand:innen</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel={seitenTitel} />
         
         <IonRefresher slot="fixed" onIonRefresh={(e) => {
           refreshAll();
@@ -431,12 +406,12 @@ const AdminKonfisPage: React.FC<AdminKonfisPageProps> = ({ onSelectKonfi, select
           Onboarding-Tour schließen sich gegenseitig aus; die Neuigkeiten-
           Karte bleibt weg, solange sie offen ist. */}
       {showNeuerungen && (
-        <AdminUpdate220WalkthroughModal onClose={schliesseNeuerungen} />
+        <AdminUpdate230WalkthroughModal onClose={schliesseNeuerungen} />
       )}
 
       {/* Derselbe Walkthrough — hier über die Neuigkeiten-Karte geöffnet. */}
       {showUpdateWalkthrough && (
-        <AdminUpdate220WalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
+        <AdminUpdate230WalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
       )}
 
       {showMitmachenErklaerung && (

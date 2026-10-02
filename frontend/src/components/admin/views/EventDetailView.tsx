@@ -1,4 +1,3 @@
-import { FARBEN } from '../../../theme/colors';
 import {
   ICON_ABSAGE,
   ICON_ANTWORTEN,
@@ -6,26 +5,28 @@ import {
   ICON_KOPIEREN_GEFUELLT,
   ICON_CHAT,
   ICON_ENTFERNEN_GEFUELLT,
-  ICON_GESPERRT,
   ICON_GRUPPE_GEFUELLT,
   ICON_HAKEN_GEFUELLT,
+  ICON_JAHRGANG,
   ICON_LOESCHEN_GEFUELLT,
   ICON_PERSON_HINZUFUEGEN_GEFUELLT,
   ICON_QRCODE,
   ICON_RUECKGAENGIG,
   ICON_TERMIN_GEFUELLT,
   ICON_TEXTDOKUMENT,
-  ICON_ZURUECK,
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
-import { fehlerText } from '../../../utils/fehler';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
+import { fehlerDaten, fehlerStatus, fehlerText } from '../../../utils/fehler';
+import { konfisInReihenfolge } from '../../../utils/teilnehmerReihenfolge';
+import { bestaetigenMitRueckfrage, type UeberbuchenFrage } from '../../../utils/ueberbuchen';
 import { darfTermineVerwalten } from '../../../utils/terminRechte';
 import { kopiereTermin } from '../../../utils/terminVorbelegung';
 import { welcheKnoepfe, zusageBeschriftung, absageBeschriftung, absageBrauchtGrund } from '../../../utils/zusageKnoepfe';
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  IonPage, IonHeader, IonToolbar, IonTitle, IonContent,
-  IonButtons, IonButton, IonIcon, IonCard, IonCardContent,
+  IonPage, IonContent,
+  IonButton, IonIcon, IonCard, IonCardContent,
   IonItem, IonLabel, IonList, IonListHeader,
   IonRefresher, IonRefresherContent, useIonModal,
   IonItemSliding, IonItemOptions, IonItemOption,
@@ -38,7 +39,7 @@ import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { absageZuruecknehmenFragen } from '../../../utils/absageZuruecknehmen';
 import OfflinePlatzhalter from '../../shared/OfflinePlatzhalter';
 import api from '../../../services/api';
-import { SectionHeader, AbsageBlock, formatEventDateLong as formatDate, formatEventTime as formatTime, istVergangen, istAbgesagt } from '../../shared';
+import { SectionHeader, AbsageBlock, EmptyState, formatEventDateLong as formatDate, formatEventTime as formatTime, istVergangen, istAbgesagt } from '../../shared';
 import { getStatusIcon } from '../../shared/StatusBadge';
 import EventModal from '../modals/EventModal';
 import ParticipantManagementModal from '../modals/ParticipantManagementModal';
@@ -62,6 +63,7 @@ import AbmeldungNachtragenModal from '../modals/AbmeldungNachtragenModal';
 import TerminAbsagenModal from '../modals/TerminAbsagenModal';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { trackHandlung } from '../../../services/analytics';
+import { datumLang } from '../../../utils/dateUtils';
 
 // Ionic 9 gibt bei ref an IonItemSliding die React-Komponente zurueck, nicht
 // mehr das DOM-Element. Gebraucht wird hier nur close() — das haben beide.
@@ -90,6 +92,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
   const [unregistrations, setUnregistrations] = useState<Unregistration[]>([]);
   const [loading, setLoading] = useState(true);
   const [eventData, setEventData] = useState<Event | null>(null);
+  const [jahrgangFehlt, setJahrgangFehlt] = useState(false);
 
   // ====================================================================
   // EIGENE AN-/ABMELDUNG
@@ -258,7 +261,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
       try {
         const res = await api.get(`/events/${eventData.id}/timeslots`);
         slots = res.data || [];
-      } catch (err) {
+      } catch {
         setError('Die Zeitfenster konnten nicht geladen werden — die Kopie hat keine.');
       }
     }
@@ -367,9 +370,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     get terminName() { return eventData?.name ?? ''; },
     get terminDatum() {
       if (!eventData?.event_date) return '';
-      return new Date(eventData.event_date).toLocaleDateString('de-DE', {
-        weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric'
-      });
+      return datumLang(eventData.event_date);
     },
     // DIESELBE REGEL WIE UEBERALL SONST: Abgemeldete sind keine
     // Teilnehmenden -- weder die Selbstabmeldung ('opted_out') noch die
@@ -472,6 +473,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     setUnregistrations([]);
     setEventData(null);
     setEventMaterials([]);
+    setJahrgangFehlt(false);
     setError('');
     setLoading(true);
   }, [eventId]);
@@ -516,10 +518,10 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           setEventData(ausListe);
           setError('');
         } else {
-          setError('Dieser Termin wurde noch nicht geladen — dafür brauchst du eine Verbindung.');
+          setError('Dieses Event wurde noch nicht geladen — dafür brauchst du eine Verbindung.');
         }
       } catch {
-        if (gilt()) setError('Dieser Termin wurde noch nicht geladen — dafür brauchst du eine Verbindung.');
+        if (gilt()) setError('Dieses Event wurde noch nicht geladen — dafür brauchst du eine Verbindung.');
       } finally {
         if (gilt()) setLoading(false);
       }
@@ -529,6 +531,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     try {
       const eventRes = await api.get(`/events/${fuerEventId}`);
       if (!gilt()) return;
+      setJahrgangFehlt(false);
       setEventData(eventRes.data);
       setParticipants(eventRes.data.participants || []);
       setUnregistrations(eventRes.data.unregistrations || []);
@@ -539,7 +542,16 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
         if (gilt()) setEventMaterials([]);
       }
     } catch (err) {
-      if (gilt()) setError('Fehler beim Laden der Event-Daten', { ort: 'event-detail-laden', fehler: err });
+      if (!gilt()) return;
+      // Kein Fehler der App, sondern eine Antwort mit Grund: Der Termin
+      // gehoert zu einem Jahrgang, dem dieser Zugang nicht zugewiesen ist
+      // (lesen.js). Dann KEIN roter Kasten und keine Fehlermessung --
+      // stattdessen die Erklaerung auf der Seite (siehe jahrgangFehlt).
+      if (fehlerStatus(err) === 403 && fehlerDaten(err)?.error_code === 'jahrgang_nicht_zugewiesen') {
+        setJahrgangFehlt(true);
+        return;
+      }
+      setError('Fehler beim Laden der Event-Daten', { ort: 'event-detail-laden', fehler: err });
     } finally {
       if (gilt()) setLoading(false);
     }
@@ -556,7 +568,8 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
   // abgesagter ebenfalls als 'open' (nur die Zeilen darueber fingen
   // 'cancelled' vorher ab), und ein ausgebuchter Termin MIT freier Warteliste
   // galt als 'closed', obwohl die Anmeldung auf die Warteliste offen ist.
-  // Die Berechnung steht in `events.js:124-133`.
+  // Die Berechnung steht in `backend/utils/terminAnmeldeStatus.js`
+  // (`anmeldeStatusSql`).
   //
   // Bei "Nur Team"- und "Team gesucht"-Terminen zaehlt ohnehin das
   // TEAMER-Kontingent: registration_status rechnet ausschliesslich mit
@@ -581,7 +594,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     const danger = { primary: 'var(--app-color-danger)', secondary: 'var(--app-color-danger)' };
     const konfirm = { primary: 'var(--app-color-konfis)', secondary: 'var(--app-color-konfis)' }; // Konfirmation = lila
     const info = { primary: 'var(--app-color-info)', secondary: 'var(--app-color-info)' };
-    const past = { primary: FARBEN.neutral, secondary: FARBEN.neutral };
+    const past = { primary: 'var(--app-color-neutral)', secondary: 'var(--app-color-neutral)' };
     const waitlist = { primary: 'var(--app-color-bonus)', secondary: 'var(--app-color-bonus)' };
     const success = { primary: 'var(--app-color-success)', secondary: 'var(--app-color-success)' };
     const upcoming = { primary: 'var(--app-color-bonus)', secondary: 'var(--app-color-bonus)' };
@@ -602,7 +615,8 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     // Pflichttermine: Anmeldung entfaellt, die Farbe der Domain passt.
     if (regStatus === 'mandatory') return events;
     // Ausgebucht wird an der Kapazitaet erkannt, nicht am Status: das Backend
-    // meldet bei freier Warteliste weiterhin 'open' (`events.js:129-131`).
+    // meldet bei freier Warteliste weiterhin 'open' (`anmeldeStatusSql` in
+    // `backend/utils/terminAnmeldeStatus.js`).
     const istVoll = eventData.max_participants > 0
       && eventData.registered_count >= eventData.max_participants;
     if (istVoll && eventData.waitlist_enabled) return waitlist;
@@ -626,7 +640,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     if (isPastEvent && !hasUnprocessedBookings) return 'Verbucht';
 
     const regStatus = calculateRegistrationStatus(eventData);
-    if (regStatus === 'mandatory') return 'Pflichttermin';
+    if (regStatus === 'mandatory') return 'Pflicht-Event';
     const istVoll = eventData.max_participants > 0
       && eventData.registered_count >= eventData.max_participants;
     if (istVoll && eventData.waitlist_enabled) return 'Warteliste';
@@ -635,7 +649,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     if (regStatus === 'upcoming') return 'Bald';
     if (regStatus === 'closed') return 'Geschlossen';
     // Kein Status vom Backend: neutral bleiben statt "Geschlossen" behaupten.
-    return 'Termin';
+    return 'Event';
   };
 
   // Grund und Notiz gehen mit derselben Route mit. Der Grund gehoert zu
@@ -806,14 +820,36 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     });
   };
 
+  const frageUeberbuchen = (frage: UeberbuchenFrage) => new Promise<boolean>((resolve) => {
+    presentAlert({
+      header: frage.header,
+      message: frage.message,
+      buttons: [
+        { text: 'Abbrechen', role: 'cancel', handler: () => resolve(false) },
+        { text: 'Trotzdem bestätigen', handler: () => resolve(true) }
+      ],
+      // Tippen neben den Dialog ist ein Nein; ein zweites resolve nach dem
+      // Button-Handler bleibt wirkungslos.
+      onDidDismiss: () => resolve(false)
+    });
+  });
+
   const handlePromoteParticipant = async (participant: Participant) => {
     try {
-      await api.put(`/events/${eventId}/participants/${participant.id}/status`, { status: 'confirmed' });
+      const ergebnis = await bestaetigenMitRueckfrage(
+        (ueberbuchen) => api.put(
+          `/events/${eventId}/participants/${participant.id}/status`,
+          ueberbuchen ? { status: 'confirmed', ueberbuchen: true } : { status: 'confirmed' }
+        ).then(() => undefined),
+        frageUeberbuchen,
+        participant.participant_name
+      );
+      if (ergebnis === 'abgebrochen') return;
       await loadEventData();
       triggerRefresh('events');
     } catch (error) {
- console.error('Promote participant error:', error);
-      setError('Fehler beim Bestätigen des Teilnehmers');
+      console.error('Promote participant error:', error);
+      setError(fehlerText(error, 'Fehler beim Bestätigen des Teilnehmers'));
     }
   };
 
@@ -1051,6 +1087,8 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                 className={`app-corner-badge ${cornerBadgeClass}`}
                 style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
                 title={statusText}
+                role="img"
+                aria-label={statusText}
               >
                 <IonIcon icon={getStatusIcon(statusText) || ICON_GRUPPE_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
               </div>
@@ -1163,16 +1201,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
   if (loading) {
     return (
       <IonPage ref={pageRef}>
-        <IonHeader translucent={true}>
-          <IonToolbar>
-            {!hideBackButton && (
-              <IonButtons slot="start">
-                <IonButton aria-label="Zurück" onClick={onBack}><IonIcon icon={ICON_ZURUECK} /></IonButton>
-              </IonButtons>
-            )}
-            <IonTitle>Event Details</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeile titel="Event-Details" onZurueck={hideBackButton ? undefined : onBack} gemeindeUmschalter={false} />
         <IonContent fullscreen>
           <LoadingSpinner message="Event wird geladen..." />
         </IonContent>
@@ -1180,17 +1209,34 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
     );
   }
 
+  // Termin aus einem fremden Jahrgang (Push oder Link): den Grund nennen und
+  // den Weg hinaus, statt der leeren Seite mit Platzhaltertitel. Dieselbe
+  // Seite gibt es fuer Teamer:innen in TeamerEventsPage (renderJahrgangHinweis)
+  // -- gleicher Wortlaut, damit beide Rollen dasselbe lesen.
+  if (jahrgangFehlt) {
+    return (
+      <IonPage ref={pageRef}>
+        <AppKopfzeile titel="Event" onZurueck={hideBackButton ? undefined : onBack} gemeindeUmschalter={false} />
+        <IonContent className="app-gradient-background" fullscreen>
+          <EmptyState
+            icon={ICON_JAHRGANG}
+            title="Nicht deinem Jahrgang zugeordnet"
+            message="Dieses Event gehört zu einem Jahrgang, dem du nicht zugewiesen bist. Die Leitung deiner Gemeinde kann das in den Einstellungen ändern."
+            iconColor="var(--app-color-events)"
+          />
+        </IonContent>
+      </IonPage>
+    );
+  }
+
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          {!hideBackButton && (
-            <IonButtons slot="start">
-              <IonButton aria-label="Zurück" onClick={onBack}><IonIcon icon={ICON_ZURUECK} /></IonButton>
-            </IonButtons>
-          )}
-          <IonTitle>{eventData?.name || 'Event Details'}</IonTitle>
-          <IonButtons slot="end">
+      <AppKopfzeile
+        titel={eventData?.name || 'Event-Details'}
+        onZurueck={hideBackButton ? undefined : onBack}
+        gemeindeUmschalter={false}
+        rechts={(
+          <>
             {/* Einen BESTEHENDEN Chat oeffnen darf auch das Team — das ist
                 reine Navigation. Ihn ANZULEGEN ist requireAdmin
                 (verwaltung.js). Gibt es noch keinen, fuehrte der Knopf
@@ -1205,7 +1251,7 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
               <IonIcon icon={ICON_QRCODE} />
             </IonButton>
             {darfVerwalten && (
-              <IonButton aria-label="Termin kopieren" onClick={handleKopieren}>
+              <IonButton aria-label="Event kopieren" onClick={handleKopieren}>
                 <IonIcon icon={ICON_KOPIEREN_GEFUELLT} />
               </IonButton>
             )}
@@ -1214,16 +1260,12 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                 <IonIcon icon={ICON_BEARBEITEN} />
               </IonButton>
             )}
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
+          </>
+        )}
+      />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">{eventData?.name || 'Event Details'}</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel={eventData?.name || 'Event-Details'} />
 
         <IonRefresher slot="fixed" onIonRefresh={handleRefresh} onIonPull={triggerPullHaptic}>
           <IonRefresherContent refreshingSpinner="crescent" />
@@ -1300,7 +1342,6 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
           <EventInfoCard
             eventData={eventData}
             participants={participants}
-            formatDate={formatDate}
             formatTime={formatTime}
             eventMaterials={eventMaterials}
             onMaterialHinweisClick={handleMaterialHinweisClick}
@@ -1394,7 +1435,10 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
 
         {/* Participants List */}
         {(() => {
-          const konfiParticipants = participants.filter(p => p.role_name === 'konfi');
+          const konfiParticipants = konfisInReihenfolge(
+            participants.filter(p => p.role_name === 'konfi'),
+            eventData?.mandatory
+          );
           // Team-Seite: Teamer:innen UND zugeordnete Leitung. Ein '!== konfi'
           // statt '=== teamer', sonst landet zugeordnete Leitung in der
           // Konfi-Liste und wird als Kind gezaehlt.
@@ -1536,7 +1580,8 @@ const EventDetailView: React.FC<EventDetailViewProps> = ({ eventId, onBack, hide
                       // Anwesenheits-Status. Ohne diesen Knopf musste die
                       // Leitung sie einzeln verbuchen, und der Termin blieb
                       // im "Verbuchen"-Reiter stehen -- pending_bookings_count
-                      // zaehlt beide Rollen (events.js:270-274).
+                      // zaehlt beide Rollen (`backend/routes/events/lesen.js`,
+                      // `unprocessedCount`).
                       const unprocessedTeamer = teamerConfirmed.filter(p => !p.attendance_status).length;
                       if (unprocessedTeamer === 0 || !darfVerwalten) return null;
                       return (

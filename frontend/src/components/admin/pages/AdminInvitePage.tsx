@@ -35,7 +35,9 @@ import {
   ICON_QRCODE_GEFUELLT,
   ICON_SCHLIESSEN,
   ICON_TEILEN,
+  ICON_UHRZEIT,
   ICON_UHRZEIT_GEFUELLT,
+  ICON_WARNHINWEIS_GEFUELLT,
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
@@ -47,6 +49,16 @@ import QRCode from 'qrcode';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 import { tageBis } from '../../shared/eventFormatting';
 import { teilenImBrowser } from '../../../services/systemDialoge';
+import { datumKurz } from '../../../utils/dateUtils';
+import {
+  GUELTIGKEIT_TAGE,
+  STANDARD_TAGE,
+  HOECHSTENS_TAGE,
+  gueltigkeitText,
+  istGueltigkeitTage,
+  verlaengerungsOptionen,
+  type GueltigkeitTage
+} from '../../../utils/einladungsGueltigkeit';
 
 interface Jahrgang {
   id: number;
@@ -100,6 +112,7 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
   );
 
   const [selectedJahrgang, setSelectedJahrgang] = useState<number | null>(null);
+  const [gueltigTage, setGueltigTage] = useState<GueltigkeitTage>(STANDARD_TAGE);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string | null>(null);
   const [generatingCode, setGeneratingCode] = useState(false);
@@ -141,7 +154,8 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
     try {
       setGeneratingCode(true);
       const response = await api.post('/auth/invite-code', {
-        jahrgang_id: selectedJahrgang
+        jahrgang_id: selectedJahrgang,
+        gueltig_tage: gueltigTage
       });
 
       const code = response.data.invite_code;
@@ -167,17 +181,53 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
     }
   };
 
-  const extendInvite = async (inviteId: number) => {
+  const extendInvite = async (inviteId: number, tage: GueltigkeitTage) => {
     if (offlineBlockiert(isOnline, setError)) return;
     try {
       setExtendingInvite(inviteId);
-      await api.post(`/auth/invite-codes/${inviteId}/extend`);
+      const res = await api.post(`/auth/invite-codes/${inviteId}/extend`, { tage });
+      if (res.data?.expires_at) setSuccess(`Einladung gilt bis ${datumKurz(res.data.expires_at)}`);
       await refreshInvites();
     } catch (error) {
       setError(fehlerText(error, 'Fehler beim Verlängern des Codes'));
     } finally {
       setExtendingInvite(null);
     }
+  };
+
+  // Um wie viel verlaengern? Dieselben Stufen wie beim Anlegen, aber nur die,
+  // die noch etwas bringen: Das neue Ablaufdatum liegt nie mehr als 90 Tage
+  // in der Zukunft (der Server kuerzt, die Auswahl zeigt es vorher an).
+  const waehleVerlaengerung = (invite: ExistingInvite) => {
+    if (offlineBlockiert(isOnline, setError)) return;
+    const optionen = verlaengerungsOptionen(new Date(invite.expires_at));
+    if (optionen.length === 0) {
+      presentAlert({
+        header: 'Einladung verlängern',
+        message: `Der Code gilt schon ${HOECHSTENS_TAGE} Tage im Voraus — länger geht es nicht.`,
+        buttons: ['OK']
+      });
+      return;
+    }
+    presentAlert({
+      header: 'Einladung verlängern',
+      message: `Um wie viele Tage? Länger als ${HOECHSTENS_TAGE} Tage im Voraus gilt kein Code.`,
+      inputs: optionen.map((option, index) => ({
+        type: 'radio' as const,
+        label: option.text,
+        value: option.tage,
+        checked: index === 0
+      })),
+      buttons: [
+        { text: 'Abbrechen', role: 'cancel' },
+        {
+          text: 'Verlängern',
+          handler: (tage: unknown) => {
+            if (istGueltigkeitTage(tage)) extendInvite(invite.id, tage);
+          }
+        }
+      ]
+    });
   };
 
   const deleteInvite = (invite: ExistingInvite) => {
@@ -299,7 +349,7 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
                   <div style={{ display: 'flex', flexDirection: 'column' }}>
                     <IonItem lines="none" className="app-item-transparent">
                       <IonLabel position="stacked">Jahrgang *</IonLabel>
-                      <IonSelect
+                      <IonSelect aria-label="Jahrgang" aria-required="true"
                         value={selectedJahrgang}
                         onIonChange={(e) => {
                           setSelectedJahrgang(e.detail.value);
@@ -308,10 +358,28 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
                         }}
                         placeholder="Jahrgang wählen"
                         interface="popover"
+                        interfaceOptions={{ arrow: false }}
                       >
                         {(jahrgaenge || []).map((jahrgang) => (
                           <IonSelectOption key={jahrgang.id} value={jahrgang.id}>
                             {jahrgang.name}
+                          </IonSelectOption>
+                        ))}
+                      </IonSelect>
+                    </IonItem>
+                    <IonItem lines="none" className="app-item-transparent">
+                      <IonLabel position="stacked">Gültigkeit</IonLabel>
+                      <IonSelect aria-label="Gültigkeit"
+                        value={gueltigTage}
+                        onIonChange={(e) => {
+                          if (istGueltigkeitTage(e.detail.value)) setGueltigTage(e.detail.value);
+                        }}
+                        interface="popover"
+                        interfaceOptions={{ arrow: false }}
+                      >
+                        {GUELTIGKEIT_TAGE.map((tage) => (
+                          <IonSelectOption key={tage} value={tage}>
+                            {gueltigkeitText(tage)}
                           </IonSelectOption>
                         ))}
                       </IonSelect>
@@ -377,11 +445,35 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
                                 borderLeftColor: 'var(--app-color-success-strong)'
                               }}
                             >
-                              {/* Corner Badge - Gültigkeit */}
+                              {/* Gueltigkeit: Zahl der Resttage plus Uhr statt
+                                  "Noch 5 Tage gültig" -- wie die offenen Freigaben
+                                  in der Challenge-Liste. Am letzten Tag stand hier
+                                  eine "0" plus Uhr -- die irritiert.
+                                  Ab dem letzten Tag deshalb das
+                                  Warnzeichen ohne Zahl: orange, solange der Code
+                                  heute noch gilt (wie "wartet noch" bei der
+                                  Glocke), rot, wenn er abgelaufen ist (wie in der
+                                  Konfi-Detailansicht). Der ganze Satz steht in
+                                  title/aria-label. */}
                               <div className="app-corner-badges">
-                                <div className="app-corner-badge" style={{ backgroundColor: 'var(--app-color-success-strong)' }}>
-                                  {formatExpiryDate(invite.expires_at)}
-                                </div>
+                                {(() => {
+                                  const resttage = tageBis(new Date(invite.expires_at));
+                                  const satz = formatExpiryDate(invite.expires_at);
+                                  const abgelaufen = resttage < 0;
+                                  const letzterTag = resttage === 0;
+                                  return (
+                                    <div
+                                      className="app-corner-badge"
+                                      style={{ backgroundColor: abgelaufen ? 'var(--app-color-danger)' : letzterTag ? 'var(--app-color-warning)' : 'var(--app-color-success-strong)', display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mini)', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
+                                      title={satz}
+                                      role="img"
+                                      aria-label={satz}
+                                    >
+                                      {resttage > 0 && resttage}
+                                      <IonIcon icon={abgelaufen || letzterTag ? ICON_WARNHINWEIS_GEFUELLT : ICON_UHRZEIT} aria-hidden="true" style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)', display: 'block' }} />
+                                    </div>
+                                  );
+                                })()}
                               </div>
                               <div className="app-list-item__row">
                                 <div className="app-list-item__main">
@@ -397,7 +489,7 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
                                         {invite.invite_code}
                                       </span>
                                       <span className="app-list-item__meta-item">
-                                        <IonIcon icon={ICON_GRUPPE_GEFUELLT} style={{ color: 'var(--app-color-users)' }} />
+                                        <IonIcon icon={ICON_GRUPPE_GEFUELLT} style={{ color: 'var(--app-text-users)' }} />
                                         {invite.used_count || 0}
                                       </span>
                                     </div>
@@ -411,7 +503,7 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
                                 die Aktion sperren - sonst wischt man ein
                                 zweites Mal, weil nichts passiert. */}
                             <IonItemOption
-                              onClick={() => { closeOpenSlidingItems(); extendInvite(invite.id); }}
+                              onClick={() => { closeOpenSlidingItems(); waehleVerlaengerung(invite); }}
                               aria-label="Einladung verlängern"
                               className="app-swipe-action"
                               disabled={extendingInvite === invite.id}
@@ -463,7 +555,7 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
                         boxShadow: 'var(--app-schatten-schwebend)'
                       }}
                     />
-                    <p className="app-settings-item__subtitle" style={{ fontSize: 'var(--app-text-basis)', margin: '0 0 var(--app-abstand-eng) 0' }}>
+                    <p className="app-list-item__subtitle" style={{ fontSize: 'var(--app-text-basis)', margin: '0 0 var(--app-abstand-eng) 0' }}>
                       Konfis scannen diesen Code, um sich selbst zu registrieren.
                     </p>
                     <div style={{
@@ -512,7 +604,7 @@ const AdminInvitePage: React.FC<AdminInviteModalProps> = ({ onClose, dismiss }) 
               <IonCard className="app-card app-info-box--blue">
                 <IonCardContent className="app-info-box">
                   <p style={{ margin: 0 }}>
-                    Einladungscodes sind 7 Tage gültig und können von beliebig vielen Konfis verwendet werden. Konfis werden automatisch dem gewählten Jahrgang zugeordnet.
+                    Einladungscodes gelten je nach Wahl 7 bis 90 Tage und laufen immer ab. Verlängern geht, solange ein Code gilt — höchstens bis 90 Tage im Voraus. Ein Code kann von beliebig vielen Konfis verwendet werden; sie werden automatisch dem gewählten Jahrgang zugeordnet.
                   </p>
                 </IonCardContent>
               </IonCard>

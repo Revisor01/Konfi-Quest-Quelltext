@@ -10,12 +10,13 @@
 // muessen exakt gleich zaehlen, sonst zeigt die App 10/10 ohne dass das
 // Abzeichen kommt.
 
-const { computeCurrentStreak } = require('./streakCalculation');
+const { angezeigteSerie } = require('./streakCalculation');
 const { berechneBadgeProgress, bedingungFehlt } = require('./badgeProgress');
 const { TEAMER_KATEGORIE_NAMEN_SQL } = require('./badgeKategorieRegel');
+const { abfragenBuendeln } = require('./abfragenBuendeln');
 
 // Ermittelt Abzeichen (verdient + offen + Fortschritt) fuer eine Teamer:in.
-// Erwartet: db (pg Pool), userId (users.id), orgId (organizations.id).
+// Erwartet: db (Pool oder Client), userId (users.id), orgId (organizations.id).
 //
 // Gibt { alle, earned, available, stats } zurueck:
 //   alle       — jedes Abzeichen mit earned/earned_at/unreachable/progress,
@@ -36,9 +37,9 @@ async function getTeamerBadgeProgress(db, userId, orgId) {
   const { rows: badges } = await db.query(badgesQuery, [userId, orgId]);
 
   // Hauptmetriken einmalig abfragen für Fortschrittsberechnung
-  const [actCountRes, evCountRes, uniqueActRes, activeYearsRes, teamerSinceRes, categoryCountsRes, actNamesRes, eventTitlesRes, allDatesRes, kategorieNamenRes] = await Promise.all([
+  const [actCountRes, evCountRes, uniqueActRes, activeYearsRes, teamerSinceRes, categoryCountsRes, actNamesRes, eventTitlesRes, allDatesRes, kategorieNamenRes] = await abfragenBuendeln(db, [
     // Teamer-Aktivitäten + Events
-    db.query(
+    () => db.query(
       `SELECT (
         (SELECT COUNT(*) FROM user_activities ua
          JOIN activities a ON ua.activity_id = a.id
@@ -48,19 +49,19 @@ async function getTeamerBadgeProgress(db, userId, orgId) {
       [userId, orgId]
     ),
     // Nur Events
-    db.query(
+    () => db.query(
       "SELECT COUNT(*) as count FROM event_bookings WHERE user_id = $1 AND attendance_status = 'present' AND organization_id = $2",
       [userId, orgId]
     ),
     // Unique Activities
-    db.query(
+    () => db.query(
       `SELECT COUNT(DISTINCT ua.activity_id) as count FROM user_activities ua
        JOIN activities a ON ua.activity_id = a.id
        WHERE ua.user_id = $1 AND ua.organization_id = $2 AND a.target_role = 'teamer'`,
       [userId, orgId]
     ),
     // Aktive Jahre (Jahre mit mind. 1 Teamer-Aktivität oder Event)
-    db.query(
+    () => db.query(
       `SELECT DISTINCT EXTRACT(YEAR FROM d.date)::int as year FROM (
         SELECT ua.completed_date as date FROM user_activities ua
         JOIN activities a ON ua.activity_id = a.id
@@ -73,14 +74,14 @@ async function getTeamerBadgeProgress(db, userId, orgId) {
       [userId, orgId]
     ),
     // Startjahr-Quelle (teamer_since, Migration 064) — konsistent zur Wertung (badges.js teamer_year)
-    db.query(
+    () => db.query(
       "SELECT teamer_since FROM users WHERE id = $1",
       [userId]
     ),
     // Pro Kategorie: Anzahl Teamer-Aktivitäten + anwesende Events (für
     // category_activities-Progress). Identische Logik wie die Wertung in
     // badges.js (checkAndAwardTeamerBadges, case 'category_activities').
-    db.query(
+    () => db.query(
       `SELECT c.name AS category, COUNT(*) AS count FROM (
         SELECT ac.category_id, ua.id FROM user_activities ua
         JOIN activities a ON ua.activity_id = a.id
@@ -96,7 +97,7 @@ async function getTeamerBadgeProgress(db, userId, orgId) {
       [userId, orgId]
     ),
     // Teamer-Aktivitaets-Namen + Anzahl (für specific_activity / activity_combination).
-    db.query(
+    () => db.query(
       `SELECT a.name, COUNT(*) AS count FROM user_activities ua
        JOIN activities a ON ua.activity_id = a.id
        WHERE ua.user_id = $1 AND a.organization_id = $2 AND a.target_role = 'teamer'
@@ -105,14 +106,14 @@ async function getTeamerBadgeProgress(db, userId, orgId) {
     ),
     // Besuchte Event-Namen (für activity_combination required_events).
     // events-Spalte heißt 'name' (nicht 'title') -> als title aliasen.
-    db.query(
+    () => db.query(
       `SELECT DISTINCT e.name AS title FROM event_bookings eb
        JOIN events e ON eb.event_id = e.id
        WHERE eb.user_id = $1 AND eb.attendance_status = 'present' AND eb.organization_id = $2`,
       [userId, orgId]
     ),
     // Alle Aktivitaets-/Event-Daten (für streak / time_based).
-    db.query(
+    () => db.query(
       `SELECT ua.completed_date AS date FROM user_activities ua
        JOIN activities a ON ua.activity_id = a.id
        WHERE ua.user_id = $1 AND ua.organization_id = $2 AND a.target_role = 'teamer'
@@ -125,7 +126,7 @@ async function getTeamerBadgeProgress(db, userId, orgId) {
     // category_combination: aus welchen Kategorien war die Teamer:in dabei.
     // Query-Text aus utils/badgeKategorieRegel.js -- byte-identisch zur
     // Wertung in routes/badges.js (Teamer-Zweig).
-    db.query(TEAMER_KATEGORIE_NAMEN_SQL, [userId, orgId])
+    () => db.query(TEAMER_KATEGORIE_NAMEN_SQL, [userId, orgId])
   ]);
 
   const activityCount = parseInt(actCountRes.rows[0].count);
@@ -146,7 +147,7 @@ async function getTeamerBadgeProgress(db, userId, orgId) {
   const allDates = allDatesRes.rows.map(r => r.date).filter(Boolean);
   // Array der aktiven Jahre (INTEGER) — für Startjahr-Filter im teamer_year-Case.
   const activeYearValues = activeYearsRes.rows.map(r => r.year);
-  const currentStreak = computeCurrentStreak(allDates);
+  const currentStreak = angezeigteSerie(allDates);
 
   // Startjahr für teamer_year (konsistent zur Wertung badges.js):
   // 1. users.teamer_since; 2. Fallback aelteste aktive Jahr (entspricht aelteste Teamer-Aktivität).

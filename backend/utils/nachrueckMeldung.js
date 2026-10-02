@@ -38,7 +38,7 @@ async function meldeNachrueckern(db, organizationId, nachgerueckt) {
         'SELECT name, event_date FROM events WHERE id = $1',
         [eintrag.eventId]
       );
-      const name = event?.name || 'Termin';
+      const name = event?.name || 'Event';
       const datum = event?.event_date || null;
       if (eintrag.seite === 'team') {
         await PushService.sendWaitlistPromotionToTeamer(db, eintrag.userId, name, datum, eintrag.eventId, organizationId);

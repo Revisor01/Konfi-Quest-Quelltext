@@ -2,6 +2,7 @@ import { Capacitor } from '@capacitor/core';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { FileOpener } from '@capacitor-community/file-opener';
 import { FileViewer } from '@capacitor/file-viewer';
+import { dateiExternOeffnen } from '../services/systemDialoge';
 
 const TEMP_DIR = 'temp';
 
@@ -59,17 +60,70 @@ export async function tempDateienAufraeumen(): Promise<void> {
 }
 
 /**
+ * Zeigt der Betrachter der App (FileViewerModal) PDFs selbst an — Seiten
+ * untereinander, per pdf.js?
+ *
+ * Auf Android und im Browser ja, auf iOS nein: Dort zeigt die Vorschau des
+ * Systems (QuickLook) PDFs in der App, mit Suche, Teilen und Sichern, und das
+ * bleibt so.
+ *
+ * WARUM ANDROID: Auf
+ * Android zeigt keines der beiden Plugins eine Datei IN der App. Beide starten
+ * nur Intent.ACTION_VIEW (FileOpenerPlugin.java; die Doku von
+ * @capacitor/file-viewer: „previewMediaContentFromLocalPath: Only implemented
+ * in iOS. Android defaults to openDocumentFromLocalPath"). Die Datei ging in
+ * einer fremden App auf, und bei eingeschalteter App-Sperre kam bei der
+ * Rückkehr jedes Mal die Biometrie-Abfrage. Das WebView zeigt PDFs im iframe
+ * auch nicht an — deshalb pdf.js.
+ *
+ * WARUM AUCH IM BROWSER: Wie eine PDF im iframe aussieht, entscheidet jeder
+ * Browser selbst — am Rechner mit seiner eigenen Leiste, auf dem Handy je nach
+ * Browser anders oder gar nicht; das Android-WebView ist dafür das deutlichste
+ * Beispiel. Mit pdf.js sieht die PDF überall gleich aus, bedient sich wie in
+ * der App, und es gibt einen Weg zu testen statt drei. Scheitert pdf.js,
+ * bleibt das iframe als Rückfall (FileViewerModal).
+ */
+export const pdfImAppBetrachter = (): boolean =>
+  !Capacitor.isNativePlatform() || Capacitor.getPlatform() === 'android';
+
+/**
+ * Soll diese Datei im Betrachter der App aufgehen statt in der Vorschau des
+ * Systems oder einer fremden App?
+ *
+ * - Browser: immer — es gibt nichts anderes.
+ * - Android: Bilder, Videos und PDFs (siehe pdfImAppBetrachter). Alles andere
+ *   (Word, Excel, Präsentationen …) kann das WebView nicht darstellen; das
+ *   geht weiter in eine passende App, dann über dateiExternOeffnen.
+ * - iOS: nie — die Vorschau des Systems zeigt alles in der App.
+ */
+export const zeigtAppBetrachter = (mimeType: string): boolean => {
+  if (!Capacitor.isNativePlatform()) return true;
+  if (Capacitor.getPlatform() !== 'android') return false;
+  return mimeType.startsWith('image/')
+    || mimeType.startsWith('video/')
+    || mimeType === 'application/pdf';
+};
+
+/**
  * Oeffnet eine Datei nativ über FileOpener (Bilder) oder FileViewer (Dokumente).
- * Gibt true zurück bei Erfolg auf nativer Plattform, false auf Web oder bei Fehler.
- * Bei false kann der Caller das FileViewerModal als Web-Fallback nutzen.
+ * Gibt true zurück, wenn die Datei nativ geöffnet wurde. False heißt: Der
+ * Aufrufer zeigt sie im Betrachter der App (FileViewerModal) — im Browser, auf
+ * Android bei Bildern, Videos und PDFs (siehe zeigtAppBetrachter) oder wenn
+ * das native Öffnen scheitert.
+ *
+ * Jeder native Aufruf läuft durch dateiExternOeffnen: Auf Android geht die
+ * Datei in einer fremden App auf, auf iOS kann das Teilen-Blatt aus der
+ * Vorschau die App ebenso in den Hintergrund legen. Beides darf die App-Sperre
+ * nicht auslösen.
  */
 export async function openFileNatively(
   blobOrUrl: Blob | string,
   fileName: string,
   mimeType: string
 ): Promise<boolean> {
-  // Web-Plattform: sofort false, Caller nutzt FileViewerModal
-  if (!Capacitor.isNativePlatform()) return false;
+  // Browser und Android bei Bildern, Videos, PDFs: sofort false, ohne Kopie
+  // auf dem Gerät — der Betrachter der App übernimmt.
+  if (zeigtAppBetrachter(mimeType)) return false;
 
   try {
     // Blob beschaffen
@@ -111,12 +165,13 @@ export async function openFileNatively(
 
     const fileUri = await Filesystem.getUri({ directory: Directory.Documents, path: tempPath });
 
-    // Bilder über FileOpener (bessere native Anzeige)
+    // Bilder über FileOpener (bessere native Anzeige; erreicht diese Stelle
+    // nur noch auf iOS, siehe zeigtAppBetrachter)
     if (mimeType.startsWith('image/')) {
-      await FileOpener.open({ filePath: fileUri.uri, contentType: mimeType });
+      await dateiExternOeffnen(() => FileOpener.open({ filePath: fileUri.uri, contentType: mimeType }));
     } else {
       // Dokumente, Videos, PDFs etc. über FileViewer
-      await FileViewer.openDocumentFromLocalPath({ path: fileUri.uri });
+      await dateiExternOeffnen(() => FileViewer.openDocumentFromLocalPath({ path: fileUri.uri }));
     }
 
     return true;

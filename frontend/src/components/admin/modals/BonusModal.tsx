@@ -38,6 +38,7 @@ import {
   type PunkteartFlags,
 } from '../../../utils/punktearten';
 import { trackHandlung } from '../../../services/analytics';
+import { tastaturKlick } from '../../../utils/tastatur';
 
 interface BonusModalProps {
   konfiId: number;
@@ -155,7 +156,7 @@ const BonusModal: React.FC<BonusModalProps> = ({ konfiId, onClose, onSave, dismi
               <IonList style={{ background: 'transparent' }}>
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Bezeichnung *</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Bezeichnung" aria-required="true"
                     value={name}
                     onIonInput={(e) => setName(e.detail.value!)}
                     placeholder="z.B. Hilfe beim Aufräumen"
@@ -168,8 +169,8 @@ const BonusModal: React.FC<BonusModalProps> = ({ konfiId, onClose, onSave, dismi
 
               <p className="app-text-sub" style={{ marginTop: 'var(--app-abstand-basis)', marginBottom: 'var(--app-abstand-mini)' }}>Datum *</p>
               <IonDatetimeButton datetime="bonus-date" style={{ justifyContent: 'flex-start' }} />
-              <IonModal keepContentsMounted={true}>
-                <IonDatetime
+              <IonModal aria-label="Datum wählen" keepContentsMounted={true}>
+                <IonDatetime aria-label="Datum" aria-required="true"
                   id="bonus-date"
                   presentation="date"
                   firstDayOfWeek={1}
@@ -185,11 +186,11 @@ const BonusModal: React.FC<BonusModalProps> = ({ konfiId, onClose, onSave, dismi
               </IonModal>
 
               <p className="app-text-sub" style={{ marginTop: 'var(--app-abstand-basis)', marginBottom: 'var(--app-abstand-mini)' }}>
-                Punkte * <span style={{ fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-color-bonus)' }}>{points}</span>
+                Punkte * <span style={{ fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-text-bonus)' }}>{points}</span>
               </p>
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-eng)', padding: '0 var(--app-abstand-eng)' }}>
                 <span style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)', minWidth: '24px', textAlign: 'center' }}>1</span>
-                <IonRange
+                <IonRange aria-label="Punkte" aria-required="true"
                   min={1} max={10} step={1}
                   pin={true} pinFormatter={(value: number) => `${value}`}
                   value={points}
@@ -217,7 +218,7 @@ const BonusModal: React.FC<BonusModalProps> = ({ konfiId, onClose, onSave, dismi
                     ? 'rgba(var(--app-color-success-strong-rgb), 0.1)'
                     : 'rgba(var(--app-color-gottesdienst-rgb), 0.1)';
                   return (
-                    <div
+                    <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                       key={art}
                       className="app-list-item"
                       onClick={() => !isSubmitting && setType(art)}
@@ -254,7 +255,7 @@ const BonusModal: React.FC<BonusModalProps> = ({ konfiId, onClose, onSave, dismi
               <IonList style={{ background: 'transparent' }}>
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Begründung</IonLabel>
-                  <IonTextarea
+                  <IonTextarea aria-label="Begründung"
                     value={reason}
                     onIonInput={(e) => setReason(e.detail.value!)}
                     placeholder="Warum werden diese Bonuspunkte vergeben?"

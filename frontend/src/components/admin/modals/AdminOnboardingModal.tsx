@@ -55,7 +55,7 @@ export const SLIDES: OnboardingSlide[] = [
     color: 'var(--app-color-events)',
     rgb: '--app-color-events-rgb',
     title: 'Mitmachen: Events',
-    text: 'Der Tab "Mitmachen" bündelt Events und Aktivitäten in zwei Reitern. Events sind Termine, die du anlegst — einmalig, über mehrere Tage oder als ganze Serie, mit Plätzen, Zeitfenstern und Warteliste. Konfis melden sich vorher an, und du behältst An- und Abwesenheit im Griff. Du kannst auch festlegen, dass für einen Termin Team gesucht wird oder er nur fürs Team ist.',
+    text: 'Der Tab "Mitmachen" bündelt Events und Aktivitäten in zwei Reitern. Events legst du an — einmalig, über mehrere Tage oder als ganze Serie, mit Plätzen, Zeitfenstern und Warteliste. Konfis melden sich vorher an, und du behältst An- und Abwesenheit im Griff. Du kannst auch festlegen, dass für ein Event Team gesucht wird oder es nur fürs Team ist.',
   },
   {
     icon: ICON_TEXTDOKUMENT,

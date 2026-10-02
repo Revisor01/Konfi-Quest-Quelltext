@@ -21,7 +21,18 @@
 --                    Buchungen".
 --
 -- Gelöschte Konten (users.deleted_at) zählen nirgends mit.
-CREATE OR REPLACE VIEW event_booking_stats AS
+--
+-- IDEMPOTENZ: Die View entsteht hier nur,
+-- wenn es sie noch nicht gibt. Vorher scheiterte ein zweiter Lauf auf dem
+-- heutigen Stand ("cannot drop columns from view", Migration 154 hat Spalten
+-- ergaenzt) -- und auf dem Stand von 136 haette er die Zaehlung still auf
+-- die alte Trennung Teamer/Nicht-Teamer zurueckgedreht. Vermerkte Staende
+-- betrifft das nicht (der Migrationslauf vergleicht nur den Namen).
+-- Waechter: tests/schema/migrationenIdempotent.test.js.
+DO $migration$ BEGIN
+  IF to_regclass('public.event_booking_stats') IS NULL THEN
+    EXECUTE $view$
+CREATE VIEW event_booking_stats AS
 SELECT
   eb.event_id,
   COUNT(*) FILTER (
@@ -58,7 +69,10 @@ FROM event_bookings eb
 -- geloeschten Kontos waere also als Konfi gezaehlt worden.
 JOIN users u ON eb.user_id = u.id AND u.deleted_at IS NULL
 LEFT JOIN roles r ON u.role_id = r.id
-GROUP BY eb.event_id;
+GROUP BY eb.event_id
+$view$;
+  END IF;
+END $migration$;
 
 -- Ohne diesen Index läuft die View bei jedem Aufruf über die ganze Tabelle.
 CREATE INDEX IF NOT EXISTS idx_event_bookings_event_status

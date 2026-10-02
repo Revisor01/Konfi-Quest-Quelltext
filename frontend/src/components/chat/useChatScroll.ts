@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Keyboard } from '@capacitor/keyboard';
 import type { PluginListenerHandle } from '@capacitor/core';
 import { Message } from '../../types/chat';
@@ -12,10 +12,32 @@ import { Message } from '../../types/chat';
  * - schwebender Tages-Chip (Tag der obersten sichtbaren Nachricht)
  * - "Nach unten"-Button ab SCROLL_DOWN_THRESHOLD Abstand zum Ende
  * - ans Ende scrollen, wenn die Tastatur auf-/zugeht
+ * - aeltere Nachrichten anstossen, sobald man sich dem Listenanfang naehert,
+ *   und die Leseposition halten, wenn sie oben eingefuegt werden
  */
 
 // Ab welchem Abstand zum Listenende (in px) der "Nach unten"-Button erscheint.
 const SCROLL_DOWN_THRESHOLD = 300;
+
+// Ab welchem Abstand zum Listenanfang (in px) aeltere Nachrichten nachgeladen
+// werden. Etwas vor dem Anfang, damit die naechste Seite meist schon da ist,
+// wenn man oben ankommt.
+export const NACHLADE_SCHWELLE = 300;
+
+// Derselbe Schluessel wie in ChatMessagesList (React-Key einer Nachricht).
+const schluesselVon = (m: Message | undefined) => (m ? (m.client_id ?? m.clientId ?? m.id) : undefined);
+
+interface VoranstellAnker {
+  scrollEl: HTMLElement;
+  // Die bisher oberste Nachricht und wo sie auf dem Bildschirm stand.
+  ankerEl: HTMLElement | null;
+  ankerOben: number;
+  // Rueckfall ohne Anker-Element: Abstand zum Listenende halten.
+  hoehe: number;
+  oben: number;
+  ersterSchluessel: string | number | undefined;
+  zeit: number;
+}
 
 interface ChatScrollDeps {
   messages: Message[];
@@ -23,9 +45,11 @@ interface ChatScrollDeps {
   initialUnreadRef: React.MutableRefObject<number | null>;
   // DOM-Knoten des "Neue Nachrichten"-Trenners (steht in der Nachrichtenliste).
   newDividerRef: React.RefObject<HTMLDivElement | null>;
+  // Wird aufgerufen, wenn man sich dem Listenanfang naehert (aeltere laden).
+  onNaheAmAnfang?: () => void;
 }
 
-export function useChatScroll({ messages, initialUnreadRef, newDividerRef }: ChatScrollDeps) {
+export function useChatScroll({ messages, initialUnreadRef, newDividerRef, onNaheAmAnfang }: ChatScrollDeps) {
   const contentRef = useRef<HTMLIonContentElement>(null);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
@@ -45,7 +69,69 @@ export function useChatScroll({ messages, initialUnreadRef, newDividerRef }: Cha
   // mit einem Sprung ans Listenende überschreibt.
   const parkedAtDividerRef = useRef(false);
 
+  // Schluessel der letzten Nachricht beim vorigen Durchlauf: Bleibt er gleich,
+  // obwohl die Liste waechst, kamen die Nachrichten OBEN dazu (aeltere
+  // nachgeladen) — dann nicht ans Ende springen.
+  const letzterSchluesselRef = useRef<string | number | undefined>(undefined);
+  // Erst nach dem Initial-Scroll darf der Listenanfang Nachladen ausloesen;
+  // vorher steht die Liste noch oben (scrollTop 0).
+  const erstesScrollenErledigtRef = useRef(false);
+  const naheAmAnfangRef = useRef(onNaheAmAnfang);
+  useEffect(() => { naheAmAnfangRef.current = onNaheAmAnfang; });
+  // Das Scroll-Element von ion-content (liegt im Shadow DOM, nur asynchron zu
+  // holen) — gemerkt, damit das Halten der Position synchron laufen kann.
+  const scrollElRef = useRef<HTMLElement | null>(null);
+  const voranstellAnkerRef = useRef<VoranstellAnker | null>(null);
+  const ersterSchluesselRef = useRef<string | number | undefined>(undefined);
+
+  // Leseposition halten, wenn aeltere Nachrichten oben eingefuegt wurden.
+  // useLayoutEffect: laeuft nach dem Einfuegen ins DOM, aber VOR dem Zeichnen —
+  // die Leserin sieht keinen Sprung. Gemessen wird an der bisher obersten
+  // Nachricht: Sie steht danach wieder genau dort, wo sie vorher stand, auch
+  // wenn im selben Zug unten eine neue Nachricht dazukam.
+  useLayoutEffect(() => {
+    const anker = voranstellAnkerRef.current;
+    const ersterJetzt = schluesselVon(messages[0]);
+    if (anker) {
+      voranstellAnkerRef.current = null;
+      const vorangestellt = ersterJetzt !== anker.ersterSchluessel && Date.now() - anker.zeit < 2000;
+      if (vorangestellt) {
+        if (anker.ankerEl && anker.ankerEl.isConnected) {
+          const verschoben = anker.ankerEl.getBoundingClientRect().top - anker.ankerOben;
+          anker.scrollEl.scrollTop += verschoben;
+        } else {
+          anker.scrollEl.scrollTop = anker.oben + (anker.scrollEl.scrollHeight - anker.hoehe);
+        }
+      }
+    }
+    ersterSchluesselRef.current = ersterJetzt;
+  }, [messages]);
+
+  /**
+   * Unmittelbar VOR dem Einfuegen aelterer Nachrichten aufrufen: merkt sich,
+   * wo die bisher oberste Nachricht (ankerId) auf dem Bildschirm steht.
+   */
+  const positionVorVoranstellenMerken = (ankerId: number) => {
+    const scrollEl = scrollElRef.current;
+    if (!scrollEl) return;
+    const ankerEl = contentRef.current?.querySelector<HTMLElement>(`#msg-${ankerId}`) ?? null;
+    voranstellAnkerRef.current = {
+      scrollEl,
+      ankerEl,
+      ankerOben: ankerEl ? ankerEl.getBoundingClientRect().top : 0,
+      hoehe: scrollEl.scrollHeight,
+      oben: scrollEl.scrollTop,
+      ersterSchluessel: ersterSchluesselRef.current,
+      zeit: Date.now(),
+    };
+  };
+
   useEffect(() => {
+    const letzter = schluesselVon(messages[messages.length - 1]);
+    const obenEingefuegt = !isInitialLoad
+      && prevMessageCountRef.current > 0
+      && messages.length > prevMessageCountRef.current
+      && letzter === letzterSchluesselRef.current;
     // Always scroll to bottom on initial load or new messages
     if (contentRef.current && messages.length > 0) {
       if (isInitialLoad) {
@@ -67,10 +153,17 @@ export function useChatScroll({ messages, initialUnreadRef, newDividerRef }: Cha
               contentRef.current?.scrollToBottom(0);
             }
             setIsInitialLoad(false);
-            // Schwebenden Tages-Chip initial befuellen.
+            erstesScrollenErledigtRef.current = true;
+            // Schwebenden Tages-Chip initial befuellen — und, falls die Liste
+            // den Bildschirm nicht fuellt oder der Trenner weit oben steht,
+            // gleich die aelteren Nachrichten anstossen.
             handleScroll();
           });
         });
+      } else if (obenEingefuegt) {
+        // Aeltere Nachrichten oben eingefuegt: Position haelt der Layout-
+        // Effekt oben. Kein Sprung ans Ende — nur den Tages-Chip nachziehen.
+        handleScroll();
       } else if (shouldAutoScroll && !parkedAtDividerRef.current && messages.length > prevMessageCountRef.current) {
         // Neue Nachricht: SOFORT ans Ende springen (0ms). Die 300ms-Animation
         // wirkte in Kombination mit dem Rendern der neuen Bubble ruckelig —
@@ -84,6 +177,7 @@ export function useChatScroll({ messages, initialUnreadRef, newDividerRef }: Cha
       }
     }
     prevMessageCountRef.current = messages.length;
+    letzterSchluesselRef.current = letzter;
   }, [messages, shouldAutoScroll, isInitialLoad]);
 
   // Sobald der Nutzer selbst bis ans (nahe) Listenende scrollt, "entparken" -> ab
@@ -92,8 +186,15 @@ export function useChatScroll({ messages, initialUnreadRef, newDividerRef }: Cha
   const handleScroll = async () => {
     if (!contentRef.current) return;
     const scrollEl = await contentRef.current.getScrollElement();
+    scrollElRef.current = scrollEl;
 
     const distanceFromBottom = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
+
+    // Nahe am Listenanfang: aeltere Nachrichten nachladen (der Aufrufer
+    // entscheidet, ob es noch welche gibt und ob schon geladen wird).
+    if (erstesScrollenErledigtRef.current && scrollEl.scrollTop < NACHLADE_SCHWELLE) {
+      naheAmAnfangRef.current?.();
+    }
 
     if (parkedAtDividerRef.current) {
       if (distanceFromBottom < 80) parkedAtDividerRef.current = false;
@@ -191,5 +292,6 @@ export function useChatScroll({ messages, initialUnreadRef, newDividerRef }: Cha
     handleScroll,
     handleScrollDownClick,
     handleTextareaFocus,
+    positionVorVoranstellenMerken,
   };
 }

@@ -16,18 +16,12 @@ import {
   ICON_UHRZEIT,
   ICON_UHRZEIT_GEFUELLT,
   ICON_WUERFEL,
-  ICON_ZURUECK,
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
-  IonButtons,
-  IonButton,
   IonRefresher,
   IonRefresherContent,
   IonCard,
@@ -39,6 +33,7 @@ import {
   useIonModal,
   useIonPopover
 } from '@ionic/react';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import { useApp } from '../../../contexts/AppContext';
 import { useModalPage } from '../../../contexts/ModalContext';
 import api from '../../../services/api';
@@ -50,6 +45,9 @@ import WrappedModal from '../../wrapped/WrappedModal';
 import type { WrappedHistoryEntry } from '../../../types/wrapped';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { SectionHeader } from '../../shared';
+import { datumKurz } from '../../../utils/dateUtils';
+import KonfiZeitTermine from '../../shared/KonfiZeitTermine';
+import { alsKonfiZeit } from '../../../utils/konfiZeit';
 
 interface KonfiBadge {
   badge_id: number;
@@ -75,6 +73,7 @@ import { triggerPullHaptic } from '../../../utils/haptics';
 import { getIconFromString } from '../../../utils/badgeIcons';
 import KachelRaster from '../../shared/KachelRaster';
 import BadgePopoverContent, { BadgePopoverData } from '../../shared/BadgePopoverContent';
+import { tastaturKlick } from '../../../utils/tastatur';
 
 
 
@@ -121,6 +120,18 @@ const TeamerKonfiStatsPage: React.FC = () => {
   useLiveRefresh(['points', 'badges', 'requests', 'konfis'], useCallback(() => { refreshLive(); }, [refreshLive]));
   const konfiData = profileData?.konfi_data || null;
 
+  // Die dauerhafte Kopie der Konfi-Zeit: Die Befoerderung hat
+  // die Buchungen geloescht, das Loeschen des alten Jahrgangs nimmt spaeter
+  // auch dessen Termine mit -- welche Termine die Person besucht hat, steht
+  // nur noch hier. Ein aelterer Server kennt die Route nicht; dann fehlt der
+  // Abschnitt, der Rest der Seite bleibt.
+  const { data: konfiZeitAntwort, refresh: refreshKonfiZeit } = useOfflineQuery<unknown>(
+    'teamer:konfi-zeit:' + user?.id,
+    async () => (await api.get('/teamer/konfi-zeit')).data,
+    { ttl: CACHE_TTL.PROFILE }
+  );
+  const konfiZeit = alsKonfiZeit(konfiZeitAntwort);
+
   // Konfi-Wrapped laden
   const [konfiWrapped, setKonfiWrapped] = useState<WrappedHistoryEntry | null>(null);
 
@@ -157,16 +168,7 @@ const TeamerKonfiStatsPage: React.FC = () => {
   if (!konfiData) {
     return (
       <IonPage>
-        <IonHeader>
-          <IonToolbar>
-            <IonButtons slot="start">
-              <IonButton onClick={() => window.history.back()} aria-label="Zurück">
-                <IonIcon icon={ICON_ZURUECK} slot="icon-only" />
-              </IonButton>
-            </IonButtons>
-            <IonTitle>Konfi-Historie</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeile titel="Konfi-Historie" onZurueck={() => window.history.back()} gemeindeUmschalter={false} />
         <IonContent className="ion-padding">
           <div style={{ textAlign: 'center', marginTop: 'var(--app-freiraum-kopf-m)' }}>
             <p>Keine Konfi-Daten vorhanden</p>
@@ -180,33 +182,20 @@ const TeamerKonfiStatsPage: React.FC = () => {
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()} aria-label="Zurück">
-              <IonIcon icon={ICON_ZURUECK} slot="icon-only" />
-            </IonButton>
-          </IonButtons>
-          <IonTitle>Konfi-Historie</IonTitle>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile titel="Konfi-Historie" onZurueck={() => window.history.back()} gemeindeUmschalter={false} />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Konfi-Historie</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Konfi-Historie" />
 
         <IonRefresher slot="fixed" onIonRefresh={async (e) => {
-          await refresh();
+          await Promise.all([refresh(), refreshKonfiZeit()]);
           e.detail.complete();
         }} onIonPull={triggerPullHaptic}>
           <IonRefresherContent />
         </IonRefresher>
 
         {/* Punkte-Header */}
-        <div onClick={() => presentPointsModal({ presentingElement: presentingElement || undefined })}>
+        <div role="button" tabIndex={0} onKeyDown={tastaturKlick} onClick={() => presentPointsModal({ presentingElement: presentingElement || undefined })}>
           <SectionHeader
             title={konfiData.jahrgang_name ? `Jahrgang ${konfiData.jahrgang_name}` : 'Konfi-Zeit'}
             subtitle="Konfi-Punkte-Historie"
@@ -225,7 +214,7 @@ const TeamerKonfiStatsPage: React.FC = () => {
           <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
             <IonCard className="app-card">
               <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
-                <div
+                <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                   className="app-list-item"
                   style={{ width: '100%', cursor: 'pointer', borderLeftColor: 'var(--app-color-konfis)' }}
                   onClick={() => {
@@ -254,6 +243,9 @@ const TeamerKonfiStatsPage: React.FC = () => {
             </IonCard>
           </IonList>
         )}
+
+        {/* Besuchte Termine aus der dauerhaften Kopie */}
+        {konfiZeit && <KonfiZeitTermine termine={konfiZeit.termine} />}
 
         {/* Konfi-Badges */}
         {konfiData.badges.length > 0 && (() => {
@@ -353,10 +345,7 @@ const TeamerKonfiStatsPage: React.FC = () => {
                             fontSize: 'var(--app-text-winzig)',
                             color: 'var(--app-text-tertiary)'
                           }}>
-                            {new Date(badge.awarded_date).toLocaleDateString('de-DE', {
-                              day: 'numeric',
-                              month: 'short'
-                            })}
+                            {datumKurz(badge.awarded_date, { ohneJahr: true })}
                           </span>
                         )
                       }))}

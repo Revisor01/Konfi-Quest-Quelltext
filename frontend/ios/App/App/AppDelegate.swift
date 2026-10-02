@@ -1,6 +1,17 @@
 import UIKit
 import Capacitor
 import FirebaseCore
+// Crashlytics MUSS hier importiert werden, auch wenn dieser Code es nicht
+// direkt aufruft. Das Plugin @capacitor-firebase/crashlytics
+// bringt den Pod mit, aber auf Apple-Plattformen registriert sich Crashlytics
+// erst, wenn das Framework tatsaechlich geladen ist — und geladen wird es nur,
+// wenn es irgendwo importiert wird. Ohne diese Zeile blieb die Firebase-Konsole
+// bei "SDK hinzufuegen" stehen, obwohl die App lief und ihren Push-Token
+// registrierte: Firebase hatte von der iOS-App noch nie gehoert.
+// Auf Android passiert dasselbe automatisch ueber das Gradle-Plugin, deshalb
+// stand dort "warte auf App" statt "SDK hinzufuegen" — derselbe Fehler, zwei
+// verschiedene Meldungen.
+import FirebaseCrashlytics
 import FirebaseMessaging
 import UserNotifications
 
@@ -37,6 +48,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
 
         // Firebase konfigurieren
         FirebaseApp.configure()
+
+        if let app = FirebaseApp.app() {
+            print("[FIREBASE] gestartet: projekt=\(app.options.projectID ?? "?") " +
+                  "app=\(app.options.googleAppID) bundle=\(Bundle.main.bundleIdentifier ?? "?")")
+            let absturzdienst = Crashlytics.crashlytics()
+            print("[FIREBASE] Crashlytics geladen, Sammeln aktiv=" +
+                  "\(absturzdienst.isCrashlyticsCollectionEnabled())")
+            if absturzdienst.didCrashDuringPreviousExecution() {
+                print("[FIREBASE] Der vorige Start endete mit einem Absturz — " +
+                      "der Bericht geht jetzt raus.")
+            }
+        } else {
+            print("[FIREBASE] FEHLER: FirebaseApp.app() ist nil — die " +
+                  "Konfiguration wurde nicht geladen (GoogleService-Info.plist?).")
+        }
 
         // Explizit Auto-Init aktivieren (manuelles Token-Management)
         Messaging.messaging().isAutoInitEnabled = true
@@ -87,24 +113,39 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         NotificationCenter.default.post(name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
     }
 
-    // ... (applicationWillResignActive etc. bleiben unverändert) ...
-
-    func applicationWillResignActive(_ application: UIApplication) {}
-    func applicationDidEnterBackground(_ application: UIApplication) {}
-    func applicationWillEnterForeground(_ application: UIApplication) {}
-    func applicationDidBecomeActive(_ application: UIApplication) {
-        // TESTFLIGHT FIX: Token IMMER abrufen, da TestFlight andere Environment hat
-        print("[PUSH] App became active - retrieving FCM token for environment")
-        retrieveAndSendFCMToken()
-    }
-    func applicationWillTerminate(_ application: UIApplication) {}
-
-    func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-        return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
-    }
-
-    func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
-        return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
+    // MARK: - Scene-Lebenszyklus
+    //
+    // Ab dem iOS-27-SDK ist das Scene-Modell Pflicht; ohne diese Konfiguration
+    // und das UIApplicationSceneManifest startet die App nicht mehr. Das
+    // Fenster baut jetzt SceneDelegate.swift auf.
+    //
+    // WAS HIER BEWUSST WEG IST, und warum es nicht verloren ging:
+    //
+    //  - applicationDidBecomeActive trug den FCM-Token-Abruf ("TESTFLIGHT
+    //    FIX"). Unter Scenes ruft iOS die application…-Lebenszyklusmethoden
+    //    NICHT mehr auf — der Abruf waere still ausgefallen. Er steht jetzt in
+    //    SceneDelegate.sceneDidBecomeActive.
+    //  - applicationWillResignActive / …DidEnterBackground /
+    //    …WillEnterForeground / …WillTerminate waren leer.
+    //  - application(_:open:) und application(_:continue:) reichten nur an den
+    //    ApplicationDelegateProxy durch. Das uebernimmt der SceneDelegate ueber
+    //    SceneDelegateProxy, samt der capacitorOpenURL-Meldungen, an denen die
+    //    appUrlOpen-Ereignisse von @capacitor/app haengen.
+    //
+    // NICHT betroffen und deshalb unveraendert hier geblieben: der
+    // Push-Empfang (UNUserNotificationCenter, MessagingDelegate,
+    // didRegisterForRemoteNotifications…) und didFinishLaunchingWithOptions.
+    //
+    // Die App-Sperre haengt an den UIApplication-MELDUNGEN, die
+    // @capacitor/app abonniert (AppPlugin.swift) — die feuern unter Scenes
+    // weiter. Das Zusammenspiel mit dem Vorschaubild im Umschalter ist aber
+    // zeitkritisch und gehoert am Geraet gegengeprueft.
+    func application(_ application: UIApplication,
+                     configurationForConnecting connectingSceneSession: UISceneSession,
+                     options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let config = UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
+        config.delegateClass = SceneDelegate.self
+        return config
     }
 
     // MARK: - Push Permission Request (called after login)
@@ -200,7 +241,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
         AppDelegate.lastTokenSentTime = now
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { // Längere Verzögerung für WebView readiness
-            if let window = UIApplication.shared.windows.first,
+            // Fenster ueber die verbundene Szene statt ueber
+            // UIApplication.shared.windows: Unter dem
+            // Scene-Lebenszyklus ist die alte Fensterliste veraltet und kann
+            // beim Start leer sein — dann waere der Token still nicht in der
+            // WebView gelandet.
+            //
+            // Die Suchkaskade darunter bleibt bewusst stehen: Der SceneDelegate
+            // setzt zwar den CAPBridgeViewController selbst als Wurzel, aber
+            // ein spaeter eingeschobener Navigations-Controller wuerde sie
+            // sonst wieder ins Leere laufen lassen.
+            let szenenFenster = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .flatMap { $0.windows }
+            if let window = szenenFenster.first(where: { $0.isKeyWindow }) ?? szenenFenster.first,
                let rootController = window.rootViewController {
 
                 var bridgeController: CAPBridgeViewController?

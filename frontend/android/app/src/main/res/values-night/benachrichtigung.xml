@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Dunkelmodus: dieselbe Textfarbe der App im Dunkeln (5,9:1 auf
+         #202124). Das Violett aus values/ kaeme auf einer dunklen
+         Benachrichtigungsleiste nur auf 2,8:1. -->
+    <color name="benachrichtigung_farbe">#A78BFA</color>
+</resources>

@@ -5,6 +5,14 @@
 // (POST /events/:id/chat) — hier geht es nur um die Mitgliedschaft in einem
 // bereits bestehenden Chat.
 //
+// Die Regel steht deshalb an EINER Stelle, in den beiden Eintrittswegen
+// unten: addToEventChat und syncEventChat nehmen nur auf, wer eine
+// BESTAETIGTE Buchung hat. Die Aufrufer (Anmelden, Eintragen durch die
+// Leitung, Nachruecken, Zusage des Teams, Pflicht-Automatik, Wieder-
+// anmelden) muessen dafuer nichts wissen: Sie rufen wie bisher nach dem
+// Schreiben der Buchung, und wer auf der Warteliste landet, bleibt draussen,
+// bis promoteFromWaitlist ihn bestaetigt und hier erneut ruft.
+//
 // user_type muss dem Wert entsprechen, mit dem später gelesen wird:
 // konfi -> 'konfi', teamer -> 'teamer', org_admin/admin -> 'admin'
 // (dieselbe Abbildung wie in jahrgangChat.js).
@@ -33,10 +41,6 @@ async function removeFromEventChat(db, eventId, userId, organizationId) {
 }
 
 /**
- * Traegt eine Person in alle Chat-Räume eines Termins ein.
- * Idempotent: Ist sie schon drin, passiert nichts. Existiert kein Chat, auch
- * nicht — der Chat wird bewusst nur auf Wunsch der Leitung angelegt.
- *
  * Die Rolle wird selbst nachgesehen, damit der user_type stimmt: Ein Teamer,
  * der als 'admin' eingetragen wird, findet seinen eigenen Raum nicht.
  *
@@ -59,6 +63,12 @@ async function addToEventChat(db, eventId, userId, organizationId) {
      WHERE cr.event_id = $1
        AND cr.organization_id = $3
        AND u.deleted_at IS NULL
+       AND EXISTS (
+         SELECT 1 FROM event_bookings eb
+          WHERE eb.event_id = cr.event_id
+            AND eb.user_id = u.id
+            AND eb.status = 'confirmed'
+       )
      ON CONFLICT DO NOTHING`,
     [eventId, userId, organizationId]
   );
@@ -66,10 +76,6 @@ async function addToEventChat(db, eventId, userId, organizationId) {
 }
 
 /**
- * Gleicht die Mitgliedschaft im Chat eines Termins an die Buchungen an:
- * Jede gebuchte Person (jeder Status außer 'cancelled') kommt hinein.
- * Entfernt niemanden — das macht removeFromEventChat beim Austragen.
- *
  * Für Mengen gedacht (Pflicht-Event-Automatik), wo einzelne Aufrufe je Person
  * unnötig viele Abfragen wären. Idempotent.
  *
@@ -91,7 +97,7 @@ async function syncEventChat(db, eventId, organizationId) {
      JOIN roles r ON r.id = u.role_id
      WHERE cr.event_id = $1
        AND cr.organization_id = $2
-       AND eb.status <> 'cancelled'
+       AND eb.status = 'confirmed'
        AND u.deleted_at IS NULL
      ON CONFLICT DO NOTHING`,
     [eventId, organizationId]

@@ -347,11 +347,40 @@ function disconnectUserSockets(userId) {
   }
 }
 
+/**
+ * Laesst die Chatliste der Genannten neu laden -- dasselbe Signal
+ * 'roomsChanged', das routes/chat.js beim Anlegen und Loeschen von Raeumen
+ * schickt (ChatOverview hoert darauf). Fuer Wege ausserhalb von chat.js, die
+ * Raeume entfernen: das Loeschen eines Kontos nimmt seine Zweiergespraeche
+ * mit (utils/kontoLoeschen.js).
+ * Still bei fehlendem _io; wirft nie.
+ *
+ * @param {Array<{user_id: number, user_type: string}>} ziele
+ */
+function raeumeGeaendert(ziele) {
+  if (!_io || !Array.isArray(ziele)) {
+    return;
+  }
+  try {
+    const gesehen = new Set();
+    for (const z of ziele) {
+      if (!z || z.user_id == null || !z.user_type) continue;
+      const raum = `user_${z.user_type}_${z.user_id}`;
+      if (gesehen.has(raum)) continue;
+      gesehen.add(raum);
+      _io.to(raum).emit('roomsChanged');
+    }
+  } catch (error) {
+    console.error('LiveUpdate: Error sending roomsChanged:', error);
+  }
+}
+
 module.exports = {
   init,
   _reset,
   sendToUser,
   disconnectUserSockets,
+  raeumeGeaendert,
   sendToKonfi,
   sendToAdmin,
   sendToUserByRole,

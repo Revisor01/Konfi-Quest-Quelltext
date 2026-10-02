@@ -9,7 +9,8 @@ import type { AdminChallenge } from '../types/challenges';
 // Bestaetigungsdialog und identische Backend-Anfrage in beiden Seiten -> hier
 // einmal zusammengefasst statt dupliziert).
 //
-// Entwuerfe können ohne Weiteres weg. Alles, was schon läuft oder lief,
+// Entwuerfe und geplante, noch nicht gestartete Challenges können ohne
+// Weiteres weg. Alles, was schon läuft oder lief,
 // hängt an echten Beitraegen von Konfis -> destruktive Nachfrage mit
 // force=true (Backend löscht dann auch hochgeladene Dateien mit).
 
@@ -38,6 +39,18 @@ export function useChallengeDelete({ onDeleted }: UseChallengeDeleteOptions) {
       presentAlert({
         header: 'Entwurf löschen',
         message: `Entwurf "${challenge.title}" wirklich löschen?`,
+        buttons: [
+          { text: 'Abbrechen', role: 'cancel' },
+          { text: 'Löschen', role: 'destructive', handler: () => { doDelete(challenge, false); } }
+        ]
+      });
+      return;
+    }
+
+    if (status === 'scheduled') {
+      presentAlert({
+        header: 'Challenge löschen',
+        message: `Die geplante Challenge "${challenge.title}" wirklich löschen?`,
         buttons: [
           { text: 'Abbrechen', role: 'cancel' },
           { text: 'Löschen', role: 'destructive', handler: () => { doDelete(challenge, false); } }

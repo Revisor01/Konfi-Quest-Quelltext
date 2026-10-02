@@ -80,13 +80,11 @@ export const initializeWebSocket = (token: string): Socket => {
 
   socket.on('connect_error', (error) => {
     console.error('WebSocket connection error:', error.message);
-    // Abgelaufenes/ungueltiges Token: Server lehnt den Handshake mit einer
-    // Auth-Meldung ab ("jwt expired" / "Authentifizierung fehlgeschlagen" o.ae.).
-    // Ohne API-Call zu diesem Zeitpunkt wuerde sonst niemand den Token-Refresh
-    // auslösen — der Chat-Tab hängt dann scheinbar grundlos. Wir stossen den
-    // zentralen Refresh-/Relogin-Flow an (api.ts -> auth:relogin-required).
     const msg = (error?.message || '').toLowerCase();
-    if (msg.includes('jwt') || msg.includes('token') || msg.includes('auth') || msg.includes('unauthorized')) {
+    if (
+      msg.includes('jwt') || msg.includes('token') || msg.includes('auth') || msg.includes('unauthorized') ||
+      msg.includes('zugriff') || msg.includes('organisation')
+    ) {
       window.dispatchEvent(new CustomEvent('socket:auth-error'));
     }
   });

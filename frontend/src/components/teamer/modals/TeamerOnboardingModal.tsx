@@ -32,14 +32,14 @@ export const SLIDES: OnboardingSlide[] = [
     color: 'var(--app-color-teamer)',
     rgb: '--app-color-teamer-rgb',
     title: 'Willkommen im Team',
-    text: 'Schön, dass du als Teamer:in dabei bist! Hier begleitest du deine Gruppe, behältst Termine im Blick und sammelst selbst Badges für dein Engagement. Wir zeigen dir kurz, wie alles funktioniert.',
+    text: 'Schön, dass du als Teamer:in dabei bist! Hier begleitest du deine Gruppe, behältst Events im Blick und sammelst selbst Badges für dein Engagement. Wir zeigen dir kurz, wie alles funktioniert.',
   },
   {
     icon: ICON_STARTSEITE,
     color: 'var(--app-color-teamer)',
     rgb: '--app-color-teamer-rgb',
     title: 'Dein Start',
-    text: 'Auf der Startseite siehst du deine wichtigsten Infos auf einen Blick: anstehende Termine, deine Badges, deine Zertifikate und alles, was für dich gerade ansteht.',
+    text: 'Auf der Startseite siehst du deine wichtigsten Infos auf einen Blick: anstehende Events, deine Badges, deine Zertifikate und alles, was für dich gerade ansteht.',
   },
   {
     icon: ICON_CHATS,
@@ -53,7 +53,7 @@ export const SLIDES: OnboardingSlide[] = [
     color: 'var(--app-color-events)',
     rgb: '--app-color-events-rgb',
     title: 'Mitmachen: Events',
-    text: 'Der Tab "Mitmachen" bündelt Events und Aktivitäten in zwei Reitern. Bei den Events findest du alle Termine und meldest dich vorher dort an, wo das Team gebraucht wird. Manche Termine sind nur fürs Team. Angelegt werden Termine von der Leitung.',
+    text: 'Der Tab "Mitmachen" bündelt Events und Aktivitäten in zwei Reitern. Bei den Events meldest du dich vorher dort an, wo das Team gebraucht wird. Manche Events sind nur fürs Team. Angelegt werden Events von der Leitung.',
   },
   {
     icon: ICON_TEXTDOKUMENT,
@@ -74,7 +74,7 @@ export const SLIDES: OnboardingSlide[] = [
     color: 'var(--app-color-badges)',
     rgb: '--app-color-badges-rgb',
     title: 'Deine Badges',
-    text: 'Auch du sammelst Abzeichen — für dein Engagement im Team. Schau hier, welche Badges du schon hast und welche du als Nächstes erreichen kannst.',
+    text: 'Auch du sammelst Badges — für dein Engagement im Team. Schau hier, welche du schon hast und welche du als Nächstes erreichen kannst.',
   },
   {
     icon: ICON_ORDNER,

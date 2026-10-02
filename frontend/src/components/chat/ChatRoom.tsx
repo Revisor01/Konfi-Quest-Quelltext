@@ -1,12 +1,7 @@
-import { ICON_AUFKLAPPEN_GEFUELLT, ICON_ZURUECK } from '../shared/icons';
+import { ICON_AUFKLAPPEN_GEFUELLT } from '../shared/icons';
 import React, { useState, useEffect, useRef } from 'react';
 import {
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
-  IonButton,
-  IonButtons,
   IonIcon,
   IonRefresher,
   IonRefresherContent,
@@ -22,19 +17,28 @@ import { CACHE_TTL } from '../../services/offlineCache';
 import api from '../../services/api';
 import { Message, ChatRoomProps as ChatRoomComponentProps } from '../../types/chat';
 import ChatMessagesList from './ChatMessagesList';
+import ChatVerlaufAnfang from './ChatVerlaufAnfang';
 import PollModal from './modals/PollModal';
 import MembersModal from './modals/MembersModal';
 import { writeQueue, onItemFailed } from '../../services/writeQueue';
 import {
   ergaenzeLokaleBubbles,
   chatNachrichtEinreihen,
-  mergeMitLokalen,
   nachrichtNeuEinreihen,
   wartendeNachrichtAufraeumen,
 } from './chatOutbox';
+import {
+  sendeFehlerText,
+  SENDEFEHLER_ZU_GROSS,
+  SENDEFEHLER_DATEITYP,
+  SENDEFEHLER_ABGELEHNT,
+} from './sendeFehler';
+import { fehlerStatus } from '../../utils/fehler';
+import { uploadFehlerMelden, warteschlangenFehlerMelden } from '../../services/uploadDiagnose';
 import { safeUUID } from '../../utils/uuid';
 import { networkMonitor } from '../../services/networkMonitor';
 import { ChatHeader, MessageInput, autoCapitalize } from './ChatRoomSections';
+import AppKopfzeile from '../shared/AppKopfzeile';
 import { haptik, triggerPullHaptic, ImpactStyle } from '../../utils/haptics';
 import { useChatScroll } from './useChatScroll';
 import { useChatSocket } from './useChatSocket';
@@ -42,6 +46,15 @@ import { useUmfragenUndReaktionen } from './useUmfragenUndReaktionen';
 import { useChatDateien } from './useChatDateien';
 import { nachrichtTeilen } from './chatTeilen';
 import { useChatVerwaltung } from './useChatVerwaltung';
+import {
+  AELTERE_SEITE,
+  ERSTER_BLOCK,
+  aeltereVoranstellen,
+  aeltesteServerId,
+  alsGeloescht,
+  anfangErreicht,
+  juengstenBlockEinpflegen,
+} from './chatVerlauf';
 
 
 
@@ -58,21 +71,50 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   const newDividerAnchorRef = useRef<number | null>(null);
 
   // --- useOfflineQuery: Initial messages load mit Cache ---
+  //
+  // Der Offline-Cache haelt NUR den juengsten Block (ERSTER_BLOCK Nachrichten)
+  // — genau das, was dieser Abruf liefert. Nachgeladene aeltere Seiten
+  // (?before=) leben nur im State des offenen Raums und kommen bewusst nicht in
+  // den Cache: Wer ein Jahr zurueckblaettert, wuerde sonst
+  // Tausende Nachrichten samt Reaktionen und Umfragen in den Geraetespeicher
+  // schreiben und bei jedem Oeffnen wieder einlesen. Offline zeigt der Raum
+  // damit die juengsten 100; aeltere laden, sobald wieder Netz da ist.
   const { data: initialMessages, refresh: refreshMessagesCache } = useOfflineQuery<Message[]>(
     'chat:messages:' + room?.id,
-    () => api.get(`/chat/rooms/${room?.id}/messages?limit=100`).then(r => r.data),
+    () => api.get(`/chat/rooms/${room?.id}/messages?limit=${ERSTER_BLOCK}`).then(r => r.data),
     { ttl: CACHE_TTL.CHAT_MESSAGES, enabled: !!room?.id }
   );
 
   // Lokaler messages-State für Live-Updates (WebSocket aktualisiert diesen direkt)
   const [messages, setMessages] = useState<Message[]>([]);
 
+  // Blaettern nach oben (chatVerlauf.ts): id der aeltesten Nachricht in dem
+  // Moment, als der Server weniger lieferte als angefordert — solange sie die
+  // aelteste der Liste ist, ist der Anfang des Chats erreicht.
+  const [anfangBei, setAnfangBei] = useState<number | null>(null);
+  const [laedtAeltere, setLaedtAeltere] = useState(false);
+  const [aeltereFehlgeschlagen, setAeltereFehlgeschlagen] = useState(false);
+  const laedtAeltereRef = useRef(false);
+  // Raum zum Zeitpunkt der Antwort — eine spaete Antwort fuer einen anderen
+  // Raum darf nicht in diese Liste geraten.
+  const raumIdRef = useRef(room?.id);
+  useEffect(() => { raumIdRef.current = room?.id; }, [room?.id]);
+
+  // Den juengsten Block einpflegen: bereits nachgeladene aeltere Nachrichten
+  // bleiben stehen, wenn der Block an sie anschliesst. Ein Block unter
+  // ERSTER_BLOCK ist der ganze Chat — dann ist der Anfang erreicht.
+  const juengstenBlockUebernehmen = (block: Message[]) => {
+    setMessages(prev => juengstenBlockEinpflegen(block, prev));
+    if (block.length < ERSTER_BLOCK) setAnfangBei(block.length > 0 ? block[0].id : null);
+  };
+
   // Initiale Nachrichten aus Cache/API in lokalen State kopieren
   useEffect(() => {
     if (initialMessages && initialMessages.length > 0) {
       // Merge statt Ersetzen: sonst löscht der Cache-/API-Stand die noch nicht
-      // zugestellten lokalen Nachrichten aus der Liste.
-      setMessages(prev => mergeMitLokalen(initialMessages, prev));
+      // zugestellten lokalen Nachrichten aus der Liste — und die bereits
+      // nachgeladenen aelteren.
+      juengstenBlockUebernehmen(initialMessages);
       // Ist die Server-Kopie da, ist der "endgueltig fehlgeschlagen"-Merker
       // fuer diese client_ids hinfaellig (best-effort).
       writeQueue.forgetFailedChatMany(initialMessages.map(m => m.client_id));
@@ -87,8 +129,13 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
       if (item.metadata.type !== 'chat') return;
       if (room?.id && item.metadata.roomId !== room.id) return;
       const clientId = item.metadata.clientId;
+      // Mit Datei: fuer die Messung, ob auch der Versand aus der eigenen
+      // Kopie der Warteschlange scheitert (services/uploadDiagnose.ts).
+      if (item.body?._localFilePath) warteschlangenFehlerMelden(item.error.status);
+      // Mit dem Status: Bei einer endgueltigen Ablehnung (413, 415 ...) steht
+      // der Grund an der Nachricht, und das Menue bietet kein "Erneut senden".
       setMessages(prev => prev.map(m =>
-        m.localId === clientId ? { ...m, queueStatus: 'error' as const } : m
+        m.localId === clientId ? { ...m, queueStatus: 'error' as const, sendeFehlerStatus: item.error.status } : m
       ));
     });
   }, [room?.id]);
@@ -122,7 +169,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   const {
     selectedFile,
     selectedFilePreview,
-    handleFileSelect,
+    dateiWaehlen,
     clearSelectedFile,
     handleFileClick,
     ladendeDatei,
@@ -142,6 +189,9 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   const [replyToMessage, setReplyToMessage] = useState<Message | null>(null);
   // Scroll-Verhalten (Initial-Scroll, Auto-Scroll, Tages-Chip, "Nach unten"-
   // Button, Tastatur) liegt gebuendelt in useChatScroll.
+  // Nahe am Listenanfang ruft useChatScroll ladeAeltere (weiter unten
+  // definiert, darum ueber eine Ref).
+  const ladeAeltereRef = useRef<() => void>(() => {});
   const {
     contentRef,
     setShouldAutoScroll,
@@ -151,8 +201,13 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     handleScroll,
     handleScrollDownClick,
     handleTextareaFocus,
-  } = useChatScroll({ messages, initialUnreadRef, newDividerRef });
-  const fileInputRef = useRef<HTMLInputElement>(null);
+    positionVorVoranstellenMerken,
+  } = useChatScroll({
+    messages,
+    initialUnreadRef,
+    newDividerRef,
+    onNaheAmAnfang: () => ladeAeltereRef.current(),
+  });
   const textareaRef = useRef<HTMLIonTextareaElement>(null);
   // client_ids eigener Sendungen, deren Server-Kopie noch nicht per Socket
   // angekommen ist — Fallback-Reload nur wenn der Socket nicht liefert.
@@ -164,6 +219,32 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   const [presentActionSheet] = useIonActionSheet();
 
   const handleRetryMessage = (message: Message) => {
+    const loeschen = {
+      text: 'Nachricht löschen',
+      role: 'destructive',
+      handler: async () => {
+        // Aus UI entfernen
+        setMessages(prev => prev.filter(m => m.localId !== message.localId));
+        // Queue-Item, Fehl-Merker und lokale Dateikopien aufraeumen
+        // (Loeschen ist eine bewusste Entscheidung).
+        await wartendeNachrichtAufraeumen(room?.id, message.localId);
+      }
+    };
+    const abbrechen = { text: 'Abbrechen', role: 'cancel' };
+
+    // Endgueltig abgelehnt (413 zu gross, 415 Dateityp, sonst 4xx ausser
+    // 408/429): Ein neuer Versuch schickte dieselbe Datei und scheiterte
+    // gleich. Das Menue nennt den Grund und bietet nur das Loeschen an.
+    const grund = sendeFehlerText(message.sendeFehlerStatus);
+    if (grund) {
+      presentActionSheet({
+        header: 'Nachricht nicht gesendet',
+        subHeader: grund,
+        buttons: [loeschen, abbrechen]
+      });
+      return;
+    }
+
     presentActionSheet({
       header: 'Nachricht fehlgeschlagen',
       buttons: [
@@ -192,21 +273,8 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
             }
           }
         },
-        {
-          text: 'Nachricht löschen',
-          role: 'destructive',
-          handler: async () => {
-            // Aus UI entfernen
-            setMessages(prev => prev.filter(m => m.localId !== message.localId));
-            // Queue-Item, Fehl-Merker und lokale Dateikopien aufraeumen
-            // (Loeschen ist eine bewusste Entscheidung).
-            await wartendeNachrichtAufraeumen(room?.id, message.localId);
-          }
-        },
-        {
-          text: 'Abbrechen',
-          role: 'cancel'
-        }
+        loeschen,
+        abbrechen
       ]
     });
   };
@@ -281,8 +349,8 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     // Kein eigener Loading State - ChatRoomView handled das Loading
     if (!room) return;
     try {
-      const response = await api.get(`/chat/rooms/${room.id}/messages?limit=100`);
-      setMessages(prev => mergeMitLokalen(response.data, prev));
+      const response = await api.get(`/chat/rooms/${room.id}/messages?limit=${ERSTER_BLOCK}`);
+      juengstenBlockUebernehmen(response.data);
 
       // Don't pre-load images anymore - use lazy loading instead for better performance
     } catch (err) {
@@ -292,6 +360,47 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
       // Loading wird im ChatRoomView gehandhabt
     }
   };
+
+  // Aeltere Nachrichten nachladen: die
+  // naechsten AELTERE_SEITE vor der aeltesten geladenen, oben einfuegen, die
+  // Leseposition halten (useChatScroll). Kommen weniger als angefordert, ist
+  // der Anfang des Chats erreicht. Doppelte fuehrt aeltereVoranstellen nach
+  // id zusammen. Schlaegt es fehl, laedt nichts automatisch nach — der Knopf
+  // oben startet den naechsten Versuch (sonst feuerte jedes Scroll-Ereignis
+  // am Anfang eine weitere Anfrage ins Funkloch).
+  const ladeAeltere = async (erneut = false) => {
+    if (!room || laedtAeltereRef.current) return;
+    if (aeltereFehlgeschlagen && !erneut) return;
+    if (anfangErreicht(messages, anfangBei)) return;
+    const aelteste = aeltesteServerId(messages);
+    if (aelteste === null) return;
+    const raumId = room.id;
+
+    laedtAeltereRef.current = true;
+    setLaedtAeltere(true);
+    setAeltereFehlgeschlagen(false);
+    try {
+      const response = await api.get(`/chat/rooms/${raumId}/messages?before=${aelteste}&limit=${AELTERE_SEITE}`);
+      const aeltere: Message[] = response.data;
+      if (raumIdRef.current !== raumId) return;
+      if (aeltere.length > 0) {
+        positionVorVoranstellenMerken(aelteste);
+        setMessages(prev => aeltereVoranstellen(prev, aeltere));
+      }
+      if (aeltere.length < AELTERE_SEITE) {
+        setAnfangBei(aeltere.length > 0 ? aeltere[0].id : aelteste);
+      }
+    } catch (err) {
+      console.error('Fehler beim Laden älterer Nachrichten:', err);
+      setAeltereFehlgeschlagen(true);
+    } finally {
+      laedtAeltereRef.current = false;
+      setLaedtAeltere(false);
+    }
+  };
+  // Nach jedem Rendern die aktuelle Fassung hinterlegen (sie liest messages
+  // und anfangBei aus diesem Rendern).
+  useEffect(() => { ladeAeltereRef.current = () => { ladeAeltere(); }; });
 
   const loadMissedMessages = async (afterId: number) => {
     if (!room) return;
@@ -358,7 +467,15 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
     if (!room) return;
 
     const clientId = safeUUID();
-    const localId = safeUUID();
+    // EINE Kennung fuer die Blase und fuer Warteschlange und Fehl-Merker
+    // Bis dahin bekam die Blase eine eigene localId, waehrend
+    // onItemFailed, "Erneut senden" und "Nachricht löschen" sie mit der
+    // client_id der Warteschlange verglichen -- fuer eine in dieser Sitzung
+    // geschriebene Nachricht passte das nie: Sie blieb nach einem Fehlschlag
+    // auf "wartet", Loeschen raeumte den Merker nicht, und sie kam beim
+    // naechsten Oeffnen wieder. Die Blasen aus Warteschlange und Merker
+    // (chatOutbox) tragen schon immer beides gleich.
+    const localId = clientId;
     const content = messageText.trim();
     const file = selectedFile;
     const currentReplyTo = replyToMessage;
@@ -447,8 +564,27 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
 
         if (room) markRoomAsRead();
         setShouldAutoScroll(true);
-      } catch {
+      } catch (err) {
         pendingSendsRef.current.delete(clientId);
+        const status = fehlerStatus(err);
+        const grund = sendeFehlerText(status);
+        if (status !== undefined && grund) {
+          setMessages(prev => prev.map(m =>
+            m.localId === localId ? { ...m, queueStatus: 'error' as const, sendeFehlerStatus: status } : m
+          ));
+          // Feste Texte (Positivliste der Fehlermessung), nie der des Servers.
+          setError(status === 413 ? SENDEFEHLER_ZU_GROSS : status === 415 ? SENDEFEHLER_DATEITYP : SENDEFEHLER_ABGELEHNT);
+          try {
+            await writeQueue.chatAblehnungMerken(
+              { clientId, roomId: room.id, content, fileName: file?.name, fileType: file?.type, createdAt: Date.now() },
+              { status, message: grund }
+            );
+          } catch (merkErr) {
+            console.error('Abgelehnte Nachricht konnte nicht gemerkt werden:', merkErr);
+          }
+          return;
+        }
+        if (file) uploadFehlerMelden('chat-datei-direkt', err);
         // Fehlgeschlagener Online-Versand: Die Nachricht lebte bisher NUR im
         // React-State — Raum verlassen oder App neu gestartet, und sie war
         // weg (verschwundene Nachricht). Jetzt wird sie in die Queue
@@ -460,6 +596,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
           if (networkMonitor.isOnline) writeQueue.flush();
         } catch (queueErr) {
           console.error('Nachricht konnte nicht in die Queue gesichert werden:', queueErr);
+          if (file) uploadFehlerMelden('chat-datei-sichern', queueErr);
           setMessages(prev => prev.map(m =>
             m.localId === localId ? { ...m, queueStatus: 'error' as const } : m
           ));
@@ -499,6 +636,10 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
           handler: () => {
             api.delete(`/chat/messages/${messageId}`)
               .then(() => {
+                // Sofort als geloescht zeigen: Liegt die Nachricht im
+                // nachgeladenen aelteren Teil, bringt der juengste Block sie
+                // nicht mit.
+                setMessages(prev => prev.map(m => (m.id === messageId ? alsGeloescht(m) : m)));
                 loadMessages();
               })
               .catch((err) => {
@@ -572,16 +713,9 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
   if (!room) {
     return (
       <>
-        <IonHeader>
-          <IonToolbar>
-            <IonButtons slot="start">
-              <IonButton aria-label="Zurück" onClick={onBack}>
-                <IonIcon icon={ICON_ZURUECK} />
-              </IonButton>
-            </IonButtons>
-            <IonTitle>Chat wird geladen...</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        {/* Opak wie der ChatHeader danach, sonst springt die Kopfzeile beim
+            Wechsel vom Laden zum Raum. */}
+        <AppKopfzeile titel="Chat wird geladen..." onZurueck={onBack} translucent={false} gemeindeUmschalter={false} />
         <IonContent className="app-gradient-background" fullscreen>
           <div style={{ textAlign: 'center', padding: 'var(--app-abstand-riesig)' }}>
             <p>Chat wird geladen...</p>
@@ -646,7 +780,7 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
           }}>
             <span style={{
               fontSize: 'var(--app-text-meta)', fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-body)',
-              background: 'rgba(245,245,247,0.95)', backdropFilter: 'blur(4px)',
+              background: 'var(--app-surface-muted)', backdropFilter: 'blur(4px)',
               padding: 'var(--app-abstand-mini) var(--app-abstand-mittelweit)', borderRadius: 'var(--app-radius-karte)', boxShadow: 'var(--app-schatten-flach)'
             }}>
               {floatingDay}
@@ -685,12 +819,12 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
               alignItems: 'center',
               justifyContent: 'center',
               cursor: 'pointer',
-              backgroundColor: 'rgba(255,255,255,0.95)',
+              backgroundColor: 'var(--app-surface-card)',
               backdropFilter: 'blur(10px)',
               boxShadow: 'var(--app-schatten-karte-stark)'
             }}
           >
-            <IonIcon icon={ICON_AUFKLAPPEN_GEFUELLT} style={{ fontSize: 'var(--app-text-titel)', color: 'var(--app-color-chat)' }} />
+            <IonIcon icon={ICON_AUFKLAPPEN_GEFUELLT} style={{ fontSize: 'var(--app-text-titel)', color: 'var(--app-text-chat)' }} />
           </button>
         </div>
 
@@ -704,8 +838,17 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
             color: 'var(--app-text-secondary)',
             textAlign: 'center'
           }}>
-            Admins können Chats nicht verlassen. Chats können nur gelöscht werden.
+            Die Leitung kann Chats nicht verlassen. Chats können nur gelöscht werden.
           </div>
+        )}
+
+        {messages.length > 0 && (
+          <ChatVerlaufAnfang
+            laedt={laedtAeltere}
+            fehler={aeltereFehlgeschlagen}
+            anfang={anfangErreicht(messages, anfangBei)}
+            onErneutLaden={() => { ladeAeltere(true); }}
+          />
         )}
 
         <ChatMessagesList
@@ -729,7 +872,11 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
           ladendeDatei={ladendeDatei}
           uploadFortschritt={uploadFortschritt}
           onError={setError}
-          onDeselectMessage={() => setSelectedMessage(null)}
+          onDeselectMessage={() => {
+            setSelectedMessage(null);
+            setShowReactionPicker(false);
+            setReactionTargetMessage(null);
+          }}
           textareaRef={textareaRef}
           onRetry={handleRetryMessage}
         />
@@ -742,11 +889,10 @@ const ChatRoom: React.FC<ChatRoomComponentProps> = ({ room, onBack, presentingEl
         selectedFilePreview={selectedFilePreview}
         replyToMessage={replyToMessage}
         textareaRef={textareaRef}
-        fileInputRef={fileInputRef}
         onTextChange={handleTextInputChange}
         onFocus={handleTextareaFocus}
         onSend={sendMessage}
-        onFileSelect={handleFileSelect}
+        onDateiWaehlen={dateiWaehlen}
         onClearFile={clearSelectedFile}
         onClearReply={() => setReplyToMessage(null)}
       />

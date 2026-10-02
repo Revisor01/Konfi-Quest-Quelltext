@@ -114,7 +114,7 @@ const UnregisterModal: React.FC<UnregisterModalProps> = ({
               )}
               <IonList style={{ background: 'transparent', padding: '0' }}>
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
-                  <IonTextarea
+                  <IonTextarea aria-label="Grund für die Abmeldung"
                     value={reason}
                     onIonInput={(e) => setReason(e.detail.value!)}
                     placeholder="Bitte gib einen Grund für deine Abmeldung an..."

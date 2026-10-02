@@ -7,8 +7,14 @@ const liveUpdate = require('../utils/liveUpdate');
 const { computeCurrentStreak } = require('../utils/streakCalculation');
 // Seiteneffekte nach der Antwort (abwartbar im Test) -- siehe utils/nachAntwort.js
 const { nachAntwort } = require('../utils/nachAntwort');
+// Auf einem Transaktions-Client nacheinander, ueber den Pool parallel (pg 9).
+const { abfragenBuendeln } = require('../utils/abfragenBuendeln');
+const { ladeMitgliederDerOrganisation } = require('../utils/orgMitglieder');
 // Single Source of Truth: welche Events zählen für Badges (Konfi vs. Teamer).
 const { KONFI_BADGE_EVENT_CONDITION } = require('../utils/badgeEventRule');
+const { loescheMitteilungenZuAbzeichen } = require('../utils/postfachAufraeumen');
+// Konfi-Badges Befoerderter bleiben, wie sie verdient wurden
+const { sichereKonfiZeitVorAbzeichenAenderung } = require('../utils/konfiHistorie');
 // Single Source of Truth: aus welchen Kategorien war jemand dabei (category_combination).
 const {
   KONFI_KATEGORIE_NAMEN_SQL,
@@ -111,7 +117,7 @@ const CRITERIA_TYPES = {
     // hier zaehlt jede Kategorie hoechstens einmal. Genau das braucht es fuer
     // "drei verschiedene Freizeiten": dreimal dieselbe Konfifahrt soll das
     // Abzeichen NICHT ausloesen.
-    help: "Kreuze die Kategorien an, die in Frage kommen. Der Wert sagt, aus WIE VIELEN davon jemand dabei gewesen sein muss — nicht wie oft. Beispiel: drei Kategorien angekreuzt und Wert 3 heißt: aus allen dreien mindestens einmal. Wert 1 heißt: eine davon genügt. Zwei Termine aus derselben Kategorie zählen zusammen nur einmal. Es zählen Termine und Aktivitäten gleichermaßen."
+    help: "Kreuze die Kategorien an, die in Frage kommen. Der Wert sagt, aus WIE VIELEN davon jemand dabei gewesen sein muss — nicht wie oft. Beispiel: drei Kategorien angekreuzt und Wert 3 heißt: aus allen dreien mindestens einmal. Wert 1 heißt: eine davon genügt. Zwei Events aus derselben Kategorie zählen zusammen nur einmal. Es zählen Events und Aktivitäten gleichermaßen."
   },
   
   // === ZEIT-BASIERTE KRITERIEN (Komplex) ===
@@ -153,34 +159,51 @@ const CRITERIA_TYPES = {
 // weiter wie bisher; nur der Nachhol-Lauf schweigt.
 const STILL = { still: true };
 
+// optionen.organizationId: die Gemeinde, in der geprueft wird -- bei Routen
+// die aktive Gemeinde der Anfrage (req.user.organization_id). Ohne Angabe
+// gilt die Stamm-Gemeinde des Kontos.
 const checkAndAwardBadges = async (db, userId, optionen = {}) => {
   const still = optionen.still === true;
   try {
-    // Rolle des Users prüfen
-    const roleCheckQuery = `SELECT u.organization_id, u.display_name as name, r.name as role_name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = $1`;
-    const { rows: [userInfo] } = await db.query(roleCheckQuery, [userId]);
+    const { rows: [userInfo] } = await db.query(
+      `SELECT g.organization_id,
+              CASE WHEN u.organization_id = g.organization_id THEN rp.name ELSE ro.name END AS role_name
+         FROM users u
+         CROSS JOIN LATERAL (SELECT COALESCE($2::bigint, u.organization_id) AS organization_id) g
+         LEFT JOIN user_organizations uo ON uo.user_id = u.id AND uo.organization_id = g.organization_id
+         LEFT JOIN roles ro ON ro.id = uo.role_id
+         LEFT JOIN roles rp ON rp.id = u.role_id
+        WHERE u.id = $1 AND u.deleted_at IS NULL`,
+      [userId, optionen.organizationId ?? null]
+    );
     if (!userInfo) return { count: 0, badges: [] };
 
-    const isTeamer = userInfo.role_name === 'teamer';
-    const organizationId = userInfo.organization_id;
+    const organizationId = Number(userInfo.organization_id);
 
     // =====================================================================
     // TEAMER-BRANCH
     // =====================================================================
-    if (isTeamer) {
+    if (userInfo.role_name === 'teamer') {
       return await checkAndAwardTeamerBadges(db, userId, organizationId, still);
     }
 
+    // Leitung (admin, org_admin, super_admin) und Nicht-Mitglieder: nichts.
+    if (userInfo.role_name !== 'konfi') return { count: 0, badges: [] };
+
     // =====================================================================
-    // KONFI-BRANCH (bestehende Logik)
+    // KONFI-BRANCH
     // =====================================================================
+    // Nur ein Konfi-Profil DIESER Gemeinde zaehlt. Die Spalten ausdruecklich
+    // benennen: `kp.*, u.organization_id` liess die Konto-Gemeinde die
+    // Profil-Gemeinde ueberschreiben (gleicher Spaltenname, der letzte gewinnt).
     const konfiQuery = `
-      SELECT kp.*, u.display_name as name, u.organization_id
+      SELECT kp.user_id, kp.jahrgang_id, kp.gottesdienst_points, kp.gemeinde_points,
+             kp.organization_id, u.display_name as name
       FROM konfi_profiles kp
       JOIN users u ON kp.user_id = u.id
-      WHERE kp.user_id = $1 AND u.deleted_at IS NULL
+      WHERE kp.user_id = $1 AND kp.organization_id = $2 AND u.deleted_at IS NULL
     `;
-    const { rows: [konfi] } = await db.query(konfiQuery, [userId]);
+    const { rows: [konfi] } = await db.query(konfiQuery, [userId, organizationId]);
     if (!konfi) return { count: 0, badges: [] };
     // pg liefert numeric/integer-Spalten als STRING. Ohne Konvertierung macht
     // `total += konfi.gottesdienst_points` String-Konkatenation ("0"+"3"+"5"="035")
@@ -213,6 +236,11 @@ const checkAndAwardBadges = async (db, userId, optionen = {}) => {
     const earnedBadgeDetails = [];
 
     // Vorab-Queries: activity_count, event_count, bonus_count, completed_activities, unique_activities
+    //
+    // abfragenBuendeln statt Promise.all: Anwesenheit und
+    // Check-in rufen diese Funktion mit dem CLIENT ihrer Transaktion -- dort
+    // nacheinander (pg 9 streicht die interne Warteschlange fuer gleichzeitige
+    // Abfragen auf einem Client), ueber den Pool weiter parallel.
     const [
       { rows: [preActCount] },
       { rows: [preEvCount] },
@@ -220,19 +248,19 @@ const checkAndAwardBadges = async (db, userId, optionen = {}) => {
       { rows: preCompletedActs },
       { rows: preUniqueActs },
       { rows: preKategorienKonfi }
-    ] = await Promise.all([
-      db.query("SELECT COUNT(*) as count FROM user_activities WHERE user_id = $1 AND organization_id = $2", [userId, konfi.organization_id]),
+    ] = await abfragenBuendeln(db, [
+      () => db.query("SELECT COUNT(*) as count FROM user_activities WHERE user_id = $1 AND organization_id = $2", [userId, konfi.organization_id]),
       // event_count/activity_count: nur freiwillige, bestaetigte Events (kein Pflicht/Konfirmation).
-      db.query(`SELECT COUNT(*) as count FROM event_bookings eb JOIN events e ON eb.event_id = e.id WHERE eb.user_id = $1 AND ${KONFI_BADGE_EVENT_CONDITION} AND eb.organization_id = $2`, [userId, konfi.organization_id]),
+      () => db.query(`SELECT COUNT(*) as count FROM event_bookings eb JOIN events e ON eb.event_id = e.id WHERE eb.user_id = $1 AND ${KONFI_BADGE_EVENT_CONDITION} AND eb.organization_id = $2`, [userId, konfi.organization_id]),
       // bonus_points-Badge meint die SUMME der Bonuspunkte (Frontend-Label "Punkte"),
       // nicht die Anzahl der Eintraege -> SUM(points), konsistent zum Progress (konfi.js).
-      db.query("SELECT COALESCE(SUM(points), 0) as count FROM bonus_points WHERE konfi_id = $1 AND organization_id = $2", [userId, konfi.organization_id]),
-      db.query("SELECT DISTINCT a.name FROM user_activities ua JOIN activities a ON ua.activity_id = a.id WHERE ua.user_id = $1 AND a.organization_id = $2", [userId, konfi.organization_id]),
-      db.query("SELECT DISTINCT activity_id FROM user_activities WHERE user_id = $1 AND organization_id = $2", [userId, konfi.organization_id]),
+      () => db.query("SELECT COALESCE(SUM(points), 0) as count FROM bonus_points WHERE konfi_id = $1 AND organization_id = $2", [userId, konfi.organization_id]),
+      () => db.query("SELECT DISTINCT a.name FROM user_activities ua JOIN activities a ON ua.activity_id = a.id WHERE ua.user_id = $1 AND a.organization_id = $2", [userId, konfi.organization_id]),
+      () => db.query("SELECT DISTINCT activity_id FROM user_activities WHERE user_id = $1 AND organization_id = $2", [userId, konfi.organization_id]),
       // category_combination: aus welchen Kategorien war der Konfi dabei.
       // Query-Text aus utils/badgeKategorieRegel.js -- derselbe, den der
       // Fortschritt in utils/konfiBadgeProgress.js benutzt.
-      db.query(KONFI_KATEGORIE_NAMEN_SQL, [userId, konfi.organization_id])
+      () => db.query(KONFI_KATEGORIE_NAMEN_SQL, [userId, konfi.organization_id])
     ]);
 
     const preloaded = {
@@ -446,17 +474,17 @@ async function checkAndAwardTeamerBadges(db, userId, organizationId, still = fal
     { rows: teamerCompletedActs },
     { rows: teamerUniqueActs },
     { rows: teamerKategorien }
-  ] = await Promise.all([
-    db.query(`SELECT COUNT(*) as count FROM user_activities ua JOIN activities a ON ua.activity_id = a.id WHERE ua.user_id = $1 AND ua.organization_id = $2 AND a.target_role = 'teamer'`, [userId, organizationId]),
+  ] = await abfragenBuendeln(db, [
+    () => db.query(`SELECT COUNT(*) as count FROM user_activities ua JOIN activities a ON ua.activity_id = a.id WHERE ua.user_id = $1 AND ua.organization_id = $2 AND a.target_role = 'teamer'`, [userId, organizationId]),
     // Teamer: ALLE bestaetigten Events zählen (inkl. Pflicht/Konfirmation) — Teamer
     // arbeiten dort mit, das ist eine legitime Zählung. (Anders als bei Konfis.)
-    db.query("SELECT COUNT(*) as count FROM event_bookings WHERE user_id = $1 AND attendance_status = 'present' AND organization_id = $2", [userId, organizationId]),
-    db.query(`SELECT DISTINCT a.name FROM user_activities ua JOIN activities a ON ua.activity_id = a.id WHERE ua.user_id = $1 AND a.organization_id = $2 AND a.target_role = 'teamer'`, [userId, organizationId]),
-    db.query(`SELECT DISTINCT ua.activity_id FROM user_activities ua JOIN activities a ON ua.activity_id = a.id WHERE ua.user_id = $1 AND ua.organization_id = $2 AND a.target_role = 'teamer'`, [userId, organizationId]),
+    () => db.query("SELECT COUNT(*) as count FROM event_bookings WHERE user_id = $1 AND attendance_status = 'present' AND organization_id = $2", [userId, organizationId]),
+    () => db.query(`SELECT DISTINCT a.name FROM user_activities ua JOIN activities a ON ua.activity_id = a.id WHERE ua.user_id = $1 AND a.organization_id = $2 AND a.target_role = 'teamer'`, [userId, organizationId]),
+    () => db.query(`SELECT DISTINCT ua.activity_id FROM user_activities ua JOIN activities a ON ua.activity_id = a.id WHERE ua.user_id = $1 AND ua.organization_id = $2 AND a.target_role = 'teamer'`, [userId, organizationId]),
     // category_combination: aus welchen Kategorien war die Teamer:in dabei.
     // Query-Text aus utils/badgeKategorieRegel.js -- derselbe, den der
     // Fortschritt in utils/teamerBadgeProgress.js benutzt.
-    db.query(TEAMER_KATEGORIE_NAMEN_SQL, [userId, organizationId])
+    () => db.query(TEAMER_KATEGORIE_NAMEN_SQL, [userId, organizationId])
   ]);
 
   const teamerPreloaded = {
@@ -550,8 +578,8 @@ async function checkAndAwardTeamerBadges(db, userId, organizationId, still = fal
           const { rows: [firstAct] } = await db.query(
             `SELECT MIN(ua.completed_date) as min_date FROM user_activities ua
              JOIN activities a ON ua.activity_id = a.id
-             WHERE ua.user_id = $1 AND a.target_role = 'teamer'`,
-            [userId]
+             WHERE ua.user_id = $1 AND ua.organization_id = $2 AND a.target_role = 'teamer'`,
+            [userId, organizationId]
           );
           if (firstAct && firstAct.min_date) {
             startYear = new Date(firstAct.min_date).getFullYear();
@@ -564,11 +592,10 @@ async function checkAndAwardTeamerBadges(db, userId, organizationId, still = fal
           break;
         }
 
-        // Alle Aktivitäts- und Event-Daten sammeln
         const { rows: allDates } = await db.query(
           `SELECT ua.completed_date as date FROM user_activities ua
            JOIN activities a ON ua.activity_id = a.id
-           WHERE ua.user_id = $1 AND a.target_role = 'teamer'
+           WHERE ua.user_id = $1 AND ua.organization_id = $2 AND a.target_role = 'teamer'
            UNION ALL
            SELECT e.event_date as date FROM event_bookings eb
            JOIN events e ON eb.event_id = e.id
@@ -713,10 +740,10 @@ async function checkStreakCriteria(db, userId, organizationId, criteriaValue, is
 // Shared: Badges einfuegen und Notifications senden
 // =====================================================================
 async function insertBadgesAndNotify(db, userId, organizationId, earnedBadgeIds, earnedBadgeDetails, still = false) {
-  const insertPromises = earnedBadgeIds.map(badgeId =>
+  // Auf einem Client nacheinander, ueber den Pool parallel (utils/abfragenBuendeln.js).
+  await abfragenBuendeln(db, earnedBadgeIds.map(badgeId => () =>
     db.query("INSERT INTO user_badges (user_id, badge_id, organization_id) VALUES ($1, $2, $3)", [userId, badgeId, organizationId])
-  );
-  await Promise.all(insertPromises);
+  ));
 
   try {
     // Stille Vergabe (Nachhol-Lauf ueber "Abzeichen neu pruefen"): weder
@@ -733,7 +760,7 @@ async function insertBadgesAndNotify(db, userId, organizationId, earnedBadgeIds,
         "INSERT INTO notifications (user_id, title, message, type, data, organization_id) VALUES ($1, $2, $3, $4, $5, $6)",
         [
           userId,
-          `Neues Badge erhalten! ${badge.icon}`,
+          'Neues Badge erhalten!',
           `Herzlichen Glückwunsch! Du hast das Badge "${badge.name}" erhalten: ${badge.description}`,
           'badge_earned',
           JSON.stringify({
@@ -884,20 +911,9 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
   // Speichern. Liefert, wie viele Personen geprueft wurden und wie viele das
   // angefragte Abzeichen neu bekommen haben.
   async function pruefeAbzeichenNach(badge, organizationId) {
-    const rollenFilter = badge.target_role === 'teamer'
-      ? "r.name = 'teamer'"
-      : "r.name = 'konfi'";
-    const { rows: personen } = await db.query(
-      `SELECT DISTINCT u.id
-       FROM users u
-       JOIN roles r ON u.role_id = r.id
-       LEFT JOIN user_organizations uo ON uo.user_id = u.id
-       WHERE ${rollenFilter}
-         AND u.deleted_at IS NULL
-         AND u.is_active = true
-         AND (u.organization_id = $1 OR uo.organization_id = $1)`,
-      [organizationId]
-    );
+    const zielrolle = badge.target_role === 'teamer' ? 'teamer' : 'konfi';
+    const personen = (await ladeMitgliederDerOrganisation(db, organizationId, [zielrolle]))
+      .map((id) => ({ id }));
 
     let neuVergeben = 0;
     let geprueft = 0;
@@ -905,7 +921,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
       try {
         // STILL: Ein Nachhol-Lauf soll nicht zwei Dutzend Push-Nachrichten
         // auf einmal ausloesen (siehe Kommentar bei STILL oben).
-        const ergebnis = await checkAndAwardBadges(db, person.id, STILL);
+        const ergebnis = await checkAndAwardBadges(db, person.id, { ...STILL, organizationId });
         geprueft++;
         if (ergebnis.badges.some(b => b.id === badge.id)) neuVergeben++;
       } catch (personErr) {
@@ -954,7 +970,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
       if (!badge.is_active) {
         // Inaktive Abzeichen werden von checkAndAwardBadges ohnehin
         // uebersprungen — dann lieber gleich sagen, warum nichts passiert.
-        return res.status(400).json({ error: 'Das Abzeichen ist nicht aktiv' });
+        return res.status(400).json({ error: 'Das Badge ist nicht aktiv' });
       }
 
       const zuletzt = letztePruefungJeOrg.get(organizationId);
@@ -1101,7 +1117,21 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
                     WHERE id = $10 AND organization_id = $11`;
       
       const params = [name, icon, description, criteria_type, criteria_value, extraJson, activeFlag, hiddenFlag, farbeFuerBadge(color, criteria_type), req.params.id, req.user.organization_id];
-      const { rowCount } = await db.query(query, params);
+
+      const client = await db.getClient();
+      let rowCount;
+      try {
+        await client.query('BEGIN');
+        await sichereKonfiZeitVorAbzeichenAenderung(client, req.params.id, req.user.organization_id,
+          { anlass: 'abzeichen_geaendert', erstelltVon: req.user.id });
+        ({ rowCount } = await client.query(query, params));
+        await client.query(rowCount === 0 ? 'ROLLBACK' : 'COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
       
       if (rowCount === 0) {
         return res.status(404).json({ error: 'Badge nicht gefunden oder keine Berechtigung' });
@@ -1125,7 +1155,16 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
     try {
       await client.query('BEGIN');
 
+      await sichereKonfiZeitVorAbzeichenAenderung(client, req.params.id, req.user.organization_id,
+        { anlass: 'abzeichen_geloescht', erstelltVon: req.user.id });
+
       await client.query("DELETE FROM user_badges WHERE badge_id = $1", [req.params.id]);
+      // Postfach: "Neues Badge erhalten" zu diesem Abzeichen geht
+      // mit -- das Abzeichen verschwindet samt Exemplaren aus allen Profilen,
+      // die Mitteilung zeigte danach auf nichts (utils/postfachAufraeumen.js).
+      // Innerhalb der Transaktion, VOR der Org-Pruefung unten: Bei 404 rollt
+      // alles zurueck, auch das hier.
+      await loescheMitteilungenZuAbzeichen(client, req.params.id);
 
       const { rowCount } = await client.query("DELETE FROM custom_badges WHERE id = $1 AND organization_id = $2", [req.params.id, req.user.organization_id]);
 

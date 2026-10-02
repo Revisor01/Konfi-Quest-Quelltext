@@ -164,6 +164,7 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
             <IonItemGroup>
               <IonItem>
                 <IonTextarea
+                  aria-label="Frage"
                   value={question}
                   onIonInput={(e) => setQuestion(e.detail.value!)}
                   placeholder="Deine Frage eingeben..."
@@ -190,6 +191,7 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
               {options.map((option, index) => (
                 <IonItem key={index}>
                   <IonInput
+                    aria-label={`Option ${index + 1}`}
                     value={option}
                     onIonInput={(e) => updateOption(index, e.detail.value!)}
                     placeholder={`Option ${index + 1}`}
@@ -215,8 +217,8 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
               {/* Option hinzufügen */}
               {options.length < 10 && (
                 <IonItem button onClick={addOption} detail={false}>
-                  <IonIcon icon={ICON_HINZUFUEGEN} slot="start" style={{ color: 'var(--app-color-chat)' }} />
-                  <IonLabel style={{ color: 'var(--app-color-chat)' }}>Option hinzufügen</IonLabel>
+                  <IonIcon icon={ICON_HINZUFUEGEN} slot="start" style={{ color: 'var(--app-text-chat)' }} />
+                  <IonLabel style={{ color: 'var(--app-text-chat)' }}>Option hinzufügen</IonLabel>
                 </IonItem>
               )}
             </IonItemGroup>
@@ -240,13 +242,13 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
                     {exclusiveOptions ? 'Bei exklusiven Optionen nicht möglich' : 'Mehrere Antworten erlauben'}
                   </p>
                 </IonLabel>
-                <IonToggle
+                <IonToggle aria-label="Mehrfachauswahl"
                   slot="end"
                   className="app-toggle--chat"
                   checked={multipleChoice}
                   disabled={exclusiveOptions}
                   onIonChange={(e) => setMultipleChoice(e.detail.checked)}
-                  aria-label="Mehrfachauswahl"
+                 
                 />
               </IonItem>
 
@@ -257,12 +259,12 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
                     Sichtbar machen, wer welche Antwort gewählt hat
                   </p>
                 </IonLabel>
-                <IonToggle
+                <IonToggle aria-label="Namen anzeigen"
                   slot="end"
                   className="app-toggle--chat"
                   checked={!anonymous}
                   onIonChange={(e) => setAnonymous(!e.detail.checked)}
-                  aria-label="Namen anzeigen"
+                 
                 />
               </IonItem>
 
@@ -273,7 +275,7 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
                     Jede Option kann nur von einer Person gewählt werden
                   </p>
                 </IonLabel>
-                <IonToggle
+                <IonToggle aria-label="Exklusive Optionen"
                   slot="end"
                   className="app-toggle--chat"
                   checked={exclusiveOptions}
@@ -281,7 +283,7 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
                     setExclusiveOptions(e.detail.checked);
                     if (e.detail.checked) setMultipleChoice(false);
                   }}
-                  aria-label="Exklusive Optionen"
+                 
                 />
               </IonItem>
 
@@ -292,23 +294,24 @@ const PollModal: React.FC<PollModalProps> = ({ onClose, onSuccess, roomId, dismi
                     Umfrage automatisch schließen
                   </p>
                 </IonLabel>
-                <IonToggle
+                <IonToggle aria-label="Ablaufdatum"
                   slot="end"
                   className="app-toggle--chat"
                   checked={hasExpiration}
                   onIonChange={(e) => setHasExpiration(e.detail.checked)}
-                  aria-label="Ablaufdatum"
+                 
                 />
               </IonItem>
 
               {hasExpiration && (
                 <IonItem>
-                  <IonIcon icon={ICON_UHRZEIT} slot="start" style={{ color: 'var(--app-color-chat)' }} />
+                  <IonIcon icon={ICON_UHRZEIT} slot="start" style={{ color: 'var(--app-text-chat)' }} />
                   <IonSelect
+                    label="Ablaufzeit"
                     value={expirationHours}
                     onIonChange={(e) => setExpirationHours(e.detail.value)}
                     interface="popover"
-                    label="Ablaufzeit"
+                    interfaceOptions={{ arrow: false }}
                     labelPlacement="start"
                   >
                     <IonSelectOption value={1}>1 Stunde</IonSelectOption>

@@ -1,15 +1,12 @@
-import { ICON_HINZUFUEGEN_GEFUELLT, ICON_LOESCHEN_GEFUELLT, ICON_POKAL_GEFUELLT, ICON_ZURUECK } from '../../shared/icons';
+import { ICON_HINZUFUEGEN_GEFUELLT, ICON_LOESCHEN_GEFUELLT, ICON_POKAL_GEFUELLT } from '../../shared/icons';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useRef } from 'react';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
   IonItem,
   IonButton,
-  IonButtons,
   IonIcon,
   IonItemSliding,
   IonItemOptions,
@@ -126,28 +123,19 @@ const AdminLevelsPage: React.FC = () => {
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonButtons slot="start">
-            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-              <IonIcon icon={ICON_ZURUECK} />
-            </IonButton>
-          </IonButtons>
-          <IonTitle>Level</IonTitle>
-          <IonButtons slot="end">
-            <IonButton aria-label="Neues Level anlegen" onClick={handleAdd}>
-              <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
-            </IonButton>
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile
+        titel="Level"
+        onZurueck={() => window.history.back()}
+        gemeindeUmschalter={false}
+        rechts={(
+          <IonButton aria-label="Neues Level anlegen" onClick={handleAdd}>
+            <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
+          </IonButton>
+        )}
+      />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Level</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Level" />
 
         <IonRefresher slot="fixed" onIonRefresh={handleRefresh} onIonPull={triggerPullHaptic}>
           <IonRefresherContent refreshingSpinner="crescent" />
@@ -176,7 +164,7 @@ const AdminLevelsPage: React.FC = () => {
               emptyIcon={ICON_POKAL_GEFUELLT}
               emptyTitle="Keine Level gefunden"
               emptyMessage="Noch keine Level angelegt"
-              emptyIconColor="var(--app-color-konfis)"
+              emptyIconColor="var(--app-color-level)"
             >
                       {(levels || []).map((level, index) => (
                         <IonItemSliding

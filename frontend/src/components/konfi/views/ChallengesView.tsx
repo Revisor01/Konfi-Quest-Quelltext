@@ -20,8 +20,11 @@ import {
 } from '../../shared/icons';
 import { EmptyState, SectionHeader } from '../../shared';
 import ChallengeStempelSektion from '../../shared/ChallengeStempelSektion';
+import ZaehlerKugel from '../../shared/ZaehlerKugel';
 import type { KonfiChallenge, ChallengeMark, OffenerStempel } from '../../../types/challenges';
 import { getIconFromString } from '../../../utils/badgeIcons';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { datumKurz } from '../../../utils/dateUtils';
 
 /**
  * Loest den gespeicherten Icon-Namen einer Challenge auf (Rueckfall: Flagge).
@@ -43,6 +46,13 @@ interface ChallengesViewProps {
   /** Noch nicht erhaltene Stempel (grau). Fehlt bei aelteren Servern. */
   offeneStempel?: OffenerStempel[];
   onSelectChallenge: (challenge: KonfiChallenge) => void;
+  /**
+   * Neuigkeiten je Challenge-ID (BadgeContext.challengeUpdatesByChallenge):
+   * rote Zahl am Symbol des Eintrags, wie der Ungelesen-Zaehler in der
+   * Chat-Liste. Nur laufende Challenges tragen eine -- der Server zaehlt
+   * fuer das Archiv nichts.
+   */
+  neuigkeiten?: Record<number, number>;
   // Zusaetzlicher Inhalt DIREKT UNTER dem SectionHeader (Leitungs-Sicht:
   // Verwalten|Mitmachen). Gleiches Muster wie EventsView/RequestsView.
   headerSlot?: React.ReactNode;
@@ -78,7 +88,7 @@ const formatDate = (value?: string | null): string => {
   if (!value) return '';
   const d = new Date(value);
   if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return datumKurz(d);
 };
 
 const formatDateRange = (startValue?: string | null, endValue?: string | null): string => {
@@ -89,10 +99,7 @@ const formatDateRange = (startValue?: string | null, endValue?: string | null): 
   if (isNaN(start.getTime()) || !endDate || isNaN(endDate.getTime())) return end;
 
   const sameYear = start.getFullYear() === endDate.getFullYear();
-  const startFormatted = start.toLocaleDateString(
-    'de-DE',
-    sameYear ? { day: '2-digit', month: '2-digit' } : { day: '2-digit', month: '2-digit', year: 'numeric' }
-  );
+  const startFormatted = datumKurz(start, { ohneJahr: sameYear });
   return `${startFormatted} – ${end}`;
 };
 
@@ -102,6 +109,7 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
   marks,
   offeneStempel = [],
   onSelectChallenge,
+  neuigkeiten = {},
   headerSlot
 }) => {
   // Aktive Challenges: die knappste Frist zuerst — was zuerst endet, steht oben.
@@ -185,8 +193,9 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
                   Listen-Item wie bei Events/Badges — keine Leitkarte mehr. */}
               {sortedActive.map((challenge) => {
                 const author = getAuthorLabel(challenge);
+                const neu = neuigkeiten[challenge.id] ?? 0;
                 return (
-                  <div
+                  <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                     key={challenge.id}
                     className="app-list-item app-list-item--challenges"
                     onClick={() => onSelectChallenge(challenge)}
@@ -198,6 +207,8 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
                           className="app-corner-badge app-corner-badge--queue"
                           style={{ backgroundColor: 'var(--app-color-challenges)' }}
                           title="Du hast bereits eingereicht"
+                          role="img"
+                          aria-label="Du hast bereits eingereicht"
                         >
                           <IonIcon icon={ICON_SENDEN} />
                         </div>
@@ -205,8 +216,14 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
                     )}
                     <div className="app-list-item__row">
                       <div className="app-list-item__main">
-                        <div className="app-icon-circle app-icon-circle--challenges">
-                          <IonIcon icon={getChallengeBadgeIcon(challenge.badge_icon)} />
+                        {/* Symbol mit Neuigkeiten-Kugel -- wie das Raum-Symbol
+                            in der Chat-Liste (ChatOverview); Lage siehe
+                            .app-zaehler-anker in variables.css. */}
+                        <div className="app-zaehler-anker">
+                          <div className="app-icon-circle app-icon-circle--challenges">
+                            <IonIcon icon={getChallengeBadgeIcon(challenge.badge_icon)} />
+                          </div>
+                          <ZaehlerKugel anzahl={neu} label="Neuigkeiten" />
                         </div>
                         <div className="app-list-item__content">
                           <div className="app-list-item__title" style={{ paddingRight: challenge.has_submission ? 'var(--app-freiraum-aktion-xs)' : '0' }}>
@@ -277,7 +294,7 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
                   // und tappbar, aber sichtbar von "erledigt" unterschieden.
                   const participated = !!challenge.has_submission;
                   return (
-                    <div
+                    <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                       key={challenge.id}
                       className="app-list-item app-list-item--challenges"
                       onClick={() => onSelectChallenge(challenge)}
@@ -289,6 +306,8 @@ const ChallengesView: React.FC<ChallengesViewProps> = ({
                             className="app-corner-badge app-corner-badge--queue"
                             style={{ backgroundColor: 'var(--app-color-challenges)' }}
                             title="Du hast bereits eingereicht"
+                            role="img"
+                            aria-label="Du hast bereits eingereicht"
                           >
                             <IonIcon icon={ICON_SENDEN} />
                           </div>

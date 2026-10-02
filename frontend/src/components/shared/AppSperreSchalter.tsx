@@ -11,6 +11,7 @@ import {
   sperreOeffnen
 } from '../../services/appSperre';
 import { biometrieVerfuegbar } from '../../services/biometrics';
+import { tastaturKlick } from '../../utils/tastatur';
 
 // Farbvariante der jeweiligen Rolle — dasselbe Muster wie BiometrieSchalter,
 // damit sich der Eintrag in die "Konto-Einstellungen" aller drei Ansichten
@@ -141,7 +142,7 @@ const AppSperreSchalter: React.FC<Props> = ({ variante }) => {
       : `${VERZOEGERUNG_BEZEICHNUNG[wert]} im Hintergrund`;
 
   return (
-    <div
+    <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-disabled={speichert}
       className={`app-list-item app-list-item--${variante}`}
       style={{ width: '100%', cursor: 'pointer' }}
       onClick={speichert ? undefined : oeffnen}

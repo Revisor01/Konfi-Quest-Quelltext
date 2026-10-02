@@ -25,7 +25,7 @@ function spruchFuer(total: number): { auge: string; slogan: string[]; nachsatz: 
     return {
       auge: 'Deine Punkte',
       slogan: ['Da kommt', 'was', 'zusammen.'],
-      nachsatz: 'Jeder Punkt steht für einen Termin, an dem du da warst.'
+      nachsatz: 'Jeder Punkt steht für ein Event, bei dem du da warst.'
     };
   }
   // 3) Auf dem Weg

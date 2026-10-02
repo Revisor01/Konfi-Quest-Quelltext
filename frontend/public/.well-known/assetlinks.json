@@ -5,7 +5,8 @@
       "namespace": "android_app",
       "package_name": "de.godsapp.konfiquest",
       "sha256_cert_fingerprints": [
-        "PASTE_YOUR_SHA256_FINGERPRINT_HERE"
+        "F5:A2:14:F9:54:5F:5B:08:A9:7E:F0:02:53:DB:69:D5:DD:EC:AF:E4:B4:8B:9E:8C:3F:11:8C:9A:AB:99:A0:30",
+        "BF:6B:0B:6C:A8:81:DB:0B:C9:70:7A:F9:E7:9B:19:69:B6:58:88:A0:1C:B4:E4:7D:47:1B:98:3F:D5:E4:1C:A4"
       ]
     }
   }

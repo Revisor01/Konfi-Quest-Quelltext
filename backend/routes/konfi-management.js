@@ -5,20 +5,29 @@ const { handleValidationErrors, commonValidations, getPointField } = require('..
 const { checkPointTypeEnabled } = require('../utils/pointTypeGuard');
 const { generateBiblicalPassword } = require('../utils/passwordUtils');
 const { generateUniqueUsername } = require('../utils/usernameGenerator');
-const { deleteKonfiCascade } = require('../utils/konfiDeletion');
+const { benutzernameSperrenUndPruefen } = require('../utils/benutzernameSperre');
+const { kontoDatenLoeschen, kontoDateienLoeschen, meldeNachKontoLoeschung } = require('../utils/kontoLoeschen');
+const { invalidateUserCache } = require('../middleware/rbac');
 const { deletePhotoFile } = require('../utils/photoStorage');
 const { checkKonfiLimit, nextTier } = require('../utils/konfiLimit');
 const { syncJahrgangChat } = require('../utils/jahrgangChat');
 const { removeFromEventChat, addToEventChat } = require('../utils/eventChat');
+const { syncTeamChat } = require('../utils/teamChat');
+const chatSyncCache = require('../utils/chatSyncCache');
 const { getKonfiBadgeProgress } = require('../utils/konfiBadgeProgress');
 // Ein Ort fuer "darf dieser Aufrufer in diesem Jahrgang?" — org_admin und
 // super_admin sind ausgenommen, admin und teamer brauchen die Zuweisung.
 // Hier immer mit { edit: true }: Anlegen und Verschieben sind Schreibwege.
 const { darfJahrgang, darfKonfi } = require('../utils/jahrgangsZugriff');
+const { istMitgliedDerOrganisation, ladeRolleInGemeinde } = require('../utils/orgMitglieder');
 const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
 const { rueckeNach } = require('../utils/bookingUtils');
 const { meldeNachrueckern } = require('../utils/nachrueckMeldung');
+const { loescheMitteilungenZuAntraegen } = require('../utils/postfachAufraeumen');
+const { nachAntwort } = require('../utils/nachAntwort');
+const { meldePasswortGeaendert } = require('../utils/passwortGeaendertMail');
+const { kontoSperreAufheben } = require('../utils/kontoSperre');
 const router = express.Router();
 
 // Konfis: Teamer darf ansehen, Admin darf bearbeiten
@@ -103,23 +112,46 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
         }
     });
 
+    const mitgliederSql = `
+        SELECT u.id, r.name AS role_name
+          FROM users u
+          JOIN roles r ON r.id = u.role_id
+         WHERE u.organization_id = $1
+           AND r.name = ANY($2::text[])
+           AND u.deleted_at IS NULL
+        UNION
+        SELECT u.id, r.name AS role_name
+          FROM user_organizations uo
+          JOIN users u ON u.id = uo.user_id
+          JOIN roles r ON r.id = uo.role_id
+         WHERE uo.organization_id = $1
+           AND u.organization_id IS DISTINCT FROM $1
+           AND r.name = ANY($2::text[])
+           AND u.deleted_at IS NULL`;
+
     // GET all teamers for the admin's organization
     router.get('/teamer', rbacVerifier, requireTeamer, async (req, res) => {
         try {
             const query = `
+                WITH mitglieder AS (${mitgliederSql})
                 SELECT u.id, u.display_name as name, u.username, u.teamer_since,
                        STRING_AGG(DISTINCT j.name, ', ' ORDER BY j.name) as jahrgang_name,
+                       -- ADDITIV: die IDs zu den Namen. Die
+                       -- Teilnehmerauswahl am Termin bietet nur Personen aus
+                       -- den Jahrgaengen des Termins an und braucht dafuer
+                       -- die IDs statt der zusammengefuegten Namen.
+                       ARRAY_REMOVE(ARRAY_AGG(DISTINCT j.id), NULL)::int[] as jahrgang_ids,
                        COALESCE(badge_counts.badge_count, 0)::int as badge_count,
                        COALESCE(cert_counts.cert_count, 0)::int as cert_count
-                FROM users u
-                JOIN roles r ON u.role_id = r.id
+                FROM mitglieder m
+                JOIN users u ON u.id = m.id
                 LEFT JOIN user_jahrgang_assignments uja ON u.id = uja.user_id
-                LEFT JOIN jahrgaenge j ON uja.jahrgang_id = j.id
+                LEFT JOIN jahrgaenge j ON uja.jahrgang_id = j.id AND j.organization_id = $1
                 LEFT JOIN (
                     SELECT ub.user_id, COUNT(*) as badge_count
                     FROM user_badges ub
                     JOIN custom_badges cb ON ub.badge_id = cb.id
-                    WHERE cb.target_role = 'teamer'
+                    WHERE cb.target_role = 'teamer' AND cb.organization_id = $1
                     GROUP BY ub.user_id
                 ) badge_counts ON u.id = badge_counts.user_id
                 LEFT JOIN (
@@ -128,12 +160,11 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                     WHERE organization_id = $1
                     GROUP BY user_id
                 ) cert_counts ON u.id = cert_counts.user_id
-                WHERE r.name = 'teamer' AND u.organization_id = $1
                 GROUP BY u.id, u.display_name, u.username, u.teamer_since,
                          badge_counts.badge_count, cert_counts.cert_count
                 ORDER BY u.display_name
             `;
-            const { rows } = await db.query(query, [req.user.organization_id]);
+            const { rows } = await db.query(query, [req.user.organization_id, ['teamer']]);
             res.json(rows);
         } catch (err) {
             console.error('Database error in GET /konfis/teamer:', err);
@@ -158,15 +189,25 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
     // ausser dem username, wie bei /teamer.
     router.get('/leitung', rbacVerifier, requireTeamer, async (req, res) => {
         try {
+            // role_name ist die Rolle in DIESER Gemeinde, die
+            // Jahrgaenge nur die dieser Gemeinde -- siehe mitgliederSql oben.
             const { rows } = await db.query(
-                `SELECT u.id, u.display_name as name, u.username, r.name as role_name
-                   FROM users u
-                   JOIN roles r ON u.role_id = r.id
-                  WHERE r.name IN ('admin', 'org_admin')
-                    AND u.organization_id = $1
-                    AND u.deleted_at IS NULL
+                `WITH mitglieder AS (${mitgliederSql})
+                 SELECT u.id, u.display_name as name, u.username, m.role_name,
+                        -- ADDITIV: Jahrgaenge und Vollzugriffs-Flag,
+                        -- damit die Teilnehmerauswahl am Termin nur Leitung
+                        -- aus den Jahrgaengen des Termins anbietet. org_admin
+                        -- und super_admin sind davon ausgenommen — das Flag
+                        -- steht deshalb mit dabei.
+                        u.is_super_admin,
+                        ARRAY_REMOVE(ARRAY_AGG(DISTINCT j.id), NULL)::int[] as jahrgang_ids
+                   FROM mitglieder m
+                   JOIN users u ON u.id = m.id
+                   LEFT JOIN user_jahrgang_assignments uja ON uja.user_id = u.id
+                   LEFT JOIN jahrgaenge j ON j.id = uja.jahrgang_id AND j.organization_id = $1
+                  GROUP BY u.id, u.display_name, u.username, m.role_name, u.is_super_admin
                   ORDER BY u.display_name`,
-                [req.user.organization_id]
+                [req.user.organization_id, ['admin', 'org_admin']]
             );
             res.json(rows);
         } catch (err) {
@@ -192,9 +233,10 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
         try {
             await client.query('BEGIN');
 
-            // Global freien Username generieren (Kollision -> anna.musterfrau2 usw.),
-            // sonst knallt der UNIQUE-Index (organization_id, username) mit 500.
-            const username = await generateUniqueUsername(client, name);
+            let username = await generateUniqueUsername(client, name);
+            while (await benutzernameSperrenUndPruefen(client, username)) {
+                username = await generateUniqueUsername(client, name);
+            }
 
             // First verify that the jahrgang exists
             const jahrgangCheckQuery = "SELECT id FROM jahrgaenge WHERE id = $1 AND organization_id = $2";
@@ -202,7 +244,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
 
             if (!jahrgangExists) {
                 await client.query('ROLLBACK');
-                return res.status(400).json({ error: 'Jahrgang nicht gefunden oder gehört nicht zu Ihrer Organisation' });
+                return res.status(400).json({ error: 'Jahrgang nicht gefunden oder gehört nicht zu Ihrer Gemeinde' });
             }
 
             if (!darfJahrgang(req, jahrgang_id, { edit: true })) {
@@ -256,37 +298,43 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                 VALUES ($1, $2, $3, 0, 0)`;
             await client.query(profileQuery, [userId, jahrgang_id, req.user.organization_id]);
 
+            // Ein vorher durchprobierter Benutzername startet frei (Sperre je
+            // Konto nach Fehlversuchen, utils/kontoSperre.js).
+            await kontoSperreAufheben(client, userId);
+
             // Jahrgangs-Chat synchronisieren: legt den Chat bei Bedarf an und
             // fuegt den neuen Konfi (sowie weiterhin alle Soll-Mitglieder) hinzu.
             await syncJahrgangChat(client, jahrgang_id, req.user.organization_id, req.user.id);
 
-            await client.query('COMMIT');
-
-            // Auto-Enrollment für zukünftige Pflicht-Events
-            try {
-              const enrollFutureEventsQuery = `
-                INSERT INTO event_bookings (event_id, user_id, status, booking_date, organization_id)
-                SELECT e.id, $1, 'confirmed', NOW(), $2
-                FROM events e
-                JOIN event_jahrgang_assignments eja ON e.id = eja.event_id
-                WHERE eja.jahrgang_id = $3
-                  AND e.mandatory = true
-                  AND e.event_date > NOW()
-                  AND e.organization_id = $2
-                  AND e.cancelled IS NOT TRUE
-                ON CONFLICT (user_id, event_id) DO NOTHING
-                RETURNING event_id
-              `;
-              const { rows: gebucht } = await db.query(enrollFutureEventsQuery, [userId, req.user.organization_id, jahrgang_id]);
-              // Auch in die Chats der Pflichttermine eintreten (falls die
-              // Leitung dort einen angelegt hat) — sonst fehlt der neue Konfi
-              // in Chats, in denen sein ganzer Jahrgang sitzt.
-              for (const row of gebucht) {
-                await addToEventChat(db, row.event_id, userId, req.user.organization_id);
-              }
-            } catch (enrollErr) {
-              console.error('Auto-enrollment für Pflicht-Events fehlgeschlagen:', enrollErr);
+            // Einschreibung in die kuenftigen Pflicht-Events des Jahrgangs --
+            // INNERHALB der Transaktion,
+            // wie beim Jahrgangswechsel (PUT unten).
+            // Bis dahin lief sie nach dem COMMIT auf dem Pool, Fehler nur ins
+            // Log: Scheiterte sie, gab es die Konfi in keinem Pflicht-Event,
+            // und die Leitung bekam trotzdem 201 samt Passwort. Jetzt ganz
+            // oder gar nicht; ein Fehler endet im catch unten (ROLLBACK, 500).
+            const enrollFutureEventsQuery = `
+              INSERT INTO event_bookings (event_id, user_id, status, booking_date, organization_id)
+              SELECT e.id, $1, 'confirmed', NOW(), $2
+              FROM events e
+              JOIN event_jahrgang_assignments eja ON e.id = eja.event_id
+              WHERE eja.jahrgang_id = $3
+                AND e.mandatory = true
+                AND e.event_date > NOW()
+                AND e.organization_id = $2
+                AND e.cancelled IS NOT TRUE
+              ON CONFLICT (user_id, event_id) DO NOTHING
+              RETURNING event_id
+            `;
+            const { rows: gebucht } = await client.query(enrollFutureEventsQuery, [userId, req.user.organization_id, jahrgang_id]);
+            // Auch in die Chats der Pflichttermine eintreten (falls die
+            // Leitung dort einen angelegt hat) — sonst fehlt der neue Konfi
+            // in Chats, in denen sein ganzer Jahrgang sitzt.
+            for (const row of gebucht) {
+              await addToEventChat(client, row.event_id, userId, req.user.organization_id);
             }
+
+            await client.query('COMMIT');
 
             res.status(201).json({ id: userId, username, temporaryPassword: password, message: 'Konfi erfolgreich erstellt' });
 
@@ -343,7 +391,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
             );
             if (!zielJahrgang) {
                 await client.query('ROLLBACK');
-                return res.status(400).json({ error: 'Jahrgang nicht gefunden oder gehört nicht zu Ihrer Organisation' });
+                return res.status(400).json({ error: 'Jahrgang nicht gefunden oder gehört nicht zu Ihrer Gemeinde' });
             }
 
             if (currentProfile && currentProfile.jahrgang_id
@@ -434,7 +482,8 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                 const { rows: gebucht } = await client.query(enrollFutureEventsQuery, [req.params.id, req.user.organization_id, jahrgang_id]);
                 // In die Chats der neu gebuchten Pflichttermine eintreten —
                 // dieselbe Regel wie beim Nachbuchen eines Jahrgangs am Event
-                // (events.js: syncEventChat). Existiert kein Chat, passiert
+                // (utils/eventChat.js: syncEventChat, gerufen aus
+                // routes/events/verwaltung.js). Existiert kein Chat, passiert
                 // nichts (Anlage bleibt Sache der Leitung).
                 for (const row of gebucht) {
                   await addToEventChat(client, row.event_id, parseInt(req.params.id, 10), req.user.organization_id);
@@ -460,10 +509,10 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
         }
     });
 
-    // DELETE a konfi
     router.delete('/:id', rbacVerifier, requireAdmin, validateParamId, async (req, res) => {
         const userId = req.params.id;
         const client = await db.getClient();
+        let ergebnis = null;
         try {
             await client.query('BEGIN');
 
@@ -484,26 +533,36 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                 return res.status(403).json({ error: 'Kein Zugriff auf diesen Konfi' });
             }
 
-            const nachgerueckteLoeschung = await deleteKonfiCascade(client, userId, req.user.organization_id);
+            ergebnis = await kontoDatenLoeschen(client, userId);
 
             await client.query('COMMIT');
-            res.json({ message: 'Konfi erfolgreich gelöscht' });
-
-            await meldeNachrueckern(db, req.user.organization_id, nachgerueckteLoeschung);
-
-            // Live-Update NACH der Response: geloeschter Konfi aus der Admin-Liste entfernen.
-            liveUpdate.sendToOrgAdmins(req.user.organization_id, 'konfis', 'delete', { konfiId: userId });
-            // Socket trennen: sonst empfaengt das geloeschte Konto weiter
-            // Org-Updates, bis die App neu gestartet wird.
-            liveUpdate.disconnectUserSockets(userId);
-
         } catch (err) {
             await client.query('ROLLBACK').catch(rbErr => console.error('Rollback failed:', rbErr));
  console.error('Database error in DELETE /konfis/:id:', err);
-            res.status(500).json({ error: 'Datenbankfehler' });
+            return res.status(500).json({ error: 'Datenbankfehler' });
         } finally {
             client.release();
         }
+
+        // Nach dem COMMIT: erst die Dateien, dann die Antwort. Ein Fehler
+        // dabei kippt die festgeschriebene Loeschung nicht (wirft nie).
+        await kontoDateienLoeschen(ergebnis?.dateien);
+        res.json({ message: 'Konfi erfolgreich gelöscht' });
+
+        // Rechte-Cache leeren: Sonst
+        // bediente die laufende Sitzung des geloeschten Kontos die API
+        // noch bis zu 30 Sekunden weiter (TTL in rbac.js).
+        invalidateUserCache(parseInt(userId));
+        // Socket trennen: sonst empfaengt das geloeschte Konto weiter
+        // Org-Updates, bis die App neu gestartet wird.
+        liveUpdate.disconnectUserSockets(userId);
+
+        nachAntwort(req, async () => {
+            await meldeNachKontoLoeschung(db, ergebnis);
+
+            // Live-Update NACH der Response: geloeschter Konfi aus der Admin-Liste entfernen.
+            liveUpdate.sendToOrgAdmins(req.user.organization_id, 'konfis', 'delete', { konfiId: userId });
+        }, 'DELETE /admin/konfis/:id (Meldungen nach Kontoloeschung)');
     });
 
     // Regenerate password for a konfi
@@ -574,11 +633,20 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
             // weiter Push-Nachrichten samt Chat-Inhalten.
             await client.query('DELETE FROM push_tokens WHERE user_id = $1', [req.params.id]);
 
-            const updateProfileQuery = "UPDATE konfi_profiles SET password_plain = NULL WHERE user_id = $1";
-            await client.query(updateProfileQuery, [req.params.id]);
+
+            // Neues Passwort: Eine Sperre nach Fehlversuchen endet damit
+            // -- der Weg, den die Leitung geht,
+            // wenn ein Kind ausgesperrt ist.
+            await kontoSperreAufheben(client, req.params.id);
 
             await client.query('COMMIT');
             res.json({ message: 'Passwort erfolgreich neu generiert', temporaryPassword: newPassword });
+
+            // Bestaetigung an die hinterlegte Adresse, falls es eine gibt
+            // Das Einmalpasswort steht
+            // NICHT darin -- die Leitung gibt es persoenlich weiter.
+            nachAntwort(req, () => meldePasswortGeaendert(db, parseInt(req.params.id, 10), { durchLeitung: true }),
+                'POST /admin/konfis/:id/regenerate-password (Mail)');
 
         } catch (err) {
             await client.query('ROLLBACK').catch(rbErr => console.error('Rollback failed:', rbErr));
@@ -602,10 +670,19 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                        j.gottesdienst_enabled, j.gemeinde_enabled,
                        j.target_gottesdienst, j.target_gemeinde,
                        ce.event_date as confirmation_date, ce.location as confirmation_location,
-                       r.name as role_name
+                       -- Rolle in DIESER Gemeinde: zuhause die am
+                       -- Konto, sonst die aus user_organizations. Siehe unten.
+                       CASE WHEN u.organization_id = $2 THEN r.name ELSE uo_r.name END as role_name
                 FROM users u
                 JOIN roles r ON u.role_id = r.id
-                LEFT JOIN konfi_profiles kp ON u.id = kp.user_id
+                LEFT JOIN user_organizations uo
+                  ON uo.user_id = u.id AND uo.organization_id = $2
+                 AND u.organization_id IS DISTINCT FROM $2
+                LEFT JOIN roles uo_r ON uo_r.id = uo.role_id
+                -- Das Konfi-Profil nur aus der Stamm-Gemeinde: Eine per
+                -- Einladung hier mitarbeitende Teamer:in bringt sonst Punkte
+                -- und Jahrgang ihrer Konfi-Zeit aus der anderen Gemeinde mit.
+                LEFT JOIN konfi_profiles kp ON u.id = kp.user_id AND u.organization_id = $2
                 LEFT JOIN jahrgaenge j ON kp.jahrgang_id = j.id
                 LEFT JOIN (
                   -- Konfirmationstermin/-ort PRO KONFI: das is_konfirmation-Event, zu dem
@@ -619,7 +696,14 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                     AND e.organization_id = $2
                     AND (e.cancelled IS NULL OR e.cancelled = false)
                 ) ce ON ce.user_id = u.id
-                WHERE u.id = $1 AND r.name IN ('konfi', 'teamer') AND u.organization_id = $2 AND u.deleted_at IS NULL
+                -- Mitglied DIESER Gemeinde: Konfis und Team der
+                -- Stamm-Gemeinde wie bisher, dazu Teamer:innen, die per
+                -- Einladung hier sind. Seit sie in der Team-Liste stehen
+                -- (GET /teamer ueber beide Quellen), fuehrte ihr Eintrag hier
+                -- sonst auf 404. Konfis gibt es nur in der Stamm-Gemeinde.
+                WHERE u.id = $1 AND u.deleted_at IS NULL
+                  AND ((u.organization_id = $2 AND r.name IN ('konfi', 'teamer'))
+                       OR uo_r.name = 'teamer')
             `;
             const { rows: [konfi] } = await db.query(konfiQuery, [konfiId, req.user.organization_id]);
 
@@ -639,8 +723,12 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                 }
             }
 
+            // points = der bei der Vergabe gutgeschriebene Wert (Migration 163),
+            // Bestand ohne Wert fällt auf den Wert der Aktivität zurück. Steht
+            // BEWUSST hinter ka.* — pg nimmt bei gleichem Feldnamen die letzte
+            // Spalte. Feldname und Typ bleiben, die Store-Apps lesen `points`.
             const activitiesQuery = `
-                SELECT ka.*, a.name, a.points, a.type, a.target_role, u.display_name as admin_name
+                SELECT ka.*, a.name, COALESCE(ka.points, a.points) AS points, a.type, a.target_role, u.display_name as admin_name
                 FROM user_activities ka
                 JOIN activities a ON ka.activity_id = a.id
                 LEFT JOIN users u ON ka.admin_id = u.id
@@ -662,8 +750,11 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                 SELECT COUNT(*) as "badgeCount" FROM user_badges ub
                 JOIN custom_badges cb ON ub.badge_id = cb.id
                 WHERE ub.user_id = $1 AND cb.target_role = $2
+                  AND cb.organization_id = $3
             `;
-            const { rows: [badgeResult] } = await db.query(badgeQuery, [konfiId, konfi.role_name]);
+            // Nur Badges DIESER Gemeinde -- Badges bleiben an der
+            // Gemeinde, in der sie entstanden sind.
+            const { rows: [badgeResult] } = await db.query(badgeQuery, [konfiId, konfi.role_name, req.user.organization_id]);
 
             // Gezaehlt wird GENAU wie im eigenen Profil (challenges.js,
             // GET /challenges/konfi): nur EIGENE und FREIGEGEBENE Beitraege
@@ -753,8 +844,9 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
             if (konfi.role_name === 'teamer' && konfi.gottesdienst_points !== null) {
                 // Activities aus der Konfi-Zeit
                 const histActivities = `
-                    SELECT ka.id, a.name as title, a.points, a.type as category,
-                           ka.completed_date as date, 'activity' as source_type
+                    SELECT ka.id, a.name as title, COALESCE(ka.points, a.points) AS points, a.type as category,
+                           ka.completed_date as date, 'activity' as source_type,
+                           NULL::timestamptz as event_date
                     FROM user_activities ka
                     JOIN activities a ON ka.activity_id = a.id
                     WHERE ka.user_id = $1 AND ka.organization_id = $2
@@ -764,7 +856,8 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
 
                 const histBonus = `
                     SELECT id, description as title, points, type as category,
-                           completed_date as date, 'bonus' as source_type
+                           completed_date as date, 'bonus' as source_type,
+                           NULL::timestamptz as event_date
                     FROM bonus_points
                     WHERE konfi_id = $1 AND organization_id = $2
                     ORDER BY completed_date DESC
@@ -773,7 +866,8 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
 
                 const histEvents = `
                     SELECT ep.id, e.name as title, ep.points, ep.point_type as category,
-                           ep.awarded_date as date, 'event' as source_type
+                           ep.awarded_date as date, 'event' as source_type,
+                           e.event_date
                     FROM event_points ep
                     JOIN events e ON ep.event_id = e.id
                     WHERE ep.konfi_id = $1 AND ep.organization_id = $2
@@ -891,23 +985,27 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
         const konfiId = req.params.id;
 
         try {
-            // Org-Zugehoerigkeit + Konfi-Rolle prüfen (Badge-Progress ist
-            // konfi-spezifisch; Teamer haben eigene Badges über teamer.js).
-            const { rows: [konfi] } = await db.query(
-                `SELECT u.id FROM users u
-                 JOIN roles r ON u.role_id = r.id
-                 WHERE u.id = $1 AND r.name = 'konfi' AND u.organization_id = $2 AND u.deleted_at IS NULL`,
-                [konfiId, req.user.organization_id]
-            );
+            // Konfi IN DIESER GEMEINDE (Badge-Progress ist konfi-spezifisch;
+            // Teamer haben eigene Badges über teamer.js). BEIDE QUELLEN
+            // die Rolle in dieser Gemeinde -- users.role_id
+            // zuhause, user_organizations.role_id in einer weiteren
+            // (ladeRolleInGemeinde, prueft auch deleted_at) -- und das Profil
+            // hier (darfKonfi). Vorher `u.organization_id = aktive Gemeinde`
+            // mit der Rolle am Konto: Eine Konfi, die ueber
+            // user_organizations hier Konfi ist, bekam 404, waehrend
+            // /:id/event-points (nur darfKonfi) fuer sie antwortete.
+            const rolleHier = await ladeRolleInGemeinde(db, konfiId, req.user.organization_id);
+            const zugriff = rolleHier === 'konfi'
+                ? await darfKonfi(db, req, konfiId)
+                : { gefunden: false, erlaubt: false };
 
-            if (!konfi) {
+            if (!zugriff.gefunden) {
                 return res.status(404).json({ error: 'Konfi nicht gefunden' });
             }
 
             // Jahrgangs-Bindung: Abzeichen samt Fortschritt sind
             // Konfi-Daten — sichtbar nur, wer den Jahrgang sehen darf (view),
             // wie die Detailansicht GET /:id. org_admin bleibt ausgenommen.
-            const zugriff = await darfKonfi(db, req, konfiId);
             if (!zugriff.erlaubt) {
                 return res.status(403).json({ error: 'Kein Zugriff auf diesen Konfi' });
             }
@@ -925,25 +1023,24 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
         const konfiId = req.params.id;
 
         try {
-            // Jahrgang des Konfis ermitteln
-            const jahrgangResult = await db.query(
-                'SELECT jahrgang_id FROM konfi_profiles WHERE user_id = $1',
-                [konfiId]
-            );
-
-            if (jahrgangResult.rows.length === 0) {
-                return res.status(404).json({ error: 'Konfi nicht gefunden' });
-            }
-
             // Jahrgangs-Bindung: Die Anwesenheitsstatistik listet
             // verpasste Pflichttermine samt Entschuldigungsgruenden — Konfi-
             // Daten, die nur sehen darf, wer den Jahrgang sehen darf (view).
+            //
+            // Konfi einer anderen Gemeinde -> 404.
+            // Vorher las die Route konfi_profiles ohne Gemeinde:
+            // Eine fremde Kennung ergab 403 statt 404 und verriet damit, dass
+            // es sie gibt. darfKonfi sucht nur in der aktiven Gemeinde und
+            // liefert den Jahrgang gleich mit (wie GET /:id/event-points).
             const zugriff = await darfKonfi(db, req, konfiId);
+            if (!zugriff.gefunden) {
+                return res.status(404).json({ error: 'Konfi nicht gefunden' });
+            }
             if (!zugriff.erlaubt) {
                 return res.status(403).json({ error: 'Kein Zugriff auf diesen Konfi' });
             }
 
-            const jahrgangId = jahrgangResult.rows[0].jahrgang_id;
+            const jahrgangId = zugriff.jahrgangId;
 
             if (!jahrgangId) {
                 return res.json({ total_mandatory: 0, attended: 0, percentage: 100, missed_events: [] });
@@ -1043,9 +1140,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
 
             // Badge-Check NACH COMMIT (verwendet db Pool)
             try {
-                const newBadges = await checkAndAwardBadges(db, req.params.id);
-                if (newBadges > 0) {
-                }
+                await checkAndAwardBadges(db, req.params.id, { organizationId: req.user.organization_id });
             } catch (badgeErr) {
  console.error('Error checking badges after bonus points:', badgeErr);
                 // Don't fail the request if badge checking fails
@@ -1118,7 +1213,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
 
             // Badge-Check NACH COMMIT (verwendet db Pool)
             try {
-                await checkAndAwardBadges(db, req.params.id);
+                await checkAndAwardBadges(db, req.params.id, { organizationId: req.user.organization_id });
             } catch (badgeErr) {
  console.error('Error checking badges after bonus points removal:', badgeErr);
                 // Don't fail the request if badge checking fails
@@ -1154,6 +1249,21 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
 
             const isTeamerActivity = activity.target_role === 'teamer';
 
+            if (isTeamerActivity) {
+                // GEMEINDEGRENZE AUCH FUER TEAMER-AKTIVITAETEN.
+                // Der Konfi-Zweig unten prueft
+                // die Zielperson ueber darfKonfi; dieser Zweig pruefte sie gar
+                // nicht (keine Punkte, kein Jahrgang). Eine Leitung der
+                // Gemeinde A haengte so einer Teamer:in der Gemeinde B eine
+                // Zuordnung an und loeste deren Abzeichenlauf aus. Jetzt wie
+                // assign-activity (activities.js) -> 404, aber ueber BEIDE
+                // Quellen der Zugehoerigkeit: Wer ueber user_organizations in
+                // dieser Gemeinde mitarbeitet, bekommt die Aktivitaet weiter.
+                if (!(await istMitgliedDerOrganisation(db, req.params.id, req.user.organization_id))) {
+                    return res.status(404).json({ error: 'Person nicht gefunden' });
+                }
+            }
+
             if (!isTeamerActivity) {
                 // Jahrgangs-Bindung: dieselbe Pruefung wie
                 // assign-activity (activities.js) und bonus-points — vergeben
@@ -1177,10 +1287,12 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
             try {
                 await client.query('BEGIN');
 
+                // points: Wert der Aktivität zum Zeitpunkt der Vergabe, am Beleg
+                // festgehalten.
                 const query = `
-                    INSERT INTO user_activities (user_id, activity_id, completed_date, comment, admin_id, organization_id, created_at)
-                    VALUES ($1, $2, $3, $4, $5, $6, NOW())`;
-                await client.query(query, [req.params.id, activity_id, completed_date, comment || '', req.user.id, req.user.organization_id]);
+                    INSERT INTO user_activities (user_id, activity_id, completed_date, comment, admin_id, organization_id, created_at, points)
+                    VALUES ($1, $2, $3, $4, $5, $6, NOW(), $7)`;
+                await client.query(query, [req.params.id, activity_id, completed_date, comment || '', req.user.id, req.user.organization_id, activity.points]);
 
                 if (!isTeamerActivity && activity.points && activity.type) {
                     const updateField = getPointField(activity.type);
@@ -1205,9 +1317,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
 
             // Badge-Check NACH COMMIT (verwendet db Pool)
             try {
-                const newBadges = await checkAndAwardBadges(db, req.params.id);
-                if (newBadges > 0) {
-                }
+                await checkAndAwardBadges(db, req.params.id, { organizationId: req.user.organization_id });
             } catch (badgeErr) {
  console.error('Error checking badges after activity:', badgeErr);
                 // Don't fail the request if badge checking fails
@@ -1236,8 +1346,12 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
             // org-gescopt und traf dann 0 Zeilen — das UPDATE auf konfi_profiles
             // lief aber trotzdem und zog dem fremden Konfi Punkte ab
             // 
+            // points = was bei der Vergabe gutgeschrieben wurde (Migration 163),
+            // nicht der aktuelle Wert der Aktivität — sonst zieht das Löschen
+            // nach einer Änderung des Punktwerts zu viel oder zu wenig ab
+            // Bestand ohne Wert: a.points wie vorher.
             const getActivityQuery = `
-                SELECT ka.*, a.points, a.type, a.target_role
+                SELECT ka.*, COALESCE(ka.points, a.points) AS points, a.type, a.target_role
                 FROM user_activities ka
                 JOIN activities a ON ka.activity_id = a.id
                 JOIN users u ON ka.user_id = u.id
@@ -1294,7 +1408,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
 
             // Badge-Check NACH COMMIT (verwendet db Pool)
             try {
-                await checkAndAwardBadges(db, req.params.id);
+                await checkAndAwardBadges(db, req.params.id, { organizationId: req.user.organization_id });
             } catch (badgeErr) {
  console.error('Error checking badges after activity removal:', badgeErr);
                 // Don't fail the request if badge checking fails
@@ -1340,6 +1454,11 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
             res.status(500).json({ error: 'Datenbankfehler' });
         }
     });
+
+    // Dauerhafte Kopie der Konfi-Zeit (utils/konfiHistorie.js, Migration 170).
+    // Hier und nicht oben bei den Importen: Die Datei teilen sich zwei
+    // Arbeitsstraenge, die Befoerderung ist die einzige Nutzerin.
+    const { legeKonfiHistorieAn } = require('../utils/konfiHistorie');
 
     // POST promote konfi to teamer
     router.post('/:id/promote-teamer', rbacVerifier, requireAdmin, validateParamId, async (req, res) => {
@@ -1395,8 +1514,17 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                 return res.status(500).json({ error: 'Teamer-Rolle nicht gefunden' });
             }
 
+            await legeKonfiHistorieAn(client, konfiId, req.user.organization_id, {
+                anlass: 'befoerderung',
+                erstelltVon: req.user.id
+            });
+
             // 3. Rolle ändern + teamer_since setzen
             await client.query('UPDATE users SET role_id = $1, teamer_since = CURRENT_DATE WHERE id = $2', [teamerRole.id, konfiId]);
+            await client.query(
+                'UPDATE user_organizations SET role_id = $1 WHERE user_id = $2 AND organization_id = $3',
+                [teamerRole.id, konfiId, req.user.organization_id]
+            );
 
             // 4. Event-Buchungen löschen.
             //
@@ -1410,6 +1538,12 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                 "SELECT event_id, timeslot_id FROM event_bookings WHERE user_id = $1 AND status = 'confirmed'",
                 [konfiId]
             );
+            // Alle Termine mit einer Buchung, gleich welcher Status -- ihre
+            // Termin-Chats verlaesst die Person in Schritt 9b.
+            const { rows: gebuchteTermine } = await client.query(
+                'SELECT DISTINCT event_id FROM event_bookings WHERE user_id = $1',
+                [konfiId]
+            );
             await client.query('DELETE FROM event_bookings WHERE user_id = $1', [konfiId]);
             for (const platz of freiwerdend) {
                 const [promoted] = await rueckeNach(client, {
@@ -1420,11 +1554,17 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
                 if (promoted) nachgerueckteBefoerderung.push({ eventId: platz.event_id, userId: promoted });
             }
 
-            const { rows: pendingFotos } = await client.query(
-                "SELECT photo_filename FROM activity_requests WHERE user_id = $1 AND status = 'pending' AND photo_filename IS NOT NULL",
+            const { rows: offeneAntraege } = await client.query(
+                "SELECT id, photo_filename FROM activity_requests WHERE user_id = $1 AND status = 'pending'",
                 [konfiId]
             );
+            const pendingFotos = offeneAntraege.filter(a => a.photo_filename);
             await client.query("DELETE FROM activity_requests WHERE user_id = $1 AND status = 'pending'", [konfiId]);
+            // Postfach: Die Mitteilungen zu den geloeschten
+            // offenen Antraegen gehen mit -- "Neuer Antrag eingegangen" bei
+            // der Leitung und "Antrag eingereicht" bei der befoerderten
+            // Person (utils/postfachAufraeumen.js).
+            await loescheMitteilungenZuAntraegen(client, offeneAntraege.map(a => a.id));
 
             // 6. KEINE automatische Jahrgangs-Zuweisung mehr.
             //
@@ -1434,16 +1574,6 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
             // Konfis ihres alten Jahrgangs (die eigene Peergroup) samt
             // Punkten, Antraegen und Anwesenheiten und durfte dort sogar
             // bearbeiten — ohne dass irgendjemand das entschieden haette.
-            //
-            // Folgen, bewusst in Kauf genommen:
-            //  - Ohne Zuweisung faellt die Person beim naechsten
-            //    syncJahrgangChat aus dem Chat ihres alten Jahrgangs (Schritt 9
-            //    haelt sie nur bis dahin drin). Konsistent: Wer die Jahrgangs-
-            //    Daten nicht sieht, sitzt auch nicht im Jahrgangs-Chat.
-            //  - Die EIGENEN eingefrorenen Konfi-Daten (Punkte, Abzeichen,
-            //    Historie, Wrapped) haengen an konfi_profiles/user_id, nicht
-            //    an der Zuweisung — /teamer/profile und /teamer/konfi-history
-            //    zeigen sie unveraendert.
 
             // 7. konfi_profiles BLEIBT bestehen
             // 8. user_badges BLEIBEN bestehen
@@ -1451,8 +1581,22 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
             await client.query("UPDATE chat_participants SET user_type = 'teamer' WHERE user_id = $1 AND user_type = 'konfi'", [konfiId]);
             await client.query("UPDATE chat_read_status SET user_type = 'teamer' WHERE user_id = $1 AND user_type = 'konfi'", [konfiId]);
 
+            const { rows: [altesProfil] } = await client.query(
+                'SELECT jahrgang_id FROM konfi_profiles WHERE user_id = $1',
+                [konfiId]
+            );
+            if (altesProfil?.jahrgang_id) {
+                await syncJahrgangChat(client, altesProfil.jahrgang_id, req.user.organization_id, req.user.id);
+            }
+            for (const { event_id: eventId } of gebuchteTermine) {
+                await removeFromEventChat(client, eventId, konfiId, req.user.organization_id);
+            }
+            await syncTeamChat(client, req.user.organization_id, req.user.id);
+
 
             await client.query('COMMIT');
+            // Der naechste GET /chat/rooms gleicht mit der neuen Rolle ab.
+            chatSyncCache.invalidate(req.user.organization_id, konfiId);
 
             // Nachweisfotos der geloeschten Anträge vom Dateisystem entfernen
             // (nach dem COMMIT, fehlertolerant — eine fehlende Datei darf die

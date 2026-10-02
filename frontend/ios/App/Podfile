@@ -12,8 +12,9 @@ def capacitor_pods
   pod 'Capacitor', :path => '../../node_modules/@capacitor/ios'
   pod 'CapacitorCordova', :path => '../../node_modules/@capacitor/ios'
   pod 'CapacitorCommunityFileOpener', :path => '../../node_modules/@capacitor-community/file-opener'
+  pod 'CapacitorFirebaseCrashlytics', :path => '../../node_modules/@capacitor-firebase/crashlytics'
+  pod 'CapacitorFirebaseMessaging', :path => '../../node_modules/@capacitor-firebase/messaging'
   pod 'CapacitorApp', :path => '../../node_modules/@capacitor/app'
-  pod 'CapacitorCamera', :path => '../../node_modules/@capacitor/camera'
   pod 'CapacitorDevice', :path => '../../node_modules/@capacitor/device'
   pod 'CapacitorFileViewer', :path => '../../node_modules/@capacitor/file-viewer'
   pod 'CapacitorFilesystem', :path => '../../node_modules/@capacitor/filesystem'
@@ -35,6 +36,12 @@ target 'App' do
   pod 'FirebaseCore'
   pod 'FirebaseMessaging'
   pod 'FirebaseInstallations'
+  # Absturzdiagnose. Steht hier neben den uebrigen
+  # Firebase-Pods, damit alle vier dieselbe SDK-Fassung ziehen -- CocoaPods
+  # loest das ueber FirebaseCore auf. Der CapacitorFirebaseCrashlytics-Pod
+  # oben braucht ihn ohnehin; die Zeile hier macht die Abhaengigkeit
+  # sichtbar und haelt sie an die anderen gekoppelt.
+  pod 'FirebaseCrashlytics'
 end
 
 post_install do |installer|

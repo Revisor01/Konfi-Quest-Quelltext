@@ -16,13 +16,14 @@ const { body, param } = require('express-validator');
 const { handleValidationErrors } = require('../../middleware/validation');
 const PushService = require('../../services/pushService');
 const liveUpdate = require('../../utils/liveUpdate');
-const { isRegistrationOpenForKonfis, zaehleBuchungen, rueckeNach, freiePlaetze, meldeAlleAbBeiAbsage, hebeAbsageAbmeldungenAuf, ABSAGE_OHNE_GRUND } = require('../../utils/bookingUtils');
+const { isRegistrationOpenForKonfis, zaehleBuchungen, rueckeNach, freiePlaetze, meldeAlleAbBeiAbsage, hebeAbsageAbmeldungenAuf, ABSAGE_OHNE_GRUND, ladeBetroffeneEinesAusfalls } = require('../../utils/bookingUtils');
 const { allIdsBelongToOrg } = require('../../utils/orgOwnership');
 const { syncEventChat } = require('../../utils/eventChat');
 const { nachAntwort } = require('../../utils/nachAntwort');
-const { validateTeamerQuota, pruefeAnmeldeschluss } = require('./validierung');
+const { validateTeamerQuota, pruefeAnmeldeschluss, pruefeEndeNachBeginn } = require('./validierung');
 const { formatDatum } = require('../../utils/zeitformat');
 const { darfTermin, darfJahrgang } = require('../../utils/jahrgangsZugriff');
+const { loescheTermin, entferneChatDateien } = require('../../utils/terminLoeschen');
 
 module.exports = (db, rbacVerifier, { requireAdmin }) => {
   const router = express.Router();
@@ -37,7 +38,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
     body('bring_items').optional({ nullable: true }).isString().withMessage('bring_items muss ein String sein'),
     // 0 = unbegrenzt, darum min: 0 und NICHT notEmpty (das wuerde die 0 verwerfen).
     body('max_participants').optional({ nullable: true }).isInt({ min: 0 })
-      .withMessage('Maximale Teilnehmerzahl muss 0 (unbegrenzt) oder groesser sein'),
+      .withMessage('Maximale Teilnehmerzahl muss 0 (unbegrenzt) oder größer sein'),
     handleValidationErrors
   ];
 
@@ -48,7 +49,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
     body('is_konfirmation').optional().isBoolean().withMessage('is_konfirmation muss ein Boolean sein'),
     body('bring_items').optional({ nullable: true }).isString().withMessage('bring_items muss ein String sein'),
     body('max_participants').optional({ nullable: true }).isInt({ min: 0 })
-      .withMessage('Maximale Teilnehmerzahl muss 0 (unbegrenzt) oder groesser sein'),
+      .withMessage('Maximale Teilnehmerzahl muss 0 (unbegrenzt) oder größer sein'),
     handleValidationErrors
   ];
 
@@ -67,6 +68,24 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
       mandatory, is_konfirmation, bring_items, checkin_window, teamer_needed, teamer_only,
       teamer_max_participants, teamer_waitlist_enabled, teamer_max_waitlist_size
     } = req.body;
+
+    // PFLICHTTERMIN BRAUCHT EINEN JAHRGANG.
+    //
+    // Unbemerkt blieb es, weil ein Termin OHNE Jahrgang fuer ALLE Konfis
+    // sichtbar ist (lesen.js: "Allgemeine Events sind fuer alle sichtbar").
+    // Vier meldeten sich selbst an, waehrend die Automatik schwieg; der
+    // Termin sah aus wie jeder andere.
+    //
+    // Beide Regeln sind fuer sich richtig. Ihre Kombination ist die Falle --
+    // ein Pflichttermin ohne Jahrgang ist ein Widerspruch: "alle muessen"
+    // ohne "wer". Freiwillige Termine duerfen weiterhin ohne Jahrgang
+    // bestehen, das ist der gewollte Fall "ganze Gemeinde".
+    if (mandatory && (!Array.isArray(jahrgang_ids) || jahrgang_ids.length === 0)) {
+      return res.status(400).json({
+        error: 'Ein Pflicht-Event braucht mindestens einen Jahrgang — sonst wird niemand automatisch angemeldet.',
+        error_code: 'pflicht_ohne_jahrgang'
+      });
+    }
 
     // Teamer-Felder validieren: gegenseitiger Ausschluss
     if (teamer_needed && teamer_only) {
@@ -87,6 +106,13 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
     const schlussFehler = pruefeAnmeldeschluss(registration_closes_at, event_date);
     if (schlussFehler) {
       return res.status(400).json({ error: schlussFehler });
+    }
+
+    // Das Ende darf nicht vor dem Beginn liegen (Begruendung bei
+    // pruefeEndeNachBeginn in validierung.js).
+    const endeFehler = pruefeEndeNachBeginn(event_date, event_end_time);
+    if (endeFehler) {
+      return res.status(400).json(endeFehler);
     }
 
     // max_participants ist die KONFI-Teilnehmerzahl. Bei Pflicht-Events (ganzer
@@ -117,10 +143,10 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
     // Org-Isolation: fremde jahrgang_ids/category_ids abweisen (Cross-Org-Referenzen)
     try {
       if (!(await allIdsBelongToOrg(db, 'jahrgaenge', jahrgang_ids, req.user.organization_id))) {
-        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Organisation' });
+        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Gemeinde' });
       }
       if (!(await allIdsBelongToOrg(db, 'categories', category_ids, req.user.organization_id))) {
-        return res.status(400).json({ error: 'Mindestens eine Kategorie gehört nicht zu deiner Organisation' });
+        return res.status(400).json({ error: 'Mindestens eine Kategorie gehört nicht zu deiner Gemeinde' });
       }
 
       // Jahrgangs-Bindung: Ein Termin darf nur in eigenen
@@ -169,6 +195,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
     // sichtbar, ohne Teilnehmer, und der Client legte ihn nach dem 500er
     // vermutlich noch einmal an.
     const client = await db.getClient();
+    let eventId = null;
     try {
       await client.query('BEGIN');
 
@@ -198,7 +225,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
         req.user.id, req.user.organization_id
       ]);
       
-      const eventId = newEvent.id;
+      eventId = newEvent.id;
 
       // Sequentiell statt Promise.all: Auf einem einzelnen Client gibt es
       // keine echte Parallelitaet, und das alte Promise.all checkte pro
@@ -253,51 +280,50 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
       }
 
       await client.query('COMMIT');
-
-      res.status(201).json({ id: eventId, message: 'Event erfolgreich erstellt' });
-
-      // Live Update: Notify all konfis and admins about the new event
-      liveUpdate.sendToOrg(req.user.organization_id, 'events', 'create', { eventId });
-
-      // Push Notification
-      try {
-        if (mandatory && jahrgang_ids && jahrgang_ids.length > 0) {
-          // Push nur an tatsaechlich enrollte Konfis (jahrgangs-spezifisch)
-          const { rows: enrolledUsers } = await db.query(`
-            SELECT u.id FROM users u
-            JOIN konfi_profiles kp ON u.id = kp.user_id
-            JOIN roles r ON u.role_id = r.id
-            WHERE kp.jahrgang_id = ANY($1::int[])
-              AND u.organization_id = $2
-              AND r.name = 'konfi'
-              AND u.deleted_at IS NULL
-          `, [jahrgang_ids, req.user.organization_id]);
-
-          if (enrolledUsers.length > 0) {
-            const userIds = enrolledUsers.map(u => u.id);
-            await PushService.sendMandatoryEventCreated(db, userIds, name, event_date, eventId, req.user.organization_id);
-          }
-        }
-        // Freiwillige Events: KEIN direkter "Anmeldung möglich"-Push hier.
-        // Das Flag registration_open_notified bleibt false (Default) -> der Cron
-        // (backgroundService, atomar, alle 1 Min) sendet GENAU EINEN Push, sobald
-        // das Event anmeldbar ist. Verhindert Doppel-Pushes (POST + Cron).
-      } catch (pushErr) {
-        console.error('Push notification failed for new event:', pushErr);
-      }
-
     } catch (err) {
-      // Rollback ist ein No-op, wenn der Fehler NACH dem COMMIT auftrat
-      // (Push, LiveUpdate) — dann ist die Transaktion bereits abgeschlossen.
       await client.query('ROLLBACK').catch(() => {});
- console.error('Database error in POST /events:', err);
+      console.error('Database error in POST /events:', err);
       // '23505' is the PostgreSQL code for unique_violation
       if (err.code === '23505') {
         return res.status(409).json({ error: 'Ein ähnliches Event existiert möglicherweise bereits.' });
       }
-      res.status(500).json({ error: 'Datenbankfehler' });
+      return res.status(500).json({ error: 'Datenbankfehler' });
     } finally {
       client.release();
+    }
+
+    res.status(201).json({ id: eventId, message: 'Event erfolgreich erstellt' });
+
+    // Live Update: Notify all konfis and admins about the new event
+    try {
+      liveUpdate.sendToOrg(req.user.organization_id, 'events', 'create', { eventId });
+    } catch (liveErr) {
+      console.error('Live-Update nach POST /events fehlgeschlagen:', liveErr);
+    }
+
+    // Push Notification
+    // Freiwillige Events: KEIN direkter "Anmeldung möglich"-Push hier.
+    // Das Flag registration_open_notified bleibt false (Default) -> der Cron
+    // (backgroundService, atomar, alle 1 Min) sendet GENAU EINEN Push, sobald
+    // das Event anmeldbar ist. Verhindert Doppel-Pushes (POST + Cron).
+    if (mandatory && jahrgang_ids && jahrgang_ids.length > 0) {
+      nachAntwort(req, async () => {
+        // Push nur an tatsaechlich enrollte Konfis (jahrgangs-spezifisch)
+        const { rows: enrolledUsers } = await db.query(`
+          SELECT u.id FROM users u
+          JOIN konfi_profiles kp ON u.id = kp.user_id
+          JOIN roles r ON u.role_id = r.id
+          WHERE kp.jahrgang_id = ANY($1::int[])
+            AND u.organization_id = $2
+            AND r.name = 'konfi'
+            AND u.deleted_at IS NULL
+        `, [jahrgang_ids, req.user.organization_id]);
+
+        if (enrolledUsers.length > 0) {
+          const userIds = enrolledUsers.map(u => u.id);
+          await PushService.sendMandatoryEventCreated(db, userIds, name, event_date, eventId, req.user.organization_id);
+        }
+      }, 'Push nach POST /events');
     }
   });
   
@@ -312,6 +338,24 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
       mandatory, is_konfirmation, bring_items, checkin_window, teamer_needed, teamer_only,
       teamer_max_participants, teamer_waitlist_enabled, teamer_max_waitlist_size
     } = req.body;
+
+    // PFLICHTTERMIN BRAUCHT EINEN JAHRGANG.
+    //
+    // Unbemerkt blieb es, weil ein Termin OHNE Jahrgang fuer ALLE Konfis
+    // sichtbar ist (lesen.js: "Allgemeine Events sind fuer alle sichtbar").
+    // Vier meldeten sich selbst an, waehrend die Automatik schwieg; der
+    // Termin sah aus wie jeder andere.
+    //
+    // Beide Regeln sind fuer sich richtig. Ihre Kombination ist die Falle --
+    // ein Pflichttermin ohne Jahrgang ist ein Widerspruch: "alle muessen"
+    // ohne "wer". Freiwillige Termine duerfen weiterhin ohne Jahrgang
+    // bestehen, das ist der gewollte Fall "ganze Gemeinde".
+    if (mandatory && (!Array.isArray(jahrgang_ids) || jahrgang_ids.length === 0)) {
+      return res.status(400).json({
+        error: 'Ein Pflicht-Event braucht mindestens einen Jahrgang — sonst wird niemand automatisch angemeldet.',
+        error_code: 'pflicht_ohne_jahrgang'
+      });
+    }
 
     // Teamer-Felder validieren: gegenseitiger Ausschluss
     if (teamer_needed && teamer_only) {
@@ -335,6 +379,12 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
       return res.status(400).json({ error: schlussFehlerUpdate });
     }
 
+    // Wie beim Anlegen: das Ende nicht vor den Beginn.
+    const endeFehlerUpdate = pruefeEndeNachBeginn(event_date, event_end_time);
+    if (endeFehlerUpdate) {
+      return res.status(400).json(endeFehlerUpdate);
+    }
+
     // Guards für Pflicht-Events
     // Pflicht- UND Konfirmations-Events geben keine Punkte (serverseitig erzwungen).
     const effectivePoints = (mandatory || is_konfirmation) ? 0 : points;
@@ -342,10 +392,10 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
     // Org-Isolation: fremde jahrgang_ids/category_ids abweisen (Cross-Org-Referenzen)
     try {
       if (!(await allIdsBelongToOrg(db, 'jahrgaenge', jahrgang_ids, req.user.organization_id))) {
-        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Organisation' });
+        return res.status(400).json({ error: 'Mindestens ein Jahrgang gehört nicht zu deiner Gemeinde' });
       }
       if (!(await allIdsBelongToOrg(db, 'categories', category_ids, req.user.organization_id))) {
-        return res.status(400).json({ error: 'Mindestens eine Kategorie gehört nicht zu deiner Organisation' });
+        return res.status(400).json({ error: 'Mindestens eine Kategorie gehört nicht zu deiner Gemeinde' });
       }
     } catch (err) {
       console.error('Org-Ownership-Check fehlgeschlagen:', err);
@@ -353,6 +403,12 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
     }
     // Reine Teamer-Events haben keine Konfi-Plaetze -> 0 (= unbegrenzt/irrelevant)
     const effectiveMaxParticipants = (mandatory || teamer_only) ? 0 : max_participants;
+    // Konfi-Plaetze ausdruecklich unbegrenzt (0, auch bei Pflicht-Events) --
+    // dann ruecken unten alle wartenden Konfis nach. Nicht bei
+    // reinen Teamer-Events: Dort gibt es keine Konfi-Plaetze.
+    const konfiUnbegrenzt = !teamer_only
+      && effectiveMaxParticipants !== undefined && effectiveMaxParticipants !== null
+      && effectiveMaxParticipants !== '' && Number(effectiveMaxParticipants) === 0;
     const effectiveWaitlist = mandatory ? false : (waitlist_enabled !== undefined ? waitlist_enabled : true);
     // Timeslots bei Pflicht-Events UND Konfirmationen nicht erlaubt (siehe POST).
     // Wird ein Event nachträglich zu mandatory/is_konfirmation, fällt es unten in
@@ -387,7 +443,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
 
       if (!zugriff.erlaubt) {
         await client.query('ROLLBACK');
-        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf diesen Termin' } };
+        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf dieses Event' } };
       } else if (!zielJahrgangErlaubt) {
         await client.query('ROLLBACK');
         fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf diesen Jahrgang' } };
@@ -547,11 +603,21 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
             promotedUsers.push(...nachgerueckt);
           }
         }
-      } else if (max_participants > 0) {
-        // Bei normalen Events: Gesamtkapazität prüfen (Teamer zählen nicht mit)
-        const frei = await freiePlaetze(client, { eventId: id, seite: 'konfi' }, max_participants);
-        if (frei > 0) {
-          const nachgerueckt = await rueckeNach(client, { eventId: id, seite: 'konfi', anzahl: frei });
+      } else if (konfiUnbegrenzt || max_participants > 0) {
+        // Bei normalen Events: Gesamtkapazität prüfen (Teamer zählen nicht mit).
+        //
+        // 0 = UNBEGRENZT -> ALLE Wartenden ruecken nach.
+        // Hier stand nur `max_participants > 0`; die 0
+        // fiel durch, niemand rueckte nach, waehrend jede neue Anmeldung
+        // sofort bestaetigt wurde -- wer frueh wartete, sah spaeter
+        // Angemeldete vor sich. Jetzt dieselbe Regel wie beim
+        // Team-Kontingent darunter: Ohne Obergrenze ist die Zahl der Wartenden
+        // die natuerliche Grenze (freiePlaetze liefert dann null).
+        const frei = await freiePlaetze(client, { eventId: id, seite: 'konfi' }, konfiUnbegrenzt ? 0 : max_participants);
+        const { waitlist: wartende } = await zaehleBuchungen(client, { eventId: id }, 'konfi');
+        const obergrenze = frei === null ? wartende : Math.min(frei, wartende);
+        if (obergrenze > 0) {
+          const nachgerueckt = await rueckeNach(client, { eventId: id, seite: 'konfi', anzahl: obergrenze });
           promotedUsers.push(...nachgerueckt);
         }
       }
@@ -718,8 +784,9 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
     // Vor dem try: die Nacharbeit hinter dem finally braucht diese Werte.
     let event = null;
     let fruehAntwort = null;
-    let bookedKonfiUserIds = [];
+    let betroffeneUserIds = [];
     let awardedPoints = [];
+    let chatDateien = [];
     try {
       await client.query('BEGIN');
 
@@ -734,7 +801,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
         fruehAntwort = { status: 404, body: { error: 'Event nicht gefunden' } };
       } else if (!zugriff.erlaubt) {
         await client.query('ROLLBACK');
-        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf diesen Termin' } };
+        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf dieses Event' } };
       } else {
 
       const forceDelete = req.query.force === 'true';
@@ -767,90 +834,19 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
 
       if (!fruehAntwort) {
 
-      // Push an angemeldete Konfis wenn abgesagtes Event gelöscht wird
-      // IMMER einsammeln (nicht nur bei abgesagten Events): wer angemeldet war,
-      // muss erfahren, dass der Termin weg ist — egal ob vorher abgesagt oder
-      // direkt gelöscht.
-      const { rows: bookedKonfis } = await client.query(
-        `SELECT eb.user_id FROM event_bookings eb
-         JOIN users u ON eb.user_id = u.id
-         JOIN roles r ON u.role_id = r.id
-         WHERE eb.event_id = $1 AND r.name = 'konfi' AND eb.status IN ('confirmed', 'waitlist', 'excused') AND u.deleted_at IS NULL`,
-        [id]
-      );
-      bookedKonfiUserIds = bookedKonfis.map(b => b.user_id);
+      // Wer erfaehrt, dass der Termin weg ist: DIESELBEN wie bei einer
+      // Absage (utils/bookingUtils.js, ladeBetroffeneEinesAusfalls) --
+      // Konfis, Team und Leitung, bestaetigt, wartend oder einzeln
+      // abgemeldet ('excused', Migration 153). Vor dem Loeschen der
+      // Buchungen eingesammelt; gemeldet wird unten nur, wenn der Termin
+      // nicht schon abgesagt war.
+      betroffeneUserIds = await ladeBetroffeneEinesAusfalls(client, id);
 
-      // Get event chat rooms and their files before deletion
-      const { rows: eventChatRooms } = await client.query("SELECT id FROM chat_rooms WHERE event_id = $1", [id]);
-      const allFiles = [];
+      const ergebnis = await loescheTermin(client, id, { punkteZuruecknehmen: true });
+      awardedPoints = ergebnis.vergebenePunkte;
+      chatDateien = ergebnis.dateien;
 
-      for (const room of eventChatRooms) {
-        const { rows: roomFiles } = await client.query("SELECT file_path FROM chat_messages WHERE room_id = $1 AND file_path IS NOT NULL", [room.id]);
-        allFiles.push(...roomFiles);
-      }
-
-      // Proceed with deletions. Order matters due to foreign keys.
-      // 1. Delete chat data first
-      for (const room of eventChatRooms) {
-        // Delete poll votes first (polls are linked via message_id, not room_id)
-        await client.query(`
-          DELETE FROM chat_poll_votes WHERE poll_id IN (
-            SELECT cp.id FROM chat_polls cp
-            JOIN chat_messages cm ON cp.message_id = cm.id
-            WHERE cm.room_id = $1
-          )
-        `, [room.id]);
-
-        // Delete polls (via message_id)
-        await client.query(`
-          DELETE FROM chat_polls WHERE message_id IN (
-            SELECT id FROM chat_messages WHERE room_id = $1
-          )
-        `, [room.id]);
-        await client.query("DELETE FROM chat_read_status WHERE room_id = $1", [room.id]);
-        await client.query("DELETE FROM chat_messages WHERE room_id = $1", [room.id]);
-        await client.query("DELETE FROM chat_participants WHERE room_id = $1", [room.id]);
-      }
-      await client.query("DELETE FROM chat_rooms WHERE event_id = $1", [id]);
-
-      const { rows: vergebenePunkte } = await client.query(
-        "SELECT konfi_id, points, point_type FROM event_points WHERE event_id = $1",
-        [id]
-      );
-      awardedPoints = vergebenePunkte;
-      for (const pts of awardedPoints) {
-        const updateProfileQuery = pts.point_type === 'gottesdienst'
-          ? "UPDATE konfi_profiles SET gottesdienst_points = GREATEST(0, gottesdienst_points - $1) WHERE user_id = $2"
-          : "UPDATE konfi_profiles SET gemeinde_points = GREATEST(0, gemeinde_points - $1) WHERE user_id = $2";
-        await client.query(updateProfileQuery, [pts.points, pts.konfi_id]);
-      }
-      await client.query("DELETE FROM event_points WHERE event_id = $1", [id]);
-
-      // 3. Delete event-specific data
-      await client.query("DELETE FROM event_bookings WHERE event_id = $1", [id]);
-      await client.query("DELETE FROM event_timeslots WHERE event_id = $1", [id]);
-      await client.query("DELETE FROM event_categories WHERE event_id = $1", [id]);
-      await client.query("DELETE FROM event_jahrgang_assignments WHERE event_id = $1", [id]);
-
-      // 4. Clean up files from filesystem (best effort)
-      const fs = require('fs').promises;
-      const path = require('path');
-
-      for (const fileRecord of allFiles) {
-        try {
-          // Seit der Aufteilung liegt diese Datei eine Ebene tiefer
-          // (routes/events/ statt routes/), daher ZWEI '..' bis backend/.
-          const fullPath = path.join(__dirname, '..', '..', 'uploads', 'chat', fileRecord.file_path);
-          await fs.unlink(fullPath);
-        } catch (fileErr) {
- console.warn(`Could not delete file ${fileRecord.file_path}:`, fileErr.message);
-        }
-      }
-
-      // Finally, delete the event itself
-      const { rowCount } = await client.query("DELETE FROM events WHERE id = $1", [id]);
-
-      if (rowCount === 0) {
+      if (!ergebnis.geloescht) {
         await client.query('ROLLBACK');
         fruehAntwort = { status: 404, body: { error: 'Event nicht gefunden' } };
       } else {
@@ -870,6 +866,10 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
     if (fruehAntwort) {
       return res.status(fruehAntwort.status).json(fruehAntwort.body);
     }
+
+    // Chat-Anhaenge erst nach dem COMMIT vom Dateisystem nehmen: Ein
+    // ROLLBACK soll keine Dateien verlieren, deren Nachrichten noch stehen.
+    await entferneChatDateien(chatDateien);
 
     res.json({ message: 'Event erfolgreich gelöscht' });
 
@@ -891,9 +891,9 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
       // OHNE KENNUNG (letzter Parameter bleibt weg): Der Termin ist in
       // derselben Transaktion geloescht worden. Ein Sprung dorthin fuehrte
       // ins Leere — die Meldung bleibt auf der Terminliste.
-      if (bookedKonfiUserIds.length > 0 && !event.cancelled) {
+      if (betroffeneUserIds.length > 0 && !event.cancelled) {
         const eventDateFormatted = formatDatum(event.event_date);
-        try { await PushService.sendEventCancellationToKonfis(db, bookedKonfiUserIds, event.name, eventDateFormatted, req.user.organization_id); } catch (e) { console.error('Push notification failed:', e); }
+        try { await PushService.sendEventCancellationToKonfis(db, betroffeneUserIds, event.name, eventDateFormatted, req.user.organization_id); } catch (e) { console.error('Push notification failed:', e); }
       }
 
       // Live Update: Notify all konfis and admins about the event deletion
@@ -930,7 +930,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
         fruehAntwort = { status: 404, body: { error: 'Event nicht gefunden' } };
       } else if (!zugriff.erlaubt) {
         await client.query('ROLLBACK');
-        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf diesen Termin' } };
+        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf dieses Event' } };
       } else if (existingChat) {
         await client.query('ROLLBACK');
         fruehAntwort = { status: 409, body: { error: 'Chat existiert bereits für dieses Event' } };
@@ -992,7 +992,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
     // Vor dem try: Push, Antwort und Live-Update stehen hinter dem finally.
     let event = null;
     let fruehAntwort = null;
-    let participants = [];
+    let participantIds = [];
     try {
       await client.query('BEGIN');
 
@@ -1013,7 +1013,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
         fruehAntwort = { status: 400, body: { error: 'Event ist bereits abgesagt' } };
       } else if (!zugriff.erlaubt) {
         await client.query('ROLLBACK');
-        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf diesen Termin' } };
+        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf dieses Event' } };
       } else {
 
       // Mark event as cancelled
@@ -1035,13 +1035,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
       );
 
       // Get all participants to notify
-      const { rows: teilnehmende } = await client.query(`
-        SELECT DISTINCT eb.user_id, u.display_name, u.username
-        FROM event_bookings eb
-        JOIN users u ON eb.user_id = u.id
-        WHERE eb.event_id = $1 AND eb.status IN ('confirmed', 'waitlist', 'excused') AND u.deleted_at IS NULL
-      `, [eventId]);
-      participants = teilnehmende;
+      participantIds = await ladeBetroffeneEinesAusfalls(client, eventId);
 
       // IN DERSELBEN TRANSAKTION wie die Absage. Schlaegt das Abmelden fehl,
       // faellt auch das cancelled = TRUE zurueck -- ein halb abgesagter
@@ -1068,7 +1062,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
     }
 
     // Push und LiveUpdate NACH COMMIT und client.release()
-    const userIds = participants.map(p => p.user_id);
+    const userIds = participantIds;
     const eventDateFormatted = formatDatum(event.event_date);
     if (userIds.length > 0) {
       try { await PushService.sendEventCancellationToKonfis(db, userIds, event.name, eventDateFormatted, req.user.organization_id, grund, eventId); } catch (e) { console.error('Push notification failed:', e); }
@@ -1076,7 +1070,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
 
     res.json({
       message: `Event "${event.name}" wurde abgesagt`,
-      participants_notified: participants.length,
+      participants_notified: participantIds.length,
       notification_message,
       // Additiv: Alte Apps ignorieren das Feld, neue zeigen den Grund direkt
       // an, ohne den Termin nochmal zu laden.
@@ -1144,7 +1138,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
         fruehAntwort = { status: 400, body: { error: 'Event ist nicht abgesagt' } };
       } else if (!zugriff.erlaubt) {
         await client.query('ROLLBACK');
-        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf diesen Termin' } };
+        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf dieses Event' } };
       } else {
         // cancelled, cancelled_at, cancelled_by BLEIBEN UNANGETASTET
         // (Migration 152): Wer den Termin abgesagt hat, hat ihn abgesagt --
@@ -1297,7 +1291,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }) => {
         fruehAntwort = { status: 400, body: { error: 'Event ist nicht abgesagt' } };
       } else if (!zugriff.erlaubt) {
         await client.query('ROLLBACK');
-        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf diesen Termin' } };
+        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf dieses Event' } };
       } else {
         // Alle sechs Absage-Felder zurueck auf den Stand davor. Begruendung
         // ausfuehrlich im Kopf dieser Route.

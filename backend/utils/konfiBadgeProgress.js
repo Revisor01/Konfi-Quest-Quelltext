@@ -11,13 +11,14 @@
 // Wertung in badges.js (checkAndAwardBadges). Progress und Vergabe müssen
 // exakt gleich zählen, sonst zeigt die App 10/10 ohne dass der Badge kommt.
 
-const { computeCurrentStreak } = require('./streakCalculation');
+const { angezeigteSerie } = require('./streakCalculation');
 const { KONFI_BADGE_EVENT_CONDITION } = require('./badgeEventRule');
 const { berechneBadgeProgress, bedingungFehlt } = require('./badgeProgress');
 const { KONFI_KATEGORIE_NAMEN_SQL } = require('./badgeKategorieRegel');
+const { abfragenBuendeln } = require('./abfragenBuendeln');
 
 // Ermittelt Badges (earned + available + Fortschritt) für einen Konfi.
-// Erwartet: db (pg Pool), konfiId (users.id), organizationId.
+// Erwartet: db (Pool oder Client), konfiId (users.id), organizationId.
 // Gibt { available, earned, stats } zurück — dasselbe Shape wie GET /konfi/badges.
 async function getKonfiBadgeProgress(db, konfiId, organizationId) {
   // Der to_regclass-Legacy-Check auf custom_badges wurde entfernt:
@@ -64,36 +65,36 @@ async function getKonfiBadgeProgress(db, konfiId, organizationId) {
     categoryCountsRes,
     activityNameCountsRes,
     kategorieNamenRes
-  ] = await Promise.all([
-    db.query(query, [konfiId, organizationId]),
-    db.query(
+  ] = await abfragenBuendeln(db, [
+    () => db.query(query, [konfiId, organizationId]),
+    () => db.query(
       `SELECT kp.gottesdienst_points, kp.gemeinde_points, j.gottesdienst_enabled, j.gemeinde_enabled
        FROM konfi_profiles kp JOIN jahrgaenge j ON kp.jahrgang_id = j.id WHERE kp.user_id = $1`,
       [konfiId]
     ),
-    db.query(
+    () => db.query(
       'SELECT COUNT(*) as count FROM user_activities WHERE user_id = $1 AND organization_id = $2',
       [konfiId, organizationId]
     ),
-    db.query(
+    () => db.query(
       `SELECT COUNT(*) as count FROM event_bookings eb JOIN events e ON eb.event_id = e.id WHERE eb.user_id = $1 AND ${KONFI_BADGE_EVENT_CONDITION} AND eb.organization_id = $2`,
       [konfiId, organizationId]
     ),
-    db.query(
+    () => db.query(
       `SELECT COUNT(*) FROM event_bookings eb JOIN events e ON eb.event_id = e.id
          WHERE eb.user_id = $1 AND eb.attendance_status = 'present' AND e.mandatory = true AND eb.organization_id = $2`,
       [konfiId, organizationId]
     ),
-    db.query(
+    () => db.query(
       'SELECT COUNT(DISTINCT activity_id) as count FROM user_activities WHERE user_id = $1 AND organization_id = $2',
       [konfiId, organizationId]
     ),
-    db.query(
+    () => db.query(
       'SELECT COALESCE(SUM(points), 0) as total FROM bonus_points WHERE konfi_id = $1 AND organization_id = $2',
       [konfiId, organizationId]
     ),
-    db.query(datesQuery, [konfiId, organizationId]),
-    db.query(
+    () => db.query(datesQuery, [konfiId, organizationId]),
+    () => db.query(
       `SELECT name, COUNT(*) as count FROM (
          SELECT ka.id, c.name FROM user_activities ka
          JOIN activities a ON ka.activity_id = a.id
@@ -109,7 +110,7 @@ async function getKonfiBadgeProgress(db, konfiId, organizationId) {
        ) as combined GROUP BY name`,
       [konfiId, organizationId]
     ),
-    db.query(
+    () => db.query(
       `SELECT a.name, COUNT(*) as count FROM user_activities ua
        JOIN activities a ON ua.activity_id = a.id
        WHERE ua.user_id = $1 AND a.organization_id = $2
@@ -119,7 +120,7 @@ async function getKonfiBadgeProgress(db, konfiId, organizationId) {
     // category_combination: aus welchen Kategorien war der Konfi dabei.
     // Query-Text aus utils/badgeKategorieRegel.js -- byte-identisch zur
     // Wertung in routes/badges.js (Konfi-Zweig).
-    db.query(KONFI_KATEGORIE_NAMEN_SQL, [konfiId, organizationId])
+    () => db.query(KONFI_KATEGORIE_NAMEN_SQL, [konfiId, organizationId])
   ]);
 
   const badges = badgesRes.rows;
@@ -136,7 +137,7 @@ async function getKonfiBadgeProgress(db, konfiId, organizationId) {
   const uniqueActivityCount = parseInt(uniqueActivitiesRes.rows[0]?.count || 0);
   const bonusPointsTotal = parseInt(bonusPointsRes.rows[0]?.total || 0);
   const allDates = datesRes.rows.map(r => r.date);
-  const currentStreak = computeCurrentStreak(allDates);
+  const currentStreak = angezeigteSerie(allDates);
   // Map statt Plain Object: schuetzt vor Prototype-Keys als Kategorie-/Aktivitaetsnamen.
   const categoryCounts = new Map(categoryCountsRes.rows.map(r => [r.name, parseInt(r.count)]));
   const activityNameCounts = new Map(activityNameCountsRes.rows.map(r => [r.name, parseInt(r.count)]));

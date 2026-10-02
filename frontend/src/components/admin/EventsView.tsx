@@ -25,6 +25,9 @@ import { SectionHeader, ListSection, EventLegendModal, EventCornerBadges, Absage
 import { getStatusIcon } from '../shared/StatusBadge';
 import { Event } from '../../types/event';
 import { closeOpenSlidingItems } from '../../utils/slidingItems';
+import SegmentZahl from '../shared/SegmentZahl';
+import WeitereEintraege from '../shared/WeitereEintraege';
+import { useSchrittweiseListe } from '../../hooks/useSchrittweiseListe';
 
 interface EventsViewProps {
   events: Event[];
@@ -43,6 +46,7 @@ interface EventsViewProps {
     verbuchen: number;
     vergangen: number;
   };
+  wartendVerbuchen?: number;
   jahrgaenge?: Array<{id: number; name: string}>;
   selectedJahrgang?: number | null;
   onJahrgangChange?: (jahrgangId: number | null) => void;
@@ -67,6 +71,7 @@ const EventsView: React.FC<EventsViewProps> = ({
   activeTab = 'aktuell',
   onTabChange,
   eventCounts,
+  wartendVerbuchen = 0,
   jahrgaenge,
   selectedJahrgang,
   onJahrgangChange,
@@ -84,6 +89,11 @@ const EventsView: React.FC<EventsViewProps> = ({
 
   // Events werden bereits von der Page sortiert übergeben
   const filteredAndSortedEvents = events;
+  // Schrittweise rendern: bei 62 anstehenden Terminen bringt
+  // es gedrosselt kaum etwas (2,0 s vorher wie nachher), bei mehr waechst der
+  // Abstand; die Reiter-Zaehler oben rechnen weiter ueber alle.
+  const { sichtbar: sichtbareEvents, weitere: weitereEvents, mehrZeigen: mehrEvents } =
+    useSchrittweiseListe(filteredAndSortedEvents, `${activeTab}|${selectedJahrgang ?? ''}|${searchText ?? ''}`);
 
   const eventEndDate = eventEnde;
 
@@ -112,7 +122,7 @@ const EventsView: React.FC<EventsViewProps> = ({
     <>
       <SectionHeader
         title="Events"
-        subtitle="Termine und Veranstaltungen"
+        subtitle="Gottesdienste, Konfi-Tage und Fahrten"
         icon={ICON_TERMIN_GEFUELLT}
         preset="events"
         onInfo={() => presentLegend({ presentingElement: presentingElement || undefined })}
@@ -167,7 +177,7 @@ const EventsView: React.FC<EventsViewProps> = ({
               <IonLabel>Aktuell</IonLabel>
             </IonSegmentButton>
             <IonSegmentButton value="verbuchen">
-              <IonLabel>Verbuchen</IonLabel>
+              <IonLabel>Verbuchen<SegmentZahl anzahl={wartendVerbuchen} label={wartendVerbuchen === 1 ? 'Event wartet auf Verbuchung' : 'Events warten auf Verbuchung'} /></IonLabel>
             </IonSegmentButton>
             <IonSegmentButton value="vergangen">
               <IonLabel>Vergangen</IonLabel>
@@ -188,20 +198,21 @@ const EventsView: React.FC<EventsViewProps> = ({
           {onSearchChange && (
             <IonItem>
               <IonIcon icon={ICON_SUCHE_GEFUELLT} slot="start" className="app-icon-color--system" style={{ fontSize: 'var(--app-text-standard)' }} />
-              <IonInput
+              <IonInput aria-label="Events durchsuchen"
                 value={searchText}
                 onIonInput={(e) => onSearchChange(e.detail.value || '')}
-                placeholder="Event suchen..."
+                placeholder="Events durchsuchen..."
               />
             </IonItem>
           )}
           {jahrgaenge && jahrgaenge.length > 0 && onJahrgangChange && (
             <IonItem>
               <IonIcon icon={ICON_TERMIN} slot="start" className="app-icon-color--system" style={{ fontSize: 'var(--app-text-standard)' }} />
-              <IonSelect
+              <IonSelect aria-label="Jahrgang"
                 value={selectedJahrgang}
                 onIonChange={(e) => onJahrgangChange(e.detail.value || null)}
                 interface="popover"
+                interfaceOptions={{ arrow: false }}
                 placeholder="Jahrgang"
                 style={{ width: '100%' }}
               >
@@ -233,7 +244,7 @@ const EventsView: React.FC<EventsViewProps> = ({
         }
         emptyIconColor="var(--app-color-events)"
       >
-        {filteredAndSortedEvents.map((event, index) => {
+        {sichtbareEvents.map((event, index) => {
               const isPastEvent = istVergangen(event);
               // istAbgesagt() prueft BEIDE Felder: GET /events liefert
               // registration_status, GET /events/cancelled zusaetzlich
@@ -288,7 +299,7 @@ const EventsView: React.FC<EventsViewProps> = ({
               const statusIcon = getStatusIcon(statusText) || ICON_TERMIN_GEFUELLT;
 
               return (
-              <IonItemSliding key={event.id} style={{ marginBottom: index < filteredAndSortedEvents.length - 1 ? 'var(--app-abstand-eng)' : '0' }}>
+              <IonItemSliding key={event.id} style={{ marginBottom: index < sichtbareEvents.length - 1 ? 'var(--app-abstand-eng)' : '0' }}>
                 <IonItem
                   button
                   onClick={() => onSelectEvent(event)}
@@ -488,7 +499,7 @@ const EventsView: React.FC<EventsViewProps> = ({
                     {onKopieren && (
                       <IonItemOption
                         onClick={() => { closeOpenSlidingItems(); onKopieren(event); }}
-                        aria-label="Termin kopieren"
+                        aria-label="Event kopieren"
                         className="app-swipe-action"
                       >
                         <div className="app-icon-circle app-icon-circle--lg app-icon-circle--primary">
@@ -524,6 +535,7 @@ const EventsView: React.FC<EventsViewProps> = ({
               );
             })}
       </ListSection>
+      <WeitereEintraege weitere={weitereEvents} onMehr={mehrEvents} bezeichnung="Events" />
     </>
   );
 };

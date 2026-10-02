@@ -40,10 +40,15 @@ import {
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
 import { getStatusIcon } from '../../shared/StatusBadge';
+import { zeitraumText } from '../../shared/eventFormatting';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
+import { konfisInReihenfolge } from '../../../utils/teilnehmerReihenfolge';
 import { urheberZeile, notizUrheberZeile, checkinZeile } from '../../../utils/anwesenheitUrheber';
 import { teilnahmeDarstellung, listItemKlasse, iconKreisKlasse, eckBadgeKlasse } from '../../../utils/teilnahmeStatus';
 import type { Participant, Unregistration, EventMaterial } from '../../../types/event';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { datumKurz, datumUhrzeit } from '../../../utils/dateUtils';
+import { linkOeffnen } from '../../../services/systemDialoge';
 
 // ---- Shared Types (re-export from main file's interfaces) ----
 
@@ -128,7 +133,6 @@ export type { Participant, Unregistration } from '../../../types/event';
 interface EventInfoCardProps {
   eventData: EventData;
   participants: Participant[];
-  formatDate: (dateString: string) => string;
   formatTime: (dateString: string) => string;
   eventMaterials?: EventMaterial[];
   onMaterialHinweisClick?: () => void;
@@ -137,7 +141,6 @@ interface EventInfoCardProps {
 export const EventInfoCard = React.memo<EventInfoCardProps>(({
   eventData,
   participants,
-  formatDate,
   formatTime,
   eventMaterials,
   onMaterialHinweisClick
@@ -157,10 +160,7 @@ export const EventInfoCard = React.memo<EventInfoCardProps>(({
           <div>
             <div className="app-info-row__label">Datum</div>
             <div className="app-info-row__value">
-              {formatDate(eventData.event_date || '')}
-              {' · '}
-              {formatTime(eventData.event_date || '')}
-              {eventData.event_end_time && ` – ${formatTime(eventData.event_end_time)}`}
+              {zeitraumText({ event_date: eventData.event_date || '', event_end_time: eventData.event_end_time })}
             </div>
           </div>
         </div>
@@ -189,11 +189,11 @@ export const EventInfoCard = React.memo<EventInfoCardProps>(({
               {eventData.registration_opens_at ? (
                 <>
                   <div className="app-info-row__value">
-                    von {new Date(eventData.registration_opens_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })} – {formatTime(eventData.registration_opens_at)}
+                    von {datumKurz(eventData.registration_opens_at)} – {formatTime(eventData.registration_opens_at)}
                   </div>
                   {eventData.registration_closes_at && (
                     <div className="app-info-row__value">
-                      bis {new Date(eventData.registration_closes_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })} – {formatTime(eventData.registration_closes_at)}
+                      bis {datumKurz(eventData.registration_closes_at)} – {formatTime(eventData.registration_closes_at)}
                     </div>
                   )}
                 </>
@@ -361,13 +361,13 @@ export const EventInfoCard = React.memo<EventInfoCardProps>(({
         {eventData.location && (
           <div className="app-info-row">
             <IonIcon icon={ICON_ORT_GEFUELLT} className="app-info-row__icon app-icon-color--location" />
-            <div
+            <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
               onClick={() => {
                 if (eventData.location_maps_url) {
-                  window.open(eventData.location_maps_url, '_blank');
+                  linkOeffnen(eventData.location_maps_url);
                 } else if (eventData.location) {
                   const mapsUrl = `https://maps.apple.com/?q=${encodeURIComponent(eventData.location)}`;
-                  window.open(mapsUrl, '_blank');
+                  linkOeffnen(mapsUrl);
                 }
               }}
             >
@@ -438,7 +438,7 @@ export const EventInfoCard = React.memo<EventInfoCardProps>(({
         {eventMaterials && eventMaterials.length > 0 && onMaterialHinweisClick && (
           <div className="app-info-row">
             <IonIcon icon={ICON_DATEI_GEFUELLT} className="app-info-row__icon app-icon-color--material" />
-            <div onClick={onMaterialHinweisClick}>
+            <div role="button" tabIndex={0} onKeyDown={tastaturKlick} onClick={onMaterialHinweisClick}>
               <div className="app-info-row__label">Material</div>
               <div className="app-info-row__value app-event-detail__material-link">
                 {eventMaterials.length === 1
@@ -509,7 +509,7 @@ export const SeriesEventsSection = React.memo<SeriesEventsSectionProps>(({
       <div className="app-section-icon app-section-icon--info">
         <IonIcon icon={ICON_TERMIN_GEFUELLT} />
       </div>
-      <IonLabel>Weitere Termine dieser Serie</IonLabel>
+      <IonLabel>Weitere Events dieser Serie</IonLabel>
     </IonListHeader>
     <IonCard className="app-card">
       <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
@@ -519,14 +519,22 @@ export const SeriesEventsSection = React.memo<SeriesEventsSectionProps>(({
           const seriesUnlimited = (seriesEvent.max_participants || 0) === 0;
           const isFull = !seriesUnlimited && (seriesEvent.registered_count || 0) >= seriesEvent.max_participants;
           return (
-            <div
+            <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
               key={seriesEvent.id}
               className={`app-list-item ${isFull ? 'app-list-item--danger' : 'app-list-item--success'} app-event-detail__series-link`}
               onClick={() => onNavigate(seriesEvent.id)}
             >
+              {/* Symbol statt "Voll"/"Frei" -- dieselbe Darstellung wie bei den
+                  Zeitfenstern weiter unten; das Wort steht in title/aria-label. */}
               <div className="app-corner-badges">
-                <div className={`app-corner-badge ${isFull ? 'app-corner-badge--danger' : 'app-corner-badge--success'}`}>
-                  {isFull ? 'Voll' : 'Frei'}
+                <div
+                  className={`app-corner-badge ${isFull ? 'app-corner-badge--danger' : 'app-corner-badge--success'}`}
+                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
+                  title={isFull ? 'Voll' : 'Frei'}
+                  role="img"
+                  aria-label={isFull ? 'Voll' : 'Frei'}
+                >
+                  <IonIcon icon={isFull ? ICON_ABSAGE : ICON_ZUSAGE_GEFUELLT} aria-hidden="true" style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                 </div>
               </div>
               <div className="app-list-item__row">
@@ -580,13 +588,7 @@ export const UnregistrationsSection = React.memo<UnregistrationsSectionProps>(({
                     {unreg.konfi_name}
                   </div>
                   <div className="app-list-item__subtitle">
-                    Abgemeldet am {new Date(unreg.unregistered_at).toLocaleString('de-DE', {
-                      day: '2-digit',
-                      month: '2-digit',
-                      year: 'numeric',
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })}
+                    Abgemeldet am {datumUhrzeit(unreg.unregistered_at)}
                   </div>
                 </div>
               </div>
@@ -626,7 +628,7 @@ export const EventMaterialSection = React.memo<EventMaterialSectionProps>(({
       <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
         <div style={{ display: 'flex', flexDirection: 'column' }}>
         {eventMaterials.map((mat) => (
-          <div
+          <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
             key={mat.id}
             className="app-list-item app-list-item--material"
             style={{ cursor: 'pointer' }}
@@ -776,9 +778,9 @@ export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
             }
             return false;
           };
-          const slotParticipants = participants.filter(
+          const slotParticipants = konfisInReihenfolge(participants.filter(
             p => ['confirmed', 'excused', 'opted_out'].includes(p.status || '') && matchesSlot(p)
-          );
+          ), eventMandatory);
           const slotWaitlist = participants.filter(p => p.status === 'waitlist' && matchesSlot(p));
           const isFull = (timeslot.registered_count || 0) >= timeslot.max_participants;
           const waitlistCount = timeslot.waitlist_count || 0;
@@ -789,7 +791,9 @@ export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
                 <div className="app-corner-badges">
                   <div className={`app-corner-badge ${isFull ? 'app-corner-badge--danger' : 'app-corner-badge--success'}`}
                     style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
-                    title={isFull ? 'Voll' : 'Frei'}>
+                    title={isFull ? 'Voll' : 'Frei'}
+                    role="img"
+                    aria-label={isFull ? 'Voll' : 'Frei'}>
                     <IonIcon icon={isFull ? ICON_ABSAGE : ICON_ZUSAGE_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                   </div>
                 </div>
@@ -828,6 +832,8 @@ export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
                                 className={`app-corner-badge ${cornerBadgeClass}`}
                                 style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
                                 title={statusText}
+                                role="img"
+                                aria-label={statusText}
                               >
                                 <IonIcon icon={getStatusIcon(statusText) || ICON_GRUPPE_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                               </div>
@@ -927,7 +933,9 @@ export const TimeslotsSection = React.memo<TimeslotsSectionProps>(({
                         <div className="app-corner-badges">
                           <div className="app-corner-badge app-corner-badge--warning"
                             style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
-                            title="Warteliste">
+                            title="Warteliste"
+                            role="img"
+                            aria-label="Warteliste">
                             <IonIcon icon={ICON_UHRZEIT_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                           </div>
                         </div>

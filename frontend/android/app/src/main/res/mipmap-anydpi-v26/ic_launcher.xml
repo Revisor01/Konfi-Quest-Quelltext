@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive icon: 108 dp je Ebene, der Launcher zeigt die mittleren 72 dp
+     und schneidet sie mit seiner Maske zu (Kreis, Squircle ...). Sicher
+     sichtbar ist nur der Kreis mit 66 dp Durchmesser; das Motiv im
+     Vordergrund reicht deshalb nur bis 28,5 dp vom Mittelpunkt.
+     Geprueft in frontend/src/__tests__/config/androidAppSymbol.test.ts. -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background"/>
     <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+    <!-- Themen-Symbole ab Android 13: Das System faerbt diese Ebene selbst
+         ein und liest nur ihre Deckkraft. Aeltere Fassungen ueberspringen
+         das Element. -->
+    <monochrome android:drawable="@mipmap/ic_launcher_monochrome"/>
 </adaptive-icon>

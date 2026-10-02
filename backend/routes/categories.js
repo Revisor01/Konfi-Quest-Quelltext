@@ -98,6 +98,19 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }) => {
     const categoryId = req.params.id;
 
     try {
+      // Erst die Gemeinde, dann die Nutzung:
+      // Vorher kam fuer eine Kategorie einer ANDEREN Gemeinde
+      // 409 mit der Zahl ihrer Aktivitaeten und Events -- das verriet, dass
+      // es die Kennung gibt und wie sie genutzt wird. Jetzt 404 wie fuer
+      // jede unbekannte Kennung.
+      const { rows: [eigene] } = await db.query(
+        'SELECT id FROM categories WHERE id = $1 AND organization_id = $2',
+        [categoryId, req.user.organization_id]
+      );
+      if (!eigene) {
+        return res.status(404).json({ error: 'Kategorie nicht gefunden' });
+      }
+
       const checkQuery = `
         SELECT
           (SELECT COUNT(*) FROM activity_categories WHERE category_id = $1)::int as activity_count,

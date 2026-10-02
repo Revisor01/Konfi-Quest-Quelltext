@@ -26,7 +26,7 @@ export const SLIDES_BASIS: OnboardingSlide[] = [
     color: 'var(--app-color-events)',
     rgb: '--app-color-events-rgb',
     title: 'Events: vorher anmelden',
-    text: 'Unter "Events" stehen die Termine, zu denen du dich anmeldest — Gottesdienste, Konfi-Tage, Fahrten. Du meldest dich vorher an, siehst wie viele Plätze frei sind und kommst bei vollen Terminen auf die Warteliste. Pflichttermine erkennst du an der Markierung.',
+    text: 'Unter "Events" stehen Gottesdienste, Konfi-Tage und Fahrten. Du meldest dich vorher an, siehst wie viele Plätze frei sind und kommst bei vollen Events auf die Warteliste. Pflicht-Events erkennst du an der Markierung.',
   },
 ];
 

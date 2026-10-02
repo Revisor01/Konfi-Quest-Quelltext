@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
   IonRefresher,
   IonRefresherContent
 } from '@ionic/react';
 import { useApp } from '../../../contexts/AppContext';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import { useBadge } from '../../../contexts/BadgeContext';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
@@ -101,12 +99,17 @@ const KonfiBadgesPage: React.FC = () => {
   const badgeStats = badgeData?.stats || { totalVisible: 0, totalSecret: 0 };
 
   const processedBadges: AnzeigeBadge[] = (() => {
-    if (!badgeData || !konfiData) return [];
+    // Nur die Abzeichen sind Pflicht. Das Profil dient allein als Rueckfall
+    // fuer den Punkte-Fortschritt bei Abzeichen ohne `progress` vom Server;
+    // fehlt es (noch nicht geladen, 500, Zeitueberschreitung), zeigt die Seite
+    // die Abzeichen trotzdem -- vorher stand dann "Keine Badges gefunden"
+    // neben den Kopfzahlen.
+    if (!badgeData) return [];
 
     // Punkte direkt aus konfi_profiles verwenden
-    const currentGottesdienstPoints = konfiData.gottesdienst_points || 0;
-    const currentGemeindePoints = konfiData.gemeinde_points || 0;
-    const currentTotalPoints = konfiData.total_points || (currentGottesdienstPoints + currentGemeindePoints);
+    const currentGottesdienstPoints = konfiData?.gottesdienst_points || 0;
+    const currentGemeindePoints = konfiData?.gemeinde_points || 0;
+    const currentTotalPoints = konfiData?.total_points || (currentGottesdienstPoints + currentGemeindePoints);
 
     // Process ALL badges (available + earned)
     const allBadges = [...badgeData.available, ...badgeData.earned];
@@ -131,7 +134,7 @@ const KonfiBadgesPage: React.FC = () => {
       let progressPoints = badge.progress?.current || 0;
       let progressPercentage = badge.progress?.percentage || 0;
 
-      if (!badge.progress && !isEarned) {
+      if (!badge.progress && !isEarned && konfiData) {
         if (badge.criteria_type === 'total_points') {
           progressPoints = Math.min(currentTotalPoints, badge.criteria_value);
           progressPercentage = (progressPoints / badge.criteria_value) * 100;
@@ -174,18 +177,10 @@ const KonfiBadgesPage: React.FC = () => {
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonTitle>Badges</IonTitle>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile titel="Badges" />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Badges</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Badges" />
 
         <IonRefresher slot="fixed" onIonRefresh={async (e) => {
           await Promise.all([refreshBadges(), refreshProfile()]);

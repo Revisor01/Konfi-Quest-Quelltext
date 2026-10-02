@@ -28,6 +28,16 @@ export interface ChallengeFormData {
 // deshalb ist die Jahrgangs-Pflicht dort aufgehoben.
 export const istNurTeam = (formData: ChallengeFormData) => formData.audience === 'nur_team';
 
+// Drei Zielgruppen. Beim Bearbeiten bleibt jede, wie sie
+// ist -- vorher wurde 'konfis' im Formular still zu 'konfis_und_team' und
+// beim nächsten Speichern vor dem Start so übernommen. Unbekanntes oder
+// fehlendes fällt auf den Normalfall 'konfis_und_team'.
+export const CHALLENGE_AUDIENCES: readonly ChallengeAudience[] = ['konfis', 'konfis_und_team', 'nur_team'];
+export const audienceFuerFormular = (audience?: string | null): ChallengeAudience =>
+  (CHALLENGE_AUDIENCES as readonly string[]).includes(audience ?? '')
+    ? (audience as ChallengeAudience)
+    : 'konfis_und_team';
+
 // Für den Versand ans Backend: die lokale Wandzeit aus dem Picker in einen
 // echten UTC-Zeitstempel wandeln. Ohne diese Wandlung landet der naive String
 // in einer TIMESTAMPTZ-Spalte und wird in der Server-Zeitzone interpretiert —

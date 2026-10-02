@@ -24,7 +24,7 @@ function spruchFuer(besucht: number): { auge: string; slogan: string[]; nachsatz
   // 1) Sehr viel: 20 und mehr
   if (besucht >= 20) {
     return {
-      auge: 'Deine Termine',
+      auge: 'Deine Events',
       slogan: ['Du warst', 'öfter da', 'als manche', 'Möbel.'],
       nachsatz: 'Du hast kaum etwas ausgelassen.'
     };
@@ -32,7 +32,7 @@ function spruchFuer(besucht: number): { auge: string; slogan: string[]; nachsatz
   // 2) Viel: 10 bis 19
   if (besucht >= 10) {
     return {
-      auge: 'Deine Termine',
+      auge: 'Deine Events',
       slogan: ['Immer wieder', 'aufgetaucht.'],
       nachsatz: 'Nicht einmal, nicht zweimal — immer wieder.'
     };
@@ -40,7 +40,7 @@ function spruchFuer(besucht: number): { auge: string; slogan: string[]; nachsatz
   // 3) Solide: 5 bis 9
   if (besucht >= 5) {
     return {
-      auge: 'Deine Termine',
+      auge: 'Deine Events',
       slogan: ['Auf dich', 'war', 'Verlass.'],
       nachsatz: 'Immer wieder hast du dir die Zeit genommen.'
     };
@@ -48,7 +48,7 @@ function spruchFuer(besucht: number): { auge: string; slogan: string[]; nachsatz
   // 4) Wenig, aber da: 2 bis 4
   if (besucht >= 2) {
     return {
-      auge: 'Deine Termine',
+      auge: 'Deine Events',
       slogan: ['Du warst', 'dabei.'],
       nachsatz: 'Und darum geht es.'
     };
@@ -56,14 +56,14 @@ function spruchFuer(besucht: number): { auge: string; slogan: string[]; nachsatz
   // 5) Einmal oder gar nicht
   if (besucht === 1) {
     return {
-      auge: 'Dein Termin',
+      auge: 'Dein Event',
       slogan: ['Einmal', 'hingegangen.'],
       nachsatz: 'Aller Anfang ist genau das.'
     };
   }
   return {
-    auge: 'Deine Termine',
-    slogan: ['Der erste', 'Termin', 'wartet noch.'],
+    auge: 'Deine Events',
+    slogan: ['Das erste', 'Event', 'wartet noch.'],
     nachsatz: 'Es ist immer Platz für dich.'
   };
 }

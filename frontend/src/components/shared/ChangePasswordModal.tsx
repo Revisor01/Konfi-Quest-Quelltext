@@ -195,7 +195,7 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
               <IonList style={{ background: 'transparent', padding: '0' }}>
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Aktuelles Passwort *</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Aktuelles Passwort" aria-required="true"
                     type={showPasswords.current ? 'text' : 'password'}
                     value={passwordData.current_password}
                     onIonInput={(e) => setPasswordData(prev => ({ ...prev, current_password: e.detail.value! }))}
@@ -228,7 +228,7 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
               <IonList style={{ background: 'transparent', padding: '0' }}>
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Neues Passwort *</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Neues Passwort" aria-required="true"
                     type={showPasswords.new ? 'text' : 'password'}
                     value={passwordData.new_password}
                     onIonInput={(e) => setPasswordData(prev => ({ ...prev, new_password: e.detail.value! }))}
@@ -246,7 +246,7 @@ const ChangePasswordModal: React.FC<ChangePasswordModalProps> = ({
 
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Neues Passwort bestätigen *</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Neues Passwort bestätigen" aria-required="true"
                     type={showPasswords.confirm ? 'text' : 'password'}
                     value={passwordData.confirm_password}
                     onIonInput={(e) => setPasswordData(prev => ({ ...prev, confirm_password: e.detail.value! }))}

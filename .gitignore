@@ -135,6 +135,8 @@ frontend/ios/App/build_sim/
 build_ios/
 frontend/ios/App/build_archive/
 frontend/ios/App/build_export*/
+# derivedDataPath eines lokalen Geraetebaus (xcodebuild -derivedDataPath build-dev)
+frontend/ios/App/build-dev/
 
 # Produktions-Secrets
 .env.production

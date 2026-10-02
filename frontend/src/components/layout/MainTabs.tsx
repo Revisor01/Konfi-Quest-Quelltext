@@ -10,21 +10,23 @@ import {
   IonTabBar,
   IonTabButton,
   IonTabs,
-  IonPage,
-  IonContent,
-  IonBadge,
-  IonSpinner
+  IonBadge
 } from '@ionic/react';
 import { useIonRouter, isPlatform } from '@ionic/react';
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
 import { useApp } from '../../contexts/AppContext';
-import { BAEUME, ladeRolleVor } from '../../navigation/rollenBaeume';
+import { BAEUME } from '../../navigation/rollenBaeume';
 import { istTabLeisteVersteckt } from '../../navigation/routes';
 import type { Rolle, BadgeKey } from '../../navigation/routes';
 import { useAppLocation } from '../../navigation/useAppLocation';
 import { useBadge } from '../../contexts/BadgeContext';
-import { trackBereich } from '../../services/analytics';
+import { bereichAusPfad, trackBereich } from '../../services/analytics';
 import { ModalProvider } from '../../contexts/ModalContext'; // Behalten
+// Statisch: Das Theme laden App.tsx und
+// segmentGlas.ts ohnehin beim Start; das fruehere `await import()` hier
+// brachte keinen eigenen Chunk, nur die Build-Warnung
+// INEFFECTIVE_DYNAMIC_IMPORT.
+import { registerTabBarEffect } from '@rdlabo/ionic-theme-ios27';
 // AdminRolesPage entfernt - Rollen sind jetzt hardcoded
 
 
@@ -54,6 +56,24 @@ const SeiteMitChunk: React.FC<{
     ? <ParamSeite Seite={Seite} prop={propName} param={param} zurueckZu={zurueckZu} />
     : <Seite />
 );
+
+// Platzhalter einer Umleitung aus den URL-Parametern fuellen:
+// '/teamer/events?eventId=:id' mit { id: '7' } -> '/teamer/events?eventId=7'.
+// Ein Platzhalter ohne Wert faellt weg, statt woertlich in der Adresse zu
+// stehen -- die Zielseite sieht dann schlicht keinen Parameter.
+export const umleitungsZiel = (
+  to: string,
+  params: Readonly<Record<string, string | undefined>>
+): string => to.replace(/:([A-Za-z_][A-Za-z0-9_]*)/g, (_, name: string) => params[name] ?? '');
+
+// Eine Umleitung aus rollenBaeume.ts. <Navigate> allein kennt keine
+// Parameter: '/teamer/events/:id' -> '/teamer/events?eventId=:id' haette
+// woertlich ":id" in die Adresse geschrieben. Statische Umleitungen ohne
+// Platzhalter laufen unveraendert durch.
+export const Umleitung: React.FC<{ to: string }> = ({ to }) => {
+  const params = useParams();
+  return <Navigate to={umleitungsZiel(to, params)} replace />;
+};
 
 // Uebergeordnete Seite einer Parameter-Route: '/konfi/chat/room/:roomId'
 // wird zu '/konfi/chat'. Dorthin fuehrt der Zurueck-Knopf, wenn es keinen
@@ -98,27 +118,12 @@ const ParamSeite: React.FC<{
   return <Seite {...{ [prop]: parseInt(params[param] ?? '0', 10) }} onBack={zurueck} />;
 };
 
-// Ladezustand, waehrend ein Seiten-Chunk erstmals geladen wird. Bewusst eine
-// leere IonPage mit Spinner: Der IonRouterOutlet behaelt gemountete Seiten im
-// Speicher, und die lazy-Instanzen leben auf Modulebene — beim Tab-WECHSEL
-// zurueck oder nach dem Org-Wechsel-Remount (key=orgVersion) rendert eine
-// bereits geladene Seite synchron, dieser Fallback erscheint dann NICHT mehr.
-const SeiteLaedt: React.FC = () => (
-  <IonPage>
-    <IonContent>
-      <div style={{ display: 'flex', height: '100%', alignItems: 'center', justifyContent: 'center' }}>
-        <IonSpinner name="crescent" />
-      </div>
-    </IonContent>
-  </IonPage>
-);
-
 const MainTabs: React.FC = () => {
   const { user } = useApp();
   // Alle fuenf Zahlen an den Reitern kommen aus EINER Quelle: dem BadgeContext,
   // gespeist aus GET /notifications/badge-counts. Aktualisiert werden sie
   // gemeinsam mit refreshAllCounts().
-  const { chatUnreadTotal, pendingRequestsCount, pendingEventsCount, pendingChallengesCount, newBadgesCount } = useBadge();
+  const { chatUnreadTotal, pendingRequestsCount, pendingEventsCount, pendingChallengesCount, challengeUpdatesTotal, newBadgesCount } = useBadge();
   // super_admin bekommt eine eigene, reduzierte Navigation
   const isSuperAdmin = user?.role_name === 'super_admin';
   const location = useAppLocation();
@@ -127,15 +132,15 @@ const MainTabs: React.FC = () => {
   // Routenwechsel statt an 15 einzelnen Tab-Buttons — so zählt auch
   // Navigation, die nicht über die Tab-Leiste läuft. Uebertragen wird nur
   // der Bereichsname (z.B. "challenges") plus die Rolle, NIE die volle Route:
-  // die kann IDs enthalten (/admin/konfis/42).
+  // die kann IDs enthalten (/admin/konfis/42). Wie der Name entsteht, steht
+  // in bereichAusPfad (services/analytics.ts).
   useEffect(() => {
     if (!user) return;
-    const teile = location.pathname.split('/').filter(Boolean);
-    const bereich = teile[1] || teile[0];
+    const bereich = bereichAusPfad(location.pathname);
     if (bereich) trackBereich(bereich);
   }, [location.pathname, user?.id]);
 
-  // iOS26 Tab-Bar Liquid-Glass-Animation (rdlabo registerTabBarEffect)
+  // iOS-Tab-Leiste: gleitendes Glas beim Wechsel (rdlabo registerTabBarEffect)
   useEffect(() => {
     if (!isPlatform('ios')) return;
     if (!user) return;
@@ -143,11 +148,9 @@ const MainTabs: React.FC = () => {
     let cleanupFns: Array<() => void> = [];
     let cancelled = false;
 
-    const setup = async () => {
+    const setup = () => {
       try {
-        const mod = await import('@rdlabo/ionic-theme-ios26');
-        if (cancelled) return;
-        const register = mod.registerTabBarEffect;
+        const register = registerTabBarEffect;
         if (typeof register !== 'function') return;
 
         let attempts = 0;
@@ -173,7 +176,7 @@ const MainTabs: React.FC = () => {
         };
         tryRegister();
       } catch (e) {
-        console.warn('TabBar effect import failed:', e);
+        console.warn('TabBar effect setup failed:', e);
       }
     };
 
@@ -234,7 +237,11 @@ const MainTabs: React.FC = () => {
   const zaehler: Record<BadgeKey, number> = {
     chat: chatUnreadTotal,
     events: pendingEventsCount + pendingRequestsCount,
-    challenges: pendingChallengesCount,
+    // Ein Reiter, eine Bedeutung je Rolle: Team und Leitung zaehlen offene
+    // Freigaben, Konfis ihre Challenge-Neuigkeiten. Der Server
+    // liefert je Rolle nur den einen Anteil, der andere ist 0 -- die Summe
+    // ist also nie eine Mischung.
+    challenges: pendingChallengesCount + challengeUpdatesTotal,
     badges: newBadgesCount,
   };
 
@@ -264,7 +271,7 @@ const MainTabs: React.FC = () => {
         />
       ))}
       {baum.redirects.map(({ from, to }) => (
-        <Route key={from} path={from} element={<Navigate to={to} replace />} />
+        <Route key={from} path={from} element={<Umleitung to={to} />} />
       ))}
       <Route path="/login" element={<Navigate to={baum.home} replace />} />
       <Route path="/" element={<Navigate to={baum.home} replace />} />

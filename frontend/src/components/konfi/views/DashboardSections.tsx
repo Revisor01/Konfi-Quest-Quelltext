@@ -14,6 +14,7 @@ import {
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
 import { Badge } from '../../../types/dashboard';
+import { datumKurz, uhrzeit } from '../../../utils/dateUtils';
 
 // Badge Icon Mapping
 
@@ -43,7 +44,7 @@ export const LevelPopoverContent: React.FC<{
   const isReached = data.isReached;
 
   return (
-    <div style={{ padding: 'var(--app-abstand-mittel)', background: 'white' }}>
+    <div style={{ padding: 'var(--app-abstand-mittel)', background: 'var(--app-surface-card)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)' }}>
         <div style={{
           width: '48px',
@@ -78,7 +79,7 @@ export const LevelPopoverContent: React.FC<{
             color: 'var(--app-text-secondary)',
             lineHeight: '1.3'
           }}>
-            {level.points_required} Punkte erforderlich
+            {punkteText(level.points_required)} erforderlich
           </p>
         </div>
       </div>
@@ -154,20 +155,13 @@ export { formatTimeUntil };
 export const formatEventTime = (dateString: string | undefined) => {
   if (!dateString) return '';
   const date = new Date(dateString);
-  return date.toLocaleTimeString('de-DE', {
-    hour: '2-digit',
-    minute: '2-digit'
-  });
+  return uhrzeit(date);
 };
 
 export const formatEventDate = (dateString: string | undefined) => {
   if (!dateString) return '';
   const date = new Date(dateString);
-  return date.toLocaleDateString('de-DE', {
-    weekday: 'short',
-    day: 'numeric',
-    month: 'short'
-  });
+  return datumKurz(date, { mitWochentag: true });
 };
 
 /**
@@ -198,7 +192,7 @@ interface EventCardProps {
 export const EventCard = React.memo<EventCardProps>(({ event, onClick }) => {
   const isWaitlist = event.booking_status === 'waitlist' || event.booking_status === 'pending';
   return (
-    <div
+    <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
       onClick={onClick}
       className="app-dashboard-glass-card"
       style={{
@@ -294,6 +288,8 @@ import { RankingEntry as RankingEntryType, RankingZeile } from '../../../types/d
 import { getIconFromString } from '../../../utils/badgeIcons';
 import BadgePopoverContent, { BadgePopoverData } from '../../shared/BadgePopoverContent';
 import { formatTimeUntil } from '../../shared/eventFormatting';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { punkteText } from '../../../utils/punkteText';
 // Re-Export für bestehende Verwender (Wrapped-Slides, KonfiDetailSections).
 export { getIconFromString };
 
@@ -505,7 +501,7 @@ export const RankingSection = React.memo<RankingSectionProps>(({
                   }}>
                     {entry.points === null || entry.points === undefined
                       ? `Platz ${entry.actualRank}`
-                      : `${entry.points} Punkte`}
+                      : punkteText(entry.points)}
                   </div>
                 </div>
               </div>
@@ -535,7 +531,7 @@ export const LevelIconsRow = React.memo<LevelIconsRowProps>(({ allLevels, levelI
       const isReached = index < levelIndex;
       const isCurrent = index === levelIndex - 1;
       return (
-        <div
+        <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
           key={level.id}
           onClick={(e) => {
             e.stopPropagation();
@@ -597,7 +593,7 @@ export const LevelProgress = React.memo<LevelProgressProps>(({ nextLevel, progre
         Nächstes Level: {nextLevel.title}
       </span>
       <span style={{ fontSize: 'var(--app-text-sekundaer)', color: 'rgba(255, 255, 255, 0.9)' }}>
-        {pointsToNextLevel ? `noch ${pointsToNextLevel} Punkte` : `${progressPercentage}%`}
+        {pointsToNextLevel ? `noch ${punkteText(pointsToNextLevel)}` : `${progressPercentage}%`}
       </span>
     </div>
     <IonProgressBar

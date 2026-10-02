@@ -15,8 +15,6 @@
   /* Grosse Wortmarke ("DEIN KONFI-JAHR", Bebas, 76px) */
   --w-schlagzeile: clamp(52px, 16vw, 76px);
   --w-schlagzeile-lh: 0.88;
-  /* Mittlere Zahl (40px) */
-  --w-zahl-klein: clamp(32px, 10vw, 40px);
   /* Fliesstext und Labels */
   --w-text: 17px;
   --w-label: 12px;
@@ -896,9 +894,12 @@ ion-modal.wrapped-modal-fullscreen {
   animation: challenge-foto-puls 1.4s ease-in-out infinite;
 }
 
-.challenge-moment-foto--leer {
-  color: rgba(255, 255, 255, 0.4);
-  font-size: var(--app-text-ueberschrift-gross);
+/* Lade-, Fehler- und Offline-Hinweis an Stelle des Fotos: der gemeinsame
+   MedienPlatzhalter wie in Chat und Challenges. */
+.challenge-moment-foto--hinweis {
+  color: rgba(255, 255, 255, 0.75);
+  font-size: var(--app-text-klein);
+  text-align: center;
 }
 
 @keyframes challenge-foto-puls {
@@ -1200,7 +1201,7 @@ ion-modal.wrapped-modal-fullscreen {
 
 /* Kleines Label ganz oben ueber der Zahl. */
 .kat-auge {
-  font-size: 12px;
+  font-size: var(--w-label);
   font-weight: var(--app-schrift-fett);
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -1211,7 +1212,7 @@ ion-modal.wrapped-modal-fullscreen {
 /* Der Name der Kirchengemeinde auf der Abschluss-Seite.
    */
 .kat-gemeinde {
-  font-size: 17px;
+  font-size: var(--w-text);
   font-weight: var(--app-schrift-halbfett);
   line-height: 1.3;
   color: rgba(255, 255, 255, 0.88);
@@ -1245,7 +1246,7 @@ ion-modal.wrapped-modal-fullscreen {
 }
 
 .kat-nachsatz {
-  font-size: 17px;
+  font-size: var(--w-text);
   line-height: 1.45;
   color: rgba(255, 255, 255, 0.93);
   max-width: 22em;
@@ -1253,7 +1254,7 @@ ion-modal.wrapped-modal-fullscreen {
 
 .kat-fussnote {
   margin-top: var(--app-abstand-schmal);
-  font-size: 12px;
+  font-size: var(--w-label);
   font-weight: var(--app-schrift-halbfett);
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -1455,7 +1456,7 @@ ion-modal.wrapped-modal-fullscreen {
 }
 
 .seltenstes-slide .selt-auge {
-  font-size: 12px;
+  font-size: var(--w-label);
   font-weight: var(--app-schrift-fett);
   letter-spacing: 0.18em;
   text-transform: uppercase;
@@ -1577,7 +1578,7 @@ ion-modal.wrapped-modal-fullscreen {
 
 .w-merkzettel__label {
   display: block;
-  font-size: 11px;
+  font-size: var(--w-marke);
   font-weight: var(--app-schrift-fett);
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -1587,7 +1588,7 @@ ion-modal.wrapped-modal-fullscreen {
 .w-merkzettel__wert {
   display: block;
   margin-top: var(--app-abstand-mini);
-  font-size: 17px;
+  font-size: var(--w-text);
   font-weight: var(--app-schrift-fett);
   color: #fff;
 }
@@ -1780,13 +1781,14 @@ ion-modal.wrapped-modal-fullscreen {
 }
 
 .moment-polaroid__bild .challenge-moment-foto--laedt,
-.moment-polaroid__bild .challenge-moment-foto--leer {
+.moment-polaroid__bild .challenge-moment-foto--hinweis {
   display: flex;
   align-items: center;
   justify-content: center;
   background: #e8e4dc;
-  color: rgba(0, 0, 0, 0.3);
-  font-size: 24px;
+  /* Der Hinweis liegt hier auf hellem Polaroid-Papier. */
+  color: rgba(0, 0, 0, 0.6);
+  font-size: var(--app-text-klein);
 }
 
 /* Beiträge ohne Foto (Text, Audio, Link) bekommen dieselbe Fläche --
@@ -1821,7 +1823,7 @@ ion-modal.wrapped-modal-fullscreen {
 }
 
 .moment-polaroid__link {
-  font-size: 11px;
+  font-size: var(--w-marke);
   font-weight: var(--app-schrift-halbfett);
   color: rgba(0, 0, 0, 0.6);
   word-break: break-word;
@@ -1845,7 +1847,7 @@ ion-modal.wrapped-modal-fullscreen {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
+  font-size: var(--w-marke);
 }
 
 .moment-polaroid__titel {

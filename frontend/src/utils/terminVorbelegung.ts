@@ -95,6 +95,23 @@ export const endeNachDatumswechsel = (
 };
 
 /**
+ * Liegt das Ende vor dem Beginn?
+ *
+ * Kein Ende und ein Ende GENAU auf dem Beginn sind erlaubt, ebenso ein Wert,
+ * der sich nicht als Datum lesen laesst (das ist nicht Sache dieser Pruefung).
+ */
+export const endeVorBeginn = (beginn: string, ende: string): boolean => {
+  if (!beginn || !ende) return false;
+  const b = new Date(beginn);
+  const e = new Date(ende);
+  if (Number.isNaN(b.getTime()) || Number.isNaN(e.getTime())) return false;
+  return e < b;
+};
+
+/** Meldung, wortgleich mit dem Backend (validierung.js, ENDE_VOR_BEGINN). */
+export const ENDE_VOR_BEGINN = 'Das Ende liegt vor dem Beginn';
+
+/**
  *   "termin kopieren übernimmt alles, aber nicht material und nicht den chat.
  *    und nicht die anderen dingen. kopieren eröffnet ein modal mit allem
  *    voreingetragen."

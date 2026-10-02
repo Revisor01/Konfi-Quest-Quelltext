@@ -29,6 +29,8 @@ import {
 import api from '../../../services/api';
 import { SectionHeader } from '../../shared';
 import EmptyState from '../../shared/EmptyState';
+import { datumKurz } from '../../../utils/dateUtils';
+import { punkteAnzeigeDatum, nachAnzeigeDatumAbsteigend } from '../../../utils/punkteDatum';
 
 interface PointsHistoryModalProps {
   onClose: () => void;
@@ -54,6 +56,7 @@ interface PointEntry {
   date: string;
   comment?: string;
   source_type: 'activity' | 'bonus' | 'event';
+  event_date?: string | null;
 }
 
 const PointsHistoryModal: React.FC<PointsHistoryModalProps> = ({ onClose, pointConfig, apiEndpoint, profileTotals }) => {
@@ -83,16 +86,13 @@ const PointsHistoryModal: React.FC<PointsHistoryModalProps> = ({ onClose, pointC
     if (!dateString) return 'Unbekannt';
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return 'Ungültig';
-    return date.toLocaleDateString('de-DE', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric'
-    });
+    return datumKurz(date);
   };
 
-  // Gefilterte Historie: deaktivierte Typen ausblenden
+  // Gefilterte Historie: deaktivierte Typen ausblenden. Geordnet nach dem
+  // angezeigten Datum (bei Events der Termin, utils/punkteDatum.ts).
   const filteredHistory = useMemo(() => {
-    return history.filter(entry => {
+    return nachAnzeigeDatumAbsteigend(history).filter(entry => {
       if (entry.category === 'gottesdienst' && !gottesdienstEnabled) return false;
       if (entry.category === 'gemeinde' && !gemeindeEnabled) return false;
       return true;
@@ -217,6 +217,11 @@ const PointsHistoryModal: React.FC<PointsHistoryModalProps> = ({ onClose, pointC
                       {filteredHistory.map((entry) => {
                         const categoryColor = getCategoryColor(entry.category);
                         const typeBadgeColor = getTypeBadgeColor(entry.source_type);
+                        // Herkunft der Punkte fuer title/aria-label des Symbol-Badges --
+                        // dieselben Worte wie in der Konfi-Detailansicht der Leitung.
+                        const typeBadgeLabel = entry.source_type === 'bonus' ? 'Bonus'
+                          : entry.source_type === 'event' ? 'Event'
+                          : undefined;
 
                         // Farbe basiert auf category (blau/gruen)
                         const listItemClass = entry.category === 'gottesdienst' ? 'app-list-item--gottesdienst' : 'app-list-item--activities';
@@ -233,7 +238,7 @@ const PointsHistoryModal: React.FC<PointsHistoryModalProps> = ({ onClose, pointC
                               {/* Typ-Badge (Bonus/Event) */}
                               {typeBadgeColor && getTypeBadgeIcon(entry.source_type) && (
                                 <>
-                                  <div className="app-corner-badge" style={{ backgroundColor: typeBadgeColor }}>
+                                  <div className="app-corner-badge" title={typeBadgeLabel} role="img" aria-label={typeBadgeLabel} style={{ backgroundColor: typeBadgeColor }}>
                                     <IonIcon icon={getTypeBadgeIcon(entry.source_type)!} />
                                   </div>
                                   <div className="app-corner-badges__separator" />
@@ -254,8 +259,8 @@ const PointsHistoryModal: React.FC<PointsHistoryModalProps> = ({ onClose, pointC
                                   <div className={`app-list-item__title ${typeBadgeColor ? 'app-list-item__title--punkte-badge-doppelt' : 'app-list-item__title--punkte-badge'}`}>{entry.title}</div>
                                   <div className="app-list-item__meta">
                                     <span className="app-list-item__meta-item">
-                                      <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ color: 'var(--app-color-events)' }} />
-                                      {formatDate(entry.date)}
+                                      <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ color: 'var(--app-text-events)' }} />
+                                      {formatDate(punkteAnzeigeDatum(entry))}
                                     </span>
                                   </div>
                                 </div>

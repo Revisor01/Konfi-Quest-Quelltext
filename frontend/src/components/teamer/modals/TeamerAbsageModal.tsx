@@ -111,7 +111,7 @@ const TeamerAbsageModal: React.FC<TeamerAbsageModalProps> = ({
               </p>
               <IonList style={{ background: 'transparent', padding: '0' }}>
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
-                  <IonTextarea
+                  <IonTextarea aria-label={grundPflicht ? 'Warum kannst du nicht?' : 'Grund (kannst du leer lassen)'}
                     value={reason}
                     onIonInput={(e) => setReason(e.detail.value!)}
                     placeholder={grundPflicht ? 'Warum kannst du nicht?' : 'Grund (kannst du leer lassen)'}

@@ -1,21 +1,18 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
   IonRefresher,
   IonRefresherContent,
   IonIcon,
-  IonButtons,
   IonButton,
   useIonModal,
   useIonRouter
 } from '@ionic/react';
 import { ICON_FUNKELN_GEFUELLT, ICON_PROFIL, ICON_SCHLIESSEN } from '../../shared/icons';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import KonfiOnboardingModal from '../modals/KonfiOnboardingModal';
-import KonfiUpdate220WalkthroughModal from '../modals/KonfiUpdate220WalkthroughModal';
+import KonfiUpdate230WalkthroughModal from '../modals/KonfiUpdate230WalkthroughModal';
 import { useOnboardingWithUpdateOnce } from '../../../hooks/useOnboardingOnce';
 import NeuerungenBanner from '../../shared/NeuerungenBanner';
 import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
@@ -35,7 +32,9 @@ import type { AlleAbzeichen, Badge, BadgeUebersicht, DashboardEvent, RankingEntr
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { mergeSectionOrder, DEFAULT_KONFI_SECTION_ORDER } from '../../../utils/sectionOrder';
 import { TrialBanner, StoreUpdateBanner, istVergangen } from '../../shared';
+import WartungsHinweis from '../../shared/WartungsHinweis';
 import { track } from '../../../services/analytics';
+import { tastaturKlick } from '../../../utils/tastatur';
 
 interface PointConfig {
   gottesdienst_enabled: boolean;
@@ -320,11 +319,7 @@ const KonfiDashboardPage: React.FC = () => {
   if (loading || !dashboardData) {
     return (
       <IonPage ref={pageRef}>
-        <IonHeader translucent={true}>
-          <IonToolbar>
-            <IonTitle>Konfi Quest</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeile titel="Konfi Quest" />
         <IonContent className="app-gradient-background" fullscreen>
           {loading ? (
             <LoadingSpinner message="Konfi Quest wird geladen..." />
@@ -374,16 +369,14 @@ const KonfiDashboardPage: React.FC = () => {
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonTitle>Konfi Quest</IonTitle>
-          <IonButtons slot="end">
-            <IonButton onClick={() => router.push('/konfi/profile')} aria-label="Profil öffnen">
-              <IonIcon slot="icon-only" icon={ICON_PROFIL} style={{ color: 'var(--app-color-wrapped)', fontSize: 'var(--app-anzeige-basis)' }} />
-            </IonButton>
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile
+        titel="Konfi Quest"
+        rechts={(
+          <IonButton onClick={() => router.push('/konfi/profile')} aria-label="Profil öffnen">
+            <IonIcon slot="icon-only" icon={ICON_PROFIL} style={{ color: 'var(--app-text-wrapped)', fontSize: 'var(--app-anzeige-basis)' }} />
+          </IonButton>
+        )}
+      />
 
       <IonContent
         fullscreen
@@ -393,13 +386,7 @@ const KonfiDashboardPage: React.FC = () => {
           '--background': 'var(--app-surface-soft)'
         }}
       >
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">
-              Konfi Quest
-            </IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Konfi Quest" />
 
         <IonRefresher slot="fixed" onIonRefresh={handleRefresh} onIonPull={triggerPullHaptic}>
           <IonRefresherContent />
@@ -410,6 +397,10 @@ const KonfiDashboardPage: React.FC = () => {
         {/* Dezenter Hinweis, wenn im Store eine neuere Version liegt.
             Prueft selbst und rendert sonst nichts (StoreUpdateBanner). */}
         <StoreUpdateBanner style={{ margin: 'var(--app-abstand-eng) var(--app-abstand-basis) 0' }} />
+
+        {/* Wartungshinweis des Betriebs: steht, solange der Server ihn
+            meldet; liest nur den Stand und rendert sonst nichts. */}
+        <WartungsHinweis />
 
         <NeuerungenBanner
           style={{ margin: 'var(--app-abstand-eng) var(--app-abstand-basis) 0' }}
@@ -431,7 +422,7 @@ const KonfiDashboardPage: React.FC = () => {
               sich wieder, ein weggeklickter bleibt weg. Erreichbar bleibt er
               im Profil unter "Meine Rueckblicke". */}
         {dashboardData.has_wrapped && !wrappedHinweisWeg && (
-          <div onClick={openWrapped} style={{
+          <div role="presentation" onClick={openWrapped} style={{
             margin: '0 var(--app-abstand-basis) var(--app-abstand-basis)',
             padding: 'var(--app-abstand-gross)',
             borderRadius: 'var(--app-radius-gross)',
@@ -443,7 +434,7 @@ const KonfiDashboardPage: React.FC = () => {
           }}>
             <div style={{ position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)' }}>
               <IonIcon icon={ICON_FUNKELN_GEFUELLT} style={{ fontSize: 'var(--app-anzeige-zahl)' }} />
-              <div style={{ minWidth: 0 }}>
+              <div role="button" tabIndex={0} onKeyDown={tastaturKlick} style={{ minWidth: 0 }}>
                 <h3 className="app-headline" style={{ margin: 0, fontSize: 'var(--app-text-gross)', fontWeight: 'var(--app-schrift-fett)' }}>
                   {dashboardData.wrapped_titel || 'Dein Jahresrückblick ist da!'}
                 </h3>
@@ -510,12 +501,12 @@ const KonfiDashboardPage: React.FC = () => {
           Onboarding-Tour schließen sich gegenseitig aus; die Neuigkeiten-
           Karte bleibt weg, solange sie offen ist. */}
       {showNeuerungen && (
-        <KonfiUpdate220WalkthroughModal onClose={schliesseNeuerungen} />
+        <KonfiUpdate230WalkthroughModal onClose={schliesseNeuerungen} />
       )}
 
       {/* Derselbe Walkthrough — hier über die Neuigkeiten-Karte geöffnet. */}
       {showUpdateWalkthrough && (
-        <KonfiUpdate220WalkthroughModal
+        <KonfiUpdate230WalkthroughModal
           onClose={() => setShowUpdateWalkthrough(false)}
         />
       )}

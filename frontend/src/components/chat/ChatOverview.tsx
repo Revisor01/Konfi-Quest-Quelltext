@@ -1,12 +1,8 @@
 import { fehlerText } from '../../utils/fehler';
 import React, { useState, useEffect } from 'react';
 import { useAppLocation } from '../../navigation/useAppLocation';
-import { FARBEN } from '../../theme/colors';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
   IonItem,
   IonInput,
@@ -16,7 +12,6 @@ import {
   IonCard,
   IonCardContent,
   IonButton,
-  IonButtons,
   IonItemSliding,
   IonItemOptions,
   IonItemOption,
@@ -30,6 +25,7 @@ import {
   useIonAlert,
   useIonViewWillEnter
 } from '@ionic/react';
+import AppKopfzeile, { AppKopfzeileGross } from '../shared/AppKopfzeile';
 import {
   ICON_CHATS,
   ICON_CHATS_GEFUELLT,
@@ -47,6 +43,7 @@ import {
 import { useApp } from '../../contexts/AppContext';
 import { offlineBlockiert } from '../../utils/offlineAktion';
 import { useBadge } from '../../contexts/BadgeContext';
+import ZaehlerKugel from '../shared/ZaehlerKugel';
 import { SectionHeader, EmptyState } from '../shared';
 import { useModalPage } from '../../contexts/ModalContext';
 import { useOfflineQuery } from '../../hooks/useOfflineQuery';
@@ -397,23 +394,17 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonTitle>Chat</IonTitle>
-          <IonButtons slot="end">
-            <IonButton aria-label="Neuen Chat starten" onClick={handleCreateNewChat}>
-              <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
-            </IonButton>
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
-      
+      <AppKopfzeile
+        titel="Chat"
+        rechts={(
+          <IonButton aria-label="Neuen Chat starten" onClick={handleCreateNewChat}>
+            <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
+          </IonButton>
+        )}
+      />
+
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Chat</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Chat" />
 
         <IonRefresher slot="fixed" onIonRefresh={async (e) => {
           await refresh();
@@ -426,7 +417,7 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
           title="Deine Chats"
           subtitle="Nachrichten und Gruppen"
           icon={ICON_CHATS_GEFUELLT}
-          colors={{ primary: FARBEN.chat, secondary: FARBEN.chatDunkel }}
+          colors={{ primary: 'var(--app-color-chat)', secondary: 'var(--app-color-chat-dunkel)' }}
           stats={[
             // CHATS und UNGELESEN entsprechen je einem Reiter und schalten
             // dorthin (gleiches Muster wie Challenges/Anfragen/Nutzende).
@@ -480,7 +471,7 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
                   fontSize: 'var(--app-text-standard)'
                 }}
               />
-              <IonInput
+              <IonInput aria-label="Chaträume durchsuchen"
                 value={searchText}
                 onIonInput={(e) => setSearchText(e.detail.value!)}
                 placeholder="Chaträume durchsuchen..."
@@ -543,6 +534,8 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
                                 className={`app-corner-badge app-corner-badge--${colorClass}`}
                                 style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
                                 title={getRoomSubtitle(room)}
+                                role="img"
+                                aria-label={getRoomSubtitle(room)}
                               >
                                 <IonIcon icon={getRoomTypeIcon(room)} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                               </div>
@@ -550,38 +543,17 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
 
                             <div className="app-list-item__row">
                               <div className="app-list-item__main">
-                                {/* Icon mit Unread-Badge */}
-                                <div style={{ position: 'relative', flexShrink: 0 }}>
+                                {/* Symbol mit Zaehler-Kugel; Lage siehe .app-zaehler-anker */}
+                                <div className="app-zaehler-anker">
                                   <div
                                     className={`app-icon-circle app-icon-circle--lg app-icon-circle--${colorClass}`}
                                   >
                                     <IonIcon icon={getRoomIcon(room)} />
                                   </div>
-                                  {(() => {
-                                    const unread = chatUnreadByRoom[room.id] ?? room.unread_count ?? 0;
-                                    return unread > 0 ? (
-                                      <span style={{
-                                        position: 'absolute',
-                                        top: '0px',
-                                        right: '0px',
-                                        fontSize: 'var(--app-text-winzig)',
-                                        color: 'white',
-                                        fontWeight: 'var(--app-schrift-fett)',
-                                        backgroundColor: 'var(--app-color-danger)',
-                                        width: unread > 9 ? '18px' : '16px',
-                                        height: '16px',
-                                        borderRadius: 'var(--app-radius-kreis)',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        boxShadow: 'var(--app-schatten-flach-stark)',
-                                        border: '2px solid white',
-                                        zIndex: 2
-                                      }}>
-                                        {unread > 9 ? '9+' : unread}
-                                      </span>
-                                    ) : null;
-                                  })()}
+                                  <ZaehlerKugel
+                                    anzahl={chatUnreadByRoom[room.id] ?? room.unread_count ?? 0}
+                                    label="ungelesene Nachrichten"
+                                  />
                                 </div>
 
                                 {/* Content */}
@@ -600,7 +572,7 @@ const ChatOverview = React.forwardRef<ChatOverviewRef, ChatOverviewProps>(({ onS
                                   <div className="app-list-item__meta">
                                     {room.last_message?.created_at && (
                                       <span className="app-list-item__meta-item">
-                                        <IonIcon icon={ICON_UHRZEIT_GEFUELLT} style={{ color: 'var(--app-color-events)' }} />
+                                        <IonIcon icon={ICON_UHRZEIT_GEFUELLT} style={{ color: 'var(--app-text-events)' }} />
                                         {formatLastMessageTime(room.last_message.created_at)}
                                       </span>
                                     )}

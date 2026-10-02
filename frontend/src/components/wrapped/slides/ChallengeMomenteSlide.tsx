@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React from 'react';
 import { IonIcon } from '@ionic/react';
 import {
   ICON_BILD,
@@ -8,7 +8,9 @@ import {
   ICON_VIDEO,
 } from '../../shared/icons';
 import SlideBase from './SlideBase';
-import api, { DATEI_TIMEOUT_MS } from '../../../services/api';
+import { useMedienDatei } from '../../../hooks/useMedienDatei';
+import { mimeAusDateiname } from '../../../services/mediaCache';
+import MedienPlatzhalter from '../../shared/MedienPlatzhalter';
 import { getIconFromString } from '../../../utils/badgeIcons';
 import { linkBeschriftung } from '../../../utils/linkDisplay';
 import type { SlideProps, KonfiChallengeMoment } from '../../../types/wrapped';
@@ -32,57 +34,31 @@ function iconFuerMedienart(mediaType: string): string {
 }
 
 /**
- * Laedt ein Challenge-Foto über GET /api/challenges/files/:filename.
- * Der Auth-Header kommt automatisch aus dem api-Interceptor (services/api.ts),
- * daher ist KEIN ?token=-Parameter nötig. Die erzeugte Object-URL wird beim
- * Unmount wieder freigegeben (kein geteilter Cache wie bei den Chat-Medien —
- * Wrapped-Bilder werden genau einmal angezeigt).
+ * NETZ ZUERST: Der Rückblick ist ein eingefrorener Stand. Wird ein Beitrag
+ * danach gelöscht, steht er weiter in dieser Liste — der Server liefert die
+ * Datei dann aber nicht mehr (404). Käme das Foto zuerst aus dem Cache,
+ * zeigte der Rückblick einen gelöschten Beitrag. Deshalb fragt diese Folie
+ * erst den Server und nimmt das Gerät nur ohne Netz; ein 404 wirft die Datei
+ * zugleich aus dem Cache.
  */
 const ChallengeFoto: React.FC<{ filePath: string; fileName?: string }> = ({ filePath, fileName }) => {
-  const [src, setSrc] = useState<string>('');
-  const [fehler, setFehler] = useState(false);
-  const urlRef = useRef<string | null>(null);
+  const { url, zustand, prozent, erneutVersuchen } = useMedienDatei(filePath, {
+    quelle: 'challenges',
+    typ: mimeAusDateiname(fileName),
+    netzZuerst: true,
+  });
 
-  useEffect(() => {
-    let abgebrochen = false;
-
-    const laden = async () => {
-      try {
-        const res = await api.get(`/challenges/files/${filePath}`, { responseType: 'blob', timeout: DATEI_TIMEOUT_MS });
-        if (abgebrochen) return;
-        const url = URL.createObjectURL(res.data as Blob);
-        urlRef.current = url;
-        setSrc(url);
-      } catch {
-        if (!abgebrochen) setFehler(true);
-      }
-    };
-    laden();
-
-    return () => {
-      abgebrochen = true;
-      if (urlRef.current) {
-        URL.revokeObjectURL(urlRef.current);
-        urlRef.current = null;
-      }
-    };
-  }, [filePath]);
-
-  if (fehler) {
+  if (url) {
     return (
-      <div className="challenge-moment-foto challenge-moment-foto--leer">
-        <IonIcon icon={ICON_BILD} />
+      <div className="challenge-moment-foto">
+        <img src={url} alt={fileName || 'Dein Beitrag'} />
       </div>
     );
   }
 
-  if (!src) {
-    return <div className="challenge-moment-foto challenge-moment-foto--laedt" />;
-  }
-
   return (
-    <div className="challenge-moment-foto">
-      <img src={src} alt={fileName || 'Dein Beitrag'} />
+    <div className={`challenge-moment-foto challenge-moment-foto--hinweis${zustand === 'laedt' || zustand === 'wartet' ? ' challenge-moment-foto--laedt' : ''}`}>
+      <MedienPlatzhalter zustand={zustand} prozent={prozent} was="Das Foto" onErneut={erneutVersuchen} />
     </div>
   );
 };

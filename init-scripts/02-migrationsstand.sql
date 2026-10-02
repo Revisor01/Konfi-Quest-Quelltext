@@ -3,7 +3,7 @@
 --
 -- ERZEUGT, NICHT VON HAND GEPFLEGT.
 -- Quelle: backend/tests/schema/prod-migrations.txt
--- Erneuern mit: bash init-scripts/refresh.sh
+-- Erneuern mit: bash backend/tests/schema/init-scripts-spiegeln.sh
 --
 -- Das Schema oben enthaelt diese Migrationen bereits. Ohne die Eintraege
 -- hier wuerde backend/database.js sie beim ersten Backend-Start erneut
@@ -68,5 +68,54 @@ INSERT INTO schema_migrations (name) VALUES
     ('120_event_teamer_kontingent.sql'),
     ('121_challenges_audience.sql'),
     ('122_challenges_audience_default_team.sql'),
-    ('123_password_resets_token_hashen.sql')
+    ('123_password_resets_token_hashen.sql'),
+    ('124_daily_verses_und_activities_category.sql'),
+    ('125_challenge_link_musikdienste.sql'),
+    ('126_challenge_moderation_note.sql'),
+    ('127_challenge_link_album.sql'),
+    ('128_event_booking_stats_view.sql'),
+    ('129_invite_code_id_on_delete.sql'),
+    ('130_material_tags_entfernen.sql'),
+    ('131_org_wartelisten_einstellungen_entfernen.sql'),
+    ('132_bibeluebersetzung_eine_spalte.sql'),
+    ('133_chat_reaktionen_teamer_erlauben.sql'),
+    ('134_konfspruch_texte.sql'),
+    ('135_material_link.sql'),
+    ('136_event_booking_stats_leitung.sql'),
+    ('137_material_global.sql'),
+    ('138_zeitzone_angezeigte_zeitstempel.sql'),
+    ('139_zeitzone_in_javascript_verglichene_zeitstempel.sql'),
+    ('140_wrapped_snapshot_pro_jahrgang.sql'),
+    ('141_teamer_absage_nach_zusage.sql'),
+    ('142_material_mehrere_links.sql'),
+    ('143_wrapped_ausgaben.sql'),
+    ('144_wrapped_snapshot_pro_ausgabe.sql'),
+    ('145_warteliste_historie.sql'),
+    ('146_challenge_freigabe_historie.sql'),
+    ('147_anwesenheit_abgemeldet_und_vermerk.sql'),
+    ('148_anwesenheit_urheber.sql'),
+    ('149_notiz_urheber.sql'),
+    ('150_absagegrund.sql'),
+    ('151_anwesenheit_quelle.sql'),
+    ('152_absagegrund_urheber.sql'),
+    ('153_abmeldung_im_buchungsstatus.sql'),
+    ('154_event_booking_stats_abmeldung.sql'),
+    ('155_status_vor_absage.sql'),
+    ('156_push_tokens_app_version.sql'),
+    ('157_challenge_read_status.sql'),
+    ('158_push_gruppen_stumm.sql'),
+    ('159_gemeinde_einladungen.sql'),
+    ('160_chat_messages_fk_indizes.sql'),
+    ('162_wrapped_ausgaben_ueberleben_jahrgang.sql'),
+    ('163_user_activities_points.sql'),
+    ('164_direct_raeume_nur_zu_zweit.sql'),
+    ('165_password_plain_leeren.sql'),
+    ('166_refresh_tokens_gnadenfrist.sql'),
+    ('167_rate_limit_zaehler.sql'),
+    ('168_challenge_lesestand_leitung.sql'),
+    ('169_bewahrte_stempel.sql'),
+    ('170_konfi_historie.sql'),
+    ('171_refresh_tokens_geraet.sql'),
+    ('172_konfi_historie_anlass_abzeichen.sql'),
+    ('173_einladungscode_ohne_urheber.sql')
 ON CONFLICT (name) DO NOTHING;

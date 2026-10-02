@@ -27,46 +27,15 @@ module.exports = (db, rbacVerifier, { requireOrgAdmin }) => {
     handleValidationErrors
   ];
 
-  // Sicherstellen, dass settings-Tabelle organization_id-Spalte hat
-  // (Migration: idempotent, läuft bei jedem Start)
-  const ensureOrgColumn = async () => {
-    try {
-      // Prüfen ob organization_id Spalte existiert
-      const { rows } = await db.query(`
-        SELECT column_name FROM information_schema.columns
-        WHERE table_name = 'settings' AND column_name = 'organization_id'
-      `);
-
-      if (rows.length === 0) {
-
-        // Spalte hinzufügen (nullable zunächst)
-        await db.query('ALTER TABLE settings ADD COLUMN organization_id INTEGER REFERENCES organizations(id)');
-
-        // Bestehende Settings der ersten Organisation zuweisen
-        const { rows: orgs } = await db.query('SELECT id FROM organizations ORDER BY id LIMIT 1');
-        if (orgs.length > 0) {
-          await db.query('UPDATE settings SET organization_id = $1 WHERE organization_id IS NULL', [orgs[0].id]);
-        }
-
-        // UNIQUE constraint auf (organization_id, key) setzen
-        // Zuerst alten UNIQUE constraint auf key entfernen falls vorhanden
-        await db.query(`
-          DO $$ BEGIN
-            ALTER TABLE settings DROP CONSTRAINT IF EXISTS settings_key_key;
-            ALTER TABLE settings DROP CONSTRAINT IF EXISTS settings_pkey;
-          EXCEPTION WHEN OTHERS THEN NULL;
-          END $$;
-        `);
-        await db.query('ALTER TABLE settings ADD CONSTRAINT settings_org_key_unique UNIQUE (organization_id, key)');
-
-      }
-    } catch (err) {
-      console.error('Settings migration error:', err.message);
-    }
-  };
-
-  // Migration beim Laden ausführen
-  ensureOrgColumn();
+  // KEIN LAUFZEIT-DDL MEHR. Hier stand `ensureOrgColumn`: beim
+  // Laden eine Abfrage auf information_schema und, falls
+  // settings.organization_id fehlte, ALTER TABLE samt DROP CONSTRAINT
+  // settings_pkey. Die Spalte entsteht laengst auf beiden Wegen -- neue
+  // Instanz: init-scripts/01-create-schema.sql; Bestand: Migration 064
+  // (dieselbe Logik, idempotent), dazu 174 mit NOT NULL und dem
+  // Primaerschluessel (organization_id, key). Der Block haette im Ernstfall
+  // genau diesen Primaerschluessel wieder abgerissen.
+  // Test: tests/routes/settingsOhneLaufzeitDdl.test.js.
 
   // GET settings (alle authentifizierten User der eigenen Org)
   // Auch super_admin wird auf die aktuelle Organisation gescopt: ohne Filter

@@ -5,7 +5,7 @@ import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
 
 export default tseslint.config(
-  { ignores: ['dist', 'cypress.config.ts'] },
+  { ignores: ['dist', 'dist-app', 'cypress.config.ts'] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{ts,tsx}'],
@@ -27,10 +27,10 @@ export default tseslint.config(
       //   static-components         bewusst lokal definierte Unterkomponenten
       //   preserve-manual-memoization  vorhandene useMemo-Grenzen
       //
-      // Warum nicht 'off': Als Warnung bleiben sie sichtbar, und die
-      // CI-Regel fuer geaenderte Dateien laeuft mit --max-warnings 0 —
-      // dort schlagen sie also NUR an, wenn jemand eine NEUE Stelle
-      // hinzufuegt. Der geprüfte Altbestand blockiert keinen PR.
+      // Warum nicht 'off': Als Warnung bleiben sie im Lint-Log sichtbar.
+      // Die CI lintet bei jedem Push und PR den ganzen Baum und bewertet
+      // nur FEHLER (kein --max-warnings) — der geprüfte Altbestand blockiert
+      // also nichts, ein neuer Fehler schon (siehe ci.yml, Schritt Lint).
       'react-hooks/refs': 'warn',
       'react-hooks/set-state-in-effect': 'warn',
       'react-hooks/immutability': 'warn',

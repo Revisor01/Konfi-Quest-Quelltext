@@ -1,14 +1,17 @@
 {
   "applinks": {
-    "apps": [],
     "details": [
       {
-        "appID": "TEAMID.de.godsapp.konfiquest",
-        "paths": ["/register*", "/login*", "/konfi/*", "/admin/*"]
+        "appIDs": ["J459G9CJT5.de.godsapp.konfiquest"],
+        "components": [
+          { "/": "/login*" },
+          { "/": "/register*" },
+          { "/": "/reset-password*" }
+        ]
       }
     ]
   },
   "webcredentials": {
-    "apps": ["TEAMID.de.godsapp.konfiquest"]
+    "apps": ["J459G9CJT5.de.godsapp.konfiquest"]
   }
 }

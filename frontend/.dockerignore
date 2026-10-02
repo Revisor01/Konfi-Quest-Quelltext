@@ -7,6 +7,7 @@
 # Abhaengigkeiten und Bau-Ergebnis entstehen IM Image (npm ci, npm run build).
 node_modules
 dist
+dist-app
 
 # Native Projekte -- fuer den Web-Build ohne Bedeutung, zusammen 1,8 GB.
 ios

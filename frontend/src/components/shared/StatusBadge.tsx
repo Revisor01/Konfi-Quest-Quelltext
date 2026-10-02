@@ -16,6 +16,7 @@ import {
   ICON_UHRZEIT,
   ICON_VERBORGEN_GEFUELLT,
   ICON_WARTEND,
+  ICON_WECHSEL,
   ICON_ZUSAGE_GEFUELLT,
 } from './icons';
 
@@ -58,7 +59,12 @@ const STATUS_ICON_MAP: Record<string, string> = {
   'Verpasst': ICON_ABSAGE,
   'Ausstehend': ICON_WARTEND,
   'Genehmigt': ICON_ZUSAGE_GEFUELLT,
+  // Die Konfi-Antragsliste sagt 'Angerechnet' (Reiter und Badge gleich).
+  // Fehlte hier -- deshalb fiel das Eck-Badge dort auf den Text zurueck,
+  // waehrend 'Offen' und 'Abgelehnt' daneben Symbole zeigten.
+  'Angerechnet': ICON_ZUSAGE_GEFUELLT,
   'Abgelehnt': ICON_ABSAGE,
+  'Anderer Termin': ICON_WECHSEL,
   // Badges / generische Zustände (keine Text-Corner-Badges mehr)
   'Geheim': ICON_VERBORGEN_GEFUELLT,
   'Sichtbar': ICON_SICHTBAR_GEFUELLT,
@@ -98,6 +104,8 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({ statusText, statusColor }) =>
           padding: 'var(--app-abstand-mini) var(--app-abstand-eng)'
         }}
         title={statusText}
+        role="img"
+        aria-label={statusText}
       >
         <IonIcon icon={icon} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
       </div>
@@ -105,7 +113,7 @@ const StatusBadge: React.FC<StatusBadgeProps> = ({ statusText, statusColor }) =>
   }
 
   return (
-    <div className="app-corner-badge" style={{ backgroundColor: statusColor }}>
+    <div className="app-corner-badge" style={{ backgroundColor: statusColor }} title={statusText}>
       {statusText}
     </div>
   );

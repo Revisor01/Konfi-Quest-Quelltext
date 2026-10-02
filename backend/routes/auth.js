@@ -1,36 +1,217 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
+// Wie lange ein Einladungscode gilt
+const {
+  leseTage: leseEinladungsTage,
+  ablaufBeimAnlegen: einladungAblaufBeimAnlegen,
+  ablaufBeimVerlaengern: einladungAblaufBeimVerlaengern,
+  HOECHSTENS_TAGE: EINLADUNG_HOECHSTENS_TAGE
+} = require('../utils/einladungsGueltigkeit');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
+const { clientIp } = require('../utils/clientIp');
+const { PostgresRateLimitStore } = require('../utils/rateLimitStore');
 const { body, param } = require('express-validator');
 const validator = require('validator');
 const { handleValidationErrors, commonValidations } = require('../middleware/validation');
 const { validatePassword } = require('../utils/passwordUtils');
-const { deleteKonfiCascade } = require('../utils/konfiDeletion');
-const { meldeNachrueckern } = require('../utils/nachrueckMeldung');
+const { kontoDatenLoeschen, kontoDateienLoeschen, meldeNachKontoLoeschung } = require('../utils/kontoLoeschen');
 const { checkKonfiLimit } = require('../utils/konfiLimit');
 const PushService = require('../services/pushService');
+const { ladeLeitungZumJahrgang } = require('../utils/jahrgangLeitungSicht');
 const liveUpdate = require('../utils/liveUpdate');
 const { invalidateUserCache } = require('../middleware/rbac');
+const { nachAntwort } = require('../utils/nachAntwort');
+const { meldePasswortGeaendert } = require('../utils/passwortGeaendertMail');
+const { erzeugeKontoSperre, kontoSperreAufheben } = require('../utils/kontoSperre');
+const { benutzernameSperrenUndPruefen } = require('../utils/benutzernameSperre');
+const { refreshTokensBegrenzen } = require('../utils/refreshTokenGrenze');
 const router = express.Router();
 
-// Eigener Rate-Limiter für Passwort-Reset (getrennt vom Login-Limiter)
-const passwordResetLimiter = rateLimit({
+const erzeugeResetLimiter = (db) => ({
+// Eigener Rate-Limiter für Passwort-Reset (getrennt vom Login-Limiter).
+//
+// SCHLUESSEL WIE ALLE ANDEREN IP-LIMITER:
+// Dieser Limiter zaehlte auf req.ip -- und req.ip ist hinter
+// dem Proxy für ALLE Anfragen dieselbe Adresse (Produktionsbefund, siehe
+// server.js bei clientIp). Ergebnis: fünf Passwort-Reset-Anfragen je
+// Viertelstunde für die gesamte Plattform. Bei 10.000 bis 25.000
+// Nutzer:innen ist die Funktion damit praktisch nicht verfügbar, und ein
+// Dritter sperrt sie mit fünf Anfragen für alle. Die uebrigen Limiter waren
+// laengst auf clientIp() umgestellt, nur dieser hier nicht.
+  passwordResetLimiter: rateLimit({
   windowMs: 15 * 60 * 1000, // 15 Minuten
-  max: 5, // Max 5 Reset-Anfragen pro 15 Minuten
+  max: 5, // Max 5 Reset-Anfragen pro 15 Minuten je Absender
+  keyGenerator: (req) => ipKeyGenerator(clientIp(req)), // echte Client-IP (X-Real-IP vom Proxy)
   message: { error: 'Zu viele Passwort-Reset-Anfragen. Bitte warte 15 Minuten.' },
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  store: new PostgresRateLimitStore(db, { prefix: 'reset-ip' })
+  }),
+
+// Zweite Grenze JE ZIEL-ADRESSE: Sobald der Limiter oben je Absender zaehlt,
+// laesst sich ein einzelnes Konto von vielen Adressen aus mit Reset-Mails
+// bombardieren. Drei Anfragen je Stunde für dieselbe E-Mail reichen für
+// jeden echten Bedarf (Mail nicht angekommen, Spam-Ordner, noch einmal).
+//
+// Gezaehlt wird UNABHAENGIG davon, ob es ein Konto zu der Adresse gibt --
+// sonst wuerde ein 429 verraten, welche Adressen ein Konto haben, und die
+// neutrale Antwort der Route waere umsonst. Gross-/Kleinschreibung und
+// Leerraum zaehlen nicht als andere Adresse. Ohne E-Mail im Body greift die
+// Validierung dahinter (400); der Limiter laesst solche Anfragen durch.
+  passwordResetEmailLimiter: rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 Stunde
+  max: 3,
+  keyGenerator: (req) => `email:${String(req.body.email).trim().toLowerCase()}`,
+  skip: (req) => !req.body || typeof req.body.email !== 'string' || !req.body.email.trim(),
+  message: { error: 'Zu viele Passwort-Reset-Anfragen für diese E-Mail-Adresse. Bitte warte eine Stunde.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new PostgresRateLimitStore(db, { prefix: 'reset-email' })
+  })
 });
 
+
+// Grenze fuer die oeffentliche Namenspruefung GET /check-username/:username
+// 
+// Die Route verraet, ob es einen Benutzernamen gibt -- bei Konfis meist
+// vorname.nachname. Bis dahin bremste sie allein der allgemeine Flutschutz
+// (2000 je Viertelstunde und IP): Eine Namensliste eines Ortes liess sich in
+// Minuten abgleichen.
+//
+// GEZAEHLT WERDEN NUR TREFFER ("vergeben"): Beim Registrieren prueft die App
+// bei jedem Tastendruck (300 ms Pause), und eine Konfi-Gruppe registriert
+// sich gemeinsam aus einem Gemeinde-WLAN -- dieselbe IP, Hunderte Pruefungen
+// in einer Viertelstunde, fast alle "frei". Die sollen nicht zaehlen. Wer
+// dagegen eine Namensliste abgleicht, sammelt Treffer; nach 30 je
+// Viertelstunde und IP ist Schluss, dann antwortet die Route fuer diese IP
+// 15 Minuten lang 429. Die App (auch 2.2.x) faengt den Fehler ab und zeigt
+// dann nur keinen Hinweis "frei"/"vergeben" -- registrieren geht weiter,
+// POST /register-konfi prueft den Namen selbst.
+//
+// Zaehler im gemeinsamen Store (rate_limit_zaehler), also ueber beide
+// Replicas; Schluessel ist die Client-IP wie bei allen IP-Grenzen.
+const NAMENSPRUEFUNG_TREFFER = 30;
+const erzeugeNamensLimiter = (db) => rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: NAMENSPRUEFUNG_TREFFER,
+  keyGenerator: (req) => ipKeyGenerator(clientIp(req)),
+  skipSuccessfulRequests: true,
+  // "Erfolgreich" = nicht gezaehlt: alles ausser einem Treffer.
+  requestWasSuccessful: (req, res) => res.locals.benutzernameVergeben !== true,
+  message: { error: 'Zu viele Namensprüfungen. Bitte versuche es in 15 Minuten erneut.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new PostgresRateLimitStore(db, { prefix: 'namenspruefung' })
+});
+
+// DAS MUSTER wie bei der Namenspruefung oben: Schluessel ist die
+// Client-Adresse (clientIp, Header nur aus dem Docker-Netz), Zaehler im
+// gemeinsamen Store (beide Replicas), und GEZAEHLT WIRD NUR DER FALL, DER
+// AUF RATEN HINDEUTET. Echte Nutzung erzeugt ihn selten, und was sie
+// staendig tut -- gueltige Codes pruefen, Tokens erneuern --, zaehlt nicht.
+//
+// 1. EINLADUNGSCODE (GET /validate-invite/:code): gezaehlt wird nur 404
+//    "existiert nicht". Ein Code hat 8 Hex-Zeichen (32 Bit, POST
+//    /invite-code), und ein Treffer nennt Gemeinde und Jahrgang -- mit ihm
+//    registriert man sich dort als Konfi, samt Jahrgangs-Chat. Die App ruft
+//    die Route einmal je Deep-Link (/register?code=...) oder je Druck auf
+//    "Code pruefen" (KonfiRegisterPage.validateCode, ab 6 Zeichen), nicht
+//    beim Tippen. Eine Konfi-Gruppe im Gemeinde-WLAN teilt sich eine
+//    Adresse: 30 Personen mit je zwei Vertippern sind 60. Gueltige (200) und
+//    abgelaufene Codes (410, ohne Namen) zaehlen nicht -- sonst sperrte ein
+//    abgelaufener Code an der Tafel die ganze Gruppe, auch fuer den neuen.
+//    Vorher: bis 2000 Versuche je Viertelstunde und Adresse (je Replica).
+//
+// 2. RESET-TOKEN (POST /reset-password): gezaehlt wird nur "Ungueltiger oder
+//    abgelaufener Reset-Token". Das Token hat 32 Zufallsbytes, raten ist
+//    aussichtslos; die Grenze haelt Skripte fern. Echte Nutzung: ein Klick
+//    auf den Link aus der Mail, bei einem alten Link einer oder zwei
+//    Versuche. Ein zu schwaches neues Passwort (400 der Pruefung) zaehlt
+//    nicht -- die Seite laesst so oft probieren, wie es dauert.
+//
+// 3. REFRESH (POST /refresh): gezaehlt wird nur 401 (unbekanntes,
+//    abgelaufenes, widerrufenes oder geraetefremdes Token). Refresh-Tokens
+//    haben 64 Zufallsbytes, raten ist aussichtslos; die Grenze bremst nur
+//    Fluten. SIE MUSS WEIT SEIN: Die App meldet sich bei JEDER abgelehnten
+//    Erneuerung ab, auch bei 429 (services/api.ts, fehlerBehandeln:
+//    "Refresh vom Server abgelehnt -> Re-Login", in 2.2.x und 2.3.0).
+//    Erfolgreiche Erneuerungen -- alle 15 Minuten je aktivem Geraet, dazu
+//    bei jedem Start -- zaehlen nicht, 403 (Sperre von Konto oder Gemeinde)
+//    und 400/500 auch nicht. Ein Geraet erzeugt hoechstens zwei 401: Nach
+//    dem ersten verwirft die App den Token (ensureFreshToken behaelt den
+//    alten Zugangs-Token, die naechste Anfrage laeuft in 401, der zweite
+//    Refresh scheitert, die App meldet ab). 300 je Viertelstunde und
+//    Adresse -- dieselbe Zahl wie die Fehlversuche beim Anmelden
+//    (authLimiter) -- heisst also: 150 Geraete hinter einer Adresse werden
+//    binnen 15 Minuten abgemeldet. Das kommt nicht vor, auch nicht hinter
+//    Carrier-NAT (IPv6 zaehlt je /56).
+const EINLADUNGSCODE_FEHLVERSUCHE = 60;
+const RESET_TOKEN_FEHLVERSUCHE = 20;
+const REFRESH_FEHLVERSUCHE = 300;
+const erzeugeOeffentlicheGrenzen = (db) => {
+  const grenze = ({ prefix, max, gezaehlt, error }) => rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max,
+    keyGenerator: (req) => ipKeyGenerator(clientIp(req)),
+    skipSuccessfulRequests: true,
+    // "Erfolgreich" = nicht gezaehlt: alles ausser dem Ratefall.
+    requestWasSuccessful: (req, res) => !gezaehlt(req, res),
+    message: { error },
+    standardHeaders: true,
+    legacyHeaders: false,
+    store: new PostgresRateLimitStore(db, { prefix })
+  });
+  return {
+    einladungscodeLimiter: grenze({
+      prefix: 'einladungscode',
+      max: EINLADUNGSCODE_FEHLVERSUCHE,
+      gezaehlt: (req, res) => res.statusCode === 404,
+      error: 'Zu viele unbekannte Einladungscodes. Bitte prüfe den Code und versuche es in 15 Minuten erneut.'
+    }),
+    resetTokenLimiter: grenze({
+      prefix: 'reset-token',
+      max: RESET_TOKEN_FEHLVERSUCHE,
+      gezaehlt: (req, res) => res.locals.resetTokenUngueltig === true,
+      error: 'Zu viele ungültige Links zum Zurücksetzen. Bitte fordere einen neuen Link an und versuche es in 15 Minuten erneut.'
+    }),
+    refreshLimiter: grenze({
+      prefix: 'refresh',
+      max: REFRESH_FEHLVERSUCHE,
+      gezaehlt: (req, res) => res.statusCode === 401,
+      error: 'Zu viele abgelaufene Anmeldungen von dieser Verbindung. Bitte melde dich in 15 Minuten neu an.'
+    }),
+  };
+};
+
 const JWT_SECRET = process.env.JWT_SECRET;
+
+const SPERR_MELDUNGEN = {
+  user_inactive: 'Dein Zugang wurde deaktiviert. Bitte wende dich an deine Gemeinde.',
+  org_trial_expired: 'Die Testphase dieser Gemeinde ist abgelaufen. Bitte wende dich an die Leitung deiner Gemeinde, um einen Tarif zu buchen.',
+  org_inactive: 'Diese Gemeinde ist derzeit gesperrt. Bitte wende dich an die Leitung deiner Gemeinde.',
+};
+const sperrAntwort = (res, errorCode) =>
+  res.status(403).json({ error: SPERR_MELDUNGEN[errorCode], error_code: errorCode });
 if (!JWT_SECRET) {
   throw new Error('JWT_SECRET environment variable is required');
 }
 
+// VERTRAG GEPRUEFT: Die ausgelieferten Apps (1.5.3, 2.0.0, 2.1.1, 2.2.0,
+// 2.3.0) dekodieren das Token an genau einer Stelle, services/api.ts
+// getTokenExp, und lesen dort nur `exp`. Name und E-Mail kommen aus der
+// Antwort der Anmeldung (`user`) und aus GET /auth/me. Im Backend liest
+// niemand die beiden Claims: rbac.js, die Socket-Anmeldung und die
+// Datei-Routen laden die Person je Anfrage aus der Datenbank und lesen aus
+// dem Token nur id, iat und active_organization_id.
+
 // Unified auth routes - combines all login functionality
 module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, rbacVerifier) => {
+  const { passwordResetLimiter, passwordResetEmailLimiter } = erzeugeResetLimiter(db);
+  const namensLimiter = erzeugeNamensLimiter(db);
+  const { einladungscodeLimiter, resetTokenLimiter, refreshLimiter } = erzeugeOeffentlicheGrenzen(db);
   const { authLimiter, registerLimiter } = rateLimiters;
   const emailService = require('../services/emailService');
 
@@ -45,9 +226,34 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
   // SHA-256 Hash für DB-Speicherung (konsistent mit Phase 66)
   const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
+  // Geraete-Kennung aus dem Anfragekoerper.
+  // Die App schickt sie bei Anmeldung, Registrierung
+  // und Refresh als `device_id` mit -- dieselbe Kennung wie bei den
+  // Push-Tokens. Nur ein nicht-leerer Text bis 255 Zeichen zaehlt; alles
+  // andere gilt als "keine Kennung". Ausgelieferte Apps (2.2.x, 2.3.0) senden
+  // an diesen Routen nie eine.
+  const geraeteKennung = (req) => {
+    const roh = req.body?.device_id;
+    if (typeof roh !== 'string') return null;
+    const kennung = roh.trim();
+    return kennung.length > 0 && kennung.length <= 255 ? kennung : null;
+  };
+
+  const grenzeDurchsetzen = async (dbConn, userId, neuId, geraet) => {
+    try {
+      await refreshTokensBegrenzen(dbConn, userId, { neuId, geraet });
+    } catch (err) {
+      console.error(`Refresh-Token-Grenze fuer User ${userId} nicht durchgesetzt:`, err.message);
+    }
+  };
+
   // Frisches Token-Paar für einen User erzeugen. Wird nach dem Passwortwechsel
   // gebraucht: dort werden alle Sitzungen invalidiert, und ohne neues Paar
   // wuerde der eigene Client sofort mitfliegen.
+  // Bewusst OHNE Geraetebindung (Migration 171): Auch ausgelieferte Apps
+  // schicken beim Passwortwechsel schon eine device_id mit, beim Refresh aber
+  // nie -- ein gebundenes Token sperrte sie nach 15 Minuten aus. Die
+  // aktualisierte App bindet das Token beim ersten Refresh.
   // Gibt null zurück, wenn der User nicht (mehr) ladbar ist — der Aufrufer
   // antwortet dann ohne Token, der Wechsel selbst bleibt gueltig.
   const erstelleTokenPaarFuerUser = async (dbConn, userId) => {
@@ -70,11 +276,10 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       // auf der Kippe und könnte sich selbst aussperren.
       const iatVordatiert = Math.floor(Date.now() / 1000) + 1;
 
+      // Ohne Name und E-Mail, siehe TOKEN_INHALT oben.
       const accessToken = jwt.sign({
         id: u.id,
         type: userType,
-        display_name: u.display_name,
-        email: u.email,
         organization_id: u.organization_id,
         role_name: u.role_name,
         is_super_admin: u.is_super_admin || false,
@@ -82,10 +287,11 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       }, JWT_SECRET, { expiresIn: '15m' });
 
       const refreshToken = generateRefreshToken();
-      await dbConn.query(
-        'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
+      const { rows: [neu] } = await dbConn.query(
+        'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3) RETURNING id',
         [u.id, hashToken(refreshToken), new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)]
       );
+      await grenzeDurchsetzen(dbConn, u.id, neu.id, null);
 
       return { token: accessToken, refresh_token: refreshToken };
     } catch (err) {
@@ -98,6 +304,12 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
 
   // Rate Limiter Middleware für Login (falls vorhanden)
   const loginMiddleware = authLimiter ? [authLimiter] : [];
+  // Sperre JE KONTO nach 10 falschen Passwoertern in einer Stunde:
+  // Die IP-Grenze oben laesst 1 200 Versuche
+  // je Stunde und Adresse zu -- die Einmalpasswoerter (30 772 Bibelstellen)
+  // waren damit in einem Tag durchprobiert. Immer aktiv, auch ohne die
+  // Limiter aus server.js; Begruendung und Zahlen in utils/kontoSperre.js.
+  const kontoSperre = erzeugeKontoSperre(db);
   // Rate Limiter Middleware für Selbst-Registrierung (falls vorhanden)
   const registerMiddleware = registerLimiter ? [registerLimiter] : [];
 
@@ -144,7 +356,8 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
   ];
 
   // Unified RBAC login - works for both admins and konfis
-  router.post('/login', ...loginMiddleware, validateLogin, async (req, res) => {
+  // Reihenfolge: IP-Grenze, Eingabepruefung (trimmt den Namen), Kontosperre.
+  router.post('/login', ...loginMiddleware, validateLogin, kontoSperre, async (req, res) => {
     // Usernames werden beim Anlegen klein gespeichert (name.toLowerCase()...).
     // Eingabe daher case-insensitiv machen: trim + lowercase, sonst scheitert
     // der Login wenn jemand z.B. "Anna.Schmidt" statt "anna.schmidt" tippt
@@ -152,12 +365,16 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
     // mehr verändert gespeichert -> Login case-insensitiv per LOWER-Vergleich.
     const username = (req.body.username || '').trim();
     const { password } = req.body;
- console.warn(`Login-Versuch: ${username}`);
-
+    // Kein Benutzername im Protokoll:
+    // Er ist bei Konfis meist vorname.nachname eines Kindes. Erfolgreiche
+    // Anmeldungen schreiben keine Zeile; Fehlversuche schon,
+    // mit der Konto-Kennung oder, wenn es den Namen nicht gibt,
+    // ohne jede Angabe zur Person. Gezaehlt werden sie in der Kontosperre
+    // (utils/kontoSperre.js).
     try {
       const userQuery = `
         SELECT u.id, u.username, u.display_name, u.password_hash, u.organization_id, u.email, u.role_id,
-               u.is_super_admin, u.is_active as user_active,
+               u.is_super_admin, u.is_active as user_active, u.deleted_at,
                o.name as organization_name, o.slug as organization_slug,
                COALESCE(o.is_active, true) as organization_active, o.trial_ends_at, o.is_trial,
                r.name as role_name, r.display_name as role_display_name,
@@ -174,37 +391,50 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       const { rows: [user] } = await db.query(userQuery, [username]);
 
       if (!user) {
- console.warn(`Login fehlgeschlagen: Benutzer '${username}' not found`);
+        console.warn('Login fehlgeschlagen: unbekannter Benutzername');
         return res.status(401).json({ error: 'Ungültige Anmeldedaten' });
       }
-      
+
       const passwordMatch = await bcrypt.compare(password, user.password_hash);
       if (!passwordMatch) {
- console.warn(`Login fehlgeschlagen: Falsches Passwort für '${username}'`);
+        console.warn(`Login fehlgeschlagen: falsches Passwort fuer Konto ${user.id}`);
         return res.status(401).json({ error: 'Ungültige Anmeldedaten' });
       }
 
       // Zugriffs-Sperren — super_admin (ohne Org) ist ausgenommen.
       const isSuperAdmin = user.is_super_admin === true || user.role_name === 'super_admin';
+
+      // Soft-geloescht (deleted_at; der Auto-Loeschlauf setzt es 60 Tage
+      // nach der Konfirmation, hart geloescht wird ab Tag 120). Die Person
+      // ist fuer die Leitung laengst unsichtbar -- jede Liste filtert
+      // deleted_at IS NULL --, konnte sich aber weiter anmelden und im Chat
+      // schreiben. Antwort exakt wie
+      // beim deaktivierten Konto, damit der Fehler nicht verraet, dass es das
+      // Konto noch gibt. Gilt fuer jede Rolle: Loeschung kennt keine Ausnahme.
+      if (user.deleted_at) {
+        console.warn(`Login blockiert: Konto ${user.id} ist geloescht (Soft-Delete)`);
+        return sperrAntwort(res, 'user_inactive');
+      }
+
       if (!isSuperAdmin) {
         // User deaktiviert
         if (user.user_active === false) {
- console.warn(`Login blockiert: Benutzer '${username}' ist deaktiviert`);
-          return res.status(403).json({ error: 'Dein Zugang wurde deaktiviert. Bitte wende dich an deine Gemeinde.', error_code: 'user_inactive' });
+          console.warn(`Login blockiert: Konto ${user.id} ist deaktiviert`);
+          return sperrAntwort(res, 'user_inactive');
         }
         // Trial abgelaufen (auch falls der Cron die Org noch nicht auf inaktiv gesetzt hat)
         const trialExpired = user.trial_ends_at && new Date(user.trial_ends_at) < new Date();
         // Organisation gesperrt (inaktiv oder Trial abgelaufen)
         if (user.organization_active === false || trialExpired) {
- console.warn(`Login blockiert: Organisation von '${username}' ist gesperrt (active=${user.organization_active}, trialExpired=${trialExpired})`);
-          return res.status(403).json({
-            error: trialExpired
-              ? 'Die Testphase dieser Organisation ist abgelaufen. Bitte wende dich an deine Gemeinde, um einen Tarif zu buchen.'
-              : 'Diese Organisation ist derzeit gesperrt. Bitte wende dich an deine Gemeinde.',
-            error_code: trialExpired ? 'org_trial_expired' : 'org_inactive'
-          });
+          console.warn(`Login blockiert: Gemeinde ${user.organization_id} von Konto ${user.id} ist gesperrt (active=${user.organization_active}, trialExpired=${trialExpired})`);
+          return sperrAntwort(res, trialExpired ? 'org_trial_expired' : 'org_inactive');
         }
       }
+
+      // Erfolgreich angemeldet: Die Fehlversuche dieses Kontos verfallen --
+      // ein Kind, das sich neunmal vertippt und dann trifft, faengt wieder bei
+      // null an. (Ueber der Grenze kommt niemand bis hierher.)
+      if (req.kontoSperre) await kontoSperre.resetKey(req.kontoSperre.key);
 
       // last_login_at nur beim echten Login aktualisieren (nicht in Middleware)
       await db.query("UPDATE users SET last_login_at = NOW() WHERE id = $1", [user.id]);
@@ -212,11 +442,10 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       const userType = user.role_name === 'konfi' ? 'konfi' : user.role_name === 'teamer' ? 'teamer' : 'admin';
 
       // JWT Token - Rollen-basiert (keine Permissions mehr)
+      // Ohne Name und E-Mail, siehe TOKEN_INHALT oben.
       const token = jwt.sign({
         id: user.id,
         type: userType,
-        display_name: user.display_name,
-        email: user.email,
         organization_id: user.organization_id,
         role_name: user.role_name,
         is_super_admin: user.is_super_admin || false
@@ -226,10 +455,13 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       const refreshToken = generateRefreshToken();
       const refreshTokenHash = hashToken(refreshToken);
       const refreshExpiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000); // 90 Tage
-      await db.query(
-        'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
-        [user.id, refreshTokenHash, refreshExpiresAt]
+      // An das Geraet gebunden, wenn die App ihre Kennung mitschickt.
+      const loginGeraet = geraeteKennung(req);
+      const { rows: [neuesToken] } = await db.query(
+        'INSERT INTO refresh_tokens (user_id, token_hash, expires_at, device_id) VALUES ($1, $2, $3, $4) RETURNING id',
+        [user.id, refreshTokenHash, refreshExpiresAt, loginGeraet]
       );
+      await grenzeDurchsetzen(db, user.id, neuesToken.id, loginGeraet);
 
       const responseUser = {
         id: user.id,
@@ -319,6 +551,8 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         `UPDATE users SET password_hash = $1, token_invalidated_at = NOW() WHERE id = $2`,
         [hashedPassword, userId]
       );
+      // Neues Passwort: eine Sperre nach Fehlversuchen endet damit.
+      await kontoSperreAufheben(db, userId);
       await db.query(
         'UPDATE refresh_tokens SET revoked_at = NOW(), expires_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL',
         [userId]
@@ -356,6 +590,10 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         message: 'Passwort erfolgreich geändert',
         ...(neuesPaar || {})
       });
+
+      // Bestaetigung an die hinterlegte Adresse
+      // -- nach der Antwort, ein Versandfehler kippt nichts.
+      nachAntwort(req, () => meldePasswortGeaendert(db, userId), 'POST /auth/change-password (Mail)');
 
     } catch (err) {
  console.error('Database error in POST /api/auth/change-password:', err);
@@ -409,12 +647,11 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         }
       }
 
-      // Gesamte Kaskade in einer Transaktion (T-114-06): alles oder nichts.
       const client = await db.getClient();
-      let nachgerueckt = [];
+      let ergebnis = null;
       try {
         await client.query('BEGIN');
-        nachgerueckt = await deleteKonfiCascade(client, userId, user.organization_id);
+        ergebnis = await kontoDatenLoeschen(client, userId);
         await client.query('COMMIT');
       } catch (txErr) {
         await client.query('ROLLBACK');
@@ -423,17 +660,25 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         client.release();
       }
 
+      // Dateien erst nach dem COMMIT -- ein ROLLBACK darf keine kosten.
+      await kontoDateienLoeschen(ergebnis?.dateien);
+
       res.json({ message: 'Account erfolgreich gelöscht' });
 
-      // Benachrichtigung NACH dem COMMIT und fehlertolerant — die Loeschung
-      // ist festgeschrieben, ein Push-Fehler darf sie nicht mehr kippen.
-      await meldeNachrueckern(db, user.organization_id, nachgerueckt);
+      // Rechte-Cache leeren: Das eigene
+      // Token gaelte sonst noch bis zu 30 Sekunden weiter (TTL in rbac.js).
+      invalidateUserCache(userId);
 
-      // Admin-Liste aktualisieren und den Socket des geloeschten Kontos trennen —
-      // sonst empfing er weiter Org-Updates und die Liste blieb stehen
-      // 
-      liveUpdate.sendToOrgAdmins(req.user.organization_id, 'konfis', 'delete', { userId });
-      liveUpdate.disconnectUserSockets(userId);
+      const organizationId = req.user.organization_id;
+      nachAntwort(req, async () => {
+        await meldeNachKontoLoeschung(db, ergebnis);
+
+        // Admin-Liste aktualisieren und den Socket des geloeschten Kontos trennen —
+        // sonst empfing er weiter Org-Updates und die Liste blieb stehen
+        // 
+        liveUpdate.sendToOrgAdmins(organizationId, 'konfis', 'delete', { userId });
+        liveUpdate.disconnectUserSockets(userId);
+      }, 'POST /auth/delete-account (Meldungen nach Kontoloeschung)');
 
     } catch (err) {
  console.error('Database error in POST /api/auth/delete-account:', err);
@@ -484,6 +729,7 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       const titleValue = role_title?.trim() || null;
 
       await db.query(`UPDATE users SET role_title = $1 WHERE id = $2`, [titleValue, userId]);
+      invalidateUserCache(userId);
 
       res.json({
         message: 'Funktionsbeschreibung erfolgreich aktualisiert',
@@ -519,7 +765,29 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       // Eigene Jahrgangs-Zuweisungen mitliefern. KEINE zusaetzliche Abfrage:
       // rbacVerifier laedt sie ohnehin bei jedem Request (rbac.js:183-193),
       // hier werden sie nur durchgereicht.
-      res.json({ ...user, assigned_jahrgaenge: req.user.assigned_jahrgaenge || [] });
+      //
+      // Die Abfrage oben liest u.role_id -- das ist die Rolle der
+      // STAMM-Gemeinde. Wer ueber user_organizations in einer zweiten
+      // Gemeinde eine andere Rolle hat (in A Leitung, in B Teamer:in), bekam
+      // hier trotzdem die Rolle vom Konto gemeldet: rbacVerifier hatte sie
+      // fuer die aktive Gemeinde laengst aufgeloest (rbac.js, Migration 101),
+      // diese Route ignorierte das Ergebnis und fragte neu.
+      //
+      // Das war ein ANZEIGEFEHLER, keine Rechteausweitung: Die Rechte haengen
+      // an req.user.role_name (requireRole/requireAdmin/requireOrgAdmin lesen
+      // genau das), und der Wert war dort korrekt. Die App richtet ihre
+      // Oberflaeche aber nach dieser Antwort -- sie haette der Person in der
+      // Zweitgemeinde eine Leitungsansicht gezeigt, deren Knoepfe der Server
+      // dann mit 403 abweist.
+      //
+      // Antwortform unveraendert (ausgelieferte Apps lesen sie): dieselben
+      // Felder, dieselben Typen -- nur die Werte stimmen jetzt.
+      res.json({
+        ...user,
+        role_name: req.user.role_name ?? user.role_name,
+        role_display_name: req.user.role_display_name ?? user.role_display_name,
+        assigned_jahrgaenge: req.user.assigned_jahrgaenge || []
+      });
 
     } catch (err) {
  console.error('Database error in GET /api/auth/me:', err);
@@ -572,7 +840,7 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       res.json(rows);
     } catch (err) {
       console.error('Database error in GET /api/auth/my-organizations:', err);
-      res.status(500).json({ error: 'Fehler beim Laden der Organisationen' });
+      res.status(500).json({ error: 'Fehler beim Laden der Gemeinden' });
     }
   });
 
@@ -591,18 +859,19 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         SELECT o.id, o.name, o.slug, r.name as role_name,
                COALESCE(o.is_active, true) as is_active,
                u.display_name, u.email, u.organization_id as primary_org_id, u.is_super_admin
-        FROM user_organizations uo
-        JOIN organizations o ON uo.organization_id = o.id
-        JOIN roles r ON uo.role_id = r.id
-        JOIN users u ON uo.user_id = u.id
-        WHERE uo.user_id = $1 AND uo.organization_id = $2
+        FROM users u
+        JOIN organizations o ON o.id = $2
+        LEFT JOIN user_organizations uo ON uo.user_id = u.id AND uo.organization_id = o.id
+        JOIN roles r ON r.id = CASE WHEN u.organization_id = o.id THEN u.role_id ELSE uo.role_id END
+        WHERE u.id = $1
+          AND (u.organization_id = o.id OR uo.user_id IS NOT NULL)
       `, [userId, targetOrgId]);
 
       if (!membership) {
-        return res.status(403).json({ error: 'Du bist kein Mitglied dieser Organisation' });
+        return res.status(403).json({ error: 'Du bist kein Mitglied dieser Gemeinde' });
       }
       if (membership.is_active === false) {
-        return res.status(403).json({ error: 'Diese Organisation ist derzeit gesperrt' });
+        return res.status(403).json({ error: 'Diese Gemeinde ist derzeit gesperrt' });
       }
 
       const userType = membership.role_name === 'konfi' ? 'konfi'
@@ -611,11 +880,10 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       // Bei Wechsel zur Primaer-Org KEINEN active-Claim setzen (Default-Verhalten).
       const isPrimary = targetOrgId === membership.primary_org_id;
 
+      // Ohne Name und E-Mail, siehe TOKEN_INHALT oben.
       const token = jwt.sign({
         id: userId,
         type: userType,
-        display_name: membership.display_name,
-        email: membership.email,
         organization_id: membership.primary_org_id,
         role_name: membership.role_name,
         is_super_admin: membership.is_super_admin || false,
@@ -632,25 +900,42 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       });
     } catch (err) {
       console.error('Database error in POST /api/auth/switch-org:', err);
-      res.status(500).json({ error: 'Fehler beim Wechsel der Organisation' });
+      res.status(500).json({ error: 'Fehler beim Wechsel der Gemeinde' });
     }
   });
 
   // Request password reset (mit eigenem Rate-Limiter, getrennt vom Login-Limiter)
-  router.post('/request-password-reset', passwordResetLimiter, validateRequestPasswordReset, async (req, res) => {
+  router.post('/request-password-reset', passwordResetLimiter, passwordResetEmailLimiter, validateRequestPasswordReset, async (req, res) => {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'E-Mail-Adresse ist erforderlich' });
     
     try {
+      // Jetzt: nur Konten, mit denen man sich anmelden kann (nicht geloescht,
+      // nicht gesperrt -- is_active NULL gilt wie beim Login als aktiv), und
+      // JEDES davon bekommt seinen eigenen Link.
+      //
+      // EINE MAIL JE KONTO, nicht eine Mail mit mehreren Links: Die Vorlage
+      // (emailService.sendPasswordResetEmail) traegt genau einen Knopf und
+      // spricht die Person mit dem Namen DIESES Kontos an. Je Konto eine Mail
+      // laesst Knopf und Anrede, wie sie sind, und kann nicht verwechselt
+      // werden -- dazu stehen Gemeinde und Benutzername im Text, die Gemeinde
+      // auch im Betreff. Eine Sammelmail braeuchte eine Liste in Text und
+      // HTML und liesse offen, welcher Knopf zu welchem Konto gehoert.
       const query = `
-        SELECT u.id, u.email, u.display_name as name, r.name as role_name
+        SELECT u.id, u.email, u.username, u.display_name as name, r.name as role_name,
+               COALESCE(o.display_name, o.name) AS gemeinde
         FROM users u
         LEFT JOIN roles r ON u.role_id = r.id
+        LEFT JOIN organizations o ON o.id = u.organization_id
         WHERE u.email = $1
+          AND u.deleted_at IS NULL
+          AND COALESCE(u.is_active, true) = true
+        ORDER BY u.id
       `;
-      const { rows: [user] } = await db.query(query, [email]);
-      
-      if (user) {
+      const { rows: konten } = await db.query(query, [email]);
+
+      const mails = [];
+      for (const user of konten) {
         const userType = user.role_name === 'konfi' ? 'konfi' : user.role_name === 'teamer' ? 'teamer' : 'admin';
         const token = generateResetToken();
         const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
@@ -662,22 +947,32 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         await db.query('INSERT INTO password_resets (user_id, user_type, token, expires_at) VALUES ($1, $2, $3, $4)',
           [user.id, userType, hashToken(token), expiresAt]);
 
-        const resetUrl = `https://konfi-quest.de/reset-password?token=${token}`;
-
-        try {
-          await emailService.sendPasswordResetEmail(email, user.name, token, resetUrl);
-        } catch (emailError) {
-          // BEWUSST kein 500 nach aussen: Die Antwort unten
-          // ist absichtlich neutral formuliert, damit sie nicht verraet, ob es
-          // ein Konto gibt. Ein Fehlerstatus genau dann, wenn ein Konto
-          // existiert, hätte dieselbe Auskunft über die Hintertuer gegeben —
-          // 200 = unbekannte Adresse, 500 = Adresse vorhanden.
-          console.error('E-Mail-Versand fehlgeschlagen:', emailError);
-        }
+        mails.push({
+          name: user.name,
+          token,
+          resetUrl: `https://konfi-quest.de/reset-password?token=${token}`,
+          // Gemeinde und Benutzername nur, wenn es etwas zu unterscheiden
+          // gibt: Bei einem einzigen Konto bleibt die Mail, wie sie war.
+          konto: konten.length > 1 ? { gemeinde: user.gemeinde, benutzername: user.username } : {}
+        });
       }
 
       // Always return a success message to not reveal if an email exists or not
+      // -- und nicht, WIE VIELE Konten es gibt: Die Antwort ist fuer null,
+      // eins und mehrere Konten Zeichen fuer Zeichen dieselbe.
       res.json({ message: 'Falls ein Konto mit dieser E-Mail-Adresse existiert, wurde eine Reset-E-Mail gesendet' });
+
+      if (mails.length > 0) {
+        nachAntwort(req, async () => {
+          for (const m of mails) {
+            try {
+              await emailService.sendPasswordResetEmail(email, m.name, m.token, m.resetUrl, m.konto);
+            } catch (emailError) {
+              console.error('E-Mail-Versand fehlgeschlagen:', emailError);
+            }
+          }
+        }, 'POST /auth/request-password-reset (Mail)');
+      }
 
     } catch (err) {
  console.error('Database error in POST /api/auth/request-password-reset:', err);
@@ -695,11 +990,16 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
 
     // Only org_admin can generate invite codes
     if (req.user.role_name !== 'org_admin' && !req.user.is_super_admin) {
-      return res.status(403).json({ error: 'Nur Org-Admins können Einladungscodes erstellen' });
+      return res.status(403).json({ error: 'Nur die Gemeindeleitung kann Einladungscodes erstellen' });
     }
 
     if (!jahrgang_id) {
       return res.status(400).json({ error: 'Jahrgang ist erforderlich' });
+    }
+
+    const gueltigkeit = leseEinladungsTage(req.body.gueltig_tage);
+    if (!gueltigkeit.ok) {
+      return res.status(400).json({ error: 'Ein Einladungscode gilt 7, 14, 30, 60 oder 90 Tage.' });
     }
 
     try {
@@ -715,7 +1015,7 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
 
       // Generate unique invite code (8 characters, uppercase alphanumeric)
       const inviteCode = crypto.randomBytes(4).toString('hex').toUpperCase();
-      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+      const expiresAt = einladungAblaufBeimAnlegen(gueltigkeit.tage);
 
       // Store invite code
       await db.query(`
@@ -726,7 +1026,8 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       res.json({
         invite_code: inviteCode,
         jahrgang_name: jahrgang.name,
-        expires_at: expiresAt
+        expires_at: expiresAt,
+        gueltig_tage: gueltigkeit.tage
       });
 
     } catch (err) {
@@ -740,7 +1041,7 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
     const organizationId = req.user.organization_id;
 
     if (req.user.role_name !== 'org_admin') {
-      return res.status(403).json({ error: 'Nur Administratoren können Einladungscodes einsehen' });
+      return res.status(403).json({ error: 'Nur die Gemeindeleitung kann Einladungscodes einsehen' });
     }
 
     try {
@@ -764,13 +1065,26 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
     }
   });
 
-  // Extend invite code by 7 days (org_admin only)
+  // Extend invite code (org_admin only)
+  //
+  // UM WAEHLBARE TAGE, HOECHSTENS 90 IM VORAUS:
+  // tage 7, 14, 30, 60 oder 90, optional -- ohne das Feld wie bisher
+  // um 7 Tage (Apps im Store schicken keinen Body). Das neue Ablaufdatum
+  // liegt nie mehr als 90 Tage in der Zukunft; was darueber hinausginge,
+  // wird gekuerzt (begrenzt: true). Steht der Code schon an der Grenze: 400.
+  // Abgelaufene Codes bleiben abgelaufen (400 wie bisher). Antwort additiv
+  // um begrenzt erweitert.
   router.post('/invite-codes/:id/extend', rbacVerifier, async (req, res) => {
     const { id } = req.params;
     const organizationId = req.user.organization_id;
 
     if (req.user.role_name !== 'org_admin') {
-      return res.status(403).json({ error: 'Nur Administratoren können Einladungscodes verlängern' });
+      return res.status(403).json({ error: 'Nur die Gemeindeleitung kann Einladungscodes verlängern' });
+    }
+
+    const verlaengerung = leseEinladungsTage(req.body ? req.body.tage : undefined);
+    if (!verlaengerung.ok) {
+      return res.status(400).json({ error: 'Ein Einladungscode lässt sich um 7, 14, 30, 60 oder 90 Tage verlängern.' });
     }
 
     try {
@@ -787,15 +1101,19 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         return res.status(400).json({ error: 'Abgelaufene Codes können nicht verlängert werden' });
       }
 
-      // Add 7 days to current expiry
-      const newExpiry = new Date(invite.expires_at);
-      newExpiry.setDate(newExpiry.getDate() + 7);
+      const { ablauf: newExpiry, begrenzt, verlaengert } =
+        einladungAblaufBeimVerlaengern(new Date(invite.expires_at), verlaengerung.tage);
+      if (!verlaengert) {
+        return res.status(400).json({
+          error: `Der Code gilt schon ${EINLADUNG_HOECHSTENS_TAGE} Tage im Voraus — länger lässt er sich nicht verlängern.`
+        });
+      }
 
       await db.query(`
         UPDATE invite_codes SET expires_at = $1 WHERE id = $2 AND organization_id = $3
       `, [newExpiry, id, organizationId]);
 
-      res.json({ message: 'Einladungscode verlängert', expires_at: newExpiry });
+      res.json({ message: 'Einladungscode verlängert', expires_at: newExpiry, begrenzt });
 
     } catch (err) {
  console.error('Database error in POST /api/auth/invite-codes/:id/extend:', err);
@@ -807,7 +1125,7 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
   router.delete('/invite-codes/:id', rbacVerifier, async (req, res) => {
     const organizationId = req.user.organization_id;
     if (req.user.role_name !== 'org_admin') {
-      return res.status(403).json({ error: 'Nur Administratoren können Einladungscodes löschen' });
+      return res.status(403).json({ error: 'Nur die Gemeindeleitung kann Einladungscodes löschen' });
     }
     try {
       const { rowCount } = await db.query(
@@ -822,8 +1140,9 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
     }
   });
 
-  // Check username availability (public endpoint)
-  router.get('/check-username/:username', async (req, res) => {
+  // Check username availability (public endpoint). Grenze: namensLimiter
+  // oben.
+  router.get('/check-username/:username', namensLimiter, async (req, res) => {
     const { username } = req.params;
     const trimmed = username.trim();
 
@@ -840,6 +1159,8 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       const { rows } = await db.query('SELECT id FROM users WHERE LOWER(username) = LOWER($1)', [trimmed]);
 
       if (rows.length > 0) {
+        // Nur dieser Fall zaehlt fuer den namensLimiter.
+        res.locals.benutzernameVergeben = true;
         return res.json({ available: false, message: 'Benutzername bereits vergeben' });
       }
 
@@ -852,7 +1173,7 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
   });
 
   // Validate invite code (public endpoint)
-  router.get('/validate-invite/:code', async (req, res) => {
+  router.get('/validate-invite/:code', einladungscodeLimiter, async (req, res) => {
     const { code } = req.params;
 
     try {
@@ -957,6 +1278,11 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       try {
         await client.query('BEGIN');
 
+        if (await benutzernameSperrenUndPruefen(client, username)) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({ error: 'Benutzername bereits vergeben' });
+        }
+
         // Konfi-Limit-Prüfung (Weg 2, D-08b): NUR Hard-Block ablehnen. Grace und
         // under_limit laufen unverändert durch — der sich selbst anmeldende Konfi
         // kann keinen "Trotzdem anlegen"-Dialog der Leitung bestaetigen (kein 409,
@@ -983,16 +1309,21 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
           VALUES ($1, $2, 0, 0, $3, $4)
         `, [newUser.id, invite.jahrgang_id, invite.id, invite.organization_id]);
 
+        // Ein vorher durchprobierter Name startet frei (utils/kontoSperre.js).
+        await kontoSperreAufheben(client, newUser.id);
+
         await client.query('COMMIT');
 
-        // Push-Notification an Jahrgangs-Admins
         try {
-          await PushService.sendNewKonfiRegistrationToAdmins(
+          const empfaenger = await ladeLeitungZumJahrgang(db, invite.organization_id, invite.jahrgang_id);
+          await PushService.sendNewKonfiRegistrationToLeadership(
             db,
             invite.organization_id,
+            empfaenger,
             invite.jahrgang_id,
             display_name,
-            invite.jahrgang_name
+            invite.jahrgang_name,
+            newUser.id
           );
         } catch (pushErr) {
           console.error('Push for new registration failed:', pushErr);
@@ -1018,11 +1349,10 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         }
 
         // Auto-Login: JWT Token generieren
+        // Ohne Name und E-Mail, siehe TOKEN_INHALT oben.
         const token = jwt.sign({
           id: newUser.id,
           type: 'konfi',
-          display_name: display_name,
-          email: email?.trim() || null,
           organization_id: invite.organization_id,
           role_name: 'konfi',
           is_super_admin: false
@@ -1032,10 +1362,13 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         const refreshToken = generateRefreshToken();
         const refreshTokenHash = hashToken(refreshToken);
         const refreshExpiresAt = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000); // 90 Tage
-        await db.query(
-          'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
-          [newUser.id, refreshTokenHash, refreshExpiresAt]
+        // An das Geraet gebunden, wenn die App ihre Kennung mitschickt.
+        const registrierGeraet = geraeteKennung(req);
+        const { rows: [neuesToken] } = await db.query(
+          'INSERT INTO refresh_tokens (user_id, token_hash, expires_at, device_id) VALUES ($1, $2, $3, $4) RETURNING id',
+          [newUser.id, refreshTokenHash, refreshExpiresAt, registrierGeraet]
         );
+        await grenzeDurchsetzen(db, newUser.id, neuesToken.id, registrierGeraet);
 
         res.json({
           message: 'Registrierung erfolgreich',
@@ -1073,7 +1406,7 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
   });
 
   // Reset password with token
-  router.post('/reset-password', validateResetPassword, async (req, res) => {
+  router.post('/reset-password', resetTokenLimiter, validateResetPassword, async (req, res) => {
     const { token, newPassword } = req.body;
     
     if (!token || !newPassword) return res.status(400).json({ error: 'Token und neues Passwort sind erforderlich' });
@@ -1096,6 +1429,8 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
       );
 
       if (!resetRecord) {
+        // Nur dieser Fall zaehlt fuer den resetTokenLimiter.
+        res.locals.resetTokenUngueltig = true;
         return res.status(400).json({ error: 'Ungültiger oder abgelaufener Reset-Token' });
       }
       
@@ -1109,6 +1444,8 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         `UPDATE users SET password_hash = $1, token_invalidated_at = NOW() WHERE id = $2`,
         [hashedPassword, resetRecord.user_id]
       );
+      // Neues Passwort: eine Sperre nach Fehlversuchen endet damit.
+      await kontoSperreAufheben(db, resetRecord.user_id);
       await db.query(
         'UPDATE refresh_tokens SET revoked_at = NOW(), expires_at = NOW() WHERE user_id = $1 AND revoked_at IS NULL',
         [resetRecord.user_id]
@@ -1123,6 +1460,10 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
 
       res.json({ message: 'Passwort erfolgreich zurückgesetzt' });
 
+      // Bestaetigung an die hinterlegte Adresse, wie beim
+      // Selbst-Aendern.
+      nachAntwort(req, () => meldePasswortGeaendert(db, resetRecord.user_id), 'POST /auth/reset-password (Mail)');
+
     } catch (err) {
  console.error('Database error in POST /api/auth/reset-password:', err);
       res.status(500).json({ error: 'Fehler beim Zurücksetzen des Passworts' });
@@ -1132,7 +1473,7 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
   // ===== TOKEN REFRESH =====
 
   // Refresh Access-Token mit Rotation (altes Refresh-Token wird ungültig)
-  router.post('/refresh', async (req, res) => {
+  router.post('/refresh', refreshLimiter, async (req, res) => {
     const { refresh_token } = req.body;
     if (!refresh_token) {
       return res.status(400).json({ error: 'Refresh-Token ist erforderlich' });
@@ -1144,10 +1485,48 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
 
     const tokenHash = hashToken(refresh_token);
 
+    // GERAETEBINDUNG.
+    // Traegt das Token eine Kennung, gilt es nur zusammen mit
+    // DERSELBEN Kennung. Eine andere -- oder gar keine -- heisst: Das Token
+    // wird woanders eingeloest als dort, wo es ausgestellt wurde. Antwort 401
+    // wie bei jedem ungueltigen Token, und DIESES Token wird widerrufen und
+    // sofort ablaufen gelassen (sonst fiele es in die Gnadenfrist und liesse
+    // sich mit einer geratenen Kennung noch einmal versuchen).
+    //
+    // Bewusst NUR dieses Token, nicht die ganze Familie wie bei der dritten
+    // Verwendung in der Gnadenfrist: Dort haben zwei Parteien nachweislich
+    // ein GUELTIGES Token benutzt. Hier ist der Versuch gescheitert; und eine
+    // Kennung, die sich auf dem echten Geraet aendert (etwa wenn das Geraet
+    // die Kennung beim ersten Start nicht liefern konnte), soll die Person
+    // nicht auf allen anderen Geraeten mit abmelden.
+    //
+    // "Keine Kennung" zaehlt wie "andere": Sonst liesse sich die Bindung durch
+    // Weglassen umgehen. Ausgelieferte Apps (2.2.x, 2.3.0) sperrt das nicht
+    // aus -- sie senden bei Anmeldung, Registrierung und Refresh nie eine
+    // Kennung und halten deshalb nur ungebundene Tokens. Der Passwortwechsel
+    // bindet nicht (erstelleTokenPaarFuerUser), obwohl dort auch alte Apps eine
+    // device_id schicken.
+    //
+    // Ungebundene Tokens gelten wie bisher. Schickt die Anfrage eine Kennung
+    // mit (die App nach dem Update), ist das NEUE Token an sie gebunden -- so
+    // sind auch Sitzungen von vor dem Update nach dem ersten Refresh geschuetzt.
+    const kennung = geraeteKennung(req);
+    const fremdesGeraet = (gebundenAn) => Boolean(gebundenAn) && gebundenAn !== kennung;
+    const ablehnenUndWiderrufen = async (tokenId, userId) => {
+      await db.query(
+        `UPDATE refresh_tokens
+            SET revoked_at = COALESCE(revoked_at, NOW()), expires_at = NOW()
+          WHERE id = $1`,
+        [tokenId]
+      );
+      console.warn(`Refresh-Token von User ${userId} mit ${kennung ? 'fremder' : 'fehlender'} Geraete-Kennung vorgelegt: Token widerrufen`);
+      return res.status(401).json({ error: 'Ungültiger oder abgelaufener Refresh-Token' });
+    };
+
     try {
       // Altes Token suchen (nicht revoked, nicht abgelaufen)
       const { rows: [existing] } = await db.query(
-        'SELECT id, user_id, expires_at FROM refresh_tokens WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > NOW()',
+        'SELECT id, user_id, expires_at, device_id FROM refresh_tokens WHERE token_hash = $1 AND revoked_at IS NULL AND expires_at > NOW()',
         [tokenHash]
       );
 
@@ -1162,25 +1541,87 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
         // Android-Process-Kills nicht mehr persistieren konnte und erst beim NAECHSTEN
         // App-Oeffnen wieder mit dem alten Token ankommt. 30s deckten das nicht ab
         // (Ursache des Android-Session-/Push-/Chat-Totalausfalls ab 1.5.0). Aelter
-        // als 5 Min -> echtes 401. Der alte Token bleibt einmalig+kurz nutzbar.
-        const { rows: [recent] } = await db.query(
-          `SELECT id, user_id, expires_at FROM refresh_tokens
-           WHERE token_hash = $1 AND revoked_at IS NOT NULL
-             AND revoked_at > NOW() - INTERVAL '5 minutes'
-             AND expires_at > NOW()`,
+        // als 5 Min -> echtes 401.
+        //
+        // GENAU EINMAL: "einmalig" stand hier
+        // schon immer im Kommentar, der Code liess das alte Token aber fuenf Minuten
+        // lang beliebig oft gelten -- dreimal derselbe Token: 200, 200, 200 und drei
+        // offene 90-Tage-Tokens. Damit fehlte, was Rotation leisten soll: die
+        // Erkennung einer Wiederverwendung (Diebstahl) und der Widerruf. Jetzt:
+        //  1. Die Gnadenfrist gilt einmal (gnade_genutzt_at). Dabei wird der
+        //     Nachfolger aus der ersten Rotation (ersetzt_durch) widerrufen UND
+        //     sofort ablaufen gelassen, damit er nicht selbst in die Gnadenfrist
+        //     faellt -- je Geraet bleibt genau EIN Token offen. Der Client, der den
+        //     Nachfolger verloren hat, arbeitet mit dem neuen weiter; der, der ihn
+        //     noch haette, waere der Angreifer.
+        //  2. Kommt das Token ein drittes Mal, hat es zwei Parteien benutzt: 401,
+        //     und ALLE Refresh-Tokens des Kontos werden widerrufen. Die Person
+        //     meldet sich neu an, der Angreifer nicht.
+        //  3. Nach Ablauf des Fensters bleibt es ein schlichtes 401 ohne Widerruf:
+        //     Ein Geraet, das nach einem Prozess-Kill erst Stunden spaeter mit dem
+        //     alten Token kommt, ist genau der Fall von oben -- es darf die uebrigen
+        //     Geraete nicht aussperren.
+        // Ein Token, das per Logout widerrufen wurde, traegt expires_at = NOW() und
+        // faellt weder in die Gnadenfrist noch unter das Diebstahl-Signal.
+        //
+        // Der parallele Burst (mehrere Anfragen mit demselben Token in derselben
+        // Sekunde) lesen gnade_genutzt_at moeglicherweise alle als NULL und gehen
+        // alle den Gnadenpfad -- dann bleiben kurz mehrere Tokens offen, aber
+        // niemand wird ausgesperrt. Bewusst so: Die App verhindert parallele
+        // Refreshes ohnehin (isRefreshing in services/api.ts); ein falscher Alarm
+        // waere hier teurer als ein zweites Token fuer fuenf Minuten.
+        const { rows: [alt] } = await db.query(
+          `SELECT id, user_id, ersetzt_durch, gnade_genutzt_at, device_id,
+                  (revoked_at > NOW() - INTERVAL '5 minutes' AND expires_at > NOW()) AS im_fenster
+             FROM refresh_tokens
+            WHERE token_hash = $1 AND revoked_at IS NOT NULL`,
           [tokenHash]
         );
-        if (!recent) {
+        if (!alt) {
           return res.status(401).json({ error: 'Ungültiger oder abgelaufener Refresh-Token' });
         }
-        // Im Grace-Fenster: weiter wie mit einem gueltigen Token (kein erneutes Revoke nötig)
-        return await issueRefreshedTokens(db, res, recent.user_id, activeOrgId);
+        // Geraetebindung VOR der Gnadenfrist: Ein Versuch von fremder Stelle
+        // verbraucht weder die Gnade noch loest er den Widerruf der Familie
+        // aus -- er beendet nur die Gnadenfrist dieses Tokens. Der Nachfolger
+        // des echten Geraets bleibt gueltig.
+        if (fremdesGeraet(alt.device_id)) {
+          return await ablehnenUndWiderrufen(alt.id, alt.user_id);
+        }
+        if (alt.gnade_genutzt_at) {
+          await db.query(
+            `UPDATE refresh_tokens
+                SET revoked_at = COALESCE(revoked_at, NOW()), expires_at = NOW()
+              WHERE user_id = $1 AND expires_at > NOW()`,
+            [alt.user_id]
+          );
+          console.warn(`Refresh-Token-Wiederverwendung erkannt: alle Refresh-Tokens von User ${alt.user_id} widerrufen`);
+          return res.status(401).json({ error: 'Ungültiger oder abgelaufener Refresh-Token' });
+        }
+        if (!alt.im_fenster) {
+          return res.status(401).json({ error: 'Ungültiger oder abgelaufener Refresh-Token' });
+        }
+        await db.query('UPDATE refresh_tokens SET gnade_genutzt_at = NOW() WHERE id = $1', [alt.id]);
+        if (alt.ersetzt_durch) {
+          await db.query(
+            `UPDATE refresh_tokens
+                SET revoked_at = COALESCE(revoked_at, NOW()), expires_at = NOW()
+              WHERE id = $1`,
+            [alt.ersetzt_durch]
+          );
+        }
+        return await issueRefreshedTokens(db, res, alt.user_id, activeOrgId, alt.id, alt.device_id || kennung);
+      }
+
+      if (fremdesGeraet(existing.device_id)) {
+        return await ablehnenUndWiderrufen(existing.id, existing.user_id);
       }
 
       // Altes Token sofort revoken (Rotation)
       await db.query('UPDATE refresh_tokens SET revoked_at = NOW() WHERE id = $1', [existing.id]);
 
-      return await issueRefreshedTokens(db, res, existing.user_id, activeOrgId);
+      // Die Rotation uebernimmt die Bindung; ein ungebundenes Token wird an
+      // die mitgeschickte Kennung gebunden (siehe oben).
+      return await issueRefreshedTokens(db, res, existing.user_id, activeOrgId, existing.id, existing.device_id || kennung);
     } catch (err) {
       console.error('Database error in POST /api/auth/refresh:', err);
       res.status(500).json({ error: 'Fehler beim Token-Refresh' });
@@ -1192,10 +1633,16 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
   // activeOrgId (optional): aktive Multi-Org, kommt beim Refresh aus dem Header
   // X-Active-Organization. Sie wird (nach Mitgliedschafts-Prüfung) als Claim ins
   // neue Access-Token geschrieben, damit der Org-Kontext den Refresh ueberlebt.
-  async function issueRefreshedTokens(db, res, userId, activeOrgId = null) {
+  // vorgaengerId (optional): das Refresh-Token, an dessen Stelle das neue tritt.
+  // Es bekommt ersetzt_durch gesetzt, damit die Gnadenfrist den Nachfolger
+  // widerrufen kann (Migration 166).
+  // geraet (optional): Geraete-Kennung, an die das neue Token gebunden wird
+  // (Migration 171) -- die des Vorgaengers oder, war der ungebunden, die
+  // mitgeschickte.
+  async function issueRefreshedTokens(db, res, userId, activeOrgId = null, vorgaengerId = null, geraet = null) {
     const { rows: [user] } = await db.query(`
       SELECT u.id, u.username, u.display_name, u.organization_id, u.email, u.role_id,
-             u.is_super_admin, u.is_active as user_active,
+             u.is_super_admin, u.is_active as user_active, u.deleted_at,
              COALESCE(o.is_active, true) as organization_active, o.trial_ends_at,
              r.name as role_name,
              kp.jahrgang_id, j.name as jahrgang_name,
@@ -1213,17 +1660,22 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
     }
 
     // Zugriffs-Sperre beim Refresh — super_admin ausgenommen.
+    //
+    // Soft-geloeschte Konten (deleted_at) zaehlen hier wie deaktivierte und
+    // bekommen dieselbe Antwort -- der
+    // Refresh war neben Login und rbac.js die dritte Stelle, die deleted_at
+    // nicht kannte und einem ausgeblendeten Konto 90 Tage lang frische
+    // Access-Tokens ausstellte. Die Loeschung gilt fuer jede Rolle.
     const isSuperAdmin = user.is_super_admin === true || user.role_name === 'super_admin';
-    if (!isSuperAdmin) {
-      const trialExpired = user.trial_ends_at && new Date(user.trial_ends_at) < new Date();
-      if (user.user_active === false || user.organization_active === false || trialExpired) {
-        return res.status(403).json({
-          error: trialExpired
-            ? 'Die Testphase dieser Organisation ist abgelaufen.'
-            : 'Diese Organisation ist derzeit gesperrt. Bitte wende dich an deine Gemeinde.',
-          error_code: trialExpired ? 'org_trial_expired' : (user.user_active === false ? 'user_inactive' : 'org_inactive')
-        });
-      }
+    const kontoGesperrt = Boolean(user.deleted_at) || (!isSuperAdmin && user.user_active === false);
+    const trialExpired = !isSuperAdmin && user.trial_ends_at && new Date(user.trial_ends_at) < new Date();
+    const orgGesperrt = !isSuperAdmin && (user.organization_active === false || trialExpired);
+    // Reihenfolge wie bei der Anmeldung: erst das Konto, dann die Gemeinde.
+    if (kontoGesperrt) {
+      return sperrAntwort(res, 'user_inactive');
+    }
+    if (orgGesperrt) {
+      return sperrAntwort(res, trialExpired ? 'org_trial_expired' : 'org_inactive');
     }
 
     // Aktive Org nur uebernehmen, wenn sie von der Primaer-Org abweicht UND der
@@ -1239,11 +1691,10 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
 
     const userType = user.role_name === 'konfi' ? 'konfi' : user.role_name === 'teamer' ? 'teamer' : 'admin';
 
+    // Ohne Name und E-Mail, siehe TOKEN_INHALT oben.
     const newAccessToken = jwt.sign({
       id: user.id,
       type: userType,
-      display_name: user.display_name,
-      email: user.email,
       organization_id: user.organization_id,
       role_name: user.role_name,
       is_super_admin: user.is_super_admin || false,
@@ -1253,10 +1704,16 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
     const newRefreshToken = generateRefreshToken();
     const newRefreshHash = hashToken(newRefreshToken);
     const newRefreshExpiry = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000);
-    await db.query(
-      'INSERT INTO refresh_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)',
-      [user.id, newRefreshHash, newRefreshExpiry]
+    const { rows: [neu] } = await db.query(
+      'INSERT INTO refresh_tokens (user_id, token_hash, expires_at, device_id) VALUES ($1, $2, $3, $4) RETURNING id',
+      [user.id, newRefreshHash, newRefreshExpiry, geraet]
     );
+    if (vorgaengerId) {
+      await db.query('UPDATE refresh_tokens SET ersetzt_durch = $1 WHERE id = $2', [neu.id, vorgaengerId]);
+    }
+    // Das rotierte Token ist schon widerrufen und zaehlt nicht mit; die
+    // Gnadenfrist (oben) bleibt davon unberuehrt.
+    await grenzeDurchsetzen(db, user.id, neu.id, geraet);
 
     return res.json({ token: newAccessToken, refresh_token: newRefreshToken });
   }
@@ -1311,17 +1768,6 @@ module.exports = (db, verifyToken, transporter, SMTP_CONFIG, rateLimiters = {}, 
     }
   });
 
-  // Abgelaufene + revoked Refresh-Tokens alle 24h aufräumen
-  setInterval(async () => {
-    try {
-      const { rowCount } = await db.query(
-        "DELETE FROM refresh_tokens WHERE expires_at < NOW() OR (revoked_at IS NOT NULL AND revoked_at < NOW() - INTERVAL '7 days')"
-      );
-      if (rowCount > 0) console.log(`Cleanup: ${rowCount} abgelaufene Refresh-Tokens entfernt`);
-    } catch (err) {
-      console.error('Refresh-Token Cleanup Fehler:', err);
-    }
-  }, 24 * 60 * 60 * 1000);
 
   return router;
 };

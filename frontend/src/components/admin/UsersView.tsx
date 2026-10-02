@@ -1,6 +1,5 @@
 import React, { useState, useRef } from 'react';
 import { IonIcon, IonItem, IonItemGroup, IonLabel, IonList, IonListHeader, IonItemSliding, IonItemOptions, IonItemOption, IonInput, IonSegment, IonSegmentButton, IonRefresher, IonRefresherContent } from '@ionic/react';
-import { FARBEN } from '../../theme/colors';
 import {
   ICON_AKTENTASCHE_GEFUELLT,
   ICON_AT_ZEICHEN,
@@ -9,6 +8,7 @@ import {
   ICON_GRUPPE_GEFUELLT,
   ICON_JAHRGANG_GEFUELLT,
   ICON_LOESCHEN_GEFUELLT,
+  ICON_ORGANISATION_GEFUELLT,
   ICON_PERSON,
   ICON_PERSON_GEFUELLT,
   ICON_SCHILD_GEFUELLT,
@@ -19,6 +19,8 @@ import { filterBySearchTerm } from '../../utils/helpers';
 import { SectionHeader, ListSection } from '../shared';
 import { AdminUser } from '../../types/user';
 import { triggerPullHaptic } from '../../utils/haptics';
+import { datumKurz } from '../../utils/dateUtils';
+import { rollenName, rollenFarbeVar } from '../../utils/rollenNamen';
 
 // Ionic 9 gibt bei ref an IonItemSliding die React-Komponente zurueck, nicht
 // mehr das DOM-Element. Gebraucht wird hier nur close() — das haben beide.
@@ -73,24 +75,11 @@ const UsersView: React.FC<UsersViewProps> = ({
   const getAdminUsers = () => users.filter(user => user.role_name === 'admin' || user.role_name === 'org_admin');
   const getTeamerUsers = () => users.filter(user => user.role_name === 'teamer');
 
-  // Echte Hexwerte (theme/colors.ts): Die Rollenfarbe wird teils per
-  // Alpha-Suffix weiterverrechnet, var()-Strings scheiden aus.
-  const getRoleColor = (roleName: string) => {
-    switch (roleName) {
-      case 'org_admin': return FARBEN.users;
-      case 'admin': return FARBEN.users;
-      case 'teamer': return FARBEN.teamer;
-      default: return FARBEN.neutral;
-    }
-  };
+  const getRoleColor = (roleName: string) => rollenFarbeVar(roleName);
 
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('de-DE', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
+    return datumKurz(dateString);
   };
 
 
@@ -111,13 +100,13 @@ const UsersView: React.FC<UsersViewProps> = ({
 
       <SectionHeader
         title="Benutzer:innen"
-        subtitle="Admins, Team und Rollen"
+        subtitle="Leitung, Team und Rollen"
         icon={ICON_GRUPPE_GEFUELLT}
         preset="users"
         stats={[
           // Die Kacheln entsprechen den Reitern; "Aktiv" hat keine Kachel.
           { value: users.length, label: 'Gesamt', onClick: () => setSelectedFilter('alle'), active: selectedFilter === 'alle' },
-          { value: getAdminUsers().length, label: 'Admins', onClick: () => setSelectedFilter('admin'), active: selectedFilter === 'admin' },
+          { value: getAdminUsers().length, label: 'Leitung', onClick: () => setSelectedFilter('admin'), active: selectedFilter === 'admin' },
           { value: getTeamerUsers().length, label: 'Team', onClick: () => setSelectedFilter('teamer'), active: selectedFilter === 'teamer' }
         ]}
       />
@@ -135,7 +124,7 @@ const UsersView: React.FC<UsersViewProps> = ({
             <IonLabel>Aktiv</IonLabel>
           </IonSegmentButton>
           <IonSegmentButton value="admin">
-            <IonLabel>Admin</IonLabel>
+            <IonLabel>Leitung</IonLabel>
           </IonSegmentButton>
           <IonSegmentButton value="teamer">
             <IonLabel>Team</IonLabel>
@@ -154,7 +143,7 @@ const UsersView: React.FC<UsersViewProps> = ({
         <IonItemGroup>
           <IonItem>
             <IonIcon icon={ICON_SUCHE_GEFUELLT} slot="start" className="app-search-bar__icon" />
-            <IonInput
+            <IonInput aria-label="Benutzer:in suchen"
               value={searchTerm}
               onIonInput={(e) => setSearchTerm(e.detail.value!)}
               placeholder="Benutzer:in suchen..."
@@ -177,6 +166,8 @@ const UsersView: React.FC<UsersViewProps> = ({
       >
         {filteredAndSortedUsers.map((user, index) => {
               const roleColor = getRoleColor(user.role_name);
+              const rolleText = rollenName(user.role_name);
+              const rolleIcon = user.role_name === 'org_admin' ? ICON_ORGANISATION_GEFUELLT : user.role_name === 'admin' ? ICON_SCHILD_GEFUELLT : ICON_PERSON_GEFUELLT;
 
               return (
               <IonItemSliding
@@ -206,9 +197,12 @@ const UsersView: React.FC<UsersViewProps> = ({
                     <div className="app-corner-badges">
                       <div
                         className="app-corner-badge"
-                        style={{ backgroundColor: roleColor }}
+                        style={{ backgroundColor: roleColor, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
+                        title={rolleText}
+                        role="img"
+                        aria-label={rolleText}
                       >
-                        {user.role_name === 'org_admin' ? 'Org-Admin' : user.role_name === 'admin' ? 'Admin' : 'Teamer:in'}
+                        <IonIcon icon={rolleIcon} aria-hidden="true" style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                       </div>
                     </div>
 
@@ -242,6 +236,14 @@ const UsersView: React.FC<UsersViewProps> = ({
                               <span className="app-list-item__meta-item">
                                 <IonIcon icon={ICON_AKTENTASCHE_GEFUELLT} className={user.is_active ? 'app-icon-color--badges' : ''} style={!user.is_active ? { color: 'var(--app-text-muted)' } : undefined} />
                                 {user.role_title}
+                              </span>
+                            )}
+                            {/* Ueber eine Gemeinde-Einladung dabei: Konto und
+                                Stamm-Gemeinde liegen woanders, hier gibt es
+                                nur Rolle und Jahrgaenge. */}
+                            {user.mitgliedschaft === 'weitere' && (
+                              <span className="app-list-item__meta-item">
+                                zuhause in einer anderen Gemeinde
                               </span>
                             )}
                           </div>

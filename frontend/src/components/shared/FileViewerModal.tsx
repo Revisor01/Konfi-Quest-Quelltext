@@ -1,11 +1,14 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { IonIcon } from '@ionic/react';
-import { ICON_DATEI, ICON_HERUNTERLADEN, ICON_SCHLIESSEN, ICON_TEILEN } from './icons';
+import { ICON_DATEI, ICON_EXTERN_OEFFNEN, ICON_HERUNTERLADEN, ICON_SCHLIESSEN, ICON_TEILEN } from './icons';
 import { Capacitor } from '@capacitor/core';
-import { teilen } from '../../services/systemDialoge';
+import { dateiExternOeffnen, teilen } from '../../services/systemDialoge';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { FileOpener } from '@capacitor-community/file-opener';
 import api, { DATEI_TIMEOUT_MS } from '../../services/api';
+import { getMediaBlob, medienAusApiPfad } from '../../services/mediaCache';
+import { pdfImAppBetrachter, zeigtAppBetrachter } from '../../utils/nativeFileViewer';
+import type { PdfSeitenProps } from './PdfSeiten';
 import './FileViewerModal.css';
 
 // --- Hilfsfunktion: API-Pfade erkennen und per Auth-fetch in Blob-URL wandeln ---
@@ -13,10 +16,20 @@ const isApiPath = (url: string): boolean => {
   return url.startsWith('/api/') || url.startsWith('api/');
 };
 
-const resolveUrl = async (url: string): Promise<string> => {
+const resolveUrl = async (url: string, mimeType: string): Promise<string> => {
   if (!isApiPath(url)) return url;
   // Relativer API-Pfad → per axios (mit Auth-Header) laden
   const cleanPath = url.startsWith('/api/') ? url.substring(4) : url.startsWith('api/') ? '/' + url.substring(4) : url;
+  // Dateien aus Chat, Challenges und Material über den Medien-Cache
+  // Wer im Betrachter zu den übrigen Dateien wischt, lud jede
+  // davon bisher an
+  // ihm vorbei — bei jedem Wischen neu. Der Typ kommt aus dem Dateinamen;
+  // beim Treffer im Cache gibt es keinen Antwort-Header.
+  const medium = medienAusApiPfad(cleanPath);
+  if (medium) {
+    const blob = await getMediaBlob(medium.datei, { quelle: medium.quelle });
+    return URL.createObjectURL(new Blob([blob], { type: mimeType || blob.type }));
+  }
   const response = await api.get(cleanPath, { responseType: 'blob', timeout: DATEI_TIMEOUT_MS });
   const contentType = response.headers?.['content-type'];
   const mime: string = typeof contentType === 'string' ? contentType : 'application/octet-stream';
@@ -70,10 +83,13 @@ const openFileNatively = async (resolvedUrl: string, fileName: string, mimeType:
             data: base64,
             directory: Directory.Cache
           });
-          await FileOpener.open({
+          // Durch die Hülle: Auf Android geht die Datei in einer fremden App
+          // auf, und die App-Sperre darf das nicht für "verlassen" halten
+          // 
+          await dateiExternOeffnen(() => FileOpener.open({
             filePath: result.uri,
             contentType: mimeType
-          });
+          }));
           resolve(true);
         } catch {
           resolve(false);
@@ -134,8 +150,33 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
   const mouseDownRef = useRef<{ x: number; y: number } | null>(null);
   const mousePanStartRef = useRef<{ x: number; y: number } | null>(null);
 
+  // Dateien, die der Betrachter selbst nicht darstellen konnte (pdf.js
+  // gescheitert, Bild- oder Videoformat unbekannt). Auf Android gehen sie dann
+  // doch in eine fremde App, im Browser zeigt das iframe die PDF.
+  const [nichtDarstellbar, setNichtDarstellbar] = useState<ReadonlySet<number>>(() => new Set());
+  // Die PDF-Ansicht samt pdf.js, erst beim ersten Öffnen einer PDF geladen.
+  const [PdfAnsicht, setPdfAnsicht] = useState<React.ComponentType<PdfSeitenProps> | null>(null);
+
   const currentFile = files[currentIndex];
   const isNative = Capacitor.isNativePlatform();
+  const category = currentFile ? getFileCategory(currentFile.mimeType) : 'fallback';
+  const gescheitert = nichtDarstellbar.has(currentIndex);
+  // Zeigt der Betrachter diese Datei selbst? Auf Android Bilder, Videos, PDFs;
+  // im Browser alles; auf iOS gehen PDFs und Dokumente in die Vorschau des
+  // Systems (siehe utils/nativeFileViewer.ts).
+  const pdfInDerApp = category === 'pdf' && pdfImAppBetrachter() && !gescheitert;
+  // Auf Android: in eine fremde App ausweichen, wenn die eigene Anzeige
+  // scheitert. Auf iOS bleibt alles, wie es war.
+  const darfAusweichen = isNative && !!currentFile && zeigtAppBetrachter(currentFile.mimeType);
+  const externOeffnen = isNative && !!currentFile && (
+    category === 'document'
+    || (category === 'pdf' && !pdfInDerApp)
+    || (darfAusweichen && gescheitert)
+  );
+
+  const ausweichen = useCallback((index: number) => {
+    setNichtDarstellbar((vorher) => (vorher.has(index) ? vorher : new Set(vorher).add(index)));
+  }, []);
 
   // URL-Aufloesung: API-Pfade per Auth-fetch in Blob-URL wandeln
   useEffect(() => {
@@ -159,7 +200,7 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
     // API-Pfad → async laden
     setUrlLoading(true);
     setResolvedUrl(null);
-    resolveUrl(url).then(resolved => {
+    resolveUrl(url, currentFile.mimeType).then(resolved => {
       resolvedUrlsRef.current[url] = resolved;
       setResolvedUrl(resolved);
       setUrlLoading(false);
@@ -187,11 +228,10 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
     };
   }, []);
 
-  // Automatisch nativ öffnen (PDF/DOCX auf iOS/Android)
+  // Automatisch nativ öffnen: Dokumente (Word …) auf iOS und Android, PDFs
+  // auf iOS, auf Android alles, was der Betrachter nicht darstellen konnte.
   useEffect(() => {
-    if (!resolvedUrl || !currentFile || !isNative) return;
-    const cat = getFileCategory(currentFile.mimeType);
-    if (cat !== 'pdf' && cat !== 'document') return;
+    if (!resolvedUrl || !currentFile || !externOeffnen) return;
 
     setNativeOpening(true);
     openFileNatively(resolvedUrl, currentFile.fileName, currentFile.mimeType).then((success) => {
@@ -201,7 +241,19 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
       }
       // Bei Fehler: Fallback zum bestehenden Rendering (iframe/Download)
     });
-  }, [resolvedUrl, currentFile, isNative]);
+  }, [resolvedUrl, currentFile, externOeffnen]);
+
+  // pdf.js erst laden, wenn eine PDF in der App zu zeigen ist (eigener Chunk,
+  // siehe utils/pdfDokument.ts). Scheitert schon das Laden — etwa weil im
+  // Browser nach einem Update der alte Chunk fehlt —, weicht der Betrachter aus.
+  useEffect(() => {
+    if (!pdfInDerApp || PdfAnsicht) return;
+    let aus = false;
+    import('./PdfSeiten')
+      .then((modul) => { if (!aus) setPdfAnsicht(() => modul.default); })
+      .catch(() => { if (!aus) ausweichen(currentIndex); });
+    return () => { aus = true; };
+  }, [pdfInDerApp, PdfAnsicht, ausweichen, currentIndex]);
 
   // --- Navigation ---
   const goToNext = useCallback(() => {
@@ -215,6 +267,37 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
       setCurrentIndex(prev => prev - 1);
     }
   }, [currentIndex]);
+
+  // --- Wischen über einem Video ---
+  // Bisher ließ sich ein Video nur ansehen: Wer aus einer Folge von Fotos auf
+  // ein Video wischte, kam dort nicht weiter. Auf Android öffnen Videos jetzt
+  // im Betrachter, damit wurde die Lücke sichtbar.
+  // Das untere Viertel gehört der Zeitleiste des Videos — ein Wisch, der dort
+  // beginnt, spult und wechselt nicht die Datei.
+  const videoWischRef = useRef<{ x: number; y: number; zeit: number } | null>(null);
+
+  const handleVideoTouchStart = useCallback((e: React.TouchEvent) => {
+    const t = e.touches[0];
+    const box = e.currentTarget.getBoundingClientRect();
+    if (e.touches.length !== 1 || !t || t.clientY > box.bottom - box.height / 4) {
+      videoWischRef.current = null;
+      return;
+    }
+    videoWischRef.current = { x: t.clientX, y: t.clientY, zeit: Date.now() };
+  }, []);
+
+  const handleVideoTouchEnd = useCallback((e: React.TouchEvent) => {
+    const start = videoWischRef.current;
+    videoWischRef.current = null;
+    const ende = e.changedTouches[0];
+    if (!start || !ende) return;
+    const dx = ende.clientX - start.x;
+    const dy = ende.clientY - start.y;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5 && Date.now() - start.zeit < 500) {
+      if (dx < 0) goToNext();
+      else goToPrev();
+    }
+  }, [goToNext, goToPrev]);
 
   // --- Touch-Handler (Bild) ---
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
@@ -428,7 +511,37 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
   // --- Rendering ---
   if (!currentFile) return null;
 
-  const category = getFileCategory(currentFile.mimeType);
+  const istAndroid = isNative && Capacitor.getPlatform() === 'android';
+
+  // Die Datei geht in die Vorschau des Systems (iOS) oder in eine fremde App
+  // (Android). Der Block steht, solange das läuft, und bietet danach einen
+  // zweiten Versuch an.
+  const renderNativOeffnen = () => (
+    <div className="file-viewer-fallback">
+      <IonIcon icon={ICON_DATEI} className="file-viewer-fallback-icon" />
+      <p className="file-viewer-fallback-name">{currentFile.fileName}</p>
+      {gescheitert && (
+        <p className="file-viewer-fallback-type">Die App kann diese Datei nicht selbst anzeigen.</p>
+      )}
+      <p className="file-viewer-fallback-type">
+        {nativeOpening ? 'Wird geöffnet...' : 'Tippe zum erneut Öffnen'}
+      </p>
+      {!nativeOpening && (
+        <button className="file-viewer-fallback-btn" onClick={() => {
+          if (resolvedUrl) {
+            setNativeOpening(true);
+            openFileNatively(resolvedUrl, currentFile.fileName, currentFile.mimeType).then((success) => {
+              setNativeOpening(false);
+              if (success) onClose();
+            });
+          }
+        }}>
+          <IonIcon icon={istAndroid ? ICON_EXTERN_OEFFNEN : ICON_DATEI} />
+          {istAndroid ? 'Mit anderer App öffnen' : 'Nativ öffnen'}
+        </button>
+      )}
+    </div>
+  );
 
   const renderContent = () => {
     // Ladeindikator für API-Pfade
@@ -439,6 +552,10 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
         </div>
       );
     }
+
+    // Auf Android konnte der Betrachter die Datei nicht zeigen (etwa ein
+    // Videoformat, das das WebView nicht abspielt): fremde App.
+    if (darfAusweichen && gescheitert) return renderNativOeffnen();
 
     switch (category) {
       case 'image':
@@ -463,36 +580,31 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
                 transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`
               }}
               draggable={false}
+              onError={darfAusweichen ? () => ausweichen(currentIndex) : undefined}
             />
           </div>
         );
 
       case 'pdf':
-        if (isNative) {
+        if (pdfInDerApp) {
+          if (!PdfAnsicht) {
+            return (
+              <div className="file-viewer-fallback">
+                <p className="file-viewer-fallback-name">PDF wird geladen…</p>
+              </div>
+            );
+          }
           return (
-            <div className="file-viewer-fallback">
-              <IonIcon icon={ICON_DATEI} className="file-viewer-fallback-icon" />
-              <p className="file-viewer-fallback-name">{currentFile.fileName}</p>
-              <p className="file-viewer-fallback-type">
-                {nativeOpening ? 'Wird geöffnet...' : 'Tippe zum erneut Öffnen'}
-              </p>
-              {!nativeOpening && (
-                <button className="file-viewer-fallback-btn" onClick={() => {
-                  if (resolvedUrl) {
-                    setNativeOpening(true);
-                    openFileNatively(resolvedUrl, currentFile.fileName, currentFile.mimeType).then((success) => {
-                      setNativeOpening(false);
-                      if (success) onClose();
-                    });
-                  }
-                }}>
-                  <IonIcon icon={ICON_DATEI} />
-                  Nativ öffnen
-                </button>
-              )}
-            </div>
+            <PdfAnsicht
+              key={resolvedUrl}
+              url={resolvedUrl}
+              titel={currentFile.fileName}
+              onFehler={() => ausweichen(currentIndex)}
+              onWischen={(richtung) => (richtung === 'weiter' ? goToNext() : goToPrev())}
+            />
           );
         }
+        if (isNative) return renderNativOeffnen();
         return (
           <iframe
             src={resolvedUrl}
@@ -503,31 +615,7 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
         );
 
       case 'document':
-        if (isNative) {
-          return (
-            <div className="file-viewer-fallback">
-              <IonIcon icon={ICON_DATEI} className="file-viewer-fallback-icon" />
-              <p className="file-viewer-fallback-name">{currentFile.fileName}</p>
-              <p className="file-viewer-fallback-type">
-                {nativeOpening ? 'Wird geöffnet...' : 'Tippe zum erneut Öffnen'}
-              </p>
-              {!nativeOpening && (
-                <button className="file-viewer-fallback-btn" onClick={() => {
-                  if (resolvedUrl) {
-                    setNativeOpening(true);
-                    openFileNatively(resolvedUrl, currentFile.fileName, currentFile.mimeType).then((success) => {
-                      setNativeOpening(false);
-                      if (success) onClose();
-                    });
-                  }
-                }}>
-                  <IonIcon icon={ICON_DATEI} />
-                  Nativ öffnen
-                </button>
-              )}
-            </div>
-          );
-        }
+        if (isNative) return renderNativOeffnen();
         return (
           <div className="file-viewer-fallback">
             <IonIcon icon={ICON_DATEI} className="file-viewer-fallback-icon" />
@@ -542,13 +630,20 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
 
       case 'video':
         return (
-          <video
-            src={resolvedUrl}
-            className="file-viewer-video"
-            controls
-            playsInline
-            autoPlay={false}
-          />
+          <div
+            className="file-viewer-video-rahmen"
+            onTouchStart={handleVideoTouchStart}
+            onTouchEnd={handleVideoTouchEnd}
+          >
+            <video
+              src={resolvedUrl}
+              className="file-viewer-video"
+              controls
+              playsInline
+              autoPlay={false}
+              onError={darfAusweichen ? () => ausweichen(currentIndex) : undefined}
+            />
+          </div>
         );
 
       case 'fallback':
@@ -570,7 +665,9 @@ const FileViewerModal: React.FC<FileViewerModalProps> = (props) => {
   };
 
   return (
-    <div className="file-viewer-overlay">
+    // Name des Dialogs fuer Vorlesehilfen: der Dateiname, der auch oben in
+    // der Leiste steht (keine ion-title hier, siehe utils/modalNamen.ts).
+    <div className="file-viewer-overlay" data-dialogname={currentFile.fileName || 'Datei'}>
       {/* Toolbar */}
       <div className="file-viewer-toolbar">
         <div className="file-viewer-toolbar-left">

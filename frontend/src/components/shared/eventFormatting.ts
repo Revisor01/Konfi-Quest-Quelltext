@@ -1,32 +1,25 @@
 // Gemeinsame Datums-/Zeit-Formatierung für Events (zuvor in jeder Rolle
 // dupliziert: Konfi/Admin/Teamer Views + DetailViews). Deutsche Locale.
+//
+// Die Formate selbst stehen in utils/dateUtils.ts: Die drei
+// Namen hier bleiben, weil 17 Stellen sie über shared/index.ts importieren,
+// und reichen nur weiter.
+import { datumKurz, datumLang, uhrzeit } from '../../utils/dateUtils';
 
 export const formatEventDate = (dateString: string): string =>
-  new Date(dateString).toLocaleDateString('de-DE', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  });
+  datumKurz(dateString);
 
 // 18:30 (leere/ungueltige Eingaben -> '')
 export const formatEventTime = (dateString: string): string => {
   if (!dateString) return '';
   const date = new Date(dateString);
   if (isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString('de-DE', {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return uhrzeit(date);
 };
 
-// Sonntag, 14. Juni 2026
+// Sonntag, 7. Juni 2026
 export const formatEventDateLong = (dateString: string): string =>
-  new Date(dateString).toLocaleDateString('de-DE', {
-    weekday: 'long',
-    day: '2-digit',
-    month: 'long',
-    year: 'numeric',
-  });
+  datumLang(dateString);
 
 // Folge: Bei einer Freizeit vom 10. bis 14. sagte die Konfi-Liste ab dem
 // 11. noch "laeuft", die Detailansicht desselben Termins aber schon
@@ -261,12 +254,21 @@ const nachDatumAbsteigend = <T extends ReiterTermin>(a: T, b: T) =>
 export const aktuelleTermine = <T extends ReiterTermin>(offen: T[], abgesagt: T[]): T[] =>
   [...offen, ...abgesagt].filter(e => eventEnde(e) >= new Date()).sort(nachDatumAufsteigend);
 
-// Reiter "Verbuchen": beendete Termine mit offenen Buchungen. Abgesagte
+// Reiter "Verbuchen": BEGONNENE Termine mit offenen Buchungen. Abgesagte
 // gehoeren bewusst NICHT dazu -- an einem abgesagten Termin gibt es nichts
 // zu verbuchen.
+//
+// Beide Regeln waren fuer sich vertretbar, aber sie widersprachen einander.
+// Der Beginn ist die nuetzlichere: Wer waehrend des Konfisamstags jemanden
+// verbucht, findet den Termin dort, wo er ihn sucht. Ein laufender Termin
+// steht damit in "Aktuell" UND in "Verbuchen" -- er laeuft ja noch, und es
+// gibt schon etwas zu verbuchen.
+//
+// Ohne event_end_time faellt eventEnde ohnehin auf event_date zurueck; fuer
+// den Altbestand aendert sich also nichts.
 export const zuVerbuchendeTermine = <T extends ReiterTermin>(offen: T[]): T[] =>
   offen
-    .filter(e => eventEnde(e) < new Date() && hatOffeneBuchungen(e) && e.registration_status !== 'cancelled')
+    .filter(e => new Date(e.event_date) < new Date() && hatOffeneBuchungen(e) && e.registration_status !== 'cancelled')
     .sort(nachDatumAbsteigend);
 
 // Reiter "Vergangen": beendete Termine ohne offene Buchungen (fertig
@@ -276,4 +278,34 @@ export const vergangeneTermine = <T extends ReiterTermin>(offen: T[], abgesagt: 
   const verbucht = offen.filter(e => eventEnde(e) < jetzt && !hatOffeneBuchungen(e));
   const abgesagtVorbei = abgesagt.filter(e => eventEnde(e) < jetzt);
   return [...verbucht, ...abgesagtVorbei].sort(nachDatumAbsteigend);
+};
+
+/**
+ * Der Zeitraum eines Termins als ein Satz.
+ *
+ * Ein Tag:      Freitag, 20. November 2026 · 16:30 – 21:00
+ * Mehrere Tage: Freitag, 20. November 2026, 16:30 – Sonntag, 22. November 2026, 12:30
+ */
+export const zeitraumText = (event: {
+  event_date: string;
+  event_end_time?: string | null;
+}): string => {
+  const beginn = event.event_date;
+  const ende = event.event_end_time;
+  if (!beginn) return '';
+
+  const beginnTag = formatEventDateLong(beginn);
+  const beginnZeit = formatEventTime(beginn);
+
+  if (!ende) return `${beginnTag} · ${beginnZeit}`;
+
+  const endeTag = formatEventDateLong(ende);
+  const endeZeit = formatEventTime(ende);
+
+  // Verglichen wird der TAG, nicht die Uhrzeit: Eine Uebernachtung von
+  // 19:00 bis 09:00 laeuft ueber zwei Tage, auch wenn die Endzeit kleiner
+  // aussieht als die Startzeit.
+  if (beginnTag === endeTag) return `${beginnTag} · ${beginnZeit} – ${endeZeit}`;
+
+  return `${beginnTag}, ${beginnZeit} – ${endeTag}, ${endeZeit}`;
 };

@@ -26,8 +26,8 @@ export const SLIDES: OnboardingSlide[] = [
     icon: ICON_KOPIEREN_GEFUELLT,
     color: 'var(--app-color-events)',
     rgb: '--app-color-events-rgb',
-    title: 'Termin kopieren',
-    text: 'Wisch einen Termin nach links, oder öffne ihn und tipp oben auf das Kopieren-Symbol: Das Formular geht mit allen Angaben des Originals auf. Der Beginn rückt auf die nächste halbe Stunde, die Dauer bleibt. Material, Chat und Anmeldungen kommen nicht mit. Angelegt wird erst beim Speichern.',
+    title: 'Event kopieren',
+    text: 'Wisch ein Event nach links, oder öffne es und tipp oben auf das Kopieren-Symbol: Das Formular geht mit allen Angaben des Originals auf. Der Beginn rückt auf die nächste halbe Stunde, die Dauer bleibt. Material, Chat und Anmeldungen kommen nicht mit. Angelegt wird erst beim Speichern.',
   },
   {
     icon: ICON_TERMIN_GEFUELLT,
@@ -48,7 +48,7 @@ export const SLIDES: OnboardingSlide[] = [
     color: 'var(--app-color-users)',
     rgb: '--app-color-users-rgb',
     title: 'Mehr Klarheit bei Rechten',
-    text: 'Teamer:innen und Admins sehen und erreichen nur die Konfis ihrer eigenen Jahrgänge — im Chat, in den Listen und bei Terminen. Bleibt eine Liste leer, ist das kein Fehler, sondern diese Grenze.',
+    text: 'Teamer:innen und die Leitung sehen und erreichen nur die Konfis ihrer eigenen Jahrgänge — im Chat, in den Listen und bei Events. Bleibt eine Liste leer, ist das kein Fehler, sondern diese Grenze.',
   },
   {
     icon: ICON_OFFLINE,
@@ -62,7 +62,7 @@ export const SLIDES: OnboardingSlide[] = [
     color: 'var(--app-color-users)',
     rgb: '--app-color-users-rgb',
     title: 'Sperre, Symbole, Tempo',
-    text: 'Die App lässt sich mit Face ID, Touch ID oder Fingerabdruck sperren; im Profil wählst du die Wartezeit. Angemeldet bleibst du dabei, von Haus aus ist die Sperre aus. Dazu 95 Symbole für Abzeichen statt 54 — und die App startet schneller.',
+    text: 'Die App lässt sich mit Face ID, Touch ID oder Fingerabdruck sperren; im Profil wählst du die Wartezeit. Angemeldet bleibst du dabei, von Haus aus ist die Sperre aus. Dazu 95 Symbole für Badges statt 54 — und die App startet schneller.',
   },
 ];
 

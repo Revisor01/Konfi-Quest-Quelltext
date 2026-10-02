@@ -16,7 +16,8 @@ import {
   IonCard,
   IonCardContent,
   IonSelect,
-  IonSelectOption
+  IonSelectOption,
+  useIonAlert
 } from '@ionic/react';
 import {
   ICON_FILTER,
@@ -31,13 +32,22 @@ import api from '../../../services/api';
 import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import type { Participant } from '../../../types/event';
+// Die Jahrgangsregel liegt in utils/jahrgangsPassung.ts — sie
+// spiegelt gehoertZumTermin im Backend und hat dort ihre Erklaerung.
+import { passtZumTermin } from '../../../utils/jahrgangsPassung';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { uhrzeit } from '../../../utils/dateUtils';
+import { fehlerText } from '../../../utils/fehler';
+import { eintragenMitRueckfrage, type UeberbuchenFrage } from '../../../utils/ueberbuchen';
 
 interface Konfi {
   id: number;
   name: string;
   jahrgang_id?: number;
+  jahrgang_ids?: number[];
   jahrgang_name?: string;
   role_name?: string;
+  is_super_admin?: boolean;
 }
 
 // Participant kommt zentral aus types/event. Die fruehere Fassung hier kannte
@@ -60,10 +70,12 @@ interface EventJahrgang {
 interface Event {
   has_timeslots?: boolean;
   timeslots?: Timeslot[];
+  teamer_only?: boolean;
   jahrgang_id?: number;
   jahrgang_name?: string;
   jahrgaenge?: EventJahrgang[];
 }
+
 
 interface ParticipantManagementModalProps {
   eventId: number;
@@ -83,6 +95,7 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
   filterRole
 }) => {
   const { setError, isOnline } = useApp();
+  const [presentAlert] = useIonAlert();
   const [searchTerm, setSearchTerm] = useState('');
   const [availableKonfis, setAvailableKonfis] = useState<Konfi[]>([]);
   const [selectedKonfis, setSelectedKonfis] = useState<number[]>([]);
@@ -124,7 +137,12 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
   // Event-Jahrgänge ermitteln (für Filter)
   const eventJahrgaenge = eventData?.jahrgaenge?.map(j => j.name) ||
     (eventData?.jahrgang_name ? [eventData.jahrgang_name] : []);
+  const eventJahrgangIds: number[] = eventData?.jahrgaenge?.map(j => j.id) ||
+    (eventData?.jahrgang_id ? [eventData.jahrgang_id] : []);
   const hasEventJahrgaenge = eventJahrgaenge.length > 0;
+  // Greift die Jahrgangsgrenze fuer die Auswahl? Nicht bei 'Nur Team' und
+  // nicht ohne Jahrgang — dann steht auch kein Hinweis auf der Seite.
+  const jahrgangsGrenzeAktiv = hasEventJahrgaenge && !eventData?.teamer_only;
 
   const loadAvailableKonfis = async (participantsList?: Participant[]) => {
     try {
@@ -185,15 +203,18 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
 
     if (!matchesSearch) return false;
 
-    // Teamer:innen und Leitung sind immer sichtbar (kein Jahrgang-Filter)
+    // Wer zu keinem Jahrgang des Termins gehoert, wird gar nicht erst
+    // angeboten — Konfis, Team und Leitung gleichermassen. Bis
+    // dahin galt hier "Teamer:innen und Leitung sind immer sichtbar", und
+    // nur die Konfis wurden ueber den Namen des Jahrgangs gefiltert.
+    if (!passtZumTermin(konfi, eventData, eventJahrgangIds)) return false;
+
+    // Der Jahrgangs-Filter im Kopf betrifft nur Konfis: Team und Leitung
+    // tragen mehrere Jahrgaenge und stehen ohnehin nur bei Ueberschneidung hier.
     if (konfi.role_name !== 'konfi') return true;
 
-    // Wenn Event Jahrgänge hat, nur diese Konfis zeigen (außer "alle" gewählt)
-    if (hasEventJahrgaenge && selectedJahrgang === 'alle') {
-      // Bei "alle" trotzdem nur Event-Jahrgänge zeigen
-      return eventJahrgaenge.includes(konfi.jahrgang_name || '');
-    } else if (selectedJahrgang !== 'alle') {
-      // Spezifischer Jahrgang gewählt
+    // Spezifischer Jahrgang gewählt (bei "alle" reicht passtZumTermin oben)
+    if (selectedJahrgang !== 'alle') {
       return konfi.jahrgang_name === selectedJahrgang;
     }
 
@@ -204,10 +225,7 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
     if (!dateString) return '';
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return '';
-    return date.toLocaleTimeString('de-DE', {
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    return uhrzeit(date);
   };
 
   const handleKonfiSelection = (konfiId: number) => {
@@ -217,6 +235,21 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
         : [...prev, konfiId]
     );
   };
+
+  // Rueckfrage "voll -- trotzdem eintragen?" als Ja/Nein-Alert, wie beim
+  // Bestaetigen von der Warteliste (EventDetailView). Tippen neben den Dialog
+  // ist ein Nein; ein zweites resolve nach dem Button bleibt wirkungslos.
+  const frageUeberbuchen = (frage: UeberbuchenFrage) => new Promise<boolean>((resolve) => {
+    presentAlert({
+      header: frage.header,
+      message: frage.message,
+      buttons: [
+        { text: 'Abbrechen', role: 'cancel', handler: () => resolve(false) },
+        { text: 'Trotzdem eintragen', handler: () => resolve(true) }
+      ],
+      onDidDismiss: () => resolve(false)
+    });
+  });
 
   const handleAddParticipants = async () => {
     if (selectedKonfis.length === 0) return;
@@ -234,31 +267,39 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
       await guard(async () => {
       setLoading(true);
       try {
-        // Add each selected konfi as participant
-        for (const konfiId of selectedKonfis) {
-          // timeslot_id kommt nur dazu, wenn der Termin Zeitfenster hat.
-          const requestData: { user_id: number; status: 'confirmed'; timeslot_id?: number } = {
-            user_id: konfiId,
-            status: 'confirmed' // Admin fügt direkt als bestätigt hinzu (übersteuert Kapazität)
-          };
+        const auswahl = selectedKonfis.map(
+          (id) => availableKonfis.find((k) => k.id === id) ?? { id, name: '' }
+        );
+        const ergebnis = await eintragenMitRueckfrage(
+          auswahl,
+          (person, ueberbuchen) => api.post(`/events/${eventId}/participants`, {
+            user_id: person.id,
+            status: 'confirmed',
+            // timeslot_id kommt nur dazu, wenn der Termin Zeitfenster hat.
+            ...(eventData?.has_timeslots && selectedTimeslot ? { timeslot_id: selectedTimeslot } : {}),
+            ueberbuchen
+          }).then(() => undefined),
+          frageUeberbuchen,
+          (person) => ({ name: person.name || undefined, seite: person.role_name === 'konfi' ? 'konfi' : 'team' })
+        );
 
-          // Add timeslot_id if event has timeslots
-          if (eventData?.has_timeslots && selectedTimeslot) {
-            requestData.timeslot_id = selectedTimeslot;
-          }
-
-          await api.post(`/events/${eventId}/participants`, requestData);
-        }
-
-        setSelectedKonfis([]);
+        // Wer drin ist, bleibt drin -- auch nach Abbruch oder Fehler. Die
+        // Uebrigen bleiben ausgewaehlt, damit man sie abwaehlen oder die
+        // Teilnehmerzahl erhoehen und es noch einmal versuchen kann.
+        setSelectedKonfis(ergebnis.offen.map((person) => person.id));
         // Participants und verfügbare Konfis neu laden
         const eventResponse = await api.get(`/events/${eventId}`);
         const updatedParticipants: Participant[] = eventResponse.data.participants || [];
         setCurrentParticipants(updatedParticipants);
         await loadAvailableKonfis(updatedParticipants);
-        onSuccess();
-      } catch {
-        setError('Fehler beim Hinzufügen der Teilnehmer:innen');
+        if (ergebnis.eingetragen.length > 0) onSuccess();
+        if (ergebnis.fehler) throw ergebnis.fehler;
+      } catch (err) {
+        // Die Meldung des Servers zeigen, wenn er eine hat — etwa "… gehört
+        // zu keinem Jahrgang dieses Termins" (403). Sonst der Sammelbegriff.
+        // Ueber fehlerText, damit die Fehlermessung statt des Server-Textes
+        // (er traegt den Namen der Person) den Sammelbegriff meldet.
+        setError(fehlerText(err, 'Fehler beim Hinzufügen der Teilnehmer:innen'));
       } finally {
         setLoading(false);
       }
@@ -309,7 +350,7 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
                   {/* Suchfeld */}
                   <IonItem lines={eventJahrgaenge.length !== 1 || (eventData?.has_timeslots && eventData.timeslots && eventData.timeslots.length > 0) ? 'full' : 'none'} style={{ '--background': 'transparent' }}>
                     <IonLabel position="stacked">Person suchen</IonLabel>
-                    <IonInput
+                    <IonInput aria-label="Person suchen"
                       value={searchTerm}
                       onIonInput={(e) => setSearchTerm(e.detail.value!)}
                       placeholder="Name eingeben..."
@@ -320,11 +361,12 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
                   {(eventJahrgaenge.length !== 1) && (
                     <IonItem lines={eventData?.has_timeslots && eventData.timeslots && eventData.timeslots.length > 0 ? 'full' : 'none'} style={{ '--background': 'transparent' }}>
                       <IonLabel position="stacked">Jahrgang</IonLabel>
-                      <IonSelect
+                      <IonSelect aria-label="Jahrgang"
                         value={selectedJahrgang}
                         onIonChange={(e) => setSelectedJahrgang(e.detail.value!)}
                         placeholder="Jahrgang wählen"
                         interface="popover"
+                        interfaceOptions={{ arrow: false }}
                       >
                         {hasEventJahrgaenge ? (
                           <>
@@ -348,11 +390,12 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
                   {eventData?.has_timeslots && eventData.timeslots && eventData.timeslots.length > 0 && (
                     <IonItem lines="none" style={{ '--background': 'transparent' }}>
                       <IonLabel position="stacked">Zeitslot</IonLabel>
-                      <IonSelect
+                      <IonSelect aria-label="Zeitslot"
                         value={selectedTimeslot}
                         onIonChange={(e) => setSelectedTimeslot(e.detail.value)}
                         placeholder="Zeitslot wählen"
                         interface="popover"
+                        interfaceOptions={{ arrow: false }}
                       >
                         <IonSelectOption value={null}>Zeitslot wählen...</IonSelectOption>
                         {eventData.timeslots.map((timeslot) => {
@@ -402,6 +445,21 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
             </IonListHeader>
             <IonCard className="app-card">
               <IonCardContent>
+                {/* Warum jemand fehlt: Eine leere oder kuerzere Liste ohne
+                    Erklaerung liesse die Leitung nach der Person suchen. */}
+                {jahrgangsGrenzeAktiv && (
+                  <p
+                    data-testid="jahrgangs-hinweis"
+                    style={{
+                      margin: '0 0 var(--app-abstand-basis) 0',
+                      fontSize: 'var(--app-text-klein)',
+                      color: 'var(--app-text-secondary)'
+                    }}
+                  >
+                    Angeboten werden nur Personen aus {eventJahrgaenge.length === 1 ? 'dem Jahrgang' : 'den Jahrgängen'} dieses
+                    Events ({eventJahrgaenge.join(', ')}). Die Gemeindeleitung ist davon ausgenommen.
+                  </p>
+                )}
                 {filteredKonfis.length === 0 ? (
                   <div style={{
                     padding: 'var(--app-abstand-riesig) var(--app-abstand-gross)',
@@ -409,7 +467,11 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
                     color: 'var(--app-text-secondary)'
                   }}>
                     <IonIcon icon={ICON_SUCHE_GEFUELLT} style={{ fontSize: 'var(--app-anzeige-riesig)', opacity: 0.3, marginBottom: 'var(--app-abstand-basis)' }} />
-                    <p style={{ margin: '0', fontSize: 'var(--app-text-standard)' }}>Keine Personen gefunden</p>
+                    <p style={{ margin: '0', fontSize: 'var(--app-text-standard)' }}>
+                      {jahrgangsGrenzeAktiv
+                        ? 'Keine passenden Personen — nur wer zu einem Jahrgang dieses Events gehört, lässt sich eintragen'
+                        : 'Keine Personen gefunden'}
+                    </p>
                   </div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-eng)' }}>
@@ -417,7 +479,7 @@ const ParticipantManagementModal: React.FC<ParticipantManagementModalProps> = ({
                       const isSelected = selectedKonfis.includes(konfi.id);
 
                       return (
-                        <div
+                        <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                           key={konfi.id}
                           className="app-list-item app-list-item--events"
                           onClick={() => handleKonfiSelection(konfi.id)}

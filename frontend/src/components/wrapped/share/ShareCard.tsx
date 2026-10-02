@@ -4,6 +4,7 @@ import { TEXTE, stufeFuer } from '../slides/kategorieSeitenTexte';
 import { tageBis } from '../../shared/eventFormatting';
 import { hintergrundFuer } from '../hintergrundbilder';
 import './ShareCard.css';
+import { punkteText } from '../../../utils/punkteText';
 
 interface ShareCardProps {
   slideKey: string;
@@ -230,7 +231,7 @@ const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
             <>
               <div className="share-label">Dein Tag</div>
               <div style={{ fontSize: 96, fontWeight: 800, lineHeight: 1.1 }}>{wt.name}</div>
-              <div className="share-subtitle">{wt.anzahl} von {wt.gesamt} Terminen</div>
+              <div className="share-subtitle">{wt.anzahl} von {wt.gesamt} Events</div>
             </>
           );
         }
@@ -502,7 +503,7 @@ const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
             <>
               <div className="share-label">So fing es an</div>
               <div style={{ fontSize: 76, fontWeight: 800, lineHeight: 1.15 }}>{an.name}</div>
-              <div className="share-subtitle">Dein erster Termin</div>
+              <div className="share-subtitle">Dein erstes Event</div>
             </>
           );
         }
@@ -810,7 +811,7 @@ const ShareCard = forwardRef<HTMLDivElement, ShareCardProps>(
                 {geschafft
                   ? 'Alles, was jetzt noch kommt, machst du, weil du willst — nicht, weil du musst.'
                   : nahDran
-                    ? `Noch ${fehlend} ${fehlend === 1 ? 'Punkt' : 'Punkte'}.`
+                    ? `Noch ${punkteText(fehlend)}.`
                     : 'Es ist noch Zeit. Und es zählt nicht, wie schnell du bist — sondern dass du da bist.'}
               </div>
             </>

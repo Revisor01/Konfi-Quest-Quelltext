@@ -17,7 +17,6 @@ import {
   IonDatetime,
   IonDatetimeButton,
   IonModal,
-  IonProgressBar,
   IonList,
   IonListHeader,
   IonAccordion,
@@ -39,17 +38,22 @@ import {
   ICON_TEXT,
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
-import { Filesystem, Directory } from '@capacitor/filesystem';
 import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
 import api from '../../../services/api';
 import { writeQueue, QueueBody } from '../../../services/writeQueue';
+import { warteschlangenDateiSichern } from '../../../services/warteschlangenDatei';
 import { AktivitaetMelden } from '../../../types/request';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
-import { compressForUpload } from '../../../services/mediaCompression';
+import { fuerUploadVorbereiten, DateiZuGrossFehler, UPLOAD_GRENZE } from '../../../services/mediaCompression';
+import { dateiAuswaehlen } from '../../../services/systemDialoge';
+import SendeAnzeige from '../../shared/SendeAnzeige';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../../services/offlineCache';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { track } from '../../../services/analytics';
+import { sendenOderEinreihen, istVerbindungsabbruch } from '../../../utils/sendenOderEinreihen';
 
 interface Activity {
   id: number;
@@ -96,24 +100,23 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
   );
   const activities = activitiesData || [];
 
-  const handlePhotoSelect = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.multiple = false;
-    input.onchange = (e: Event) => handleFileSelect(e);
-    input.click();
+  // Über die Hülle (services/systemDialoge): Sie meldet den Ausflug der
+  // App-Sperre an — ohne ihn sperrte die Fotoauswahl bei „Sofort" die App
+  // 
+  const handlePhotoSelect = async () => {
+    const auswahl = await dateiAuswaehlen({ accept: 'image/*' });
+    if (auswahl) await fotoUebernehmen(auswahl[0]);
   };
 
-  const handleFileSelect = async (event: Event) => {
-    const target = event.target as HTMLInputElement;
-    const file = target.files?.[0];
-    if (!file) return;
+  const fotoUebernehmen = async (file: File) => {
     try {
-      // Erst komprimieren (1920px/JPEG wie im Chat), DANN Groessen-Check:
-      // Live-Kamerafotos sind oft 8-16 MB und wuerden einen vorgezogenen
-      // 5MB-Check immer reissen; nach Kompression passen sie locker.
-      const prepared = await compressForUpload(file);
+      // Derselbe Weg wie in Chat und Challenges: erst
+      // verkleinern (1920 px, JPEG), DANN gegen die Grenze des Servers prüfen
+      // — Live-Kamerafotos haben 8-16 MB und passen erst danach. Zu groß
+      // meldet derselbe Satz wie überall: "Datei ist zu groß (max. 5 MB)."
+      const { file: prepared, bildVorschau } = await fuerUploadVorbereiten(file, UPLOAD_GRENZE.nachweisfoto);
+      // Das Formular zeigt keine Bildvorschau, nur "Foto ausgewählt".
+      if (bildVorschau) URL.revokeObjectURL(bildVorschau);
       setFormData(prev => ({ ...prev, photo_file: prepared }));
 
       // Create preview
@@ -123,7 +126,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
       };
       reader.readAsDataURL(prepared);
     } catch (err) {
-      setError(err instanceof Error && err.message ? err.message : 'Foto konnte nicht verarbeitet werden');
+      setError(err instanceof DateiZuGrossFehler ? err.message : 'Foto konnte nicht verarbeitet werden');
     }
   };
 
@@ -150,6 +153,9 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
 
       return response.data.filename;
     } catch (error) {
+      // Netz abgerissen: unverpackt weiterreichen, damit der Vorgang in die
+      // Warteschlange faellt (sendenOderEinreihen erkennt nur den Netzfehler).
+      if (istVerbindungsabbruch(error)) throw error;
       throw new Error(fehlerText(error, 'Fehler beim Hochladen des Fotos'), { cause: error });
     }
   };
@@ -181,34 +187,10 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
 
       const clientId = safeUUID();
 
-      if (networkMonitor.isOnline) {
-        // Online-Pfad: direkt senden
-        try {
-          let photoFilename: string | null = null;
-
-          if (formData.photo_file) {
-            photoFilename = await uploadPhoto();
-          }
-
-          const requestData: AktivitaetMelden = {
-            activity_id: parseInt(formData.activity_id),
-            description: formData.description.trim(),
-            requested_date: formData.requested_date,
-            photo_filename: photoFilename,
-            client_id: clientId,
-          };
-
-          await api.post('/konfi/requests', requestData);
-
-          setSuccess('Aktivität erfolgreich eingereicht!');
-          onSuccess();
-        } catch (error) {
-          setError(fehlerTextOderMessage(error, 'Fehler beim Einreichen der Aktivität'));
-        } finally {
-          setUploadProgress(0);
-        }
-      } else {
-        // Offline-Pfad: Queue-Fallback
+      // In die Warteschlange: derselbe Vorgang mit derselben client_id, das
+      // Foto lokal gesichert (die Warteschlange laedt es beim Senden hoch).
+      let fotoNichtGesichert = false;
+      const einreihen = async () => {
         let hasFileUpload = false;
         const queueBody: QueueBody & AktivitaetMelden = {
           activity_id: parseInt(formData.activity_id),
@@ -228,16 +210,11 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
               reader.readAsDataURL(formData.photo_file!);
             });
             const fileName = `queue_${clientId}_photo.jpg`;
-            await Filesystem.writeFile({
-              path: `queue-uploads/${fileName}`,
-              data: base64,
-              directory: Directory.Data,
-            });
-            queueBody._localPhotoPath = `queue-uploads/${fileName}`;
+            queueBody._localPhotoPath = await warteschlangenDateiSichern(fileName, base64);
             queueBody._photoFileName = formData.photo_file.name;
-          } catch {
-            setError('Foto konnte nicht lokal gespeichert werden');
-            return;
+          } catch (fehler) {
+            fotoNichtGesichert = true;
+            throw fehler;
           }
         }
 
@@ -253,9 +230,51 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
             label: 'Aktivität melden',
           },
         });
+      };
 
-        setSuccess('Aktivität wird gesendet sobald du wieder online bist');
+      try {
+        // Offline -- oder online, aber das Netz reisst ab: in die
+        // Warteschlange statt in eine Fehlermeldung.
+        // Ein zweiter Eingang ist
+        // harmlos: Der Server erkennt ihn an der client_id.
+        const { weg } = await sendenOderEinreihen({
+          online: networkMonitor.isOnline,
+          methode: 'POST',
+          idempotent: true,
+          senden: async () => {
+            let photoFilename: string | null = null;
+
+            if (formData.photo_file) {
+              photoFilename = await uploadPhoto();
+            }
+
+            const requestData: AktivitaetMelden = {
+              activity_id: parseInt(formData.activity_id),
+              description: formData.description.trim(),
+              requested_date: formData.requested_date,
+              photo_filename: photoFilename,
+              client_id: clientId,
+            };
+
+            await api.post('/konfi/requests', requestData);
+            // Anonyme Messung: Wie oft werden Aktivitäten
+            // eingereicht, und mit Nachweisfoto? Erst nach der erfolgreichen
+            // Antwort; kein Name, keine Aktivität, keine Kennung.
+            track('aktivitaet-eingereicht', { mit_foto: !!photoFilename });
+          },
+          einreihen,
+        });
+
+        setSuccess(weg === 'eingereiht'
+          ? 'Aktivität wird gesendet sobald du wieder online bist'
+          : 'Aktivität erfolgreich eingereicht!');
         onSuccess();
+      } catch (error) {
+        setError(fotoNichtGesichert
+          ? 'Foto konnte nicht lokal gespeichert werden'
+          : fehlerTextOderMessage(error, 'Fehler beim Einreichen der Aktivität'));
+      } finally {
+        setUploadProgress(0);
       }
     });
   };
@@ -285,8 +304,12 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
             </IonButton>
           </IonButtons>
         </IonToolbar>
-        {isSubmitting && uploadProgress > 0 && (
-          <IonProgressBar value={uploadProgress / 100} />
+        {/* Dieselbe Anzeige wie beim Einreichen eines Challenge-Beitrags:
+            Prozent und Balken, bei 100 % "Wird verarbeitet…" —
+            der Server verschlüsselt das Foto dann noch. Vorher ein Balken
+            ohne Zahl. */}
+        {isSubmitting && (
+          <SendeAnzeige prozent={uploadProgress} was="Foto" farbe="var(--app-text-requests)" />
         )}
       </IonHeader>
 
@@ -303,7 +326,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
             <IonCardContent style={{ padding: '0' }}>
               <IonAccordionGroup ref={accordionGroupRef}>
                 <IonAccordion value="activity-picker" toggleIcon={ICON_AUFKLAPPEN} toggleIconSlot="end">
-                  <IonItem slot="header" lines="none" style={{ '--padding-start': '16px', '--inner-padding-end': '12px' }}>
+                  <IonItem slot="header" lines="none" style={{ '--padding-start': 'var(--app-abstand-basis)', '--inner-padding-end': 'var(--app-abstand-mittel)' }}>
                     {selectedActivity ? (
                       // Gewaehlt: schlichte Header-Zeile (Icon + Name + Kategorie,
                       // Punkte dezent als Chip) — KEINE Card-im-Header-Optik, die
@@ -341,7 +364,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                       })()
                     ) : (
                       <IonLabel>
-                        <h3 className="app-settings-item__subtitle" style={{ margin: '0' }}>
+                        <h3 className="app-list-item__subtitle" style={{ margin: '0' }}>
                           Aktivität auswählen
                         </h3>
                       </IonLabel>
@@ -360,7 +383,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                           const variant = activity.type === 'gottesdienst' ? 'gottesdienst' : 'gemeinde';
 
                           return (
-                            <div
+                            <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-pressed={isSelected}
                               key={activity.id}
                               className={`app-list-item app-list-item--${variant}${isSelected ? ' app-list-item--selected' : ''}`}
                               onClick={() => {
@@ -425,8 +448,8 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
             <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
               <IonItem lines="none" style={{ '--background': 'transparent' }}>
                 <IonDatetimeButton datetime="date-picker" />
-                <IonModal keepContentsMounted={true}>
-                  <IonDatetime
+                <IonModal aria-label="Datum wählen" keepContentsMounted={true}>
+                  <IonDatetime aria-label="Datum wählen"
                     id="date-picker"
                     value={formData.requested_date}
                     onIonChange={(e) => setFormData(prev => ({ ...prev, requested_date: e.detail.value as string }))}
@@ -451,7 +474,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
           <IonCard className="app-card">
             <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
               <IonItem lines="none" style={{ '--background': 'transparent' }}>
-                <IonTextarea
+                <IonTextarea aria-label="Anmerkungen (optional)"
                   value={formData.description}
                   onIonInput={(e) => setFormData(prev => ({ ...prev, description: e.detail.value! }))}
                   placeholder="Anmerkungen... (optional)"
@@ -473,7 +496,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
           </IonListHeader>
           <IonCard className="app-card">
             <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
-              <div
+              <div role="presentation"
                 onClick={handlePhotoSelect}
                 style={{
                   padding: 'var(--app-abstand-basis)',
@@ -486,13 +509,13 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
               >
                 {photoPreview ? (
                   <div className="app-settings-item" style={{ justifyContent: 'space-between' }}>
-                    <div className="app-settings-item" style={{ gap: 'var(--app-abstand-eng)' }}>
+                    <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-label="Anderes Foto wählen" className="app-settings-item" style={{ gap: 'var(--app-abstand-eng)' }}>
                       <IonIcon
                         icon={ICON_ZUSAGE_GEFUELLT}
                         className="app-icon-color--gemeinde"
                         style={{ fontSize: 'var(--app-text-untertitel)' }}
                       />
-                      <span style={{ fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-color-gemeinde)' }}>
+                      <span style={{ fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-gemeinde)' }}>
                         Foto ausgewählt
                       </span>
                     </div>
@@ -509,7 +532,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                     </IonButton>
                   </div>
                 ) : (
-                  <div className="app-settings-item" style={{ justifyContent: 'center' }}>
+                  <div role="button" tabIndex={0} onKeyDown={tastaturKlick} className="app-settings-item" style={{ justifyContent: 'center' }}>
                     <IonIcon
                       icon={ICON_KAMERA_GEFUELLT}
                       className="app-icon-color--gemeinde"

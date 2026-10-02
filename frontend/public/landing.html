@@ -72,7 +72,7 @@
         { "@type": "Offer", "name": "Standard – bis 50 Konfis", "price": "99", "priceCurrency": "EUR" },
         { "@type": "Offer", "name": "Plus – bis 75 Konfis", "price": "139", "priceCurrency": "EUR" },
         { "@type": "Offer", "name": "Groß – bis 100 Konfis", "price": "179", "priceCurrency": "EUR" },
-        { "@type": "Offer", "name": "Organisation – bis 4 Gemeinden", "price": "390", "priceCurrency": "EUR" }
+        { "@type": "Offer", "name": "Verbund – bis 4 Gemeinden", "price": "390", "priceCurrency": "EUR" }
       ],
       "installUrl": [
         "https://apps.apple.com/de/app/id6748016619",
@@ -150,7 +150,7 @@
         {
           "@type": "Question",
           "name": "Was kostet Konfi Quest?",
-          "acceptedAnswer": { "@type": "Answer", "text": "Konfi Quest kostet als Jahreslizenz zwischen 49 Euro (bis 15 Konfis) und 179 Euro (bis 100 Konfis). Für bis zu vier Gemeinden gibt es die Organisationslizenz für 390 Euro pro Jahr. Vorab könnt ihr 30 Tage kostenlos mit 5 Konfis testen." }
+          "acceptedAnswer": { "@type": "Answer", "text": "Konfi Quest kostet als Jahreslizenz zwischen 49 Euro (bis 15 Konfis) und 179 Euro (bis 100 Konfis). Für bis zu vier Gemeinden gibt es die Verbundlizenz für 390 Euro pro Jahr. Vorab könnt ihr 30 Tage kostenlos mit 5 Konfis testen." }
         },
         {
           "@type": "Question",
@@ -552,12 +552,6 @@ footer a:hover{color:#fff}
   var s = document.getElementById('umami-script');
   if(!s) return;
 
-  // 1. Hat sich dieser Browser hier schon einmal angemeldet? Nur die
-  //    Existenz des Schluessels zaehlt. "CapacitorStorage."-Praefix ist der
-  //    heutige Stand, der nackte Name der alte (migrateStorage.ts laesst ihn
-  //    als Rueckfallebene stehen) — beide gelten.
-  //    localStorage kann werfen (Privatmodus, gesperrte Websitedaten); dann
-  //    gilt schlicht "nicht erkannt".
   var angemeldet = false;
   try {
     angemeldet = localStorage.getItem('CapacitorStorage.konfi_token') !== null
@@ -923,7 +917,7 @@ footer a:hover{color:#fff}
    <div class="wcard reveal d3"><div class="wic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 11l-3 3-2-2"/></svg></div><h4>Vom Konfi zum Ehrenamt</h4><p>Der Übergang zum Teamer ist eingebaut – mit Juleica-Verwaltung. Nachwuchsgewinnung fürs Ehrenamt, by design.</p></div>
    <div class="wcard reveal d1"><div class="wic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div><h4>Datenschutz nach DSG-EKD</h4><p>Nach kirchlichem Datenschutzrecht entwickelt. Jede Gemeinde streng getrennt. Server in Deutschland.</p></div>
    <div class="wcard reveal d2"><div class="wic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg></div><h4>Funktioniert ohne Netz</h4><p>Im Gemeindehaus kein Empfang? Eingaben werden gespeichert und synchronisiert, sobald wieder Netz da ist.</p></div>
-   <div class="wcard reveal d3"><div class="wic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg></div><h4>Skaliert mit euch</h4><p>Von der Einzelgemeinde über mehrere Jahrgänge bis zum Kirchenkreis – sauber getrennt pro Organisation.</p></div>
+   <div class="wcard reveal d3"><div class="wic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M3 9h18M9 21V9"/></svg></div><h4>Skaliert mit euch</h4><p>Von der Einzelgemeinde über mehrere Jahrgänge bis zum Kirchenkreis – sauber getrennt pro Gemeinde.</p></div>
   </div>
  </div>
 </section>
@@ -963,12 +957,12 @@ footer a:hover{color:#fff}
 
    <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
     <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Können Konfis später Teamer:innen oder Admins werden?</summary>
-    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Ja. In der Benutzerverwaltung kann die Rolle einer Person jederzeit geändert werden – zum Beispiel von Konfi zu Teamer:in. Die bisherigen Punkte bleiben dabei als Historie erhalten. Auch neue Personen lassen sich direkt mit jeder Rolle anlegen. Benutzer und Rollen verwaltet ausschließlich die Organisations-Leitung.</p>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Ja. In der Benutzerverwaltung kann die Rolle einer Person jederzeit geändert werden – zum Beispiel von Konfi zu Teamer:in. Die bisherigen Punkte bleiben dabei als Historie erhalten. Auch neue Personen lassen sich direkt mit jeder Rolle anlegen. Benutzer und Rollen verwaltet die Gemeindeleitung.</p>
    </details>
 
    <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
-    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Worin unterscheiden sich Organisations-Admin und Admin?</summary>
-    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Der Organisations-Admin hat alle Rechte in eurer Gemeinde – inklusive der Benutzerverwaltung: Personen anlegen, Rollen ändern, Jahrgänge zuweisen. Ein normaler Admin verwaltet alle Inhalte wie Konfis, Events, Aktivitäten, Badges und Level, aber keine Benutzer und Rollen. Teamer:innen wiederum arbeiten nur in den ihnen zugewiesenen Jahrgängen.</p>
+    <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Worin unterscheiden sich Gemeindeleitung und Leitung?</summary>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Die Gemeindeleitung hat alle Rechte in eurer Gemeinde – inklusive der Benutzerverwaltung: Personen anlegen, Rollen ändern, Jahrgänge zuweisen. Die Leitung legt Events, Badges und Level an und betreut Konfis, Aktivitäten und Challenges der ihr zugewiesenen Jahrgänge; Leitung und Gemeindeleitung anlegen und Rollen ändern kann sie nicht. Teamer:innen arbeiten ebenfalls nur in ihren Jahrgängen.</p>
    </details>
 
    <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
@@ -993,7 +987,7 @@ footer a:hover{color:#fff}
 
    <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
     <summary style="cursor:pointer;list-style:none;padding:1rem 1.2rem;font-weight:600;color:var(--ink);font-size:1.05rem">Was kostet Konfi Quest?</summary>
-    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Konfi Quest kostet eine Jahreslizenz, gestaffelt nach der Zahl der Konfis; für mehrere Gemeinden gibt es eine Organisationslizenz. Die Staffelung steht in der <a href="#preise">Preisübersicht</a>. Vorab könnt ihr 30 Tage kostenlos mit 5 Konfis testen.</p>
+    <p style="padding:0 1.2rem 1.1rem;color:var(--ink-soft);line-height:1.65;margin:0">Konfi Quest kostet eine Jahreslizenz, gestaffelt nach der Zahl der Konfis; für mehrere Gemeinden gibt es eine Verbundlizenz. Die Staffelung steht in der <a href="#preise">Preisübersicht</a>. Vorab könnt ihr 30 Tage kostenlos mit 5 Konfis testen.</p>
    </details>
 
    <details style="background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:.4rem .4rem;box-shadow:0 4px 18px rgba(15,23,42,.04)">
@@ -1036,7 +1030,7 @@ footer a:hover{color:#fff}
    <div class="pc"><div class="tier">Standard</div><div class="scope">bis 50 Konfis</div><div class="amt">99&nbsp;€</div><div class="per">pro Jahr</div></div>
    <div class="pc feat"><div class="tier">Plus</div><div class="scope">bis 75 Konfis</div><div class="amt">139&nbsp;€</div><div class="per">pro Jahr</div></div>
    <div class="pc"><div class="tier">Groß</div><div class="scope">bis 100 Konfis</div><div class="amt">179&nbsp;€</div><div class="per">pro Jahr</div></div>
-   <div class="pc"><div class="tier">Organisation</div><div class="scope">bis 4 Gemeinden</div><div class="amt">390&nbsp;€</div><div class="per">pro Jahr</div></div>
+   <div class="pc"><div class="tier">Verbund</div><div class="scope">bis 4 Gemeinden</div><div class="amt">390&nbsp;€</div><div class="per">pro Jahr</div></div>
   </div>
   <div class="trial reveal d2">
    <h4>30 Tage kostenlos testen</h4>
@@ -1054,7 +1048,7 @@ footer a:hover{color:#fff}
   <h2 class="sec-h reveal d1">So einfach geht's los</h2>
   <p class="sec-p reveal d2">Von der Anfrage bis zum ersten Punkt – ohne IT-Abteilung.</p>
   <div class="steps">
-   <div class="step reveal d1"><div class="num">1</div><h4>Kontakt aufnehmen</h4><p>Schreibt uns – wir richten eure Organisation ein.</p></div>
+   <div class="step reveal d1"><div class="num">1</div><h4>Kontakt aufnehmen</h4><p>Schreibt uns – wir richten eure Gemeinde ein.</p></div>
    <div class="step reveal d2"><div class="num">2</div><h4>Team einladen</h4><p>Teamer:innen und Leitung einladen, Jahrgänge anlegen.</p></div>
    <div class="step reveal d3"><div class="num">3</div><h4>Konfis einladen</h4><p>Pro Jahrgang ein Einladungslink – Konfis treten bei.</p></div>
    <div class="step reveal d4"><div class="num">4</div><h4>Loslegen</h4><p>Events planen, Punkte vergeben – das Abenteuer beginnt.</p></div>

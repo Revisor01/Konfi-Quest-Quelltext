@@ -1,15 +1,12 @@
-import { ICON_HINZUFUEGEN_GEFUELLT, ICON_ZURUECK } from '../../shared/icons';
+import { ICON_HINZUFUEGEN_GEFUELLT } from '../../shared/icons';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useCallback } from 'react';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
   IonRefresher,
   IonRefresherContent,
-  IonButtons,
   IonButton,
   IonIcon,
   useIonModal,
@@ -23,6 +20,7 @@ import api from '../../../services/api';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../../services/offlineCache';
 import OrganizationView from '../OrganizationView';
+import WartungsHinweis from '../../shared/WartungsHinweis';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import OrganizationManagementModal from '../modals/OrganizationManagementModal';
 import { triggerPullHaptic } from '../../../utils/haptics';
@@ -44,8 +42,23 @@ interface Organization {
   badge_count: number;
 }
 
+interface GemeindeGeloeschtAntwort {
+  konten_geloescht?: number;
+  konten_umgezogen?: number;
+}
+
+const konten = (anzahl: number) => `${anzahl} ${anzahl === 1 ? 'Konto' : 'Konten'}`;
+
+/** Die Meldung nach dem Löschen: mit den Zahlen der Konten, wenn der Server sie schickt. */
+const gemeindeGeloeschtMeldung = (name: string, antwort?: GemeindeGeloeschtAntwort | null): string => {
+  const geloescht = antwort?.konten_geloescht;
+  const umgezogen = antwort?.konten_umgezogen;
+  if (typeof geloescht !== 'number' || typeof umgezogen !== 'number') return `Gemeinde "${name}" gelöscht`;
+  return `Gemeinde "${name}" gelöscht: ${konten(geloescht)} gelöscht, ${konten(umgezogen)} in eine andere Gemeinde umgezogen`;
+};
+
 const AdminOrganizationsPage: React.FC = () => {
-  const { setError, isOnline, refreshUser } = useApp();
+  const { setError, setSuccess, isOnline, refreshUser } = useApp();
   const { pageRef, presentingElement } = useModalPage('admin-organizations');
   
   // SWR-Cache für Organisationen
@@ -89,8 +102,11 @@ const AdminOrganizationsPage: React.FC = () => {
   const handleDeleteOrganization = async (organization: Organization) => {
     if (offlineBlockiert(isOnline, setError)) return;
     presentAlert({
-      header: 'Organisation löschen',
-      message: `Organisation "${organization.display_name}" (${organization.name}) wirklich löschen?\n\nWarnung: Alle zugehörigen Daten (Benutzer, Konfis, Aktivitäten) werden ebenfalls gelöscht!`,
+      header: 'Gemeinde löschen',
+      message: `Gemeinde "${organization.display_name}" (${organization.name}) wirklich löschen?\n\n`
+        + 'Alle Daten der Gemeinde werden gelöscht, dazu jedes Konto, das nur zu ihr gehört. '
+        + 'Wer auch zu einer anderen Gemeinde gehört, behält sein Konto und bleibt dort.\n\n'
+        + 'Das lässt sich nicht rückgängig machen.',
       buttons: [
         { text: 'Abbrechen', role: 'cancel' },
         {
@@ -98,10 +114,11 @@ const AdminOrganizationsPage: React.FC = () => {
           role: 'destructive',
           handler: async () => {
             try {
-              await api.delete(`/organizations/${organization.id}`);
+              const res = await api.delete(`/organizations/${organization.id}`);
+              setSuccess(gemeindeGeloeschtMeldung(organization.display_name, res?.data));
               await loadOrganizations();
             } catch (err) {
-              setError(fehlerText(err, 'Fehler beim Löschen der Organisation'));
+              setError(fehlerText(err, 'Fehler beim Löschen der Gemeinde'));
             }
           }
         }
@@ -125,36 +142,32 @@ const AdminOrganizationsPage: React.FC = () => {
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonButtons slot="start">
-            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-              <IonIcon icon={ICON_ZURUECK} />
-            </IonButton>
-          </IonButtons>
-          <IonTitle>Organisationen</IonTitle>
-          <IonButtons slot="end">
-            <IonButton aria-label="Neue Organisation anlegen" onClick={presentOrganizationModal}>
-              <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
-            </IonButton>
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
+      {/* Kein Gemeinde-Umschalter: die Seite ist gemeindeuebergreifend (Betrieb). */}
+      <AppKopfzeile
+        titel="Gemeinden"
+        onZurueck={() => window.history.back()}
+        gemeindeUmschalter={false}
+        rechts={(
+          <IonButton aria-label="Neue Gemeinde anlegen" onClick={presentOrganizationModal}>
+            <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
+          </IonButton>
+        )}
+      />
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Organisationen</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Gemeinden" />
         <IonRefresher slot="fixed" onIonRefresh={(e) => {
           loadOrganizations();
           e.detail.complete();
         }} onIonPull={triggerPullHaptic}>
           <IonRefresherContent></IonRefresherContent>
         </IonRefresher>
-        
+
+        {/* Wartungshinweis des Betriebs -- auch hier, damit der
+            Super-Admin sieht, was gerade bei allen Rollen steht. */}
+        <WartungsHinweis />
+
         {loading ? (
-          <LoadingSpinner message="Organisationen werden geladen..." />
+          <LoadingSpinner message="Gemeinden werden geladen..." />
         ) : (
           <>
             <OrganizationView

@@ -6,7 +6,7 @@ import {
   BiometryType,
   BiometricAuthError
 } from '@capgo/capacitor-native-biometric';
-import { getRefreshToken, getUser } from './tokenStore';
+import { getRefreshToken, getUser, setRefreshToken } from './tokenStore';
 import { BaseUser } from '../types/user';
 
 // ---------------------------------------------------------------------------
@@ -287,6 +287,23 @@ export const biometrieAktivieren = async (): Promise<boolean> => {
 };
 
 /**
+ * Schaltet die biometrische Anmeldung aus, OHNE abzumelden (Schalter in den
+ * Einstellungen).
+ *
+ * Solange der Schalter an ist, liegt der Refresh-Token nur im Arbeitsspeicher
+ * und im sicheren Speicher (Sicherheitsabwaegung a; auch nach jeder Rotation,
+ * siehe api.ts performRefresh). Loeschte das Ausschalten nur den sicheren
+ * Speicher, waere die laufende Sitzung beim naechsten Kaltstart weg. Deshalb
+ * kehrt der Token hier in die normale Ablage zurueck -- genau der Zustand
+ * wie vor dem Einschalten.
+ */
+export const biometrieAusschalten = async (): Promise<void> => {
+  await biometrieVergessen();
+  const laufend = getRefreshToken();
+  if (laufend) await setRefreshToken(laufend);
+};
+
+/**
  * Loescht die gespeicherte Sitzung und schaltet den Schalter aus.
  * MUSS bei jedem ausdruecklichen Abmelden laufen.
  */
@@ -430,6 +447,11 @@ export const gespeichertenTokenAuffrischen = async (
  * "best-effort": schlaegt das Schreiben fehl, bleibt die App normal angemeldet.
  * Nur die naechste biometrische Anmeldung scheitert dann und fuehrt auf die
  * normale Anmeldung — kein Datenverlust, keine Schleife.
+ *
+ * Der sichere Speicher ist bei eingeschaltetem Schalter die EINZIGE dauerhafte
+ * Ablage: performRefresh schreibt den rotierten Token dann nicht mehr in die
+ * Preferences. Scheitert das Schreiben
+ * hier, lebt der neue Token bis zum Ende des Prozesses nur im Arbeitsspeicher.
  *
  * PLATTFORM-UNTERSCHIED, bewusst in Kauf genommen:
  * Auf iOS ist das Schreiben in die Keychain immer still — dort stimmt die

@@ -10,6 +10,8 @@
 
 # production
 /dist
+# App-Buendel fuer Capacitor (webDir), entsteht bei jedem vite build
+/dist-app
 
 # misc
 .DS_Store

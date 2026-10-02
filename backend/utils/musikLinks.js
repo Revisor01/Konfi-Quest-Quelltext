@@ -79,6 +79,8 @@ function pruefeMusikLink(rawUrl) {
 function sauber(wert) {
   if (typeof wert !== 'string') return null;
   const s = wert
+    // Steuerzeichen sind hier genau das Ziel; die Regel greift absichtlich.
+    // eslint-disable-next-line no-control-regex
     .replace(/[\u0000-\u001f\u007f]/g, " ")
     .trim()
     .slice(0, 300)

@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { IonIcon } from '@ionic/react';
 import { ICON_SCHLIESSEN, ICON_UPGRADE } from './icons';
+import { tastaturKlick } from '../../utils/tastatur';
 import {
   pruefeStoreUpdate,
   istHinweisWeggeklickt,
   merkeHinweisWeggeklickt,
   StoreUpdateInfo
 } from '../../services/updateCheck';
+import { linkOeffnen } from '../../services/systemDialoge';
 
 /**
  * Hinweis "Neue Version im Store" fuer die drei Dashboards.
@@ -43,29 +45,29 @@ const StoreUpdateBanner: React.FC<{ style?: React.CSSProperties }> = ({
 
   if (!info) return null;
 
-  const oeffneStore = () => window.open(info.url, '_blank');
+  const oeffneStore = () => linkOeffnen(info.url);
 
   return (
+    // Kein Knopf im Knopf: Karte role="presentation", Knopf ist der Text, das
+    // X steht daneben -- Begründung in UpdateHinweisKarte.tsx.
     <div
       className="app-whatsnew app-whatsnew--store"
-      role="button"
-      tabIndex={0}
+      role="presentation"
       style={style}
-      aria-label={`Version ${info.version} ist verfügbar. Im Store ansehen`}
       onClick={oeffneStore}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          oeffneStore();
-        }
-      }}
     >
       <IonIcon
         icon={ICON_UPGRADE}
         className="app-whatsnew__icon"
         aria-hidden="true"
       />
-      <div className="app-whatsnew__text">
+      <div
+        className="app-whatsnew__text"
+        role="button"
+        tabIndex={0}
+        aria-label={`Version ${info.version} ist verfügbar. Im Store ansehen`}
+        onKeyDown={tastaturKlick}
+      >
         <span className="app-whatsnew__title">Version {info.version} ist da</span>
         <span className="app-whatsnew__sub">
           Hier tippen, um das Update im Store zu laden.

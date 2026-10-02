@@ -6,14 +6,11 @@ import {
   ICON_MAIL,
   ICON_SCHLUESSEL,
   ICON_TERMIN,
-  ICON_ZURUECK,
 } from '../../shared/icons';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import React from 'react';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
   IonCard,
   IonCardContent,
@@ -21,7 +18,6 @@ import {
   IonLabel,
   IonIcon,
   IonButton,
-  IonButtons,
   IonList,
   IonListHeader,
   IonRefresher,
@@ -38,9 +34,13 @@ import { triggerPullHaptic } from '../../../utils/haptics';
 import ChangeEmailModal from '../../shared/ChangeEmailModal';
 import ChangePasswordModal from '../../shared/ChangePasswordModal';
 import AppSperreSchalter from '../../shared/AppSperreSchalter';
+import EinladungenKarte from '../../shared/EinladungenKarte';
+import AbsturzberichteSchalter from '../../shared/AbsturzberichteSchalter';
 import ChangeRoleTitleModal from '../modals/ChangeRoleTitleModal';
 import DeleteAccountModal from '../../shared/DeleteAccountModal';
 import { useMediaCacheControl } from '../../../hooks/useMediaCacheControl';
+import { datumKurz } from '../../../utils/dateUtils';
+import { rollenName, selbstbezeichnung } from '../../../utils/rollenNamen';
 
 const AdminProfilePage: React.FC = () => {
   const { pageRef, presentingElement } = useModalPage('admin-profile');
@@ -123,23 +123,11 @@ const AdminProfilePage: React.FC = () => {
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-        <IonButtons slot="start">
-          <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-            <IonIcon icon={ICON_ZURUECK} />
-          </IonButton>
-        </IonButtons>
-          <IonTitle>Admin-Profil</IonTitle>
-        </IonToolbar>
-      </IonHeader>
+      {/* Kein Gemeinde-Umschalter: das Profil gehoert zum Konto, nicht zur Gemeinde. */}
+      <AppKopfzeile titel="Profil" onZurueck={() => window.history.back()} gemeindeUmschalter={false} />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Admin-Profil</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Profil" />
 
         <IonRefresher slot="fixed" onIonRefresh={(e) => {
           refreshProfile().then(() => e.detail.complete());
@@ -171,11 +159,13 @@ const AdminProfilePage: React.FC = () => {
             }}>
               {user?.display_name?.charAt(0)?.toUpperCase() || 'A'}
             </div>
-            <h1 className="app-detail-header__title">{user?.display_name || 'Administrator'}</h1>
+            <h1 className="app-detail-header__title">{user?.display_name || rollenName(user?.role_name, 'Leitung')}</h1>
             <p className="app-detail-header__subtitle">
-              {profileData?.role_title
-                ? `Administrator - ${profileData.role_title}`
-                : 'Administrator'}
+              {/* Rolle nach role_name (utils/rollenNamen), wie ueberall in der App. */}
+              {/* Dahinter die Selbstbezeichnung, getrimmt; nur Leerzeichen zaehlen nicht. */}
+              {selbstbezeichnung(profileData?.role_title)
+                ? `${rollenName(user?.role_name, 'Leitung')} · ${selbstbezeichnung(profileData?.role_title)}`
+                : rollenName(user?.role_name, 'Leitung')}
             </p>
             <div className="app-detail-header__info-row" style={{ justifyContent: 'center' }}>
               {(profileData?.email || user?.email) && (
@@ -187,7 +177,7 @@ const AdminProfilePage: React.FC = () => {
               {profileData?.created_at && (
                 <div className="app-detail-header__info-chip">
                   <IonIcon icon={ICON_TERMIN} style={{ fontSize: 'var(--app-text-sekundaer)' }} />
-                  Seit {new Date(profileData?.created_at || '').toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  Seit {datumKurz(profileData?.created_at)}
                 </div>
               )}
             </div>
@@ -326,6 +316,9 @@ const AdminProfilePage: React.FC = () => {
 
                 {/* App-Sperre: Face ID / Fingerabdruck vor der laufenden App */}
                 <AppSperreSchalter variante="users" />
+                {/* Absturzberichte an/aus (nur in der App, im Browser leer) */}
+                <AbsturzberichteSchalter variante="users" />
+                <EinladungenKarte variante="users" />
               </div>
             </IonCardContent>
           </IonCard>

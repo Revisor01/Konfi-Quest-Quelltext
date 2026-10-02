@@ -18,6 +18,7 @@ import { filterBySearchTerm } from '../../utils/helpers';
 import { SectionHeader, ListSection } from '../shared';
 import { triggerPullHaptic } from '../../utils/haptics';
 import { tageBis } from '../shared/eventFormatting';
+import { datumKurz } from '../../utils/dateUtils';
 
 // Ionic 9 gibt bei ref an IonItemSliding die React-Komponente zurueck, nicht
 // mehr das DOM-Element. Gebraucht wird hier nur close() — das haben beide.
@@ -107,7 +108,7 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
       </IonRefresher>
 
       <SectionHeader
-        title="Organisationen"
+        title="Gemeinden"
         subtitle="Gemeinden verwalten"
         icon={ICON_ORGANISATION_GEFUELLT}
         preset="organizations"
@@ -130,19 +131,20 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
           {/* Suchfeld */}
           <IonItem>
             <IonIcon icon={ICON_SUCHE_GEFUELLT} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
-            <IonInput
+            <IonInput aria-label="Gemeinde suchen"
               value={searchTerm}
               onIonInput={(e) => setSearchTerm(e.detail.value!)}
-              placeholder="Organisation suchen..."
+              placeholder="Gemeinde suchen..."
             />
           </IonItem>
           {/* Status-Filter */}
           <IonItem>
             <IonIcon icon={ICON_FILTER} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
-            <IonSelect
+            <IonSelect aria-label="Status"
               value={selectedFilter}
               onIonChange={(e) => setSelectedFilter(e.detail.value)}
               interface="popover"
+              interfaceOptions={{ arrow: false }}
               placeholder="Status"
               style={{ width: '100%' }}
             >
@@ -157,12 +159,12 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
       {/* Organisationen-Liste */}
       <ListSection
         icon={ICON_ORGANISATION}
-        title="Organisationen"
+        title="Gemeinden"
         count={filteredAndSortedOrganizations.length}
         iconColorClass="organizations"
         isEmpty={filteredAndSortedOrganizations.length === 0}
         emptyIcon={ICON_ORGANISATION}
-        emptyTitle="Keine Organisationen gefunden"
+        emptyTitle="Keine Gemeinden gefunden"
         emptyMessage="Noch keine Gemeinden angelegt"
         emptyIconColor="var(--app-color-users)"
       >
@@ -207,6 +209,8 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
                               display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)'
                             }}
                             title="Testversion"
+                            role="img"
+                            aria-label="Testversion"
                           >
                             <IonIcon icon={ICON_EXPERIMENT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                           </div>
@@ -220,6 +224,8 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
                           display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)'
                         }}
                         title={organization.is_active ? 'Aktiv' : 'Inaktiv'}
+                        role="img"
+                        aria-label={organization.is_active ? 'Aktiv' : 'Inaktiv'}
                       >
                         <IonIcon icon={organization.is_active ? ICON_ZUSAGE_GEFUELLT : ICON_ABSAGE} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                       </div>
@@ -236,26 +242,26 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
                           </div>
                           <div className="app-list-item__meta">
                             <span className="app-list-item__meta-item">
-                              <IonIcon icon={ICON_GRUPPE_GEFUELLT} style={{ color: 'var(--app-color-konfis)' }} />
+                              <IonIcon icon={ICON_GRUPPE_GEFUELLT} style={{ color: 'var(--app-text-konfis)' }} />
                               {organization.max_konfis != null
                                 ? `${organization.konfi_count} / ${organization.max_konfis} Konfis`
                                 : `${organization.konfi_count} Konfis`}
                             </span>
                             <span className="app-list-item__meta-item">
-                              <IonIcon icon={ICON_PERSON} style={{ color: 'var(--app-color-teamer)' }} />
+                              <IonIcon icon={ICON_PERSON} style={{ color: 'var(--app-text-teamer)' }} />
                               {organization.user_count} Team
                             </span>
                             <span className="app-list-item__meta-item">
                               {(() => {
                                 if (!organization.trial_ends_at) {
-                                  return <><IonIcon icon={ICON_UHRZEIT} style={{ color: 'var(--app-color-users)' }} />unbegrenzt</>;
+                                  return <><IonIcon icon={ICON_UHRZEIT} style={{ color: 'var(--app-text-users)' }} />unbegrenzt</>;
                                 }
                                 const end = new Date(organization.trial_ends_at);
                                 const days = tageBis(end); // Kalendertage, siehe eventFormatting.ts
                                 return (
                                   <>
-                                    <IonIcon icon={ICON_UHRZEIT} style={{ color: days < 0 ? 'var(--app-color-events)' : 'var(--app-color-users)' }} />
-                                    {end.toLocaleDateString('de-DE')} {days >= 0 ? `(${days} Tag${days === 1 ? '' : 'e'})` : '(abgelaufen)'}
+                                    <IonIcon icon={ICON_UHRZEIT} style={{ color: days < 0 ? 'var(--app-text-events)' : 'var(--app-text-users)' }} />
+                                    {datumKurz(end)} {days >= 0 ? `(${days} Tag${days === 1 ? '' : 'e'})` : '(abgelaufen)'}
                                   </>
                                 );
                               })()}
@@ -274,7 +280,7 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
                       onSelectOrganization(organization);
                     }}
                     className="app-swipe-action"
-                    aria-label="Organisation bearbeiten"
+                    aria-label="Gemeinde bearbeiten"
                   >
                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--organizations">
                       <IonIcon icon={ICON_BEARBEITEN} />
@@ -286,7 +292,7 @@ const OrganizationView: React.FC<OrganizationViewProps> = ({
                       onDeleteOrganization(organization);
                     }}
                     className="app-swipe-action"
-                    aria-label="Organisation löschen"
+                    aria-label="Gemeinde löschen"
                   >
                     <div className="app-icon-circle app-icon-circle--lg app-icon-circle--danger">
                       <IonIcon icon={ICON_LOESCHEN_GEFUELLT} />

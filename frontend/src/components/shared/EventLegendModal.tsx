@@ -102,7 +102,7 @@ const ENTRIES: LegendEntry[] = [
     color: 'var(--app-color-info)',
     icon: ICON_KREIS_LEER,
     label: 'Verbuchen',
-    description: 'Das Event ist vorbei und muss noch verbucht werden.',
+    description: 'Das Event ist vorbei und muss noch verbucht werden. Wie viele es sind, zeigt die orange Zahl an den Umschaltern „Events" und „Verbuchen".',
     variants: ['admin'],
   },
   {
@@ -142,7 +142,7 @@ const MARKERS: LegendEntry[] = [
     color: 'var(--app-color-konfis)',
     icon: ICON_FLAMME_GEFUELLT,
     label: 'Konfirmation',
-    description: 'Ein Konfirmations-Termin.',
+    description: 'Ein Event zur Konfirmation.',
     variants: ['konfi', 'teamer', 'admin'],
   },
   {
@@ -159,7 +159,7 @@ const renderRow = (entry: LegendEntry, i: number) => (
     key={i}
     style={{
       display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittelweit)',
-      background: 'rgba(255,255,255,0.7)', borderRadius: 'var(--app-radius-weich)',
+      background: 'var(--app-surface-card)', borderRadius: 'var(--app-radius-weich)',
       padding: 'var(--app-abstand-mittel) var(--app-abstand-mittelweit)', boxShadow: 'var(--app-schatten-hauch)'
     }}
   >

@@ -20,9 +20,9 @@ interface Props extends SlideProps {
  */
 const TeamerAbschlussSlide: React.FC<Props> = ({ isActive, data, year }) => {
   const zahlen = [
-    { icon: ICON_TERMIN, wert: data.slides.events_geleitet.total, label: 'Termine' },
+    { icon: ICON_TERMIN, wert: data.slides.events_geleitet.total, label: 'Events' },
     { icon: ICON_GRUPPE, wert: data.slides.konfis_betreut.total_konfis, label: 'Konfis' },
-    { icon: ICON_ABZEICHEN, wert: data.slides.badges.total_earned, label: 'Abzeichen' },
+    { icon: ICON_ABZEICHEN, wert: data.slides.badges.total_earned, label: 'Badges' },
   ];
 
   return (

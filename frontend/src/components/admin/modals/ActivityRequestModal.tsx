@@ -29,10 +29,14 @@ import {
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
-import api, { DATEI_TIMEOUT_MS } from '../../../services/api';
+import api from '../../../services/api';
+import NachweisFoto from '../../shared/NachweisFoto';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
+import { datumKurz, datumUhrzeit } from '../../../utils/dateUtils';
+import { trackHandlung } from '../../../services/analytics';
+import { punkteText } from '../../../utils/punkteText';
 // triggerRefresh nicht direkt nutzen — Modal rendert via useIonModal außerhalb des Provider-Trees
 // Stattdessen onSuccess Callback nutzen, Parent-Page hat useLiveRefresh
 
@@ -73,7 +77,6 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [request, setRequest] = useState<ActivityRequest | null>(null);
   const [adminComment, setAdminComment] = useState('');
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [selectedAction, setSelectedAction] = useState<'approve' | 'reject' | null>(null);
   const [deletingPhoto, setDeletingPhoto] = useState(false);
 
@@ -82,39 +85,22 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
 
     setLoading(true);
     try {
-      const response = await api.get('/admin/activities/requests');
-      const requests = response.data;
-      const foundRequest = requests.find((r: ActivityRequest) => r.id === requestId);
-
-      if (foundRequest) {
-        setRequest(foundRequest);
-        setAdminComment(foundRequest.admin_comment || '');
-
-        // Admins sehen das Nachweisfoto in jedem Status (auch verbucht/abgelehnt)
-        if (foundRequest.photo_filename) {
-          loadPhoto(foundRequest.id);
-        }
-      } else {
-        setError('Aktivität nicht gefunden');
-      }
+      // Nur DIESER Antrag. Vorher kam die ganze
+      // Antragsgeschichte der Gemeinde über die Leitung, um per .find() einen
+      // Eintrag herauszusuchen. Die Antwort hat die Form eines Listeneintrags.
+      const response = await api.get<ActivityRequest>(`/admin/activities/requests/${requestId}`);
+      const foundRequest = response.data;
+      setRequest(foundRequest);
+      setAdminComment(foundRequest.admin_comment || '');
+      // Das Nachweisfoto lädt NachweisFoto selbst, sobald es gezeigt wird —
+      // für die Leitung in jedem Status (auch verbucht/abgelehnt).
     } catch (err) {
-      setError('Fehler beim Laden der Aktivität');
+      // 404: Antrag gibt es (in dieser Gemeinde) nicht; 403: Konfi außerhalb
+      // der eigenen Jahrgänge. Beides meldet der Server mit eigenem Text.
+      setError(fehlerText(err, 'Fehler beim Laden der Aktivität'));
  console.error('Error loading request:', err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const loadPhoto = async (id: number) => {
-    try {
-      const response = await api.get(`/admin/activities/requests/${id}/photo`, {
-        responseType: 'blob',
-        timeout: DATEI_TIMEOUT_MS
-      });
-      const url = URL.createObjectURL(response.data);
-      setPhotoUrl(url);
-    } catch (err) {
- console.error('Error loading photo:', err);
     }
   };
 
@@ -124,21 +110,13 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
     }
   }, [requestId]);
 
-  useEffect(() => {
-    if (!photoUrl) return;
-    return () => {
-      URL.revokeObjectURL(photoUrl);
-    };
-  }, [photoUrl]);
-
-
   const handleDeletePhoto = async () => {
     if (!request) return;
     setDeletingPhoto(true);
     try {
       await api.delete(`/admin/activities/requests/${request.id}/photo`);
-      // Freigabe der Blob-URL uebernimmt der photoUrl-Effekt beim Wechsel auf null.
-      setPhotoUrl(null);
+      // Ohne photo_filename haengt NachweisFoto ab und gibt dabei seine
+      // Blob-URL frei.
       setRequest({ ...request, photo_filename: undefined });
       setSuccess('Foto erfolgreich gelöscht');
     } catch (err) {
@@ -166,6 +144,15 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
       if (networkMonitor.isOnline) {
         try {
           await api.put(`/admin/activities/requests/${request.id}`, body);
+          // Anonyme Messung NACH der erfolgreichen Antwort: wie oft wird
+          // angenommen, wie oft abgelehnt, bei Konfis und beim Team.
+          // Kein Grund, keine Aktivitaet, keine Punkte, keine
+          // Person. Offline eingereiht zaehlt nicht — dort ist noch nichts
+          // entschieden.
+          trackHandlung('antrag-entschieden', {
+            entscheidung: selectedAction === 'approve' ? 'angenommen' : 'abgelehnt',
+            antrag_von: request.activity_target_role
+          });
           // Parent-Page refresht via onSuccess + useLiveRefresh
           onSuccess();
           onClose();
@@ -194,21 +181,11 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('de-DE', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
+    return datumKurz(dateString);
   };
 
   const formatDateTime = (dateString: string) => {
-    return new Date(dateString).toLocaleString('de-DE', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    return datumUhrzeit(dateString);
   };
 
   const isPending = request?.status === 'pending';
@@ -298,7 +275,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                   <IonItem lines="inset">
                     <IonLabel>
                       <p>Punkte</p>
-                      <h2>{request.activity_points} {request.activity_points === 1 ? 'Punkt' : 'Punkte'}</h2>
+                      <h2>{punkteText(request.activity_points)}</h2>
                     </IonLabel>
                   </IonItem>
                 )}
@@ -344,30 +321,10 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
             </IonListHeader>
             <IonCard className="app-card">
               <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
-                {photoUrl ? (
-                  <img
-                    src={photoUrl}
-                    alt="Foto zur Aktivität"
-                    style={{
-                      maxWidth: '100%',
-                      borderRadius: 'var(--app-radius-klein)',
-                      boxShadow: 'var(--app-schatten-karte)',
-                      display: 'block'
-                    }}
-                  />
-                ) : (
-                  <div style={{
-                    background: 'var(--app-surface-muted)',
-                    borderRadius: 'var(--app-radius-karte)',
-                    padding: 'var(--app-abstand-weit) var(--app-abstand-basis)',
-                    textAlign: 'center'
-                  }}>
-                    <IonSpinner name="crescent" />
-                    <p style={{ margin: 'var(--app-abstand-mittel) 0 0 0', fontSize: 'var(--app-text-basis)', color: 'var(--app-text-secondary)' }}>
-                      Lade Foto...
-                    </p>
-                  </div>
-                )}
+                {/* Vorher: bei einem Ladefehler stand "Lade Foto..." für
+                    immer da. Jetzt Fortschritt, Fehler mit "Erneut
+                    versuchen", ohne Netz die graue Zeile. */}
+                <NachweisFoto key={request.id} antragId={request.id} leitung />
 
                 <IonButton
                   expand="block"
@@ -454,7 +411,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                       '--color': selectedAction === 'approve' ? 'white' : 'var(--app-color-success-strong)',
                       '--background': selectedAction === 'approve' ? 'var(--app-color-success-strong)' : 'transparent',
                       '--border-width': '2px',
-                      '--border-radius': '12px',
+                      '--border-radius': 'var(--app-radius-karte)',
                       fontWeight: 'var(--app-schrift-halbfett)'
                     }}
                   >
@@ -472,7 +429,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                       '--color': selectedAction === 'reject' ? 'white' : 'var(--app-color-danger)',
                       '--background': selectedAction === 'reject' ? 'var(--app-color-danger)' : 'transparent',
                       '--border-width': '2px',
-                      '--border-radius': '12px',
+                      '--border-radius': 'var(--app-radius-karte)',
                       fontWeight: 'var(--app-schrift-halbfett)'
                     }}
                   >
@@ -487,7 +444,7 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                     <IonLabel style={{ fontSize: 'var(--app-text-sekundaer)', color: 'var(--app-text-secondary)', marginBottom: 'var(--app-abstand-eng)', display: 'block' }}>
                       Grund für die Ablehnung *
                     </IonLabel>
-                    <IonTextarea
+                    <IonTextarea aria-label="Grund für die Ablehnung"
                       value={adminComment}
                       onIonInput={(e) => setAdminComment(e.detail.value!)}
                       placeholder="Bitte gib einen Grund für die Ablehnung an..."
@@ -498,8 +455,8 @@ const ActivityRequestModal: React.FC<ActivityRequestModalProps> = ({
                         background: 'var(--app-surface-muted)',
                         borderRadius: 'var(--app-radius-klein)',
                         padding: 'var(--app-abstand-eng)',
-                        '--padding-start': '12px',
-                        '--padding-end': '12px'
+                        '--padding-start': 'var(--app-abstand-mittel)',
+                        '--padding-end': 'var(--app-abstand-mittel)'
                       }}
                     />
                   </div>

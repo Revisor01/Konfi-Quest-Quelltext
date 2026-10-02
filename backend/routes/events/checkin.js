@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const PushService = require('../../services/pushService');
 const liveUpdate = require('../../utils/liveUpdate');
 const { checkPointTypeEnabled } = require('../../utils/pointTypeGuard');
+const { darfTermin } = require('../../utils/jahrgangsZugriff');
 
 const QR_SECRET = process.env.QR_SECRET;
 if (!QR_SECRET) {
@@ -128,7 +129,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
         // Fassungen zeigen den error-Text, den sie mitbekommen.
         await client.query('ROLLBACK');
         fruehAntwort = { status: 400, body: {
-          error: 'Du wurdest von diesem Termin abgemeldet. Melde dich bei der Leitung, wenn du doch da bist.',
+          error: 'Du wurdest von diesem Event abgemeldet. Melde dich bei der Leitung, wenn du doch da bist.',
           error_type: 'excused'
         } };
       } else if (booking.status !== 'confirmed') {
@@ -180,7 +181,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
             await client.query(updateProfileQuery, [event.points, userId]);
 
             try {
-              await checkAndAwardBadges(client, userId);
+              await checkAndAwardBadges(client, userId, { organizationId: req.user.organization_id });
             } catch (badgeErr) {
               console.error('Error checking badges after QR check-in:', badgeErr);
             }
@@ -211,7 +212,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
       // Badge-Check für Teamer NACH COMMIT (Konfis bekommen Badge-Check schon oben)
       if (req.user.type === 'teamer') {
         try {
-          await checkAndAwardBadges(db, userId);
+          await checkAndAwardBadges(db, userId, { organizationId: req.user.organization_id });
         } catch (badgeErr) {
           console.error('Error checking teamer badges after QR check-in:', badgeErr);
         }
@@ -222,13 +223,13 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
         const userType = req.user.type === 'teamer' ? 'teamer' : 'konfi';
         if (pointsAwarded) {
           try { await PushService.checkAndSendLevelUp(db, userId, req.user.organization_id); } catch (e) { console.error('Level-up check failed:', e); }
-          try { await PushService.sendEventAttendanceToKonfi(db, userId, event.name, 'present', event.points, null, req.user.organization_id); } catch (e) { console.error('Push notification failed:', e); }
+          try { await PushService.sendEventAttendanceToKonfi(db, userId, event.name, 'present', event.points, eventId, req.user.organization_id); } catch (e) { console.error('Push notification failed:', e); }
           // userType statt hart 'konfi': beim QR-Check-in koennen sich auch
           // Teamer:innen einchecken. Zwei Zeilen weiter wurde userType
           // bereits richtig verwendet, hier nicht.
           liveUpdate.sendToUser(userType, userId, 'dashboard', 'update', { points: event.points });
         } else {
-          try { await PushService.sendEventAttendanceToKonfi(db, userId, event.name, 'present', 0, null, req.user.organization_id); } catch (e) { console.error('Push notification failed:', e); }
+          try { await PushService.sendEventAttendanceToKonfi(db, userId, event.name, 'present', 0, eventId, req.user.organization_id); } catch (e) { console.error('Push notification failed:', e); }
         }
         liveUpdate.sendToUser(userType, userId, 'events', 'update', { eventId, action: 'checkin' });
         liveUpdate.sendToOrgAdmins(req.user.organization_id, 'events', 'update', { eventId, action: 'attendance' });
@@ -250,7 +251,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
     });
   });
 
-  // Generate QR token for event (Admin/Teamer)
+  // QR-Code eines Termins holen oder erzeugen (Leitung und Team).
   router.post('/:id/generate-qr', rbacVerifier, requireTeamer, async (req, res) => {
     const { id } = req.params;
     try {
@@ -261,6 +262,13 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
 
       if (!event) {
         return res.status(404).json({ error: 'Event nicht gefunden' });
+      }
+
+      // Vor dem vorhandenen Token pruefen -- sonst gaebe die Route einen
+      // einmal erzeugten Code an jede:n heraus.
+      const zugriff = await darfTermin(db, req, event.id);
+      if (!zugriff.erlaubt) {
+        return res.status(403).json({ error: 'Kein Zugriff auf dieses Event' });
       }
 
       // Wenn Token bereits existiert: direkt zurückgeben
@@ -284,10 +292,29 @@ module.exports = (db, rbacVerifier, { requireTeamer }, checkAndAwardBadges) => {
     }
   });
 
-  // Get attendance count for live polling (Admin/Teamer)
+  // Live-Zaehler zum QR-Code (Leitung und Team).
+  //
+  // Dieselbe Grenze wie generate-qr: Der Zaehler gehoert zum
+  // QR-Code, die App fragt ihn nur im QR-Fenster ab. Ein fremder oder
+  // unbekannter Termin ist 404, ein
+  // Termin aus fremdem Jahrgang 403. Die App ignoriert Fehler beim Abfragen
+  // still (QRDisplayModal, auch in 2.2.0) -- sie ruft die Route ohnehin nur
+  // fuer Termine, deren Code sie gerade zeigt.
   router.get('/:id/attendance-count', rbacVerifier, requireTeamer, async (req, res) => {
     const { id } = req.params;
     try {
+      const { rows: [event] } = await db.query(
+        'SELECT id FROM events WHERE id = $1 AND organization_id = $2',
+        [id, req.user.organization_id]
+      );
+      if (!event) {
+        return res.status(404).json({ error: 'Event nicht gefunden' });
+      }
+      const zugriff = await darfTermin(db, req, event.id);
+      if (!zugriff.erlaubt) {
+        return res.status(403).json({ error: 'Kein Zugriff auf dieses Event' });
+      }
+
       // "X von Y eingecheckt" waehrend des Check-ins. `total` sind die
       // ERWARTETEN -- deshalb weiterhin nur status = 'confirmed'.
       //

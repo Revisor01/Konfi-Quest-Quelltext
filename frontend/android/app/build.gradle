@@ -42,8 +42,9 @@ android {
     }
     buildTypes {
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             if (project.hasProperty('KONFI_KEYSTORE_PATH')) {
                 signingConfig signingConfigs.release
             }
@@ -63,6 +64,14 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
+    // Zahl am App-Symbol und eigener Push-Dienst:
+    // KonfiMessagingService ueberschreibt onMessageReceived(RemoteMessage),
+    // AppSymbolZahl ruft ShortcutBadger. Beides bringen die Plugins nur als
+    // "implementation" mit, fuer den Code der App also nicht sichtbar. Die
+    // Fassungen stehen in variables.gradle und gelten dort auch fuer die
+    // Plugins -- es bleibt je EINE Fassung im Bau.
+    implementation "com.google.firebase:firebase-messaging:$firebaseMessagingVersion"
+    implementation "me.leolin:ShortcutBadger:$shortcutBadgerVersion@aar"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
@@ -75,7 +84,32 @@ try {
     def servicesJSON = file('google-services.json')
     if (servicesJSON.text) {
         apply plugin: 'com.google.gms.google-services'
+        // Crashlytics haengt an DERSELBEN google-services.json und muss NACH
+        // dem google-services-Plugin angewendet werden. Bewusst in demselben
+        // if-Zweig: Ohne Config gibt es kein Firebase-Projekt, in das
+        // Mapping-Datei und Berichte gehoeren koennten.
+        //
+        // Dass dieser Zweig ueberhaupt erreicht wird, prueft
+        // scripts/prepare-android.sh HART ab — genau weil ein Fehlschlag hier
+        // STILL bleibt (siehe die Begruendung dort und der Push-Totalausfall
+        // 1.5.0). Beim Crashlytics-Ausfall waere es noch leiser: Die App
+        // laeuft, stuerzt aber unbemerkt ab.
+        apply plugin: 'com.google.firebase.crashlytics'
     }
 } catch(Exception e) {
     logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
+
+// Mapping-Datei fuer die Absturzdiagnose hochladen.
+//
+// Nur fuer release: Ein Debug-Bau wird nicht verschleiert und braucht es
+// nicht; der Upload kostet dort nur Bauzeit.
+android {
+    buildTypes {
+        release {
+            firebaseCrashlytics {
+                mappingFileUploadEnabled true
+            }
+        }
+    }
 }

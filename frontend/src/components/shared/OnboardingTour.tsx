@@ -5,6 +5,7 @@ import { Swiper, SwiperSlide } from 'swiper/react';
 import { Pagination } from 'swiper/modules';
 import type { Swiper as SwiperType } from 'swiper';
 import { ICON_PFEIL_WEITER_GEFUELLT, ICON_ZUSAGE_GEFUELLT } from './icons';
+import { bewegungReduziert } from '../../utils/bewegung';
 import 'swiper/css';
 import 'swiper/css/pagination';
 
@@ -98,7 +99,7 @@ const OnboardingTour: React.FC<OnboardingTourProps> = ({ slides, onClose, displa
 
       {/* Lutherrose (wandert je Slide), darf bis in die Safe-Area reichen. */}
       <img
-        src="/assets/icon/logo-mark-white.png"
+        src="/assets/icon/logo-mark.png"
         alt=""
         aria-hidden="true"
         style={{
@@ -134,6 +135,9 @@ const OnboardingTour: React.FC<OnboardingTourProps> = ({ slides, onClose, displa
         <Swiper
           modules={[Pagination]}
           pagination={{ clickable: true }}
+          // Der Wisch von Folie zu Folie: 300 ms (Swiper-Vorgabe), bei
+          // „Bewegung reduzieren" springt er.
+          speed={bewegungReduziert() ? 0 : 300}
           autoHeight={false}
           onSwiper={(s) => { swiperRef.current = s; }}
           onSlideChange={(s) => setIndex(s.activeIndex)}
@@ -175,14 +179,14 @@ const OnboardingTour: React.FC<OnboardingTourProps> = ({ slides, onClose, displa
             expand="block"
             onClick={next}
             style={{
-              '--background': 'white',
+              '--background': 'var(--app-weiss)', /* weisser Knopf auf Farbflaeche, in beiden Modi */
               '--background-activated': 'rgba(255,255,255,0.85)',
               '--background-focused': 'rgba(255,255,255,0.9)',
               '--background-hover': 'white',
               '--color': slides[index].color,
               '--ripple-color': slides[index].color,
-              '--box-shadow': '0 6px 18px rgba(0,0,0,0.18)',
-              '--border-radius': '14px',
+              '--box-shadow': '0 6px 18px rgba(0,0,0,0.18)', /* roh: weisser Knopf auf Farbflaeche, gleicher Schatten in beiden Modi; Einzelwert ohne Token */
+              '--border-radius': 'var(--app-radius-weich)',
               height: '52px', fontWeight: 'var(--app-schrift-fett)'
             }}
           >

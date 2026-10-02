@@ -23,6 +23,10 @@ import {
 } from '../shared/icons';
 import { SectionHeader, ListSection, StatusBadge } from '../shared';
 import { closeOpenSlidingItems } from '../../utils/slidingItems';
+import { datumKurz } from '../../utils/dateUtils';
+import SegmentZahl from '../shared/SegmentZahl';
+import WeitereEintraege from '../shared/WeitereEintraege';
+import { useSchrittweiseListe } from '../../hooks/useSchrittweiseListe';
 
 interface ActivityRequest {
   id: number;
@@ -53,6 +57,7 @@ interface ActivityRequestsViewProps {
   // Hauptsegment der Page, analog zum Konfi-Pattern in KonfiEventsPage).
   headerSlot?: React.ReactNode;
   ohneJahrgang?: boolean;
+  offeneAntraege?: number;
 }
 
 const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
@@ -60,7 +65,8 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
   onSelectRequest,
   onResetRequest,
   headerSlot,
-  ohneJahrgang = false
+  ohneJahrgang = false,
+  offeneAntraege = 0
 }) => {
   // Defensive: bei kaputten/gecachten Responses (Object statt Array) auf [] fallen
   const requests: ActivityRequest[] = Array.isArray(requestsRaw) ? requestsRaw : [];
@@ -81,6 +87,12 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
     return result;
   })();
 
+  // Schrittweise rendern: "Verbucht" waechst ueber das Jahr
+  // auf hunderte Zeilen; 416 davon kosteten gedrosselt 10,5 s, jetzt 1,1 s. Zaehler und
+  // Filter laufen weiter ueber alle (hooks/useSchrittweiseListe.ts).
+  const { sichtbar: sichtbareAntraege, weitere: weitereAntraege, mehrZeigen: mehrAntraege } =
+    useSchrittweiseListe(filteredAndSortedRequests, statusFilter);
+
   const getPendingCount = () => requests.filter(r => r.status === 'pending').length;
   const getApprovedCount = () => requests.filter(r => r.status === 'approved').length;
   const getRejectedCount = () => requests.filter(r => r.status === 'rejected').length;
@@ -89,11 +101,7 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
     if (!dateString) return '';
     const d = new Date(dateString);
     if (isNaN(d.getTime())) return '';
-    return d.toLocaleDateString('de-DE', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
+    return datumKurz(d);
   };
 
   const getTypeIcon = (type: string) => {
@@ -128,7 +136,7 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
           onIonChange={(e) => setStatusFilter(e.detail.value as 'all' | 'pending' | 'approved' | 'rejected')}
         >
           <IonSegmentButton value="pending">
-            <IonLabel>Offen</IonLabel>
+            <IonLabel>Offen<SegmentZahl anzahl={offeneAntraege} label={offeneAntraege === 1 ? 'Antrag wartet auf Entscheidung' : 'Anträge warten auf Entscheidung'} /></IonLabel>
           </IonSegmentButton>
           <IonSegmentButton value="approved">
             <IonLabel>Verbucht</IonLabel>
@@ -149,12 +157,12 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
         emptyTitle={ohneJahrgang ? 'Kein Jahrgang zugewiesen' : 'Keine Aktivitäten vorhanden'}
         emptyMessage={
           ohneJahrgang
-            ? 'Dir ist noch kein Jahrgang zugewiesen, deshalb siehst du keine Meldungen von Konfis. Die Leitung deiner Gemeinde kann das in den Einstellungen ändern.'
+            ? 'Dir ist noch kein Jahrgang zugewiesen, deshalb siehst du keine Meldungen von Konfis. Die Gemeindeleitung kann das in den Einstellungen ändern.'
             : 'Konfirmand:innen können Aktivitäten beantragen'
         }
         emptyIconColor="var(--app-color-success-strong)"
       >
-        {filteredAndSortedRequests.map((request, index) => {
+        {sichtbareAntraege.map((request, index) => {
                   const isPending = request.status === 'pending';
                   const isApproved = request.status === 'approved';
                   const isRejected = request.status === 'rejected';
@@ -164,7 +172,7 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
                   const statusText = isPending ? 'Offen' : isApproved ? 'Verbucht' : 'Abgelehnt';
 
                   return (
-                    <IonItemSliding key={request.id} style={{ marginBottom: index < filteredAndSortedRequests.length - 1 ? 'var(--app-abstand-eng)' : '0' }}>
+                    <IonItemSliding key={request.id} style={{ marginBottom: index < sichtbareAntraege.length - 1 ? 'var(--app-abstand-eng)' : '0' }}>
                       <IonItem
                         button
                         onClick={() => onSelectRequest(request)}
@@ -198,6 +206,8 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
                                   className="app-corner-badge"
                                   style={{ backgroundColor: 'var(--app-color-teamer)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
                                   title="Team-Aktivität"
+                                  role="img"
+                                  aria-label="Team-Aktivität"
                                 >
                                   <IonIcon icon={ICON_GRUPPE_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                                 </div>
@@ -249,7 +259,7 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
                                       Punkte-Typ (GD/Gem.) anzeigen; stattdessen "Team"-Kennzeichnung. */}
                                   {request.activity_target_role === 'teamer' ? (
                                     <span className="app-list-item__meta-item">
-                                      <IonIcon icon={ICON_GRUPPE_GEFUELLT} style={{ color: (isApproved || isRejected) ? 'var(--app-text-muted)' : 'var(--app-color-teamer)' }} />
+                                      <IonIcon icon={ICON_GRUPPE_GEFUELLT} style={{ color: (isApproved || isRejected) ? 'var(--app-text-muted)' : 'var(--app-text-teamer)' }} />
                                       Team
                                     </span>
                                   ) : (
@@ -296,6 +306,7 @@ const ActivityRequestsView: React.FC<ActivityRequestsViewProps> = ({
                   );
                 })}
       </ListSection>
+      <WeitereEintraege weitere={weitereAntraege} onMehr={mehrAntraege} bezeichnung="Aktivitäten" />
     </>
   );
 };

@@ -14,6 +14,7 @@ import {
   ICON_ZUSAGE_GEFUELLT,
 } from '../shared/icons';
 import { fehlerText, istNetzwerkfehler } from '../../utils/fehler';
+import { beiEnter } from '../../utils/tastatur';
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppLocation } from '../../navigation/useAppLocation';
 import {
@@ -32,7 +33,8 @@ import {
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
 
 import api from '../../services/api';
-import { setToken, setUser as setTokenStoreUser } from '../../services/tokenStore';
+import { sitzungUebernehmen } from '../../services/auth';
+import { geraeteKennung } from '../../services/geraeteKennung';
 import { hasValidUsernameChars } from '../../utils/usernameValidation';
 import { useApp } from '../../contexts/AppContext';
 
@@ -236,21 +238,23 @@ const KonfiRegisterPage: React.FC = () => {
       setRegistering(true);
       setError(null);
 
+      // Geraete-Kennung mitschicken: Der Server bindet das Refresh-Token an
+      // dieses Geraet.
+      const kennung = await geraeteKennung();
       const response = await api.post('/auth/register-konfi', {
         invite_code: inviteCode,
         display_name: formData.display_name.trim(),
         username: formData.username.toLowerCase().trim(),
         password: formData.password,
-        email: formData.email.trim() || undefined
+        email: formData.email.trim() || undefined,
+        ...(kennung ? { device_id: kennung } : {})
       });
 
       setSuccess(true);
 
-      // Auto-Login nach Registrierung
       const { token, user } = response.data;
       if (token && user) {
-        await setToken(token);
-        await setTokenStoreUser(user);
+        await sitzungUebernehmen(response.data);
         setUser(user);
         setAppSuccess('Willkommen bei Konfi Quest!');
         // Kurz warten für visuelles Feedback, dann zum Dashboard
@@ -277,6 +281,10 @@ const KonfiRegisterPage: React.FC = () => {
     }
   };
 
+  // Enter im letzten Feld sendet wie der Knopf -- und wie der Knopf nicht,
+  // solange ein Versuch laeuft oder das Geraet offline ist.
+  const registrierenPerTastatur = () => { if (!registering && isOnline) void handleSubmit(); };
+
   // Success Screen
   if (success) {
     return (
@@ -287,7 +295,7 @@ const KonfiRegisterPage: React.FC = () => {
           <div className="app-auth-star app-auth-star--cyan" style={{ top: '280px', right: '30px', width: '80px', height: '80px' }} />
           <div className="app-auth-star app-auth-star--gold" style={{ bottom: '200px', left: '30px', width: '50px', height: '50px' }} />
 
-          <div className="app-auth-container" style={{ textAlign: 'center' }}>
+          <div className="app-auth-container" style={{ textAlign: 'center' }} role="status">
             <div className="app-auth-success-circle">
               <IonIcon icon={ICON_ZUSAGE_GEFUELLT} className="app-auth-success-circle__icon" />
             </div>
@@ -357,14 +365,18 @@ const KonfiRegisterPage: React.FC = () => {
                     <p style={{ fontSize: 'var(--app-text-sekundaer)' }}>Du hast einen Code von deiner Gemeinde erhalten</p>
                   </div>
 
+                  {/* Feldnamen per aria-label: Ionic 9 bindet das Geschwister-IonLabel nicht mehr an das Feld;
+                      das sichtbare Label bleibt fuer das Layout. */}
                   <IonItem lines="none" className="app-auth-input">
                     <IonIcon icon={ICON_SCHLUESSEL_GEFUELLT} slot="start" style={{ color: "var(--app-auth-akzent)" }} />
                     <IonLabel position="stacked" className="app-auth-input__label">
                       Einladungscode
                     </IonLabel>
                     <IonInput
+                      aria-label="Einladungscode"
                       value={manualCode}
                       onIonInput={(e) => setManualCode(e.detail.value!.toUpperCase())}
+                      onKeyDown={beiEnter(handleManualCodeSubmit)}
                       placeholder="z.B. ABC12345"
                       className="app-auth-input__value"
                       style={{ textTransform: 'uppercase', letterSpacing: '2px' }}
@@ -372,7 +384,7 @@ const KonfiRegisterPage: React.FC = () => {
                   </IonItem>
 
                   {error && (
-                    <div className="app-auth-error">
+                    <div className="app-auth-error" role="alert">
                       <IonIcon icon={ICON_WARNHINWEIS_GEFUELLT} className="app-auth-error__icon" />
                       <span className="app-auth-error__text">{error}</span>
                     </div>
@@ -400,13 +412,14 @@ const KonfiRegisterPage: React.FC = () => {
                   </IonButton>
 
                   <div className="app-auth-footer">
-                    <span
-                      onClick={() => router.push('/login')}
+                    <a
+                      href="/login"
+                      onClick={(e) => { e.preventDefault(); router.push('/login'); }}
                       className="app-auth-link"
                     >
-                      <IonIcon icon={ICON_ZURUECK} style={{ verticalAlign: 'middle', marginRight: 'var(--app-abstand-mini)' }} />
+                      <IonIcon icon={ICON_ZURUECK} aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: 'var(--app-abstand-mini)' }} />
                       Zurück zur Anmeldung
-                    </span>
+                    </a>
                   </div>
                 </>
               ) : (
@@ -430,6 +443,8 @@ const KonfiRegisterPage: React.FC = () => {
                       Dein Name *
                     </IonLabel>
                     <IonInput
+                      aria-label="Dein Name"
+                      aria-required="true"
                       value={formData.display_name}
                       onIonInput={(e) => setFormData({ ...formData, display_name: e.detail.value! })}
                       placeholder="Vor- und Nachname"
@@ -445,6 +460,8 @@ const KonfiRegisterPage: React.FC = () => {
                       Benutzername *
                     </IonLabel>
                     <IonInput
+                      aria-label="Benutzername"
+                      aria-required="true"
                       value={formData.username}
                       onIonInput={(e) => handleUsernameInput(e.detail.value!)}
                       onIonBlur={handleUsernameBlur}
@@ -459,25 +476,25 @@ const KonfiRegisterPage: React.FC = () => {
 
                   {/* Username-Verfügbarkeits-Status */}
                   {usernameStatus === 'checking' && (
-                    <div className="app-auth-username-status app-auth-username-status--checking">
+                    <div role="status" className="app-auth-username-status app-auth-username-status--checking">
                       <IonSpinner name="dots" style={{ width: '16px', height: '16px' }} />
                       <span>Wird geprüft...</span>
                     </div>
                   )}
                   {usernameStatus === 'available' && (
-                    <div className="app-auth-username-status app-auth-username-status--available">
+                    <div role="status" className="app-auth-username-status app-auth-username-status--available">
                       <IonIcon icon={ICON_ZUSAGE_GEFUELLT} />
                       <span>Benutzername verfügbar</span>
                     </div>
                   )}
                   {usernameStatus === 'taken' && (
-                    <div className="app-auth-username-status app-auth-username-status--taken">
+                    <div role="status" className="app-auth-username-status app-auth-username-status--taken">
                       <IonIcon icon={ICON_WARNHINWEIS_GEFUELLT} />
                       <span>Benutzername bereits vergeben</span>
                     </div>
                   )}
                   {usernameStatus === 'invalid' && (
-                    <div className="app-auth-username-status app-auth-username-status--taken">
+                    <div role="status" className="app-auth-username-status app-auth-username-status--taken">
                       <IonIcon icon={ICON_ABSAGE} />
                       <span>Nur Buchstaben, Zahlen, Punkt (.) und Bindestrich (-) — keine Leerzeichen oder Umlaute</span>
                     </div>
@@ -490,6 +507,7 @@ const KonfiRegisterPage: React.FC = () => {
                       E-Mail (optional)
                     </IonLabel>
                     <IonInput
+                      aria-label="E-Mail (optional)"
                       type="email"
                       value={formData.email}
                       onIonInput={(e) => setFormData({ ...formData, email: e.detail.value! })}
@@ -506,6 +524,8 @@ const KonfiRegisterPage: React.FC = () => {
                       Passwort *
                     </IonLabel>
                     <IonInput
+                      aria-label="Passwort"
+                      aria-required="true"
                       type={showPassword ? 'text' : 'password'}
                       value={formData.password}
                       onIonInput={(e) => setFormData({ ...formData, password: e.detail.value! })}
@@ -516,12 +536,16 @@ const KonfiRegisterPage: React.FC = () => {
                       spellcheck={false}
                       className="app-auth-input__value"
                     />
-                    <IonIcon
-                      icon={showPassword ? ICON_VERBORGEN : ICON_SICHTBAR}
+                    <button
+                      type="button"
                       slot="end"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="app-auth-input__toggle"
-                    />
+                      className="app-auth-input__toggle app-knopf-nackt app-beruehrungsziel"
+                      aria-label={showPassword ? 'Passwort verbergen' : 'Passwort anzeigen'}
+                      aria-pressed={showPassword}
+                    >
+                      <IonIcon icon={showPassword ? ICON_VERBORGEN : ICON_SICHTBAR} aria-hidden="true" />
+                    </button>
                   </IonItem>
 
                   {/* Passwort-Anforderungen - ausblenden wenn alle erfuellt */}
@@ -544,9 +568,12 @@ const KonfiRegisterPage: React.FC = () => {
                       Passwort bestätigen *
                     </IonLabel>
                     <IonInput
+                      aria-label="Passwort bestätigen"
+                      aria-required="true"
                       type={showConfirmPassword ? 'text' : 'password'}
                       value={formData.password_confirm}
                       onIonInput={(e) => setFormData({ ...formData, password_confirm: e.detail.value! })}
+                      onKeyDown={beiEnter(registrierenPerTastatur)}
                       placeholder="Passwort wiederholen"
                       autocapitalize="none"
                       autocorrect={false}
@@ -554,17 +581,21 @@ const KonfiRegisterPage: React.FC = () => {
                       disabled={registering}
                       className="app-auth-input__value"
                     />
-                    <IonIcon
-                      icon={showConfirmPassword ? ICON_VERBORGEN : ICON_SICHTBAR}
+                    <button
+                      type="button"
                       slot="end"
                       onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                      className="app-auth-input__toggle"
-                    />
+                      className="app-auth-input__toggle app-knopf-nackt app-beruehrungsziel"
+                      aria-label={showConfirmPassword ? 'Passwortbestätigung verbergen' : 'Passwortbestätigung anzeigen'}
+                      aria-pressed={showConfirmPassword}
+                    >
+                      <IonIcon icon={showConfirmPassword ? ICON_VERBORGEN : ICON_SICHTBAR} aria-hidden="true" />
+                    </button>
                   </IonItem>
 
                   {/* Passwörter stimmen nicht überein */}
                   {formData.password && formData.password_confirm && formData.password !== formData.password_confirm && (
-                    <div className="app-auth-password-match-error">
+                    <div className="app-auth-password-match-error" role="status">
                       <IonIcon icon={ICON_WARNHINWEIS_GEFUELLT} />
                       Passwörter stimmen nicht überein
                     </div>
@@ -572,14 +603,17 @@ const KonfiRegisterPage: React.FC = () => {
 
                   {/* Fehler */}
                   {error && (
-                    <div className="app-auth-error">
+                    <div className="app-auth-error" role="alert">
                       <IonIcon icon={ICON_WARNHINWEIS_GEFUELLT} className="app-auth-error__icon" />
                       <span className="app-auth-error__text">{error}</span>
-                      <IonIcon
-                        icon={ICON_ABSAGE}
+                      <button
+                        type="button"
                         onClick={() => { setError(null); setIsNetworkError(false); }}
-                        className="app-auth-error__close"
-                      />
+                        className="app-auth-error__close app-knopf-nackt app-beruehrungsziel"
+                        aria-label="Meldung schließen"
+                      >
+                        <IonIcon icon={ICON_ABSAGE} aria-hidden="true" />
+                      </button>
                     </div>
                   )}
 
@@ -616,12 +650,13 @@ const KonfiRegisterPage: React.FC = () => {
                   <div className="app-auth-footer">
                     <span style={{ color: 'rgba(0, 0, 0, 0.55)', fontSize: 'var(--app-text-basis)' }}>
                       Schon einen Account?{' '}
-                      <span
-                        onClick={() => router.push('/login')}
+                      <a
+                        href="/login"
+                        onClick={(e) => { e.preventDefault(); router.push('/login'); }}
                         className="app-auth-link app-auth-link--strong"
                       >
                         Anmelden
-                      </span>
+                      </a>
                     </span>
                   </div>
                 </>

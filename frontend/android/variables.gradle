@@ -13,4 +13,16 @@ ext {
     androidxJunitVersion = '1.2.1'
     androidxEspressoCoreVersion = '3.6.1'
     cordovaAndroidVersion = '10.1.1'
+    // Firebase-Crashlytics-SDK (Absturzdiagnose). Der Wert steht hier, damit
+    // er zusammen mit den uebrigen Fassungen an EINER Stelle sichtbar ist;
+    // das Plugin faellt sonst auf seine eigene Voreinstellung zurueck.
+    firebaseCrashlyticsVersion = '20.0.3'
+    // Zahl am App-Symbol: Der eigene Push-Dienst der App baut
+    // gegen Firebase Messaging, AppSymbolZahl gegen ShortcutBadger. Beide
+    // Werte sind die Voreinstellungen der Plugins (@capacitor/push-
+    // notifications, @capacitor-firebase/messaging, @capawesome/capacitor-
+    // badge) und gelten hier fuer Plugins und App zugleich.
+    // Test: androidPushEmpfang.test.ts.
+    firebaseMessagingVersion = '25.0.1'
+    shortcutBadgerVersion = '1.1.22'
 }

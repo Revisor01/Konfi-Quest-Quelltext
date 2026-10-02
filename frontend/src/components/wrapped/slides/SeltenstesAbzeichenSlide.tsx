@@ -35,7 +35,7 @@ function tonFuer(prozent: number): { auge: string; nachsatz: string } {
   if (prozent <= 10) {
     return {
       auge: 'Fast niemand hat das',
-      nachsatz: 'Das ist die Sorte Abzeichen, von der die meisten nicht mal wissen, dass es sie gibt.'
+      nachsatz: 'Das ist die Sorte Badge, von der die meisten nicht mal wissen, dass es sie gibt.'
     };
   }
   if (prozent <= 25) {
@@ -52,7 +52,7 @@ function tonFuer(prozent: number): { auge: string; nachsatz: string } {
   }
   return {
     auge: 'Dein seltenstes',
-    nachsatz: 'Von allen deinen Abzeichen ist das das ungewöhnlichste.'
+    nachsatz: 'Von allen deinen Badges ist das das ungewöhnlichste.'
   };
 }
 

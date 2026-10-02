@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="de">
   <head>
     <meta charset="utf-8" />
     <title>Konfi Quest</title>
@@ -7,9 +7,16 @@
     <base href="/" />
 
     <meta name="color-scheme" content="light dark" />
+    <!-- Zoomen erlaubt: kein maximum-scale, kein
+         user-scalable=no. Im Browser lässt sich die Seite damit mit zwei
+         Fingern vergrößern. iOS zoomt beim Antippen eines Feldes nicht von
+         selbst heran, solange jedes Feld mindestens 16 px Schrift hat
+         (gemessen: alle 16 px, Test zoomUndSchrift.test.ts). In den Apps
+         sperrt Capacitor das Zoomen weiterhin selbst (zoomEnabled, Vorgabe
+         false) -- dort ändert sich nichts. -->
     <meta
       name="viewport"
-      content="viewport-fit=cover, width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no"
+      content="viewport-fit=cover, width=device-width, initial-scale=1.0, minimum-scale=1.0"
     />
     <meta name="format-detection" content="telephone=no" />
     <meta name="msapplication-tap-highlight" content="no" />
@@ -18,7 +25,6 @@
 
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/icon/favicon-32x32.png" />
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/icon/favicon-16x16.png" />
-    <link rel="shortcut icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
 
     <!-- Google Fonts - Bebas Neue -->

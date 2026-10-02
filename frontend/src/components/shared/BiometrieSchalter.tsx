@@ -5,7 +5,7 @@ import {
   biometrieVerfuegbar,
   istBiometrieAktiv,
   biometrieAktivieren,
-  biometrieVergessen,
+  biometrieAusschalten,
   GESPEICHERTE_SITZUNG_MAX_TAGE,
   BiometrieVerfuegbarkeit
 } from '../../services/biometrics';
@@ -66,7 +66,10 @@ const BiometrieSchalter: React.FC<Props> = ({ variante }) => {
           });
         }
       } else {
-        await biometrieVergessen();
+        // Ausschalten ist kein Abmelden: die laufende Sitzung bleibt und
+        // ueberlebt auch den naechsten Kaltstart (biometrieAusschalten legt
+        // den Token zurueck in die normale Ablage).
+        await biometrieAusschalten();
         setAktiv(false);
       }
     } finally {

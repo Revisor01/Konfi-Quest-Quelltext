@@ -66,6 +66,9 @@ import AdminPasswordResetModal from './AdminPasswordResetModal';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 import { generateStrongPassword } from '../../../utils/passwortVorschlag';
 import { tageBis } from '../../shared/eventFormatting';
+import { datumKurz } from '../../../utils/dateUtils';
+import { rollenName } from '../../../utils/rollenNamen';
+import { systemnameZumSpeichern } from '../../../utils/gemeindeSystemname';
 
 interface Organization {
   id: number;
@@ -120,11 +123,9 @@ interface MemberSearchResult {
   primary_role_name?: string;
 }
 
-const MEMBER_ROLE_OPTIONS = [
-  { value: 'org_admin', label: 'Org-Admin' },
-  { value: 'admin', label: 'Admin' },
-  { value: 'teamer', label: 'Teamer:in' }
-];
+const MEMBER_ROLE_OPTIONS = ['org_admin', 'admin', 'teamer'].map((value) => ({
+  value, label: rollenName(value)
+}));
 
 interface OrganizationManagementModalProps {
   organizationId?: number | null;
@@ -295,16 +296,6 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
       .substring(0, 2);
   };
 
-  // Systemname automatisch aus display_name generieren
-  const generateSystemName = (displayName: string) => {
-    return displayName
-      .toLowerCase()
-      .replace(/[^a-z0-9\s]/g, '')
-      .replace(/\s+/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '');
-  };
-
   useEffect(() => {
     if (isEditMode) {
       loadOrganization().then(() => {
@@ -362,7 +353,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
         loadMembers();
       }
     } catch (err) {
-      setError('Fehler beim Laden der Organisation');
+      setError('Fehler beim Laden der Gemeinde');
  console.error('Error loading organization:', err);
     } finally {
       setLoading(false);
@@ -371,14 +362,14 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
 
   const handleSave = async () => {
     if (!formData.display_name.trim()) {
-      setError('Name der Organisation ist erforderlich');
+      setError('Name der Gemeinde ist erforderlich');
       return;
     }
 
     // Validate admin fields for new organizations
     if (!isEditMode) {
       if (!formData.admin_name.trim() || !formData.admin_username.trim() || !formData.admin_password.trim()) {
-        setError('Alle Administrator-Felder sind erforderlich');
+        setError('Alle Felder der Gemeindeleitung sind erforderlich');
         return;
       }
       // Dieselbe Policy wie ueberall sonst: Hier galten
@@ -411,7 +402,13 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
 
     await guard(async () => {
       try {
-        const systemName = generateSystemName(formData.display_name);
+        // Systemname (name, slug) aus dem Anzeigenamen, mit Umlauten als
+        // ae/oe/ue/ss wie der Server. Beim Bearbeiten bleibt der gespeicherte,
+        // solange der Anzeigename gleich bleibt (utils/gemeindeSystemname.ts).
+        const systemName = systemnameZumSpeichern(
+          formData.display_name,
+          isEditMode ? organization : null
+        );
 
         // Konfi-Limit (Tarif) — nur super_admin setzt es. NULL = unbegrenzt.
         let limitValue: number | null = null;
@@ -449,8 +446,8 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
           admin_password?: string;
           admin_display_name?: string;
         } = {
-          name: systemName,
-          slug: systemName,
+          name: systemName.name,
+          slug: systemName.slug,
           display_name: formData.display_name.trim(),
           description: formData.description.trim() || null,
           contact_name: formData.contact_name.trim() || null,
@@ -528,7 +525,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
       setNewAdminData({ display_name: '', username: '', password: '' });
       setShowAddAdmin(false);
     } catch (err) {
-      setError(fehlerText(err, 'Fehler beim Hinzufügen des Administrators'));
+      setError(fehlerText(err, 'Fehler beim Hinzufügen der Gemeindeleitung'));
     } finally {
       setAddingAdmin(false);
     }
@@ -611,7 +608,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
       <IonPage>
         <IonHeader>
           <IonToolbar>
-            <IonTitle>{isEditMode ? 'Organisation bearbeiten' : 'Neue Organisation'}</IonTitle>
+            <IonTitle>{isEditMode ? 'Gemeinde bearbeiten' : 'Neue Gemeinde'}</IonTitle>
             <IonButtons slot="start">
               <IonButton aria-label="Schließen" onClick={handleClose} className="app-modal-close-btn"><IonIcon icon={ICON_SCHLIESSEN} /></IonButton>
             </IonButtons>
@@ -630,17 +627,17 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
     <IonPage ref={pageRef}>
       <IonHeader>
         <IonToolbar>
-          <IonTitle>{!isEditMode ? 'Neue Organisation' : viewMode === 'view' ? 'Organisation' : 'Organisation bearbeiten'}</IonTitle>
+          <IonTitle>{!isEditMode ? 'Neue Gemeinde' : viewMode === 'view' ? 'Gemeinde' : 'Gemeinde bearbeiten'}</IonTitle>
           <IonButtons slot="start">
             <IonButton aria-label="Schließen" onClick={onClose} disabled={isSubmitting} className="app-modal-close-btn"><IonIcon icon={ICON_SCHLIESSEN} /></IonButton>
           </IonButtons>
           <IonButtons slot="end">
             {isEditMode && viewMode === 'view' ? (
-              <IonButton aria-label="Organisation bearbeiten" onClick={() => setViewMode('edit')} className="app-modal-submit-btn app-modal-submit-btn--settings">
+              <IonButton aria-label="Gemeinde bearbeiten" onClick={() => setViewMode('edit')} className="app-modal-submit-btn app-modal-submit-btn--settings">
                 <IonIcon icon={ICON_BEARBEITEN} />
               </IonButton>
             ) : (
-              <IonButton aria-label="Organisation speichern" onClick={handleSave} disabled={!isValid || isSubmitting || !isOnline} className="app-modal-submit-btn app-modal-submit-btn--settings">
+              <IonButton aria-label="Gemeinde speichern" onClick={handleSave} disabled={!isValid || isSubmitting || !isOnline} className="app-modal-submit-btn app-modal-submit-btn--settings">
                 {!isOnline ? <><IonIcon icon={ICON_OFFLINE} /> Du bist offline</> : isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={ICON_HAKEN} />}
               </IonButton>
             )}
@@ -654,13 +651,13 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
           <>
             <SectionHeader
               title={organization.display_name}
-              subtitle={organization.kirchenkreis || 'Organisation'}
+              subtitle={organization.kirchenkreis || 'Gemeinde'}
               icon={ICON_ORGANISATION}
               preset="organizations"
               stats={[
                 { value: organization.konfi_count || 0, label: 'Konfis' },
                 { value: organization.teamer_count || 0, label: 'Team' },
-                { value: organization.admin_count || 0, label: 'Admins' }
+                { value: organization.admin_count || 0, label: 'Leitung' }
               ]}
             />
 
@@ -676,7 +673,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                 <IonCardContent className="app-card-content">
                   {organization.description && (
                     <div className="app-info-row">
-                      <IonIcon icon={ICON_TEXTDOKUMENT} className="app-info-row__icon" style={{ color: 'var(--app-color-users)' }} />
+                      <IonIcon icon={ICON_TEXTDOKUMENT} className="app-info-row__icon" style={{ color: 'var(--app-text-users)' }} />
                       <div>
                         <div className="app-info-row__label">Beschreibung</div>
                         <div className="app-info-row__value">{organization.description}</div>
@@ -685,7 +682,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                   )}
 
                   <div className="app-info-row">
-                    <IonIcon icon={ICON_GRUPPE_GEFUELLT} className="app-info-row__icon" style={{ color: 'var(--app-color-users)' }} />
+                    <IonIcon icon={ICON_GRUPPE_GEFUELLT} className="app-info-row__icon" style={{ color: 'var(--app-text-users)' }} />
                     <div>
                       <div className="app-info-row__label">Konfis</div>
                       <div className="app-info-row__value">
@@ -698,7 +695,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
 
                   {organization.contact_name && (
                     <div className="app-info-row">
-                      <IonIcon icon={ICON_PERSON} className="app-info-row__icon" style={{ color: 'var(--app-color-users)' }} />
+                      <IonIcon icon={ICON_PERSON} className="app-info-row__icon" style={{ color: 'var(--app-text-users)' }} />
                       <div>
                         <div className="app-info-row__label">Ansprechpartner:in</div>
                         <div className="app-info-row__value">{organization.contact_name}</div>
@@ -708,7 +705,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
 
                   {organization.contact_email && (
                     <div className="app-info-row">
-                      <IonIcon icon={ICON_MAIL} className="app-info-row__icon" style={{ color: 'var(--app-color-users)' }} />
+                      <IonIcon icon={ICON_MAIL} className="app-info-row__icon" style={{ color: 'var(--app-text-users)' }} />
                       <div>
                         <div className="app-info-row__label">E-Mail</div>
                         <div className="app-info-row__value">{organization.contact_email}</div>
@@ -718,7 +715,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
 
                   {organization.contact_phone && (
                     <div className="app-info-row">
-                      <IonIcon icon={ICON_TELEFON} className="app-info-row__icon" style={{ color: 'var(--app-color-users)' }} />
+                      <IonIcon icon={ICON_TELEFON} className="app-info-row__icon" style={{ color: 'var(--app-text-users)' }} />
                       <div>
                         <div className="app-info-row__label">Telefon</div>
                         <div className="app-info-row__value">{organization.contact_phone}</div>
@@ -728,7 +725,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
 
                   {organization.address && (
                     <div className="app-info-row">
-                      <IonIcon icon={ICON_ORT} className="app-info-row__icon" style={{ color: 'var(--app-color-users)' }} />
+                      <IonIcon icon={ICON_ORT} className="app-info-row__icon" style={{ color: 'var(--app-text-users)' }} />
                       <div>
                         <div className="app-info-row__label">Adresse</div>
                         <div className="app-info-row__value">{organization.address}</div>
@@ -738,7 +735,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
 
                   {organization.website_url && (
                     <div className="app-info-row">
-                      <IonIcon icon={ICON_WELT} className="app-info-row__icon" style={{ color: 'var(--app-color-users)' }} />
+                      <IonIcon icon={ICON_WELT} className="app-info-row__icon" style={{ color: 'var(--app-text-users)' }} />
                       <div>
                         <div className="app-info-row__label">Website</div>
                         <div className="app-info-row__value">{organization.website_url}</div>
@@ -748,7 +745,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
 
                   {isSuperAdmin && (
                     <div className="app-info-row">
-                      <IonIcon icon={ICON_UHRZEIT} className="app-info-row__icon" style={{ color: 'var(--app-color-users)' }} />
+                      <IonIcon icon={ICON_UHRZEIT} className="app-info-row__icon" style={{ color: 'var(--app-text-users)' }} />
                       <div>
                         <div className="app-info-row__label">Laufzeit</div>
                         <div className="app-info-row__value">
@@ -757,8 +754,8 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                                 const end = new Date(organization.trial_ends_at);
                                 const days = tageBis(end); // Kalendertage, siehe eventFormatting.ts
                                 return days >= 0
-                                  ? <span>{end.toLocaleDateString('de-DE')} ({days} Tag{days === 1 ? '' : 'e'} übrig){organization.is_trial ? ' · Testphase' : ''}</span>
-                                  : <span style={{ color: 'var(--app-color-events)' }}>{end.toLocaleDateString('de-DE')} (abgelaufen)</span>;
+                                  ? <span>{datumKurz(end)} ({days} Tag{days === 1 ? '' : 'e'} übrig){organization.is_trial ? ' · Testphase' : ''}</span>
+                                  : <span style={{ color: 'var(--app-text-events)' }}>{datumKurz(end)} (abgelaufen)</span>;
                               })()
                             : <span>unbegrenzt</span>}
                         </div>
@@ -780,17 +777,17 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
               <IonCard className="app-card">
                 <IonCardContent className="app-card-content">
                   <div className="app-info-row">
-                    <IonIcon icon={ICON_UHRZEIT} className="app-info-row__icon" style={{ color: 'var(--app-color-users)' }} />
+                    <IonIcon icon={ICON_UHRZEIT} className="app-info-row__icon" style={{ color: 'var(--app-text-users)' }} />
                     <div>
                       <div className="app-info-row__label">Erstellt</div>
-                      <div className="app-info-row__value">{new Date(organization.created_at).toLocaleDateString('de-DE')}</div>
+                      <div className="app-info-row__value">{datumKurz(organization.created_at)}</div>
                     </div>
                   </div>
                   <div className="app-info-row">
-                    <IonIcon icon={ICON_TERMIN} className="app-info-row__icon" style={{ color: 'var(--app-color-users)' }} />
+                    <IonIcon icon={ICON_TERMIN} className="app-info-row__icon" style={{ color: 'var(--app-text-users)' }} />
                     <div>
                       <div className="app-info-row__label">Aktualisiert</div>
-                      <div className="app-info-row__value">{new Date(organization.updated_at).toLocaleDateString('de-DE')}</div>
+                      <div className="app-info-row__value">{datumKurz(organization.updated_at)}</div>
                     </div>
                   </div>
                 </IonCardContent>
@@ -806,14 +803,14 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
             <div className="app-section-icon app-section-icon--organizations">
               <IonIcon icon={ICON_ORGANISATION} />
             </div>
-            <IonLabel>Organisation</IonLabel>
+            <IonLabel>Gemeinde</IonLabel>
           </IonListHeader>
           <IonCard className="app-card">
             <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
               <IonList style={{ background: 'transparent' }}>
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
-                  <IonLabel position="stacked">Name der Organisation *</IonLabel>
-                  <IonInput
+                  <IonLabel position="stacked">Name der Gemeinde *</IonLabel>
+                  <IonInput aria-label="Name der Gemeinde" aria-required="true"
                     value={formData.display_name}
                     onIonInput={(e) => setFormData({ ...formData, display_name: e.detail.value! })}
                     placeholder="z.B. Kirchengemeinde Musterstadt"
@@ -823,7 +820,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
 
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Beschreibung (optional)</IonLabel>
-                  <IonTextarea
+                  <IonTextarea aria-label="Beschreibung (optional)"
                     value={formData.description}
                     onIonInput={(e) => setFormData({ ...formData, description: e.detail.value! })}
                     placeholder="Kurze Beschreibung"
@@ -835,7 +832,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
 
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Kirchenkreis (optional)</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Kirchenkreis (optional)"
                     value={formData.kirchenkreis}
                     onIonInput={(e) => setFormData({ ...formData, kirchenkreis: e.detail.value! })}
                     placeholder="z.B. Kirchenkreis Musterland"
@@ -862,19 +859,19 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
               <IonList style={{ background: 'transparent' }}>
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Ansprechpartner:in</IonLabel>
-                  <IonInput value={formData.contact_name} onIonInput={(e) => setFormData({ ...formData, contact_name: e.detail.value! })} placeholder="z.B. Pastorin Müller" disabled={isSubmitting} />
+                  <IonInput aria-label="Ansprechpartner:in" value={formData.contact_name} onIonInput={(e) => setFormData({ ...formData, contact_name: e.detail.value! })} placeholder="z.B. Pastorin Müller" disabled={isSubmitting} />
                 </IonItem>
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">E-Mail</IonLabel>
-                  <IonInput type="email" value={formData.contact_email} onIonInput={(e) => setFormData({ ...formData, contact_email: e.detail.value! })} placeholder="kontakt@beispiel.de" disabled={isSubmitting} />
+                  <IonInput aria-label="E-Mail" type="email" value={formData.contact_email} onIonInput={(e) => setFormData({ ...formData, contact_email: e.detail.value! })} placeholder="kontakt@beispiel.de" disabled={isSubmitting} />
                 </IonItem>
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Telefon</IonLabel>
-                  <IonInput type="tel" value={formData.contact_phone} onIonInput={(e) => setFormData({ ...formData, contact_phone: e.detail.value! })} placeholder="04834 12345" disabled={isSubmitting} />
+                  <IonInput aria-label="Telefon" type="tel" value={formData.contact_phone} onIonInput={(e) => setFormData({ ...formData, contact_phone: e.detail.value! })} placeholder="04834 12345" disabled={isSubmitting} />
                 </IonItem>
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Adresse</IonLabel>
-                  <IonTextarea
+                  <IonTextarea aria-label="Adresse"
                     value={formData.address}
                     onIonInput={(e) => setFormData({ ...formData, address: e.detail.value! })}
                     placeholder="Kirchstraße 1, 12345 Musterstadt"
@@ -885,7 +882,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                 </IonItem>
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Website</IonLabel>
-                  <IonInput type="url" value={formData.website_url} onIonInput={(e) => setFormData({ ...formData, website_url: e.detail.value! })} placeholder="https://www.beispiel.de" disabled={isSubmitting} />
+                  <IonInput aria-label="Website" type="url" value={formData.website_url} onIonInput={(e) => setFormData({ ...formData, website_url: e.detail.value! })} placeholder="https://www.beispiel.de" disabled={isSubmitting} />
                 </IonItem>
               </IonList>
             </IonCardContent>
@@ -907,16 +904,16 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
               <IonList style={{ background: 'transparent' }}>
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonLabel>
-                    <h3 style={{ fontWeight: 'var(--app-schrift-mittel)', margin: '0 0 var(--app-abstand-mini) 0' }}>Organisation aktiv</h3>
+                    <h3 style={{ fontWeight: 'var(--app-schrift-mittel)', margin: '0 0 var(--app-abstand-mini) 0' }}>Gemeinde aktiv</h3>
                     <p style={{ color: 'var(--app-text-secondary)', margin: 0, fontSize: 'var(--app-text-sekundaer)' }}>Benutzer können sich anmelden</p>
                   </IonLabel>
-                  <IonToggle slot="end" className="app-toggle--users" checked={formData.is_active} onIonChange={(e) => {
+                  <IonToggle aria-label="Gemeinde aktiv" slot="end" className="app-toggle--users" checked={formData.is_active} onIonChange={(e) => {
                     const checked = e.detail.checked;
                     // Beim Deaktivieren einer bestehenden Org warnen: alle Nutzer werden ausgesperrt.
                     if (!checked && isEditMode) {
                       presentAlert({
-                        header: 'Organisation deaktivieren?',
-                        message: 'Alle Konfis, das Team und die Admins dieser Organisation können sich dann nicht mehr anmelden und werden aus laufenden Sitzungen abgemeldet. Fortfahren?',
+                        header: 'Gemeinde deaktivieren?',
+                        message: 'Alle Konfis, das Team und die Leitung dieser Gemeinde können sich dann nicht mehr anmelden und werden aus laufenden Sitzungen abgemeldet. Fortfahren?',
                         buttons: [
                           {
                             text: 'Abbrechen',
@@ -941,7 +938,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                 {!formData.is_active && (
                   <IonItem lines="none" style={{ '--background': 'rgba(var(--app-color-danger-rgb), 0.08)', borderRadius: 'var(--app-radius-knopf)', marginTop: 'var(--app-abstand-eng)' }}>
                     <IonIcon icon={ICON_WARNHINWEIS} slot="start" style={{ color: 'var(--app-color-danger)' }} />
-                    <IonLabel><p style={{ color: 'var(--app-color-danger)', margin: 0, fontWeight: 'var(--app-schrift-mittel)' }}>Inaktive Organisationen sind gesperrt</p></IonLabel>
+                    <IonLabel><p style={{ color: 'var(--app-color-danger)', margin: 0, fontWeight: 'var(--app-schrift-mittel)' }}>Inaktive Gemeinden sind gesperrt</p></IonLabel>
                   </IonItem>
                 )}
               </IonList>
@@ -957,22 +954,22 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
               <div className="app-section-icon app-section-icon--organizations">
                 <IonIcon icon={ICON_PERSON} />
               </div>
-              <IonLabel>Organisations-Administrator</IonLabel>
+              <IonLabel>Gemeindeleitung</IonLabel>
             </IonListHeader>
             <IonCard className="app-card">
               <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
                 <IonList style={{ background: 'transparent' }}>
                   <IonItem lines="full" style={{ '--background': 'transparent' }}>
-                    <IonLabel position="stacked">Name des Administrators *</IonLabel>
-                    <IonInput value={formData.admin_name} onIonInput={(e) => setFormData({ ...formData, admin_name: e.detail.value! })} placeholder="z.B. Pastor Müller" disabled={isSubmitting} />
+                    <IonLabel position="stacked">Name der Gemeindeleitung *</IonLabel>
+                    <IonInput aria-label="Name der Gemeindeleitung" aria-required="true" value={formData.admin_name} onIonInput={(e) => setFormData({ ...formData, admin_name: e.detail.value! })} placeholder="z.B. Pastor Müller" disabled={isSubmitting} />
                   </IonItem>
                   <IonItem lines="full" style={{ '--background': 'transparent' }}>
                     <IonLabel position="stacked">Login-Benutzername *</IonLabel>
-                    <IonInput value={formData.admin_username} onIonInput={(e) => setFormData({ ...formData, admin_username: e.detail.value! })} placeholder="z.B. pmueller" disabled={isSubmitting} />
+                    <IonInput aria-label="Login-Benutzername" aria-required="true" value={formData.admin_username} onIonInput={(e) => setFormData({ ...formData, admin_username: e.detail.value! })} placeholder="z.B. pmueller" disabled={isSubmitting} />
                   </IonItem>
                   <IonItem lines="none" style={{ '--background': 'transparent' }}>
                     <IonLabel position="stacked">Passwort *</IonLabel>
-                    <IonInput type={showAdminPassword ? 'text' : 'password'} value={formData.admin_password} onIonInput={(e) => setFormData({ ...formData, admin_password: e.detail.value! })} placeholder="Mind. 8 Zeichen, Groß/Klein, Zahl, Sonderzeichen" disabled={isSubmitting} />
+                    <IonInput aria-label="Passwort" aria-required="true" type={showAdminPassword ? 'text' : 'password'} value={formData.admin_password} onIonInput={(e) => setFormData({ ...formData, admin_password: e.detail.value! })} placeholder="Mind. 8 Zeichen, Groß/Klein, Zahl, Sonderzeichen" disabled={isSubmitting} />
                     <IonButton aria-label="Passwort anzeigen oder verbergen" slot="end" fill="clear" onClick={() => setShowAdminPassword(v => !v)}>
                       <IonIcon icon={showAdminPassword ? ICON_VERBORGEN : ICON_SICHTBAR} />
                     </IonButton>
@@ -986,10 +983,10 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                 </IonButton>
 
                 <IonItem lines="none" style={{ '--background': 'rgba(var(--app-color-users-rgb), 0.08)', borderRadius: 'var(--app-radius-knopf)', marginTop: 'var(--app-abstand-mittel)' }}>
-                  <IonIcon icon={ICON_SCHILD} slot="start" style={{ color: 'var(--app-color-users)' }} />
+                  <IonIcon icon={ICON_SCHILD} slot="start" style={{ color: 'var(--app-text-users)' }} />
                   <IonLabel>
-                    <p style={{ color: 'var(--app-color-users)', margin: 0, fontWeight: 'var(--app-schrift-mittel)', fontSize: 'var(--app-text-sekundaer)' }}>
-                      Der Administrator kann die gesamte Organisation verwalten
+                    <p style={{ color: 'var(--app-text-users)', margin: 0, fontWeight: 'var(--app-schrift-mittel)', fontSize: 'var(--app-text-sekundaer)' }}>
+                      Die Gemeindeleitung kann die gesamte Gemeinde verwalten
                     </p>
                   </IonLabel>
                 </IonItem>
@@ -1005,7 +1002,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
               <div className="app-section-icon app-section-icon--organizations">
                 <IonIcon icon={ICON_PERSON} />
               </div>
-              <IonLabel>Organisations-Administratoren</IonLabel>
+              <IonLabel>Gemeindeleitung</IonLabel>
             </IonListHeader>
             <IonCard className="app-card">
               <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
@@ -1045,12 +1042,12 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                                   <div className="app-list-item__title">{admin.display_name}</div>
                                   <div className="app-list-item__meta">
                                     <span className="app-list-item__meta-item">
-                                      <IonIcon icon={ICON_PERSON} style={{ color: 'var(--app-color-teamer)' }} />
+                                      <IonIcon icon={ICON_PERSON} style={{ color: 'var(--app-text-teamer)' }} />
                                       {admin.username}
                                     </span>
                                     {admin.email && (
                                       <span className="app-list-item__meta-item">
-                                        <IonIcon icon={ICON_MAIL} style={{ color: 'var(--app-color-teamer)' }} />
+                                        <IonIcon icon={ICON_MAIL} style={{ color: 'var(--app-text-teamer)' }} />
                                         {admin.email}
                                       </span>
                                     )}
@@ -1065,37 +1062,37 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                   </div>
                 ) : (
                   <div style={{ textAlign: 'center', padding: 'var(--app-abstand-basis)', color: 'var(--app-text-secondary)' }}>
-                    <IonIcon icon={ICON_WARNHINWEIS} style={{ fontSize: 'var(--app-anzeige-zahl)', color: 'var(--app-color-badges)', marginBottom: 'var(--app-abstand-eng)', display: 'block' }} />
-                    Kein Administrator vorhanden
+                    <IonIcon icon={ICON_WARNHINWEIS} style={{ fontSize: 'var(--app-anzeige-zahl)', color: 'var(--app-text-badges)', marginBottom: 'var(--app-abstand-eng)', display: 'block' }} />
+                    Noch niemand in der Gemeindeleitung
                   </div>
                 )}
 
                 {/* Neuen Admin hinzufügen */}
                 {showAddAdmin && (
                   <div style={{ marginTop: 'var(--app-abstand-basis)', padding: 'var(--app-abstand-basis)', background: 'rgba(var(--app-color-users-rgb), 0.05)', borderRadius: 'var(--app-radius-karte)', border: '1px dashed var(--app-color-users)' }}>
-                    <h4 style={{ margin: '0 0 var(--app-abstand-mittel) 0', fontSize: 'var(--app-text-betont)', fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-primary)' }}>Neuen Administrator hinzufügen</h4>
+                    <h4 style={{ margin: '0 0 var(--app-abstand-mittel) 0', fontSize: 'var(--app-text-betont)', fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-primary)' }}>Gemeindeleitung hinzufügen</h4>
                     <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <IonItem style={{ '--background': 'white', '--border-radius': '10px', marginBottom: 'var(--app-abstand-eng)' }}>
+                      <IonItem style={{ '--background': 'var(--app-surface-card)', '--border-radius': 'var(--app-radius-knopf)', marginBottom: 'var(--app-abstand-eng)' }}>
                         <IonLabel position="stacked">Name *</IonLabel>
-                        <IonInput
+                        <IonInput aria-label="Name" aria-required="true"
                           value={newAdminData.display_name}
                           onIonInput={(e) => setNewAdminData({ ...newAdminData, display_name: e.detail.value! })}
                           placeholder="z.B. Pastor Müller"
                           disabled={addingAdmin}
                         />
                       </IonItem>
-                      <IonItem style={{ '--background': 'white', '--border-radius': '10px', marginBottom: 'var(--app-abstand-eng)' }}>
+                      <IonItem style={{ '--background': 'var(--app-surface-card)', '--border-radius': 'var(--app-radius-knopf)', marginBottom: 'var(--app-abstand-eng)' }}>
                         <IonLabel position="stacked">Login-Benutzername *</IonLabel>
-                        <IonInput
+                        <IonInput aria-label="Login-Benutzername" aria-required="true"
                           value={newAdminData.username}
                           onIonInput={(e) => setNewAdminData({ ...newAdminData, username: e.detail.value! })}
                           placeholder="z.B. pmueller"
                           disabled={addingAdmin}
                         />
                       </IonItem>
-                      <IonItem style={{ '--background': 'white', '--border-radius': '10px', marginBottom: 'var(--app-abstand-eng)' }}>
+                      <IonItem style={{ '--background': 'var(--app-surface-card)', '--border-radius': 'var(--app-radius-knopf)', marginBottom: 'var(--app-abstand-eng)' }}>
                         <IonLabel position="stacked">Passwort *</IonLabel>
-                        <IonInput
+                        <IonInput aria-label="Passwort" aria-required="true"
                           type="password"
                           value={newAdminData.password}
                           onIonInput={(e) => setNewAdminData({ ...newAdminData, password: e.detail.value! })}
@@ -1121,7 +1118,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                         expand="block"
                         onClick={handleAddAdmin}
                         disabled={!newAdminData.display_name.trim() || !newAdminData.username.trim() || !newAdminData.password.trim() || addingAdmin || !isOnline}
-                        style={{ flex: 1, '--background': 'var(--app-color-users)', '--background-activated': 'var(--app-color-users-dunkel)' }}
+                        style={{ flex: 1, '--background': 'var(--app-color-users)', '--background-activated': 'var(--app-color-users-dunkel)', '--color': 'var(--app-weiss)' }}
                       >
                         {!isOnline ? <><IonIcon icon={ICON_OFFLINE} /> Du bist offline</> : addingAdmin ? <IonSpinner name="crescent" /> : 'Hinzufügen'}
                       </IonButton>
@@ -1138,7 +1135,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                       onClick={() => setShowAddAdmin(true)}
                     >
                       <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} slot="start" />
-                      Administrator hinzufügen
+                      Gemeindeleitung hinzufügen
                     </IonButton>
                   </div>
                 )}
@@ -1159,8 +1156,8 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
             <IonCard className="app-card">
               <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
                 <p style={{ margin: '0 0 var(--app-abstand-mittel) 0', fontSize: 'var(--app-text-sekundaer)', color: 'var(--app-text-secondary)' }}>
-                  Bestehende Admins oder Team-Mitglieder anderer Organisationen dieser
-                  Organisation zuweisen — sie können dann per Org-Wechsler hierher
+                  Bestehende Mitglieder aus Leitung oder Team anderer Gemeinden dieser
+                  Gemeinde zuweisen — sie können dann per Gemeinde-Umschalter hierher
                   springen. Konfis sind ausgenommen.
                 </p>
 
@@ -1168,7 +1165,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                 <IonList style={{ background: 'transparent' }}>
                   <IonItem lines="full" style={{ '--background': 'transparent' }}>
                     <IonIcon icon={ICON_SUCHE} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
-                    <IonInput
+                    <IonInput aria-label="Name oder Benutzername suchen"
                       value={memberSearch}
                       onIonInput={(e) => setMemberSearch(e.detail.value || '')}
                       placeholder="Name oder Benutzername suchen..."
@@ -1178,10 +1175,11 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                   <IonItem lines="none" style={{ '--background': 'transparent' }}>
                     <IonIcon icon={ICON_PERSON_HINZUFUEGEN} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
                     <IonLabel>Rolle</IonLabel>
-                    <IonSelect
+                    <IonSelect aria-label="Rolle"
                       value={memberRole}
                       onIonChange={(e) => setMemberRole(e.detail.value)}
                       interface="popover"
+                      interfaceOptions={{ arrow: false }}
                       slot="end"
                     >
                       {MEMBER_ROLE_OPTIONS.map(r => (
@@ -1209,7 +1207,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                         detail={false}
                         lines="none"
                         onClick={() => memberAddingId === null && handleAddMember(u.id)}
-                        style={{ '--background': 'rgba(var(--app-color-users-rgb), 0.05)', '--border-radius': '10px' }}
+                        style={{ '--background': 'rgba(var(--app-color-users-rgb), 0.05)', '--border-radius': 'var(--app-radius-knopf)' }}
                       >
                         <IonLabel>
                           <h3 style={{ margin: 0 }}>{u.display_name}</h3>
@@ -1239,7 +1237,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                       <IonItem lines="none" style={{ '--background': 'transparent', '--padding-start': '0', '--inner-padding-end': '0' }}>
                         <IonLabel>
                           <h3 style={{ margin: 0 }}>{m.display_name}</h3>
-                          <p style={{ margin: 0 }}>@{m.username} · {m.role_display_name || m.role_name}</p>
+                          <p style={{ margin: 0 }}>@{m.username} · {rollenName(m.role_name, m.role_display_name)}</p>
                         </IonLabel>
                         {m.is_primary && <IonNote slot="end">Primär</IonNote>}
                       </IonItem>
@@ -1277,9 +1275,10 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                   <IonItem lines="full" style={{ '--background': 'transparent' }}>
                     <IonLabel position="stacked">Tarif</IonLabel>
                     <IonSelect
+                      aria-label="Tarif"
                       value={isCustomLimit ? '__custom__' : maxKonfis.trim()}
                       interface="popover"
-                      interfaceOptions={{ cssClass: 'app-select-popover--wide' }}
+                      interfaceOptions={{ cssClass: 'app-select-popover--wide', arrow: false }}
                       placeholder="Tarif wählen"
                       onIonChange={(e) => {
                         const val = e.detail.value;
@@ -1305,7 +1304,7 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                   {isCustomLimit && (
                     <IonItem lines="none" style={{ '--background': 'transparent' }}>
                       <IonLabel position="stacked">Eigenes Limit (leer = unbegrenzt)</IonLabel>
-                      <IonInput
+                      <IonInput aria-label="Eigenes Limit (leer = unbegrenzt)"
                         type="number"
                         inputmode="numeric"
                         min="0"
@@ -1320,9 +1319,9 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                 </IonList>
 
                 <IonItem lines="none" style={{ '--background': 'rgba(var(--app-color-users-rgb), 0.08)', borderRadius: 'var(--app-radius-knopf)', marginTop: 'var(--app-abstand-eng)' }}>
-                  <IonIcon icon={ICON_WARNHINWEIS} slot="start" style={{ color: 'var(--app-color-users)' }} />
+                  <IonIcon icon={ICON_WARNHINWEIS} slot="start" style={{ color: 'var(--app-text-users)' }} />
                   <IonLabel>
-                    <p style={{ color: 'var(--app-color-users)', margin: 0, fontSize: 'var(--app-text-sekundaer)' }}>
+                    <p style={{ color: 'var(--app-text-users)', margin: 0, fontSize: 'var(--app-text-sekundaer)' }}>
                       Bis zu 5 Konfis über dem Limit sind nach Bestätigung möglich. Danach ist ein Tarif-Upgrade nötig. Wird beim Speichern oben übernommen.
                     </p>
                   </IonLabel>
@@ -1345,14 +1344,14 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
               <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
                 {/* aktueller Status */}
                 <div style={{ marginBottom: 'var(--app-abstand-mittel)', fontSize: 'var(--app-text-basis)', color: 'var(--app-text-body)', display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-eng)' }}>
-                  <IonIcon icon={ICON_UHRZEIT} style={{ color: 'var(--app-color-users)' }} />
+                  <IonIcon icon={ICON_UHRZEIT} style={{ color: 'var(--app-text-users)' }} />
                   {trialEndsAt
                     ? (() => {
                         const end = new Date(trialEndsAt);
                         const days = tageBis(end); // Kalendertage, siehe eventFormatting.ts
                         return days >= 0
-                          ? <span><strong>{end.toLocaleDateString('de-DE')}</strong> ({days} Tag{days === 1 ? '' : 'e'} übrig){isTrial ? ' · Testphase' : ''}</span>
-                          : <span style={{ color: 'var(--app-color-events)' }}><strong>{end.toLocaleDateString('de-DE')}</strong> (abgelaufen)</span>;
+                          ? <span><strong>{datumKurz(end)}</strong> ({days} Tag{days === 1 ? '' : 'e'} übrig){isTrial ? ' · Testphase' : ''}</span>
+                          : <span style={{ color: 'var(--app-text-events)' }}><strong>{datumKurz(end)}</strong> (abgelaufen)</span>;
                       })()
                     : <span><strong>unbegrenzt</strong></span>}
                 </div>
@@ -1362,9 +1361,10 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                   <IonItem lines={isCustomTrialDate ? 'full' : 'full'} style={{ '--background': 'transparent' }}>
                     <IonLabel position="stacked">Zeitraum</IonLabel>
                     <IonSelect
+                      aria-label="Zeitraum"
                       value={isCustomTrialDate ? -1 : (trialEndsAt ? -2 : 0)}
                       interface="popover"
-                      interfaceOptions={{ cssClass: 'app-select-popover--wide' }}
+                      interfaceOptions={{ cssClass: 'app-select-popover--wide', arrow: false }}
                       placeholder="Zeitraum wählen"
                       onIonChange={(e) => {
                         const days = e.detail.value as number;
@@ -1396,8 +1396,8 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                     <IonItem lines="full" style={{ '--background': 'transparent' }}>
                       <IonLabel position="stacked">Enddatum</IonLabel>
                       <IonDatetimeButton datetime="trial-date-picker" />
-                      <IonModal keepContentsMounted={true}>
-                        <IonDatetime
+                      <IonModal aria-label="Enddatum wählen" keepContentsMounted={true}>
+                        <IonDatetime aria-label="Enddatum"
                           id="trial-date-picker"
                           presentation="date"
                           firstDayOfWeek={1}
@@ -1418,16 +1418,16 @@ const OrganizationManagementModal: React.FC<OrganizationManagementModalProps> = 
                         <h3 style={{ fontWeight: 'var(--app-schrift-mittel)', margin: '0 0 var(--app-abstand-mini) 0' }}>Als Testphase kennzeichnen</h3>
                         <p style={{ color: 'var(--app-text-secondary)', margin: 0, fontSize: 'var(--app-text-sekundaer)' }}>Zeigt im Dashboard einen Hinweis mit Restlaufzeit</p>
                       </IonLabel>
-                      <IonToggle slot="end" className="app-toggle--users" checked={isTrial} onIonChange={(e) => handleIsTrialChange(e.detail.checked)} />
+                      <IonToggle aria-label="Als Testphase kennzeichnen" slot="end" className="app-toggle--users" checked={isTrial} onIonChange={(e) => handleIsTrialChange(e.detail.checked)} />
                     </IonItem>
                   )}
                 </IonList>
 
                 <IonItem lines="none" style={{ '--background': 'rgba(var(--app-color-users-rgb), 0.08)', borderRadius: 'var(--app-radius-knopf)', marginTop: 'var(--app-abstand-mittel)' }}>
-                  <IonIcon icon={ICON_WARNHINWEIS} slot="start" style={{ color: 'var(--app-color-users)' }} />
+                  <IonIcon icon={ICON_WARNHINWEIS} slot="start" style={{ color: 'var(--app-text-users)' }} />
                   <IonLabel>
-                    <p style={{ color: 'var(--app-color-users)', margin: 0, fontSize: 'var(--app-text-sekundaer)' }}>
-                      Nach Ablauf des Zeitraums wird die Organisation automatisch gesperrt — niemand kann sich mehr anmelden. Ohne Datum bleibt der Zugang unbegrenzt. Wird beim Speichern oben übernommen.
+                    <p style={{ color: 'var(--app-text-users)', margin: 0, fontSize: 'var(--app-text-sekundaer)' }}>
+                      Nach Ablauf des Zeitraums wird die Gemeinde automatisch gesperrt — niemand kann sich mehr anmelden. Ohne Datum bleibt der Zugang unbegrenzt. Wird beim Speichern oben übernommen.
                     </p>
                   </IonLabel>
                 </IonItem>

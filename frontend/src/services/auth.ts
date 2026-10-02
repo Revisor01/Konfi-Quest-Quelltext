@@ -1,5 +1,6 @@
-import axios from 'axios';
-import api, { API_URL } from './api';
+import api from './api';
+import { refreshAnfordern } from './refreshAnfrage';
+import { geraeteKennung } from './geraeteKennung';
 import { Device } from '@capacitor/device';
 import { Capacitor } from '@capacitor/core';
 import { setToken, setUser, setRefreshToken, getRefreshToken, clearAuth, getDeviceId, setLoggingOut } from './tokenStore';
@@ -10,38 +11,72 @@ import {
   istBiometrieAktiv
 } from './biometrics';
 import { offlineCache } from './offlineCache';
+import { clearMediaCache } from './mediaCache';
 import { writeQueue } from './writeQueue';
 import { disconnectWebSocket } from './websocket';
 import { networkMonitor } from './networkMonitor';
 import { BaseUser } from '../types/user';
+import { fehlerFuersProtokoll } from '../utils/fehler';
 
 // Race Condition User-Wechsel: Backend POST /device-token löscht alte Tokens
 // (anderer user_id mit gleichem device_token) automatisch VOR dem INSERT.
 // Frontend-seitig wird logout() mit await ausgeführt und blockiert bis DELETE durch ist.
+/**
+ * Uebernimmt eine frisch vom Server ausgestellte Sitzung in den tokenStore:
+ * Access-Token, Refresh-Token und Nutzer -- fuer Login UND Registrierung.
+ */
+export const sitzungUebernehmen = async (
+  daten: { token?: string; refresh_token?: string; user?: BaseUser }
+): Promise<BaseUser> => {
+  const { token, refresh_token, user } = daten;
+  if (!token || !user) throw new Error('Fehlender Token oder Benutzer');
+
+  await setToken(token);
+  if (refresh_token) await setRefreshToken(refresh_token);
+  await setUser(user);
+
+  return user;
+};
+
 export const loginWithAutoDetection = async (username: string, password: string): Promise<BaseUser> => {
 
   try {
-    const response = await api.post('/auth/login', { username, password });
-    const { token, refresh_token, user } = response.data;
-
-    if (!token || !user) throw new Error('Fehlender Token oder Benutzer');
-
-    await setToken(token);
-    if (refresh_token) await setRefreshToken(refresh_token);
-    await setUser(user);
-
-    return user;
+    // Geraete-Kennung mitschicken: Der Server bindet das Refresh-Token an
+    // dieses Geraet. Ohne
+    // ermittelbare Kennung wie bisher ohne -- das Token bleibt dann ungebunden.
+    const kennung = await geraeteKennung();
+    const response = await api.post('/auth/login', kennung ? { username, password, device_id: kennung } : { username, password });
+    return await sitzungUebernehmen(response.data);
   } catch (error: unknown) {
-    const err = error as { response?: { status?: number; statusText?: string; data?: { error?: string } }; message?: string; code?: string };
- console.error('Login fehlgeschlagen:', {
-      status: err?.response?.status,
-      statusText: err?.response?.statusText,
-      data: err?.response?.data,
-      message: err.message,
-      code: err.code,
-      fullError: error
-    });
-    throw new Error('Login fehlgeschlagen: ' + (err?.response?.data?.error || err.message), { cause: error });
+    const err = error as {
+      response?: { status?: number; statusText?: string; data?: { error?: string } };
+      message?: string;
+      code?: string;
+      rateLimitMessage?: string;
+    };
+    // NUR unkritische Felder ins Protokoll: Der
+    // axios-Fehler traegt die gesendete Anfrage mit, `config.data` ist
+    // '{"username":…,"password":…}' im Klartext. Frueher stand hier
+    // `fullError: error` -- das Passwort landete im Protokoll des Geraets.
+    // Test: anmeldedatenNichtImProtokoll.test.ts.
+    console.error('Login fehlgeschlagen:', fehlerFuersProtokoll(error));
+    // Antwort, Fehlercode und Rate-Limit-Meldung MITGEBEN. Die Anmeldeseite
+    // entscheidet daran, was sie zeigt (LoginView: 429 -> Meldung des
+    // Servers, keine Antwort -> "Keine Verbindung", 401 -> "Falsches
+    // Passwort"). Ohne die Felder landete jede Ablehnung durch den Server im
+    // Zweig "Keine Verbindung zum Server" -- auch "zu viele Versuche", deren
+    // Meldung sagt, was zu tun ist. Test: anmeldefehlerSichtbar.test.tsx.
+    //
+    // Die Antwort wird dabei NACHGEBAUT, nicht durchgereicht: Eine
+    // axios-Antwort haengt an `config` und `request` -- mit dem Passwort.
+    // Aus demselben Grund geht der gefangene Fehler nicht als `cause` mit.
+    const antwort = err?.response
+      ? { status: err.response.status, statusText: err.response.statusText, data: err.response.data }
+      : undefined;
+    throw Object.assign(
+      new Error('Login fehlgeschlagen: ' + (err?.response?.data?.error || err.message)),
+      { response: antwort, code: err?.code, rateLimitMessage: err?.rateLimitMessage }
+    );
   }
 };
 
@@ -92,7 +127,7 @@ export const logout = async (): Promise<void> => {
         await withTimeout(writeQueue.flush(), 8000);
       }
     } catch (error) {
-      console.warn('Queue-Flush beim Logout fehlgeschlagen (unkritisch):', error);
+      console.warn('Queue-Flush beim Logout fehlgeschlagen (unkritisch):', fehlerFuersProtokoll(error));
     }
 
     // Push-Token serverseitig löschen (best-effort, mit Timeout, NOCH authentifiziert)
@@ -116,7 +151,9 @@ export const logout = async (): Promise<void> => {
         }));
       }
     } catch (error) {
-      console.warn('Push-Token-Cleanup beim Logout fehlgeschlagen (unkritisch):', error);
+      // Nur Status und Code: der axios-Fehler traegt das Zugangs-Token im
+      // Authorization-Header mit.
+      console.warn('Push-Token-Cleanup beim Logout fehlgeschlagen (unkritisch):', fehlerFuersProtokoll(error));
     }
 
     // SEC-02: Refresh Token serverseitig revokieren (best-effort, mit Timeout)
@@ -130,7 +167,9 @@ export const logout = async (): Promise<void> => {
         }));
       }
     } catch (error) {
-      console.warn('Serverseitiges Token-Revoke fehlgeschlagen (wird lokal geloescht):', error);
+      // Nur Status und Code: `config.data` traegt den Refresh-Token im
+      // Klartext.
+      console.warn('Serverseitiges Token-Revoke fehlgeschlagen (wird lokal geloescht):', fehlerFuersProtokoll(error));
     }
 
     // GARANTIERT: lokale Auth-Daten löschen. Ab hier ist der User ausgeloggt.
@@ -175,6 +214,16 @@ export const logout = async (): Promise<void> => {
       await offlineCache.clearAll();
     } catch (error) {
       console.warn('Cache-Clear beim Logout fehlgeschlagen:', error);
+    }
+
+    // Medien-Cache leeren: Chat-Anhänge und Challenge-Dateien
+    // des abgemeldeten Kontos dürfen nicht auf dem Gerät liegen bleiben. Bis
+    // dahin wurde er nur von Hand geleert — wer sich danach anmeldete, fand
+    // die Medien der vorigen Person vor.
+    try {
+      await clearMediaCache();
+    } catch (error) {
+      console.warn('Medien-Cache beim Logout nicht geleert:', error);
     }
 
     // Device ID NICHT löschen - bleibt für das Geraet persistent
@@ -231,14 +280,18 @@ export const mitBiometrieAnmelden = async (): Promise<BiometrieAnmeldung> => {
   if (!networkMonitor.isOnline) return { status: 'offline' };
 
   try {
-    const antwort = await axios.post(`${API_URL}/auth/refresh`, {
+    // Mit Zeitlimit 20 s.
+    const antwort = await refreshAnfordern({
       refresh_token: entsperrt.refreshToken
     });
     const { token, refresh_token: neuerRefreshToken } = antwort.data || {};
     if (!token || !neuerRefreshToken) return { status: 'fehler' };
 
     // Reihenfolge wie in api.ts performRefresh: erst der langlebige Schluessel.
-    await setRefreshToken(neuerRefreshToken);
+    // Nur in den Arbeitsspeicher, NICHT in die Preferences: Wer per Biometrie
+    // hereinkommt, hat den Schalter an -- dauerhaft liegt der Token dann allein
+    // im sicheren Speicher.
+    await setRefreshToken(neuerRefreshToken, { klartext: false });
     await setToken(token);
     await setUser(entsperrt.user);
 
@@ -258,7 +311,9 @@ export const mitBiometrieAnmelden = async (): Promise<BiometrieAnmeldung> => {
       await biometrieVergessen();
       return { status: 'abgelaufen' };
     }
-    console.warn('Anmeldung per Biometrie fehlgeschlagen:', fehler);
+    // Nur Status und Code: `config.data` traegt den gespeicherten
+    // Refresh-Token im Klartext.
+    console.warn('Anmeldung per Biometrie fehlgeschlagen:', fehlerFuersProtokoll(fehler));
     return { status: 'fehler' };
   }
 };

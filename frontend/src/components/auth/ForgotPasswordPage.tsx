@@ -8,6 +8,7 @@ import {
   ICON_ZUSAGE_GEFUELLT,
 } from '../shared/icons';
 import { fehlerStatus, istNetzwerkfehler } from '../../utils/fehler';
+import { beiEnter } from '../../utils/tastatur';
 import React, { useState } from 'react';
 import {
   IonPage,
@@ -114,7 +115,7 @@ const ForgotPasswordPage: React.FC = () => {
 
               {sent ? (
                 // Erfolgsmeldung
-                <div style={{ textAlign: 'center' }}>
+                <div style={{ textAlign: 'center' }} role="status">
                   <div className="app-auth-success-circle--small">
                     <IonIcon icon={ICON_ZUSAGE_GEFUELLT} className="app-auth-success-circle__icon--small" />
                   </div>
@@ -125,7 +126,7 @@ const ForgotPasswordPage: React.FC = () => {
                     fontWeight: 'var(--app-schrift-normal)',
                     letterSpacing: '3px',
                     margin: '0 0 var(--app-abstand-mittel) 0',
-                    color: 'var(--app-color-konfis)'
+                    color: 'var(--app-text-konfis)'
                   }}>
                     E-MAIL GESENDET
                   </h2>
@@ -150,15 +151,19 @@ const ForgotPasswordPage: React.FC = () => {
               ) : (
                 // Formular
                 <>
+                  {/* Feldnamen per aria-label: Ionic 9 bindet das Geschwister-IonLabel nicht mehr an das Feld;
+                      das sichtbare Label bleibt fuer das Layout. */}
                   <IonItem lines="none" className="app-auth-input">
                     <IonIcon icon={ICON_MAIL} slot="start" style={{ color: 'var(--app-auth-akzent)' }} />
                     <IonLabel position="stacked" className="app-auth-input__label">
                       E-Mail-Adresse
                     </IonLabel>
                     <IonInput
+                      aria-label="E-Mail-Adresse"
                       type="email"
                       value={email}
                       onIonInput={(e) => setEmail(e.detail.value!)}
+                      onKeyDown={beiEnter(() => { if (!loading && isOnline) void handleSubmit(); })}
                       placeholder="deine@email.de"
                       className="app-auth-input__value"
                     />
@@ -171,7 +176,7 @@ const ForgotPasswordPage: React.FC = () => {
                   </div>
 
                   {error && (
-                    <div className="app-auth-error">
+                    <div className="app-auth-error" role="alert">
                       <IonIcon icon={ICON_WARNHINWEIS_GEFUELLT} className="app-auth-error__icon" />
                       <span className="app-auth-error__text">{error}</span>
                     </div>
@@ -182,7 +187,7 @@ const ForgotPasswordPage: React.FC = () => {
                       expand="full"
                       fill="outline"
                       onClick={() => handleSubmit()}
-                      style={{ marginBottom: 'var(--app-abstand-mittel)', '--border-radius': '8px', height: '36px', fontSize: 'var(--app-text-sekundaer)' }}
+                      style={{ marginBottom: 'var(--app-abstand-mittel)', '--border-radius': 'var(--app-radius-klein)', height: '36px', fontSize: 'var(--app-text-sekundaer)' }}
                     >
                       <IonIcon icon={ICON_AKTUALISIEREN} slot="start" />
                       Erneut versuchen
@@ -206,13 +211,14 @@ const ForgotPasswordPage: React.FC = () => {
                   </IonButton>
 
                   <div className="app-auth-footer">
-                    <span
-                      onClick={() => router.push('/login')}
+                    <a
+                      href="/login"
+                      onClick={(e) => { e.preventDefault(); router.push('/login'); }}
                       className="app-auth-link"
                     >
-                      <IonIcon icon={ICON_ZURUECK} />
+                      <IonIcon icon={ICON_ZURUECK} aria-hidden="true" />
                       Zurück zum Login
-                    </span>
+                    </a>
                   </div>
                 </>
               )}

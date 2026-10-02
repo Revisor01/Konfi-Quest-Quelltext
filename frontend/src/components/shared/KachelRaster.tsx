@@ -2,6 +2,7 @@ import React from 'react';
 import { IonIcon } from '@ionic/react';
 import { ICON_HAKEN_GEFUELLT, ICON_SPERRE_GEFUELLT } from './icons';
 import { useKachelName } from './useKachelName';
+import { tastaturKlick } from '../../utils/tastatur';
 
 /**
  * Vorher lag dasselbe Raster acht Mal als Inline-Style im Baum und war
@@ -116,7 +117,7 @@ const KachelRaster: React.FC<KachelRasterProps> = ({ eintraege, onKachelClick })
         const hatFortschritt = !verdient && (e.fortschritt ?? 0) > 0;
 
         return (
-          <div
+          <div role={onKachelClick ? 'button' : undefined} tabIndex={onKachelClick ? 0 : undefined} onKeyDown={onKachelClick ? tastaturKlick : undefined}
             key={e.schluessel}
             title={e.titel}
             onClick={onKachelClick ? (ev) => onKachelClick(e.schluessel, ev) : undefined}

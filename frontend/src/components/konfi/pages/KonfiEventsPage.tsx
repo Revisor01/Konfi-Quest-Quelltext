@@ -3,13 +3,9 @@ import React, { useState, useEffect } from 'react';
 import { useAppLocation } from '../../../navigation/useAppLocation';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
   IonRefresher,
   IonRefresherContent,
-  IonButtons,
   IonButton,
   IonIcon,
   IonSegment,
@@ -23,7 +19,8 @@ import {
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
 
 // useLocation für die Auswertung von ?segment=... (React Router v5 API)
-import { ICON_HINZUFUEGEN_GEFUELLT, ICON_QRCODE } from '../../shared/icons';
+import { ICON_HINZUFUEGEN_GEFUELLT, ICON_SCANNEN } from '../../shared/icons';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import { zaehltAlsMeiner } from '../../shared';
 import { useApp } from '../../../contexts/AppContext';
 import { useModalPage } from '../../../contexts/ModalContext';
@@ -47,6 +44,8 @@ import { triggerPullHaptic } from '../../../utils/haptics';
 // unterschiedlicher Nullbarkeit haben genau dort gebissen. Der Modal-Typ ist
 // der genauere — er kennt Teamer-Antraege ohne Punkte und ohne Typ.
 import type { ActivityRequest } from '../modals/RequestDetailModal';
+import { datumKurz } from '../../../utils/dateUtils';
+import { trackMitmachenAnsicht } from '../../../services/analytics';
 
 // Einmaliger Hinweis nach dem Tab-Umbau: die Aktivitäten sind aus ihrem eigenen
 // Tab in dieses Segment gewandert.
@@ -69,6 +68,13 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
 
   // Oberste Segment-Ebene: Events oder Aktivitäten.
   const [mainSegment, setMainSegment] = useState<'events' | 'antraege'>('events');
+  // Umschalten an der Leiste „Events | Aktivitäten" zählt als eigener
+  // Bereich -- die Seite hat für beide Ansichten denselben Pfad
+  // (services/analytics.ts, trackMitmachenAnsicht).
+  const mitmachenAnsichtWechseln = (ansicht: 'events' | 'antraege') => {
+    if (ansicht !== mainSegment) trackMitmachenAnsicht(ansicht);
+    setMainSegment(ansicht);
+  };
 
   // --- useOfflineQuery: Events ---
   const { data: events, loading, refresh, refreshLive } = useOfflineQuery<Event[]>(
@@ -90,6 +96,9 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
     const segment = new URLSearchParams(routerLocation.search).get('segment');
     if (segment === 'antraege') {
       setMainSegment('antraege');
+      // Einstieg per Link (Push, alte Route /konfi/requests) direkt in die
+      // Aktivitäten -- die Pfad-Messung zählt ihn sonst als „events".
+      trackMitmachenAnsicht('antraege');
     } else if (segment === 'events') {
       setMainSegment('events');
     }
@@ -166,11 +175,7 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('de-DE', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
+    return datumKurz(dateString);
   };
 
   const getFilteredRequests = () => {
@@ -303,7 +308,7 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
       <div className="app-segment-wrapper">
         <IonSegment
           value={mainSegment}
-          onIonChange={(e) => setMainSegment(e.detail.value as 'events' | 'antraege')}
+          onIonChange={(e) => mitmachenAnsichtWechseln(e.detail.value as 'events' | 'antraege')}
         >
           <IonSegmentButton value="events">
             <IonLabel>Events</IonLabel>
@@ -319,30 +324,20 @@ const KonfiEventsPage: React.FC<KonfiEventsPageProps> = ({ onSelectEvent, select
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonTitle>{pageTitle}</IonTitle>
-          <IonButtons slot="end">
-            {isAntraege ? (
-              <IonButton onClick={handleAddRequest} aria-label="Neue Aktivität melden">
-                <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
-              </IonButton>
-            ) : (
-              <IonButton onClick={() => presentScannerModal()} aria-label="QR-Code scannen">
-                <IonIcon icon={ICON_QRCODE} />
-              </IonButton>
-            )}
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile
+        titel={pageTitle}
+        rechts={isAntraege ? (
+          <IonButton onClick={handleAddRequest} aria-label="Neue Aktivität melden">
+            <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
+          </IonButton>
+        ) : (
+          <IonButton onClick={() => presentScannerModal()} aria-label="QR-Code scannen">
+            <IonIcon icon={ICON_SCANNEN} />
+          </IonButton>
+        )}
+      />
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">
-              {pageTitle}
-            </IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel={pageTitle} />
 
         <IonRefresher slot="fixed" onIonRefresh={async (e) => {
           if (isAntraege) {

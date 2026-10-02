@@ -31,9 +31,12 @@ import {
 } from '../../shared/icons';
 import { SectionHeader, ListSection, ChallengeLegendModal, EmptyState } from '../../shared';
 import ChallengeStempelSektion from '../../shared/ChallengeStempelSektion';
+import ZaehlerKugel from '../../shared/ZaehlerKugel';
+import SegmentZahl from '../../shared/SegmentZahl';
 import type { AdminChallenge, ChallengeStatus, ChallengeMark, OffenerStempel } from '../../../types/challenges';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
-import { anzahlBeitraege, wartenAufFreigabe } from '../../../utils/challengeTexte';
+import { anzahlBeitraege, kugelTextAmEintrag, kugelTextNeueBeitraege, wartenAufFreigabe, wartenAufFreigabeKurz } from '../../../utils/challengeTexte';
+import { datumKurz } from '../../../utils/dateUtils';
 
 // Gemeinsame Verwaltungs-Ansicht für Admin UND Teamer. Bewusst ohne eigenen
 // Datenzugriff: Laden/Modale liegen in der jeweiligen Seite, hier nur Darstellung
@@ -59,6 +62,18 @@ interface ChallengesManageViewProps {
   marks?: ChallengeMark[];
   offeneStempel?: OffenerStempel[];
   ohneJahrgang?: boolean;
+  /**
+   * Offene Freigaben je Challenge-ID (BadgeContext.pendingChallengesByChallenge):
+   * speist das orange Eck-Badge (Uhr, ohne Zahl) am Eintrag und die orange Zahl
+   * am Umschalter. In die rote Kugel am Symbol gehen sie nur noch im
+   * Rueckfall ein (neueBeitraege fehlt, aelterer Server). Optional, weil
+   * aeltere Server die Aufschluesselung nicht liefern.
+   */
+  offeneFreigaben?: Record<number, number>;
+  neuigkeiten?: Record<number, number>;
+  neueBeitraege?: Record<number, number>;
+  /** Wie viele der neuen Beitraege je Challenge auf Freigabe warten -- fuer den Vorlesetext der Kugel. */
+  neueWartend?: Record<number, number>;
 }
 
 // Status wird NICHT gespeichert, sondern aus is_draft/starts_at/ends_at abgeleitet
@@ -75,6 +90,20 @@ export const getChallengeStatus = (challenge: AdminChallenge, now: number = Date
 
 // Aufteilung auf die drei Reiter — als pure Funktion exportiert, damit die
 // Zuordnung testbar ist, ohne die Ionic-Ansicht zu rendern.
+/**
+ * Wartende Freigaben je Reiter (Aktuell/Geplant/Archiv): Summe von
+ * offeneFreigaben ueber die Challenges, die teileChallengesAuf dem Reiter
+ * zuordnet. Pure Funktion, damit Test und Liste dieselbe Aufteilung lesen.
+ */
+export const wartendeFreigabenJeReiter = (
+  teile: { current: AdminChallenge[]; planned: AdminChallenge[]; archived: AdminChallenge[] },
+  offeneFreigaben: Record<number, number>
+): { aktuell: number; geplant: number; archiv: number } => {
+  const summe = (liste: AdminChallenge[]) =>
+    liste.reduce((s, c) => s + (offeneFreigaben[c.id] ?? 0), 0);
+  return { aktuell: summe(teile.current), geplant: summe(teile.planned), archiv: summe(teile.archived) };
+};
+
 export const teileChallengesAuf = (
   challenges: AdminChallenge[],
   now: number = Date.now()
@@ -143,9 +172,8 @@ const VISIBILITY_LABEL: Record<string, string> = {
   private: 'Nur Leitung'
 };
 
-// Teilnahme-Kreis (Migration 121). 'konfis' ist der Normalfall und wird in der
-// Meta-Zeile NICHT angezeigt — nur die Abweichungen sind erwaehnenswert.
 const AUDIENCE_LABEL: Record<string, string> = {
+  konfis: 'Nur Konfis',
   konfis_und_team: 'Konfis und Team',
   nur_team: 'Nur Team'
 };
@@ -154,7 +182,7 @@ const formatDate = (value?: string | null) => {
   if (!value) return '';
   const d = new Date(value);
   if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  return datumKurz(d);
 };
 
 const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
@@ -166,13 +194,17 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
   headerSlot,
   marks: marksRaw = [],
   offeneStempel: offeneStempelRaw = [],
-  ohneJahrgang = false
+  ohneJahrgang = false,
+  offeneFreigaben = {},
+  neuigkeiten = {},
+  neueBeitraege,
+  neueWartend = {}
 }) => {
   // Fehlt die Jahrgangs-Zuweisung, ist JEDER Reiter aus demselben Grund
   // leer — deshalb bekommen alle drei denselben erklaerenden Text.
   const ohneJahrgangLeerText = {
     emptyTitle: 'Kein Jahrgang zugewiesen',
-    emptyMessage: 'Dir ist noch kein Jahrgang zugewiesen, deshalb siehst du hier keine Challenges. Die Leitung deiner Gemeinde kann das in den Einstellungen ändern.'
+    emptyMessage: 'Dir ist noch kein Jahrgang zugewiesen, deshalb siehst du hier keine Challenges. Die Gemeindeleitung kann das in den Einstellungen ändern.'
   };
   const { user } = useApp();
   const darfLoeschen = user?.type === 'admin';
@@ -193,13 +225,29 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
   // teileChallengesAuf (pure Funktion, testbar).
   const { current, planned, archived } = useMemo(() => teileChallengesAuf(challenges), [challenges]);
 
+  const wartendJeReiter = useMemo(
+    () => wartendeFreigabenJeReiter({ current, planned, archived }, offeneFreigaben),
+    [current, planned, archived, offeneFreigaben]
+  );
+
   // Ein Listeneintrag — identisch in "Aktuelle Challenges" und "Archiv",
   // deshalb einmal hier statt zweimal im JSX.
   const renderChallenge = (challenge: AdminChallenge, index: number, total: number) => {
           const status = getChallengeStatus(challenge);
           const statusColor = STATUS_COLOR[status];
           const isArchived = status === 'ended';
-          const pending = challenge.pending_count || 0;
+          // Aus dem BadgeContext, nicht aus pending_count der geladenen
+          // Liste: dieselbe Quelle wie der Reiter, damit Reiter und Eintrag
+          // nie verschiedene Zahlen zeigen und das Badge live mitgeht --
+          // die Liste laedt nur nach eigener Aktion neu, die Zaehler bei
+          // jedem Socket-Ereignis und Reiterwechsel.
+          const pending = offeneFreigaben[challenge.id] ?? 0;
+          const kugel = neueBeitraege
+            ? (neueBeitraege[challenge.id] ?? 0)
+            : pending + (neuigkeiten[challenge.id] ?? 0);
+          const kugelText = neueBeitraege
+            ? kugelTextNeueBeitraege(kugel, neueWartend[challenge.id] ?? 0)
+            : kugelTextAmEintrag(pending, neuigkeiten[challenge.id] ?? 0);
 
           return (
             <IonItemSliding
@@ -236,12 +284,11 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
                       <>
                         <div
                           className="app-corner-badge"
-                          style={{ backgroundColor: 'var(--app-color-warning)', display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mini)' }}
+                          style={{ backgroundColor: 'var(--app-color-warning)', padding: 'var(--app-abstand-mini) var(--app-abstand-kompakt)' }}
                           title={wartenAufFreigabe(pending)}
                           role="img"
                           aria-label={wartenAufFreigabe(pending)}
                         >
-                          {pending}
                           <IonIcon icon={ICON_UHRZEIT} aria-hidden="true" style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)', display: 'block' }} />
                         </div>
                         <div className="app-corner-badges__separator" />
@@ -253,6 +300,8 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
                           className="app-corner-badge app-corner-badge--queue"
                           style={{ backgroundColor: 'var(--app-color-challenges)' }}
                           title="Du hast bereits eingereicht"
+                          role="img"
+                          aria-label="Du hast bereits eingereicht"
                         >
                           <IonIcon icon={ICON_SENDEN} />
                         </div>
@@ -264,6 +313,8 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
                       className="app-corner-badge"
                       style={{ backgroundColor: statusColor, padding: 'var(--app-abstand-mini) var(--app-abstand-kompakt)' }}
                       title={STATUS_LABEL[status]}
+                      role="img"
+                      aria-label={STATUS_LABEL[status]}
                     >
                       <IonIcon icon={STATUS_ICON[status]} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)', display: 'block' }} />
                     </div>
@@ -271,11 +322,14 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
 
                   <div className="app-list-item__row">
                     <div className="app-list-item__main">
-                      <div
-                        className="app-icon-circle app-icon-circle--lg"
-                        style={{ backgroundColor: statusColor }}
-                      >
-                        <IonIcon icon={STATUS_ICON[status]} />
+                      <div className="app-zaehler-anker">
+                        <div
+                          className="app-icon-circle app-icon-circle--lg"
+                          style={{ backgroundColor: statusColor }}
+                        >
+                          <IonIcon icon={STATUS_ICON[status]} />
+                        </div>
+                        <ZaehlerKugel anzahl={kugel} label={kugelText} />
                       </div>
 
                       <div className="app-list-item__content">
@@ -283,9 +337,12 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
                           className="app-list-item__title"
                           style={{
                             color: isArchived ? 'var(--app-text-muted)' : undefined,
-                            // Das Zähler-Badge ist seit dem Umbau auf Zahl+Uhr
-                            // schmaler als das alte "{n} offen".
-                            paddingRight: pending > 0 ? 'var(--app-freiraum-aktion-xxl-plus)' : 'var(--app-freiraum-aktion-xl)'
+                            // Seit das Freigaben-Feld nur die Uhr traegt
+                            // sind alle Eck-Badges gleich breit:
+                            // hoechstens drei (Freigabe, Eingereicht, Status),
+                            // zusammen rund 81 px -- 80 px Freiraum plus 16 px
+                            // Innenabstand der Karte halten den Titel frei.
+                            paddingRight: 'var(--app-freiraum-aktion-xl)'
                           }}
                         >
                           {challenge.title}
@@ -413,13 +470,13 @@ const ChallengesManageView: React.FC<ChallengesManageViewProps> = ({
           onIonChange={(e) => setReiter(e.detail.value as 'aktuell' | 'geplant' | 'archiv')}
         >
           <IonSegmentButton value="aktuell">
-            <IonLabel>Aktuell</IonLabel>
+            <IonLabel>Aktuell<SegmentZahl anzahl={wartendJeReiter.aktuell} label={wartenAufFreigabeKurz(wartendJeReiter.aktuell)} /></IonLabel>
           </IonSegmentButton>
           <IonSegmentButton value="geplant">
-            <IonLabel>Geplant</IonLabel>
+            <IonLabel>Geplant<SegmentZahl anzahl={wartendJeReiter.geplant} label={wartenAufFreigabeKurz(wartendJeReiter.geplant)} /></IonLabel>
           </IonSegmentButton>
           <IonSegmentButton value="archiv">
-            <IonLabel>Archiv</IonLabel>
+            <IonLabel>Archiv<SegmentZahl anzahl={wartendJeReiter.archiv} label={wartenAufFreigabeKurz(wartendJeReiter.archiv)} /></IonLabel>
           </IonSegmentButton>
         </IonSegment>
       </div>

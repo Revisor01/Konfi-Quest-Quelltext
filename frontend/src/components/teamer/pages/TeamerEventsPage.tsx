@@ -1,4 +1,3 @@
-import { FARBEN } from '../../../theme/colors';
 import {
   ICON_ABSAGE,
   ICON_ANHANG,
@@ -11,6 +10,7 @@ import {
   ICON_GRUPPE_GEFUELLT,
   ICON_HINZUFUEGEN_GEFUELLT,
   ICON_INFO_GEFUELLT,
+  ICON_JAHRGANG,
   ICON_KATEGORIE_GEFUELLT,
   ICON_KOPIEREN_GEFUELLT,
   ICON_LINK,
@@ -28,14 +28,15 @@ import {
   ICON_UHRZEIT_GEFUELLT,
   ICON_UNENDLICH,
   ICON_WARTEND_GEFUELLT,
-  ICON_ZURUECK,
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
-import { fehlerText } from '../../../utils/fehler';
+import { fehlerDaten, fehlerStatus, fehlerText } from '../../../utils/fehler';
+import { konfisInReihenfolge } from '../../../utils/teilnehmerReihenfolge';
 import { hatAbgesagt, zusageBeschriftung, absageBeschriftung, absageBrauchtGrund } from '../../../utils/zusageKnoepfe';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useAppLocation } from '../../../navigation/useAppLocation';
-import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonRefresher, IonRefresherContent, IonIcon, IonSegment, IonSegmentButton, IonLabel, IonButton, IonList, IonListHeader, IonCard, IonCardContent, IonItem, IonItemGroup, IonInput, IonButtons, IonNote, useIonModal, useIonAlert, useIonViewWillEnter } from '@ionic/react';
+import { IonPage, IonContent, IonRefresher, IonRefresherContent, IonIcon, IonSegment, IonSegmentButton, IonLabel, IonButton, IonList, IonListHeader, IonCard, IonCardContent, IonItem, IonItemGroup, IonInput, IonNote, useIonModal, useIonAlert, useIonViewWillEnter } from '@ionic/react';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import { useIonRouter } from '@ionic/react';
 
 // useLocation bleibt für Query-Parameter Auswertung (React Router v5 API)
@@ -43,6 +44,7 @@ import { useApp } from '../../../contexts/AppContext';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import api from '../../../services/api';
+import { datumKurz } from '../../../utils/dateUtils';
 
 /** Ein Eintrag aus GET /material/by-event/:eventId (material.js). */
 interface EventMaterial {
@@ -62,7 +64,7 @@ import { networkMonitor } from '../../../services/networkMonitor';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../../services/offlineCache';
 import { removeDeliveredForEvents } from '../../../services/notifications';
-import { SectionHeader, ListSection, EventLegendModal, EventCornerBadges, AbsageBlock, formatEventDate as formatDate, formatEventTime as formatTime, formatEventDateLong as formatDateLong, istVergangen, istAbgesagt, titelDekoration, zaehltAlsMeiner, kategorienText, zeigtPunkteart, punkteartText } from '../../shared';
+import { SectionHeader, ListSection, EmptyState, EventLegendModal, EventCornerBadges, AbsageBlock, formatEventDate as formatDate, formatEventTime as formatTime, zeitraumText, istVergangen, istAbgesagt, titelDekoration, zaehltAlsMeiner, kategorienText, zeigtPunkteart, punkteartText } from '../../shared';
 import { getStatusIcon } from '../../shared/StatusBadge';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import QRScannerModal from '../../konfi/modals/QRScannerModal';
@@ -83,11 +85,15 @@ import { teilnahmeDarstellung, listItemKlasse, iconKreisKlasse, eckBadgeKlasse }
 import { urheberZeile, notizUrheberZeile, checkinZeile } from '../../../utils/anwesenheitUrheber';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { safeUUID } from '../../../utils/uuid';
+import { sendenOderEinreihen } from '../../../utils/sendenOderEinreihen';
 // Kein eigener ActivityRequest mehr: Die Seite reicht die Antraege an
 // RequestDetailModal weiter, und zwei gleichnamige Typen mit
 // unterschiedlicher Nullbarkeit haben genau dort gebissen. Der Modal-Typ ist
 // der genauere — er kennt Teamer-Antraege ohne Punkte und ohne Typ.
 import type { ActivityRequest } from '../../konfi/modals/RequestDetailModal';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { trackMitmachenAnsicht } from '../../../services/analytics';
+import { linkOeffnen } from '../../../services/systemDialoge';
 
 // Einmaliger Hinweis nach dem Tab-Umbau: die Aktivitäten/Anträge sind aus
 // ihrem eigenen Tab in dieses Segment gewandert (analog zu Admin/Konfi).
@@ -103,12 +109,27 @@ const TeamerEventsPage: React.FC = () => {
 
   // Oberste Segment-Ebene: Events oder Aktivitäten.
   const [mainSegment, setMainSegment] = useState<'events' | 'antraege'>('events');
+  // Umschalten an der Leiste „Events | Aktivitäten" zählt als eigener
+  // Bereich -- die Seite hat für beide Ansichten denselben Pfad
+  // (services/analytics.ts, trackMitmachenAnsicht).
+  const mitmachenAnsichtWechseln = (ansicht: 'events' | 'antraege') => {
+    if (ansicht !== mainSegment) trackMitmachenAnsicht(ansicht);
+    setMainSegment(ansicht);
+  };
 
   const [activeTab, setActiveTab] = useState<'meine' | 'alle' | 'team'>('meine');
   const [searchText, setSearchText] = useState('');
   const [selectedEvent, setSelectedEvent] = useState<Event | null>(null);
   const [bookingLoading, setBookingLoading] = useState(false);
-  const [initialEventHandled, setInitialEventHandled] = useState(false);
+  /** Kennung des zuletzt per ?eventId= geoeffneten Termins, siehe Effekt unten. */
+  const [handledEventId, setHandledEventId] = useState<string | null>(null);
+  /**
+   * Der per ?eventId= angeforderte Termin gehoert zu einem Jahrgang, dem
+   * diese Person nicht zugewiesen ist (GET /events/:id -> 403, error_code
+   * jahrgang_nicht_zugewiesen). Dann zeigt die Seite statt der Liste den
+   * Grund und den Weg hinaus -- siehe Effekt unten und renderJahrgangHinweis.
+   */
+  const [jahrgangHinweis, setJahrgangHinweis] = useState(false);
   const [eventMaterials, setEventMaterials] = useState<EventMaterial[]>([]);
   const [eventTimeslots, setEventTimeslots] = useState<Array<{ id: number; start_time: string; end_time: string; max_participants: number; registered_count: number; waitlist_count?: number }>>([]);
   /** Teilnehmerliste aus GET /events/:id -- nur zum Lesen, siehe Effekt unten. */
@@ -121,6 +142,9 @@ const TeamerEventsPage: React.FC = () => {
     const segment = new URLSearchParams(routerLocation.search).get('segment');
     if (segment === 'antraege') {
       setMainSegment('antraege');
+      // Einstieg per Link (Push, alte Route /konfi/requests) direkt in die
+      // Aktivitäten -- die Pfad-Messung zählt ihn sonst als „events".
+      trackMitmachenAnsicht('antraege');
     } else if (segment === 'events') {
       setMainSegment('events');
     }
@@ -190,11 +214,7 @@ const TeamerEventsPage: React.FC = () => {
   };
 
   const formatRequestDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('de-DE', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
+    return datumKurz(dateString);
   };
 
   const getFilteredRequests = () => {
@@ -341,16 +361,49 @@ const TeamerEventsPage: React.FC = () => {
     }
   }, [selectedEvent?.id, selectedEvent?.has_timeslots]);
 
-  // Wenn von Dashboard mit selectedEventId navigiert wurde, Event direkt öffnen
+  // Gemerkt wird die KENNUNG, nicht ein Ja/Nein. Der alte Schalter
+  // (initialEventHandled) stand nach dem ersten Deep-Link fuer immer auf
+  // "erledigt": Die Seite bleibt im Tab montiert, ein zweiter Link auf einen
+  // ANDEREN Termin lief deshalb ins Leere und zeigte weiter die Liste. Jetzt
+  // oeffnet jede neue Kennung ihren Termin. Dieselbe Kennung oeffnet ihn
+  // NICHT erneut -- sonst spraenge der Zurueck-Knopf (setSelectedEvent(null))
+  // sofort wieder hinein, weil die Adresse den Parameter behaelt. Faellt der
+  // Parameter aus der Adresse (Tab angetippt), wird der Merker geloescht,
+  // damit derselbe Termin spaeter wieder per Link aufgeht.
+  //
+  // Ausgewaehlt wird aus der LISTE (GET /events), nicht per Detailabruf: Die
+  // Liste ist bereits nach den zugewiesenen Jahrgaengen gefiltert. Ein
+  // Termin, den diese Teamer:in nicht sehen darf, steht nicht darin -- und
+  // geht damit auch ueber einen Link nicht auf. GET /events/:id folgt erst
+  // danach, und nur fuer einen Termin aus der Liste.
+  //
+  // Die Liste darf dabei leer sein: Genau die Person OHNE jeden Jahrgang hat
+  // oft gar keinen sichtbaren Termin -- und ist zugleich die, um die es geht.
   useEffect(() => {
-    if (!initialEventHandled && !loading && events && events.length > 0 && queryEventId) {
-      const eventToSelect = events.find(e => e.id === parseInt(queryEventId, 10));
-      if (eventToSelect) {
-        setSelectedEvent(eventToSelect);
-      }
-      setInitialEventHandled(true);
+    if (!queryEventId) {
+      setHandledEventId(null);
+      setJahrgangHinweis(false);
+      return;
     }
-  }, [loading, events, queryEventId, initialEventHandled]);
+    if (loading || !events || queryEventId === handledEventId) return;
+    const eventToSelect = events.find(e => e.id === parseInt(queryEventId, 10));
+    if (eventToSelect) {
+      setSelectedEvent(eventToSelect);
+    } else {
+      void pruefeJahrgangsgrund(queryEventId);
+    }
+    setHandledEventId(queryEventId);
+  }, [loading, events, queryEventId, handledEventId]);
+
+  const pruefeJahrgangsgrund = async (eventId: string) => {
+    try {
+      await api.get(`/events/${eventId}`);
+    } catch (err) {
+      if (fehlerStatus(err) === 403 && fehlerDaten(err)?.error_code === 'jahrgang_nicht_zugewiesen') {
+        setJahrgangHinweis(true);
+      }
+    }
+  };
 
   // Formatierung
   // Sortierung: naechstes Event zuerst, vergangene am Ende
@@ -449,8 +502,32 @@ const TeamerEventsPage: React.FC = () => {
     setBookingLoading(true);
     const body = reason && reason.trim() ? { dabei, reason: reason.trim() } : { dabei };
     try {
-      if (networkMonitor.isOnline) {
-        const res = await api.post(`/teamer/events/${event.id}/zusage`, body);
+      // Offline -- oder online, aber das Netz reisst ab: in die Warteschlange
+      // Ein zweiter
+      // Eingang ist harmlos: Die Zusage setzt einen Zustand, eine wiederholte
+      // Absage laesst Grund und Kennzeichen stehen (setzeTeamerZusage).
+      const versand = await sendenOderEinreihen({
+        online: networkMonitor.isOnline,
+        methode: 'POST',
+        idempotent: true,
+        senden: () => api.post(`/teamer/events/${event.id}/zusage`, body),
+        einreihen: () => writeQueue.enqueue({
+          method: 'POST',
+          url: `/teamer/events/${event.id}/zusage`,
+          body,
+          maxRetries: 5,
+          hasFileUpload: false,
+          metadata: {
+            type: 'teamer',
+            clientId: safeUUID(),
+            label: dabei ? 'Zusage' : 'Absage',
+          },
+        }),
+      });
+      if (versand.weg === 'eingereiht') {
+        setSuccess('Wird gesendet, sobald du wieder online bist');
+      } else {
+        const res = versand.ergebnis;
         // Termin UND Teilnehmerliste frisch aus der Detailantwort -- die
         // Liste (GET /events) traegt keine `participants`, und ein blosser
         // Objekttausch liess den Lade-Effekt kalt (Begruendung oben bei
@@ -463,20 +540,6 @@ const TeamerEventsPage: React.FC = () => {
         } else {
           setSuccess(dabei ? 'Du bist dabei' : 'Absage gespeichert');
         }
-      } else {
-        await writeQueue.enqueue({
-          method: 'POST',
-          url: `/teamer/events/${event.id}/zusage`,
-          body,
-          maxRetries: 5,
-          hasFileUpload: false,
-          metadata: {
-            type: 'teamer',
-            clientId: safeUUID(),
-            label: dabei ? 'Zusage' : 'Absage',
-          },
-        });
-        setSuccess('Wird gesendet, sobald du wieder online bist');
       }
       refreshLive();
     } catch (err) {
@@ -704,8 +767,8 @@ const TeamerEventsPage: React.FC = () => {
     const bonus = { primary: 'var(--app-color-bonus)', secondary: 'var(--app-color-bonus)' };
     const info = { primary: 'var(--app-color-info)', secondary: 'var(--app-color-info)' };
     const teamer = { primary: 'var(--app-color-teamer)', secondary: 'var(--app-color-teamer)' };
-    const past = { primary: FARBEN.neutral, secondary: FARBEN.neutral };
-    const neutral = { primary: FARBEN.neutralHell, secondary: FARBEN.neutralHell };
+    const past = { primary: 'var(--app-color-neutral)', secondary: 'var(--app-color-neutral)' };
+    const neutral = { primary: 'var(--app-color-neutral-hell)', secondary: 'var(--app-color-neutral-hell)' };
 
     const isPastEvent = istVergangen(event);
     const isOnWaitlist = event.booking_status === 'waitlist' || event.booking_status === 'pending';
@@ -769,17 +832,12 @@ const TeamerEventsPage: React.FC = () => {
 
     return (
       <IonPage ref={pageRef}>
-        <IonHeader translucent={true}>
-          <IonToolbar>
-            {!hideBackButton && (
-              <IonButtons slot="start">
-                <IonButton onClick={() => setSelectedEvent(null)} aria-label="Zurück zur Event-Liste">
-                  <IonIcon icon={ICON_ZURUECK} slot="icon-only" />
-                </IonButton>
-              </IonButtons>
-            )}
-            <IonTitle>{selectedEvent.name}</IonTitle>
-            <IonButtons slot="end">
+        <AppKopfzeile
+          titel={selectedEvent.name}
+          onZurueck={hideBackButton ? undefined : () => setSelectedEvent(null)}
+          gemeindeUmschalter={false}
+          rechts={(
+            <>
               {/* Einstieg in den Event-Chat — bisher hatte ihn nur die Leitung
                   (`admin/views/EventDetailView.tsx`), obwohl Teamer:innen beim
                   Buchen ohnehin Mitglied des Raums werden (`addToEventChat`).
@@ -804,16 +862,12 @@ const TeamerEventsPage: React.FC = () => {
               >
                 <IonIcon icon={ICON_QRCODE} slot="icon-only" />
               </IonButton>
-            </IonButtons>
-          </IonToolbar>
-        </IonHeader>
+            </>
+          )}
+        />
 
         <IonContent className="app-gradient-background" fullscreen>
-          <IonHeader collapse="condense">
-            <IonToolbar className="app-condense-toolbar">
-              <IonTitle size="large">{selectedEvent.name}</IonTitle>
-            </IonToolbar>
-          </IonHeader>
+          <AppKopfzeileGross titel={selectedEvent.name} />
 
           {/* HERUNTERZIEHEN HOLT DEN TERMIN, NICHT DIE LISTE.
               Hier stand vorher `safeEvents.find(...)` -- gelesen aus der
@@ -886,10 +940,7 @@ const TeamerEventsPage: React.FC = () => {
                   <div>
                     <div className="app-info-row__label">Datum</div>
                     <div className="app-info-row__value">
-                      {formatDateLong(selectedEvent.event_date)}
-                      {' \u00B7 '}
-                      {formatTime(selectedEvent.event_date)}
-                      {selectedEvent.event_end_time && ` \u2013 ${formatTime(selectedEvent.event_end_time)}`}
+                      {zeitraumText(selectedEvent)}
                     </div>
                   </div>
                 </div>
@@ -935,11 +986,11 @@ const TeamerEventsPage: React.FC = () => {
                       {selectedEvent.registration_opens_at ? (
                         <>
                           <div className="app-info-row__value">
-                            von {new Date(selectedEvent.registration_opens_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })} – {formatTime(selectedEvent.registration_opens_at)}
+                            von {datumKurz(selectedEvent.registration_opens_at)} – {formatTime(selectedEvent.registration_opens_at)}
                           </div>
                           {selectedEvent.registration_closes_at && (
                             <div className="app-info-row__value">
-                              bis {new Date(selectedEvent.registration_closes_at).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })} – {formatTime(selectedEvent.registration_closes_at)}
+                              bis {datumKurz(selectedEvent.registration_closes_at)} – {formatTime(selectedEvent.registration_closes_at)}
                             </div>
                           )}
                         </>
@@ -1023,12 +1074,12 @@ const TeamerEventsPage: React.FC = () => {
                 {selectedEvent.location && (
                   <div className="app-info-row">
                     <IonIcon icon={ICON_ORT_GEFUELLT} className="app-info-row__icon app-icon-color--location" />
-                    <div
+                    <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                       onClick={() => {
                         if (selectedEvent.location_maps_url) {
-                          window.open(selectedEvent.location_maps_url, '_blank');
+                          linkOeffnen(selectedEvent.location_maps_url);
                         } else if (selectedEvent.location) {
-                          window.open(`https://maps.apple.com/?q=${encodeURIComponent(selectedEvent.location)}`, '_blank');
+                          linkOeffnen(`https://maps.apple.com/?q=${encodeURIComponent(selectedEvent.location)}`);
                         }
                       }}
                     >
@@ -1070,7 +1121,7 @@ const TeamerEventsPage: React.FC = () => {
                   <div className="app-info-row">
                     <IonIcon icon={ICON_KOPIEREN_GEFUELLT} className="app-info-row__icon app-icon-color--events" />
                     <div>
-                      <div className="app-info-row__label">Terminreihe</div>
+                      <div className="app-info-row__label">Event-Serie</div>
                       <div className="app-info-row__value">Teil einer Serie</div>
                     </div>
                   </div>
@@ -1107,7 +1158,7 @@ const TeamerEventsPage: React.FC = () => {
                 {eventMaterials.length > 0 && (
                   <div className="app-info-row">
                     <IonIcon icon={ICON_DATEI_GEFUELLT} className="app-info-row__icon app-icon-color--material" />
-                    <div
+                    <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                       onClick={() => {
                         if (eventMaterials.length === 1) {
                           materialIdRef.current = eventMaterials[0].id;
@@ -1157,7 +1208,7 @@ const TeamerEventsPage: React.FC = () => {
               // ein Hinweis an der Stelle, wo sonst ein Knopf waere.
               <IonNote color="medium" style={{ display: 'block', textAlign: 'center', fontSize: 'var(--app-text-betont)' }}>
                 <IonIcon icon={ICON_ABSAGE} style={{ verticalAlign: 'middle', marginRight: 'var(--app-abstand-kompakt)' }} />
-                Dieser Termin ist abgesagt
+                Dieses Event ist abgesagt
               </IonNote>
             ) : isPast ? (
                   selectedEvent.is_registered ? (
@@ -1260,7 +1311,10 @@ const TeamerEventsPage: React.FC = () => {
           })()}
 
           {eventTeilnehmer.length > 0 && (() => {
-            const konfis = eventTeilnehmer.filter(p => p.role_name === 'konfi');
+            const konfis = konfisInReihenfolge(
+              eventTeilnehmer.filter(p => p.role_name === 'konfi'),
+              selectedEvent.mandatory
+            );
             const team = eventTeilnehmer.filter(p => p.role_name !== 'konfi');
 
             const Zeile = (p: Participant) => {
@@ -1276,6 +1330,8 @@ const TeamerEventsPage: React.FC = () => {
                       className={`app-corner-badge ${eckBadgeKlasse(darstellung)}`}
                       style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
                       title={darstellung.statusText}
+                      role="img"
+                      aria-label={darstellung.statusText}
                     >
                       <IonIcon icon={getStatusIcon(darstellung.statusText) || ICON_GRUPPE_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                     </div>
@@ -1382,7 +1438,7 @@ const TeamerEventsPage: React.FC = () => {
               <IonCard className="app-card">
                 <IonCardContent className="app-card-content">
                   {eventMaterials.map((mat) => (
-                    <div
+                    <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                       key={mat.id}
                       className="app-list-item app-list-item--material"
                       style={{ cursor: 'pointer', marginBottom: 'var(--app-abstand-eng)' }}
@@ -1438,7 +1494,7 @@ const TeamerEventsPage: React.FC = () => {
       <div className="app-segment-wrapper">
         <IonSegment
           value={mainSegment}
-          onIonChange={(e) => setMainSegment(e.detail.value as 'events' | 'antraege')}
+          onIonChange={(e) => mitmachenAnsichtWechseln(e.detail.value as 'events' | 'antraege')}
         >
           <IonSegmentButton value="events">
             <IonLabel>Events</IonLabel>
@@ -1455,10 +1511,10 @@ const TeamerEventsPage: React.FC = () => {
   // Events-Liste als render-Funktion (früher early-return).
   const renderList = () => (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonTitle>{pageTitle}</IonTitle>
-          <IonButtons slot="end">
+      <AppKopfzeile
+        titel={pageTitle}
+        rechts={(
+          <>
             {isAntraege && (
               <IonButton onClick={handleAddRequest} aria-label="Neue Aktivität melden">
                 <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
@@ -1469,16 +1525,12 @@ const TeamerEventsPage: React.FC = () => {
                 <IonIcon icon={ICON_SCANNEN} />
               </IonButton>
             )}
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
+          </>
+        )}
+      />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">{pageTitle}</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel={pageTitle} />
 
         <IonRefresher slot="fixed" onIonRefresh={async (e) => {
           if (isAntraege) {
@@ -1524,7 +1576,7 @@ const TeamerEventsPage: React.FC = () => {
             {/* Header mit Stats */}
             <SectionHeader
               title="Events"
-              subtitle="Termine und Veranstaltungen"
+              subtitle="Gottesdienste, Konfi-Tage und Fahrten"
               icon={ICON_TERMIN_GEFUELLT}
               preset="events"
               stats={statsData}
@@ -1563,7 +1615,7 @@ const TeamerEventsPage: React.FC = () => {
               <IonItemGroup>
                 <IonItem>
                   <IonIcon icon={ICON_SUCHE_GEFUELLT} slot="start" className="app-icon-color--system" style={{ fontSize: 'var(--app-text-standard)' }} />
-                  <IonInput
+                  <IonInput aria-label="Events durchsuchen"
                     value={searchText}
                     onIonInput={(e) => setSearchText(e.detail.value || '')}
                     placeholder="Events durchsuchen..."
@@ -1784,7 +1836,28 @@ const TeamerEventsPage: React.FC = () => {
     </IonPage>
   );
 
+  // Termin aus einem fremden Jahrgang (Push oder Link): Grund und Ausweg
+  // statt der stummen Liste. Dieselbe Seite wie in der Leitungsansicht
+  // (admin/views/EventDetailView.tsx, jahrgangFehlt) -- gleicher Wortlaut,
+  // damit beide Rollen dasselbe lesen. Zurueck fuehrt zur Liste; der Merker
+  // handledEventId verhindert, dass der Effekt oben sofort wieder nachfragt.
+  const renderJahrgangHinweis = () => (
+    <IonPage ref={pageRef}>
+      {/* Dieselbe Seite wie die Detailansicht -- ohne Gemeinde-Umschalter. */}
+      <AppKopfzeile titel="Event" onZurueck={() => setJahrgangHinweis(false)} gemeindeUmschalter={false} />
+      <IonContent className="app-gradient-background" fullscreen>
+        <EmptyState
+          icon={ICON_JAHRGANG}
+          title="Nicht deinem Jahrgang zugeordnet"
+          message="Dieses Event gehört zu einem Jahrgang, dem du nicht zugewiesen bist. Die Leitung deiner Gemeinde kann das in den Einstellungen ändern."
+          iconColor="var(--app-color-events)"
+        />
+      </IonContent>
+    </IonPage>
+  );
+
   // Detail ersetzt die Liste (selectedEvent-State steuert die Ansicht).
+  if (jahrgangHinweis) return renderJahrgangHinweis();
   return selectedEvent ? renderDetail() : renderList();
 };
 

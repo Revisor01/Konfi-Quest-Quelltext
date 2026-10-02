@@ -1,10 +1,3 @@
-// backend/utils/streakCalculation.js
-// Gemeinsame Streak-Berechnung (Single Source of Truth).
-// Wird von der Badge-Wertung (badges.js checkStreakCriteria) UND der
-// Fortschritts-Anzeige (konfi.js streak-Progress-case) genutzt. Analog zu
-// deleteKonfiCascade (Phase 114) und konfiLimit (Phase 115) wird die Logik
-// EINMAL gebaut, damit Wertung und Progress nicht auseinanderlaufen (genau das
-// Anti-Pattern, das bei mandatory_event_count gefixt wurde).
 
 /**
  * ISO-Wochennummer im Format "YYYY-Www" für ein Datum.
@@ -77,4 +70,40 @@ function computeCurrentStreak(dates) {
   return currentStreak;
 }
 
-module.exports = { computeCurrentStreak, getYearWeek, getISOWeeksInYear };
+/**
+ * computeCurrentStreak zaehlt ab der letzten aktiven Woche rueckwaerts, nicht
+ * ab heute -- fuer die WERTUNG bleibt das so: Wer einmal vier Wochen am Stueck
+ * aktiv war, hat die Bedingung erfuellt, auch wenn es ein Jahr her ist. Als
+ * Fortschritt las sich derselbe Wert aber falsch: Am offenen Abzeichen stand
+ * „3/4" fuer eine Serie, die seit Monaten gerissen war, und die naechste
+ * aktive Woche zaehlte wieder bei 1.
+ *
+ * Deshalb hier 0, sobald die letzte aktive Woche AELTER ALS DIE VORWOCHE ist.
+ * Ist sie die Vorwoche, lebt die Serie noch -- in dieser Woche kann sie
+ * weiterlaufen. Eine kuenftig datierte Woche (ein schon verbuchtes Event der
+ * naechsten Woche) zaehlt wie die laufende.
+ *
+ * Die Vorwoche wird nach KALENDERTAGEN bestimmt (Tag minus 7), nicht nach
+ * 168 Stunden: In der Woche der Umstellung auf Sommerzeit laegen 168 Stunden
+ * vor Montag 0:30 Uhr schon in der Woche davor.
+ *
+ * @param {Array<Date|string|number>} dates - dieselbe Liste wie fuer die Wertung
+ * @param {Date} [jetzt] - Stichtag (fuer Tests)
+ * @returns {number}
+ */
+function angezeigteSerie(dates, jetzt = new Date()) {
+  const serie = computeCurrentStreak(dates);
+  if (serie === 0) return 0;
+
+  const neuesteWoche = (dates || [])
+    .map(d => getYearWeek(new Date(d)))
+    .filter(week => week && !week.includes('NaN'))
+    .sort()
+    .pop();
+  const vorwoche = getYearWeek(new Date(jetzt.getFullYear(), jetzt.getMonth(), jetzt.getDate() - 7));
+
+  // "YYYY-Www" sortiert als Text wie die Wochen selbst.
+  return neuesteWoche >= vorwoche ? serie : 0;
+}
+
+module.exports = { computeCurrentStreak, angezeigteSerie, getYearWeek, getISOWeeksInYear };

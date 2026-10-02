@@ -4,12 +4,13 @@ import { darfTermineVerwalten } from '../../../utils/terminRechte';
 import { kopiereTermin } from '../../../utils/terminVorbelegung';
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useAppLocation } from '../../../navigation/useAppLocation';
-import { IonPage, IonHeader, IonToolbar, IonTitle, IonContent, IonRefresher, IonRefresherContent, IonButtons, IonButton, IonIcon, IonSegment, IonSegmentButton, IonLabel, useIonModal, useIonActionSheet, useIonAlert, useIonRouter } from '@ionic/react';
+import { IonPage, IonContent, IonRefresher, IonRefresherContent, IonButton, IonIcon, IonSegment, IonSegmentButton, IonLabel, useIonModal, useIonActionSheet, useIonAlert, useIonRouter } from '@ionic/react';
 import type { ActionSheetButton } from '@ionic/react';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 // useIonRouter: Ionic 8 API - bei Ionic v9 ggf. auf useNavigate migrieren
 
 // useLocation für die Auswertung von ?segment=... (React Router v5 API)
-import { ICON_GESPERRT, ICON_HINZUFUEGEN_GEFUELLT } from '../../shared/icons';
+import { ICON_HINZUFUEGEN_GEFUELLT } from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
@@ -26,6 +27,9 @@ import TerminAbsagenModal from '../modals/TerminAbsagenModal';
 import { Event, Timeslot } from '../../../types/event';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { aktuelleTermine, zuVerbuchendeTermine, vergangeneTermine, istAbgesagt } from '../../shared';
+import { datumLang } from '../../../utils/dateUtils';
+import { useBadge } from '../../../contexts/BadgeContext';
+import SegmentZahl from '../../shared/SegmentZahl';
 
 /**
  * 409-Antwort beim Löschen eines Termins (events/verwaltung.js).
@@ -69,6 +73,7 @@ interface AdminEventsPageProps {
 
 const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, selectedEventId }) => {
   const { user, setSuccess, setError, isOnline } = useApp();
+  const { pendingEventsCount, pendingRequestsCount } = useBadge();
   const { pageRef, presentingElement } = useModalPage('admin-events');
   const router = useIonRouter();
   const routerLocation = useAppLocation();
@@ -169,9 +174,7 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
     get terminDatum() {
       const termin = absageTerminRef.current;
       if (!termin) return '';
-      return new Date(termin.event_date).toLocaleDateString('de-DE', {
-        weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric'
-      });
+      return datumLang(termin.event_date);
     },
     get konfiAnzahl() { return absageTerminRef.current?.registered_count || 0; },
     // Ein abgesagter Termin bedeutet: Grund bearbeiten, kein zweites Absagen.
@@ -292,7 +295,7 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
         // Show action sheet for series deletion
         const buttons: ActionSheetButton[] = [
           {
-            text: 'Nur diesen Termin löschen',
+            text: 'Nur dieses Event löschen',
             icon: 'trash-outline',
             handler: () => deleteSingleEvent(event)
           }
@@ -301,15 +304,15 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
         // ohnehin die ganze Serie gemeint ist
         if (followingEvents.length > 1 && followingEvents.length < seriesEvents.length + 1) {
           buttons.push({
-            text: `Diesen + alle folgenden löschen (${followingEvents.length} Termine)`,
+            text: `Dieses + alle folgenden löschen (${followingEvents.length} Events)`,
             icon: 'trash-outline',
             role: 'destructive',
-            handler: () => deleteSeriesEvents(followingEvents, 'Diesen und alle folgenden Termine')
+            handler: () => deleteSeriesEvents(followingEvents, 'dieses und alle folgenden')
           });
         }
         buttons.push(
           {
-            text: `Ganze Serie löschen (${seriesEvents.length + 1} Termine)`,
+            text: `Ganze Serie löschen (${seriesEvents.length + 1} Events)`,
             icon: 'warning-outline',
             role: 'destructive',
             handler: () => deleteSeriesEvents([...seriesEvents, event], 'die ganze Serie')
@@ -320,8 +323,8 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
           }
         );
         presentActionSheet({
-          header: `Serie-Event löschen`,
-          subHeader: `"${event.name}" ist Teil einer Serie mit ${seriesEvents.length + 1} Terminen.`,
+          header: 'Event einer Serie löschen',
+          subHeader: `"${event.name}" ist Teil einer Serie mit ${seriesEvents.length + 1} Events.`,
           buttons
         });
         return;
@@ -436,7 +439,7 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
     let nachDemSchliessen: (() => void) | null = null;
     presentAlert({
       header: 'Serie löschen',
-      message: `Wirklich ${label} mit ${seriesEvents.length} Terminen löschen?`,
+      message: `Wirklich ${label} löschen (${seriesEvents.length} Events)?`,
       buttons: [
         { text: 'Abbrechen', role: 'cancel' },
         {
@@ -464,7 +467,7 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
             if (fehler.length > 0) {
               const firstError = fehlerDaten(fehler[0].reason)?.error;
               setError(
-                `${fehler.length} von ${seriesEvents.length} Terminen konnten nicht gelöscht werden` +
+                `${fehler.length} von ${seriesEvents.length} Events konnten nicht gelöscht werden` +
                 (firstError ? `: ${firstError}` : '')
               );
             }
@@ -498,7 +501,7 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
     });
     presentAlert({
       header: 'Wirklich löschen?',
-      message: `${konflikte.length} Termin${konflikte.length === 1 ? '' : 'e'} der Serie ${konflikte.length === 1 ? 'ist' : 'sind'} nicht leer. Beim Löschen geht verloren: ${verluste}. Das lässt sich nicht rückgängig machen.`,
+      message: `${konflikte.length} Event${konflikte.length === 1 ? '' : 's'} der Serie ${konflikte.length === 1 ? 'ist' : 'sind'} nicht leer. Beim Löschen geht verloren: ${verluste}. Das lässt sich nicht rückgängig machen.`,
       buttons: [
         { text: 'Abbrechen', role: 'cancel' },
         {
@@ -514,7 +517,7 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
             if (failed.length > 0) {
               const firstError = fehlerDaten((failed[0] as PromiseRejectedResult).reason)?.error;
               setError(
-                `${failed.length} von ${konflikte.length} Terminen konnten nicht gelöscht werden` +
+                `${failed.length} von ${konflikte.length} Events konnten nicht gelöscht werden` +
                 (firstError ? `: ${firstError}` : '')
               );
             }
@@ -612,7 +615,7 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
       try {
         const res = await api.get(`/events/${event.id}/timeslots`);
         timeslots = res.data || [];
-      } catch (err) {
+      } catch {
         setError('Die Zeitfenster konnten nicht geladen werden — die Kopie hat keine.');
       }
     }
@@ -702,10 +705,10 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
           onIonChange={(e) => setMainSegment(e.detail.value as 'events' | 'antraege')}
         >
           <IonSegmentButton value="events">
-            <IonLabel>Events</IonLabel>
+            <IonLabel>Events<SegmentZahl anzahl={pendingEventsCount} label={pendingEventsCount === 1 ? 'Event wartet auf Verbuchung' : 'Events warten auf Verbuchung'} /></IonLabel>
           </IonSegmentButton>
           <IonSegmentButton value="antraege">
-            <IonLabel>Aktivitäten</IonLabel>
+            <IonLabel>Aktivitäten<SegmentZahl anzahl={pendingRequestsCount} label={pendingRequestsCount === 1 ? 'Antrag wartet auf Entscheidung' : 'Anträge warten auf Entscheidung'} /></IonLabel>
           </IonSegmentButton>
         </IonSegment>
       </div>
@@ -715,26 +718,16 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonTitle>{pageTitle}</IonTitle>
-          <IonButtons slot="end">
-            {!isAntraege && canCreate && (
-              <IonButton aria-label="Neues Event anlegen" onClick={handleAddEventClick}>
-                <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
-              </IonButton>
-            )}
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile
+        titel={pageTitle}
+        rechts={!isAntraege && canCreate ? (
+          <IonButton aria-label="Neues Event anlegen" onClick={handleAddEventClick}>
+            <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
+          </IonButton>
+        ) : undefined}
+      />
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">
-              {pageTitle}
-            </IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel={pageTitle} />
 
         <IonRefresher slot="fixed" onIonRefresh={async (e) => {
           if (isAntraege) {
@@ -757,6 +750,7 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
             <ActivityRequestsView
               requests={requests || []}
               ohneJahrgang={ohneJahrgang}
+              offeneAntraege={pendingRequestsCount}
               onSelectRequest={handleSelectRequest}
               onResetRequest={handleResetRequest}
               headerSlot={mainSegmentSlot}
@@ -781,6 +775,7 @@ const AdminEventsPage: React.FC<AdminEventsPageProps> = ({ onSelectEvent, select
             onKopieren={canCreate ? handleKopiereEvent : undefined}
             activeTab={activeTab}
             onTabChange={setActiveTab}
+            wartendVerbuchen={pendingEventsCount}
             eventCounts={{
               aktuell: applySearch(filterByJahrgang(getAktuellEvents())).length,
               verbuchen: applySearch(filterByJahrgang(getVerbuchenEvents())).length,

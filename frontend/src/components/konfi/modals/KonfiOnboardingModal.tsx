@@ -53,7 +53,7 @@ export const SLIDES: OnboardingSlide[] = [
     color: 'var(--app-color-events)',
     rgb: '--app-color-events-rgb',
     title: 'Mitmachen: Events',
-    text: 'Unten in der Tab-Leiste findest du "Mitmachen" — mit zwei Reitern: Events und Aktivitäten. Events sind Termine, zu denen du dich vorher anmeldest — bis hin zu deiner Konfirmation. Bei manchen wählst du einen Platz oder ein Zeitfenster: einfach tippen und buchen.',
+    text: 'Unten in der Tab-Leiste findest du "Mitmachen" — mit zwei Reitern: Events und Aktivitäten. Zu Events meldest du dich vorher an — bis hin zu deiner Konfirmation. Bei manchen wählst du einen Platz oder ein Zeitfenster: einfach tippen und buchen.',
   },
   {
     icon: ICON_TEXTDOKUMENT,
@@ -67,7 +67,7 @@ export const SLIDES: OnboardingSlide[] = [
     color: 'var(--app-color-badges)',
     rgb: '--app-color-badges-rgb',
     title: 'Deine Badges',
-    text: 'Für deine Aktivitäten bekommst du Abzeichen. Sammle Badges und steig im Level auf — je mehr du machst, desto mehr schaltest du frei.',
+    text: 'Für deine Aktivitäten bekommst du Badges. Sammle sie und steig im Level auf — je mehr du machst, desto mehr schaltest du frei.',
   },
   {
     icon: ICON_CHALLENGE,

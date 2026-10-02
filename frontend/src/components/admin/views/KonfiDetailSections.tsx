@@ -37,6 +37,10 @@ import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 import type { UseIonModalResult } from '@ionic/react';
 import type { AxiosInstance } from 'axios';
 import type { BonusEintrag, EventPunkteEintrag } from '../../../types/user';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { punkteAnzeigeDatum, nachAnzeigeDatumAbsteigend } from '../../../utils/punkteDatum';
+import { datumKurz, datumLang, uhrzeit } from '../../../utils/dateUtils';
+import { punkteText } from '../../../utils/punkteText';
 
 /**
  * Die "present"-Funktion aus useIonModal — erste Haelfte des Rueckgabepaars.
@@ -232,7 +236,7 @@ export const KonfiHeaderCard = React.memo<KonfiHeaderCardProps>(({
           fontSize: 'var(--app-text-hinweis)'
         }}
       >
-        Teamer:in seit {new Date(currentKonfi.teamer_since).toLocaleDateString('de-DE', { month: 'long', year: 'numeric' })}
+        Teamer:in seit {datumKurz(currentKonfi.teamer_since)}
       </div>
     )}
 
@@ -381,7 +385,7 @@ export const BonusSection = React.memo<BonusSectionProps>(({
                             </span>
                             <span className="app-list-item__meta-item">
                               <IonIcon icon={ICON_PERSON} className="app-icon-color--konfis" />
-                              {bonus.admin_name || 'Admin'}
+                              {bonus.admin_name || 'Leitung'}
                             </span>
                           </div>
                         </div>
@@ -461,9 +465,9 @@ export const KonfispruchSection = React.memo<KonfispruchSectionProps>(({ konfspr
             <div className="app-info-row__label">Konfirmationstermin</div>
             {confirmationDate ? (
               <div className="app-info-row__value">
-                {new Date(confirmationDate).toLocaleDateString('de-DE', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+                {datumLang(confirmationDate)}
                 {' · '}
-                {new Date(confirmationDate).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr
+                {uhrzeit(confirmationDate)} Uhr
                 {confirmationLocation && ` · ${confirmationLocation}`}
               </div>
             ) : (
@@ -494,6 +498,8 @@ export const KonfispruchSection = React.memo<KonfispruchSectionProps>(({ konfspr
             onClick={onOpenMatrix}
             style={onOpenMatrix ? { cursor: 'pointer' } : undefined}
             role={onOpenMatrix ? 'button' : undefined}
+            tabIndex={onOpenMatrix ? 0 : undefined}
+            onKeyDown={onOpenMatrix ? tastaturKlick : undefined}
           >
             <IonIcon icon={ICON_ZUSAGE_GEFUELLT} className="app-info-row__icon app-icon-color--konfis" />
             <div style={{ flex: 1 }}>
@@ -542,7 +548,7 @@ export const EventPointsSection = React.memo<EventPointsSectionProps>(({
           />
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {eventPoints.map((eventPoint, index) => {
+            {nachAnzeigeDatumAbsteigend(eventPoints).map((eventPoint, index) => {
               const isEventTypeDisabled = (eventPoint.point_type === 'gottesdienst' && currentKonfi?.gottesdienst_enabled === false)
                 || (eventPoint.point_type === 'gemeinde' && currentKonfi?.gemeinde_enabled === false);
               return (
@@ -580,15 +586,11 @@ export const EventPointsSection = React.memo<EventPointsSectionProps>(({
                       <div className="app-list-item__meta">
                         <span className="app-list-item__meta-item">
                           <IonIcon icon={ICON_TERMIN_GEFUELLT} className="app-icon-color--events" />
-                          {eventPoint.awarded_date &&
-                            new Date(eventPoint.awarded_date).toLocaleDateString('de-DE', {
-                              day: '2-digit',
-                              month: '2-digit'
-                            })}
+                          {datumKurz(punkteAnzeigeDatum(eventPoint), { ohneJahr: true })}
                         </span>
                         <span className="app-list-item__meta-item">
                           <IonIcon icon={ICON_PERSON} className="app-icon-color--konfis" />
-                          {eventPoint.admin_name || 'Admin'}
+                          {eventPoint.admin_name || 'Leitung'}
                         </span>
                       </div>
                     </div>
@@ -637,7 +639,7 @@ export const TeamerEventsSection = React.memo<TeamerEventsSectionProps>(({
           <EmptyState
             icon={ICON_TERMIN_GEFUELLT}
             title="Keine Events"
-            message="Noch bei keinem Termin dabei gewesen"
+            message="Noch bei keinem Event dabei gewesen"
             iconColor="var(--app-color-events)"
           />
         ) : (
@@ -667,6 +669,10 @@ export const TeamerEventsSection = React.memo<TeamerEventsSectionProps>(({
                         padding: 'var(--app-abstand-mini) var(--app-abstand-kompakt)'
                       }}
                       title={event.booking_status === 'confirmed' ? 'Anwesend'
+                        : event.booking_status === 'absent' ? 'Abwesend'
+                        : 'Ausstehend'}
+                      role="img"
+                      aria-label={event.booking_status === 'confirmed' ? 'Anwesend'
                         : event.booking_status === 'absent' ? 'Abwesend'
                         : 'Ausstehend'}
                     >
@@ -821,7 +827,7 @@ export const ActivitiesSection = React.memo<ActivitiesSectionProps>(({
                           <div
                             className="app-list-item__title app-list-item__title--badge-space"
                             style={{
-                              color: activity.isPending ? 'var(--app-color-badges)' : undefined,
+                              color: activity.isPending ? 'var(--app-text-badges)' : undefined,
                               display: 'flex',
                               alignItems: 'center',
                               gap: 'var(--app-abstand-kompakt)'
@@ -842,7 +848,7 @@ export const ActivitiesSection = React.memo<ActivitiesSectionProps>(({
                             </span>
                             <span className="app-list-item__meta-item">
                               <IonIcon icon={ICON_PERSON} className="app-icon-color--konfis" />
-                              {activity.admin || activity.admin_name || 'Admin'}
+                              {activity.admin || activity.admin_name || 'Leitung'}
                             </span>
                           </div>
                         </div>
@@ -944,6 +950,8 @@ export const CertificatesSection = React.memo<CertificatesSectionProps>(({
                           className="app-corner-badge"
                           style={{ backgroundColor: 'var(--app-color-danger)', padding: 'var(--app-abstand-mini) var(--app-abstand-kompakt)' }}
                           title="Abgelaufen"
+                          role="img"
+                          aria-label="Abgelaufen"
                         >
                           <IonIcon
                             icon={ICON_WARNHINWEIS_GEFUELLT}
@@ -1047,8 +1055,8 @@ export const TeamerSinceSection = React.memo<TeamerSinceSectionProps>(({
       </IonCardContent>
     </IonCard>
 
-    <IonModal keepContentsMounted={true}>
-      <IonDatetime
+    <IonModal aria-label="Teamer:in seit: Datum wählen" keepContentsMounted={true}>
+      <IonDatetime aria-label="Teamer:in seit"
         id="teamer-since-date"
         presentation="date"
         firstDayOfWeek={1}
@@ -1074,7 +1082,7 @@ export const TeamerSinceSection = React.memo<TeamerSinceSectionProps>(({
 
 interface KonfiHistorySectionProps {
   konfiHistory: {
-    history: Array<{ id: number; title: string; points: number; category: string; date: string; source_type: string }>;
+    history: Array<{ id: number; title: string; points: number; category: string; date: string; source_type: string; event_date?: string | null }>;
     totals: { gottesdienst: number; gemeinde: number; total: number };
   };
   formatDate: (dateString: string) => string;
@@ -1089,7 +1097,9 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
   // unvollstaendige Antwort), wirft ein Zugriff hier den ganzen Render — und
   // die ErrorBoundary leert dann Auth + Cache, was sich als "ploetzlich
   // ausgeloggt" zeigt (User-Hinweis 11.08.).
-  const history = Array.isArray(konfiHistory?.history) ? konfiHistory.history : [];
+  // Geordnet nach dem angezeigten Datum (bei Events der Termin,
+  // utils/punkteDatum.ts) -- der Server sortiert nach Verbuchung.
+  const history = Array.isArray(konfiHistory?.history) ? nachAnzeigeDatumAbsteigend(konfiHistory.history) : [];
   const totals = konfiHistory?.totals || { gottesdienst: 0, gemeinde: 0, total: 0 };
   const visibleCount = expanded ? history.length : 3;
   return (
@@ -1098,7 +1108,7 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
       <div className="app-section-icon app-section-icon--purple">
         <IonIcon icon={ICON_UHRZEIT} />
       </div>
-      <IonLabel>Konfi-Historie ({totals.total} Punkte)</IonLabel>
+      <IonLabel>Konfi-Historie ({punkteText(totals.total)})</IonLabel>
     </IonListHeader>
     <IonCard className="app-card">
       <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
@@ -1112,7 +1122,7 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
               padding: 'var(--app-abstand-schmal)',
               textAlign: 'center'
             }}>
-              <div style={{ fontSize: 'var(--app-text-untertitel)', fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-color-gottesdienst)' }}>{totals.gottesdienst}</div>
+              <div style={{ fontSize: 'var(--app-text-untertitel)', fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-text-gottesdienst)' }}>{totals.gottesdienst}</div>
               <div style={{ fontSize: 'var(--app-text-mini)', color: 'var(--app-color-neutral)', fontWeight: 'var(--app-schrift-halbfett)' }}>GOTTESDIENST</div>
             </div>
           )}
@@ -1124,7 +1134,7 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
               padding: 'var(--app-abstand-schmal)',
               textAlign: 'center'
             }}>
-              <div style={{ fontSize: 'var(--app-text-untertitel)', fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-color-gemeinde)' }}>{totals.gemeinde}</div>
+              <div style={{ fontSize: 'var(--app-text-untertitel)', fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-text-gemeinde)' }}>{totals.gemeinde}</div>
               <div style={{ fontSize: 'var(--app-text-mini)', color: 'var(--app-color-neutral)', fontWeight: 'var(--app-schrift-halbfett)' }}>GEMEINDE</div>
             </div>
           )}
@@ -1135,7 +1145,7 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
             padding: 'var(--app-abstand-schmal)',
             textAlign: 'center'
           }}>
-            <div style={{ fontSize: 'var(--app-text-untertitel)', fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-color-konfis)' }}>{totals.total}</div>
+            <div style={{ fontSize: 'var(--app-text-untertitel)', fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-text-konfis)' }}>{totals.total}</div>
             <div style={{ fontSize: 'var(--app-text-mini)', color: 'var(--app-color-neutral)', fontWeight: 'var(--app-schrift-halbfett)' }}>GESAMT</div>
           </div>
         </div>
@@ -1173,6 +1183,8 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
                           className="app-corner-badge"
                           style={{ backgroundColor: typeBadgeColor, padding: 'var(--app-abstand-mini) var(--app-abstand-kompakt)' }}
                           title={typeBadgeLabel}
+                          role="img"
+                          aria-label={typeBadgeLabel}
                         >
                           <IonIcon
                             icon={entry.source_type === 'bonus' ? ICON_BONUS : ICON_TERMIN}
@@ -1194,7 +1206,7 @@ export const KonfiHistorySection = React.memo<KonfiHistorySectionProps>(({
                       <div className="app-list-item__content">
                         <div className={`app-list-item__title ${typeBadgeColor ? 'app-list-item__title--punkte-badge-doppelt' : 'app-list-item__title--punkte-badge'}`}>{entry.title}</div>
                         <div className="app-list-item__meta">
-                          <span className="app-list-item__meta-item">{formatDate(entry.date)}</span>
+                          <span className="app-list-item__meta-item">{formatDate(punkteAnzeigeDatum(entry))}</span>
                         </div>
                       </div>
                     </div>
@@ -1256,7 +1268,7 @@ export const PromoteSection = React.memo<PromoteSectionProps>(({
         <div className="app-event-detail__add-button-wrapper">
           <IonButton
             expand="block"
-            style={{ '--background': 'var(--app-color-konfis)', '--background-hover': 'var(--app-color-konfis-dunkel)' }}
+            style={{ '--background': 'var(--app-color-konfis)', '--background-hover': 'var(--app-color-konfis-dunkel)', '--color': 'var(--app-weiss)' }}
             disabled={!isOnline}
             onClick={handlePromoteToTeamer}
           >

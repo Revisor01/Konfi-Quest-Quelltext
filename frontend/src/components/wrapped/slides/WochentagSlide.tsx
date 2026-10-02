@@ -22,7 +22,7 @@ const WochentagSlide: React.FC<WochentagSlideProps> = ({ isActive, wochentag }) 
       <span style={{ display: 'block' }}>{wochentag.name}.</span>
     </div>
     <div className="kat-nachsatz">
-      {wochentag.anzahl} von {wochentag.gesamt} Terminen lagen an einem {wochentag.name}.
+      {wochentag.anzahl} von {wochentag.gesamt} Events lagen an einem {wochentag.name}.
     </div>
   </SlideBase>
 );

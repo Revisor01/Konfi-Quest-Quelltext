@@ -35,8 +35,8 @@ export const SLIDES: OnboardingSlide[] = [
     icon: ICON_TERMIN_GEFUELLT,
     color: 'var(--app-color-events)',
     rgb: '--app-color-events-rgb',
-    title: 'Klarheit bei Terminen',
-    text: 'Fällt ein Termin aus, steht jetzt dabei, warum. Findet er doch statt, bekommst du Bescheid und stehst wieder da, wo du vorher standst. Abgesagte Termine stehen an ihrem Datum, durchgestrichen.',
+    title: 'Klarheit bei Events',
+    text: 'Fällt ein Event aus, steht jetzt dabei, warum. Findet es doch statt, bekommst du Bescheid und stehst wieder da, wo du vorher standst. Abgesagte Events stehen an ihrem Datum, durchgestrichen.',
   },
   {
     icon: ICON_ABZEICHEN,

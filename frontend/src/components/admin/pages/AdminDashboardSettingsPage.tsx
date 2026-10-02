@@ -1,14 +1,9 @@
-import { ICON_APPS, ICON_ZURUECK } from '../../shared/icons';
+import { ICON_APPS } from '../../shared/icons';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import React, { useState } from 'react';
-import { FARBEN } from '../../../theme/colors';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
-  IonButtons,
-  IonButton,
   IonIcon,
   IonCard,
   IonCardContent,
@@ -34,6 +29,7 @@ import { SectionHeader } from '../../shared';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { safeUUID } from '../../../utils/uuid';
+import { sendenOderEinreihen } from '../../../utils/sendenOderEinreihen';
 import {
   mergeSectionOrder,
   DEFAULT_KONFI_SECTION_ORDER,
@@ -134,20 +130,23 @@ const AdminDashboardSettingsPage: React.FC = () => {
   const [konfiOrder, setKonfiOrder] = useState<string[]>(DEFAULT_KONFI_ORDER);
   const [teamerOrder, setTeamerOrder] = useState<string[]>(DEFAULT_TEAMER_ORDER);
 
+  // Einstellungen sind PUT: Offline und auch bei einem Netzabbruch im
+  // Online-Zweig gehen sie in die Warteschlange.
   const handleSaveOrder = async (key: string, value: string) => {
-    if (!networkMonitor.isOnline) {
-      writeQueue.enqueue({
-        method: 'PUT',
-        url: '/settings',
-        body: { [key]: value },
-        maxRetries: 3,
-        hasFileUpload: false,
-        metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Dashboard-Reihenfolge' },
-      });
-      return;
-    }
     try {
-      await api.put('/settings', { [key]: value });
+      await sendenOderEinreihen({
+        online: networkMonitor.isOnline,
+        methode: 'PUT',
+        senden: () => api.put('/settings', { [key]: value }),
+        einreihen: () => writeQueue.enqueue({
+          method: 'PUT',
+          url: '/settings',
+          body: { [key]: value },
+          maxRetries: 3,
+          hasFileUpload: false,
+          metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Dashboard-Reihenfolge' },
+        }),
+      });
     } catch {
       setError('Fehler beim Speichern der Reihenfolge');
     }
@@ -191,20 +190,20 @@ const AdminDashboardSettingsPage: React.FC = () => {
     // Optimistic UI zuerst
     setDashboardConfig(prev => ({ ...prev, [key]: value }));
 
-    if (!networkMonitor.isOnline) {
-      writeQueue.enqueue({
-        method: 'PUT',
-        url: '/settings',
-        body: { [`dashboard_${key}`]: value },
-        maxRetries: 3,
-        hasFileUpload: false,
-        metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Dashboard-Einstellung' },
-      });
-      return;
-    }
-
     try {
-      await api.put('/settings', { [`dashboard_${key}`]: value });
+      await sendenOderEinreihen({
+        online: networkMonitor.isOnline,
+        methode: 'PUT',
+        senden: () => api.put('/settings', { [`dashboard_${key}`]: value }),
+        einreihen: () => writeQueue.enqueue({
+          method: 'PUT',
+          url: '/settings',
+          body: { [`dashboard_${key}`]: value },
+          maxRetries: 3,
+          hasFileUpload: false,
+          metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Dashboard-Einstellung' },
+        }),
+      });
     } catch {
       // Revert bei Fehler
       setDashboardConfig(prev => ({ ...prev, [key]: !value }));
@@ -216,20 +215,20 @@ const AdminDashboardSettingsPage: React.FC = () => {
     // Optimistic UI zuerst
     setTeamerDashboardConfig(prev => ({ ...prev, [key]: value }));
 
-    if (!networkMonitor.isOnline) {
-      writeQueue.enqueue({
-        method: 'PUT',
-        url: '/settings',
-        body: { [`teamer_dashboard_${key}`]: value },
-        maxRetries: 3,
-        hasFileUpload: false,
-        metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Teamer-Dashboard-Einstellung' },
-      });
-      return;
-    }
-
     try {
-      await api.put('/settings', { [`teamer_dashboard_${key}`]: value });
+      await sendenOderEinreihen({
+        online: networkMonitor.isOnline,
+        methode: 'PUT',
+        senden: () => api.put('/settings', { [`teamer_dashboard_${key}`]: value }),
+        einreihen: () => writeQueue.enqueue({
+          method: 'PUT',
+          url: '/settings',
+          body: { [`teamer_dashboard_${key}`]: value },
+          maxRetries: 3,
+          hasFileUpload: false,
+          metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Teamer-Dashboard-Einstellung' },
+        }),
+      });
     } catch {
       // Revert bei Fehler
       setTeamerDashboardConfig(prev => ({ ...prev, [key]: !value }));
@@ -240,11 +239,7 @@ const AdminDashboardSettingsPage: React.FC = () => {
   if (loading) {
     return (
       <IonPage>
-        <IonHeader>
-          <IonToolbar>
-            <IonTitle>Dashboard</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeile titel="Dashboard" onZurueck={() => window.history.back()} gemeindeUmschalter={false} />
         <IonContent>
           <LoadingSpinner fullScreen message="Einstellungen werden geladen..." />
         </IonContent>
@@ -254,23 +249,10 @@ const AdminDashboardSettingsPage: React.FC = () => {
 
   return (
     <IonPage>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonButtons slot="start">
-            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-              <IonIcon icon={ICON_ZURUECK} />
-            </IonButton>
-          </IonButtons>
-          <IonTitle>Dashboard</IonTitle>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile titel="Dashboard" onZurueck={() => window.history.back()} gemeindeUmschalter={false} />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Dashboard</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Dashboard" />
 
         <IonRefresher slot="fixed" onIonRefresh={async (e) => {
           await refreshSettings();
@@ -283,7 +265,7 @@ const AdminDashboardSettingsPage: React.FC = () => {
           title="Dashboard"
           subtitle="Sichtbare Bereiche konfigurieren"
           icon={ICON_APPS}
-          colors={{ primary: FARBEN.users, secondary: FARBEN.usersDunkel }}
+          colors={{ primary: 'var(--app-color-users)', secondary: 'var(--app-color-users-dunkel)' }}
           stats={[
             // Die Kacheln entsprechen den beiden Reitern und schalten dorthin.
             { value: Object.values(dashboardConfig).filter(Boolean).length, label: 'Konfi', onClick: () => setDashboardSegment('konfi'), active: dashboardSegment === 'konfi' },
@@ -332,7 +314,7 @@ const AdminDashboardSettingsPage: React.FC = () => {
                       >
                         <IonReorder slot="start" />
                         <IonLabel>{KONFI_LABELS[key]}</IonLabel>
-                        <IonToggle
+                        <IonToggle aria-label={KONFI_LABELS[key]}
                           slot="end"
                           className="app-toggle--users"
                           checked={dashboardConfig[`show_${key}` as keyof DashboardConfig]}
@@ -374,7 +356,7 @@ const AdminDashboardSettingsPage: React.FC = () => {
                       >
                         <IonReorder slot="start" />
                         <IonLabel>{TEAMER_LABELS[key]}</IonLabel>
-                        <IonToggle
+                        <IonToggle aria-label={TEAMER_LABELS[key]}
                           slot="end"
                           className="app-toggle--users"
                           checked={teamerDashboardConfig[`show_${key}` as keyof TeamerDashboardConfig]}

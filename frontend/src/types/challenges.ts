@@ -163,6 +163,11 @@ export interface ChallengeMark {
   earned_at?: string | null;
   /** Beschreibung der Challenge, fürs Popover. */
   description?: string | null;
+  /**
+   * true = die Challenge gibt es nicht mehr (mit ihrem Jahrgang gelöscht),
+   * der Stempel wurde vorher aufbewahrt (utils/bewahrteStempel.ts).
+   */
+  bewahrt?: boolean;
 }
 
 /**

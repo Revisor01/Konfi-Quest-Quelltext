@@ -53,4 +53,35 @@ function pruefeAnmeldeschluss(registrationClosesAt, eventDate, jetzt = new Date(
   return 'Der Anmeldeschluss liegt in der Vergangenheit — so wäre die Anmeldung von Anfang an geschlossen.';
 }
 
-module.exports = { validateTeamerQuota, pruefeAnmeldeschluss };
+/**
+ * Ein Ende, das vor dem Beginn liegt.
+ *
+ * DER FALL: Wer beim Ende versehentlich einen frueheren Tag waehlt, speicherte
+ * ohne Warnung. Die Leitungsliste sortiert den Termin dann sofort unter
+ * "Vergangen" (sie rechnet mit dem Ende), die Konfis sehen ihn als vorbei --
+ * waehrend der Anmeldeschluss vom Beginn aus rechnet und der Termin zugleich
+ * "offen" wirkt.
+ *
+ * ERLAUBT BLEIBEN: gar kein Ende (das Feld ist optional) und ein Ende, das
+ * GENAU auf dem Beginn liegt -- das ist kein Widerspruch, nur ein Termin ohne
+ * Dauer. Ein Wert, der sich nicht als Datum lesen laesst, ist nicht Sache
+ * dieser Pruefung.
+ *
+ * EIN ORT fuer POST /, PUT /:id (verwaltung.js) und POST /series (serien.js),
+ * aus demselben Grund wie pruefeAnmeldeschluss oben.
+ *
+ * @returns {{error: string, error_code: string}|null} Antwort-Rumpf fuer 400,
+ *   oder null, wenn alles stimmig ist
+ */
+const ENDE_VOR_BEGINN = 'Das Ende liegt vor dem Beginn';
+
+function pruefeEndeNachBeginn(eventDate, eventEndTime) {
+  if (!eventDate || !eventEndTime) return null;
+  const beginn = new Date(eventDate);
+  const ende = new Date(eventEndTime);
+  if (Number.isNaN(beginn.getTime()) || Number.isNaN(ende.getTime())) return null;
+  if (ende >= beginn) return null;
+  return { error: ENDE_VOR_BEGINN, error_code: 'ende_vor_beginn' };
+}
+
+module.exports = { validateTeamerQuota, pruefeAnmeldeschluss, pruefeEndeNachBeginn, ENDE_VOR_BEGINN };

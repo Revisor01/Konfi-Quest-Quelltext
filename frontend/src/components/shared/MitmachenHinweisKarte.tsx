@@ -1,6 +1,7 @@
 import React from 'react';
 import { IonIcon } from '@ionic/react';
-import { ICON_FUNKELN, ICON_SCHLIESSEN, ICON_WEITER } from './icons';
+import { ICON_FUNKELN, ICON_SCHLIESSEN } from './icons';
+import { tastaturKlick } from '../../utils/tastatur';
 
 interface MitmachenHinweisKarteProps {
   /** Öffnet die Erklärung zum Mitmachen-Tab. */
@@ -14,24 +15,20 @@ interface MitmachenHinweisKarteProps {
 }
 
 // Mit onDismiss (Startseite): X blendet dauerhaft aus.
-// Ohne onDismiss (Profil): dauerhaft erreichbar, mit Pfeil statt X.
+// Ohne onDismiss (Profil): dauerhaft erreichbar, ohne X.
+//
+// Kein Knopf im Knopf: Karte role="presentation", Knopf ist der Text, das X
+// steht daneben -- Begründung in UpdateHinweisKarte.tsx.
 const MitmachenHinweisKarte: React.FC<MitmachenHinweisKarteProps> = ({ onOpen, onDismiss, style }) => (
-  <div
-    className="app-whatsnew app-whatsnew--mitmachen"
-    role="button"
-    tabIndex={0}
-    style={style}
-    aria-label="Events und Aktivitäten: So funktioniert der Mitmachen-Tab"
-    onClick={onOpen}
-    onKeyDown={(e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        onOpen();
-      }
-    }}
-  >
+  <div className="app-whatsnew app-whatsnew--mitmachen" role="presentation" style={style} onClick={onOpen}>
     <IonIcon icon={ICON_FUNKELN} className="app-whatsnew__icon" aria-hidden="true" />
-    <div className="app-whatsnew__text">
+    <div
+      className="app-whatsnew__text"
+      role="button"
+      tabIndex={0}
+      aria-label="Events und Aktivitäten: So funktioniert der Mitmachen-Tab"
+      onKeyDown={tastaturKlick}
+    >
       <span className="app-whatsnew__title">Events und Aktivitäten</span>
       <span className="app-whatsnew__sub">
         Beides steht jetzt im Mitmachen-Tab — hier tippen für den Überblick.
@@ -49,9 +46,7 @@ const MitmachenHinweisKarte: React.FC<MitmachenHinweisKarteProps> = ({ onOpen, o
       >
         <IonIcon icon={ICON_SCHLIESSEN} aria-hidden="true" />
       </button>
-    ) : (
-      <IonIcon icon={ICON_WEITER} className="app-whatsnew__chevron" aria-hidden="true" />
-    )}
+    ) : null}
   </div>
 );
 

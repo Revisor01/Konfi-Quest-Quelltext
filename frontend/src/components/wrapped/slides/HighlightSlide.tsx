@@ -42,7 +42,7 @@ const VARIANTEN: Record<string, Array<{ label: string; hero: string; sub: string
   ],
   verlaesslich: [
     { label: 'Zugesagt und gekommen', hero: 'Fels in der Brandung', sub: 'Anmeldungen — und keine einzige Absage' },
-    { label: 'Zugesagt ist zugesagt', hero: 'Verlässlich!', sub: 'Termine gebucht, alle gehalten' },
+    { label: 'Zugesagt ist zugesagt', hero: 'Verlässlich!', sub: 'Events gebucht, alle gehalten' },
     { label: 'Man konnte auf dich zählen', hero: 'Immer da', sub: 'Anmeldungen ohne eine Absage' },
   ],
 };

@@ -1,4 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- Grund des App-Symbols, gemessen am iOS-Symbol (Mittel aller
+         Hintergrundpixel: 34 / 26,6 / 61,9). Der Vordergrund traegt nur das
+         Motiv mit durchsichtigem Rand; diese Farbe fuellt den Rest der
+         108 dp. Weiss aus der Capacitor-Vorlage blitzte beim Verschieben der
+         Ebenen (Parallaxe, Startanimation) am Rand durch. -->
+    <color name="ic_launcher_background">#221B3E</color>
 </resources>

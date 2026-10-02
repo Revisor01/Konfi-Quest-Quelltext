@@ -21,7 +21,7 @@ function spruchFuer(verdient: number, gesamt: number): { auge: string; slogan: s
   // 1) Alle -- die Ausnahme
   if (gesamt > 0 && verdient >= gesamt) {
     return {
-      auge: 'Deine Abzeichen',
+      auge: 'Deine Badges',
       slogan: ['Alle.', 'Wirklich', 'alle.'],
       nachsatz: 'Da geht nichts mehr — du hast jedes eingesammelt.'
     };
@@ -29,7 +29,7 @@ function spruchFuer(verdient: number, gesamt: number): { auge: string; slogan: s
   // 2) Sehr viele
   if (verdient >= 15) {
     return {
-      auge: 'Deine Abzeichen',
+      auge: 'Deine Badges',
       slogan: ['Die Wand', 'wird', 'langsam', 'voll.'],
       nachsatz: `${verdient} Stück — das sammelt nicht jede.`
     };
@@ -37,7 +37,7 @@ function spruchFuer(verdient: number, gesamt: number): { auge: string; slogan: s
   // 3) Viele
   if (verdient >= 8) {
     return {
-      auge: 'Deine Abzeichen',
+      auge: 'Deine Badges',
       slogan: ['Deine', 'Sammlung', 'kann sich', 'sehen lassen.'],
       nachsatz: `${verdient} Stück hast du dir verdient.`
     };
@@ -45,21 +45,21 @@ function spruchFuer(verdient: number, gesamt: number): { auge: string; slogan: s
   // 4) Einige
   if (verdient >= 3) {
     return {
-      auge: 'Deine Abzeichen',
+      auge: 'Deine Badges',
       slogan: ['Gesammelt', 'wird', 'fleißig.'],
-      nachsatz: `${verdient} Abzeichen tragen deinen Namen.`
+      nachsatz: `${verdient} Badges tragen deinen Namen.`
     };
   }
   // 5) Die ersten
   if (verdient >= 1) {
     return {
-      auge: verdient === 1 ? 'Dein Abzeichen' : 'Deine Abzeichen',
+      auge: verdient === 1 ? 'Dein Badge' : 'Deine Badges',
       slogan: ['Das erste', 'ist das', 'schönste.'],
       nachsatz: verdient === 1 ? 'Eins hast du — und das zählt.' : `${verdient} hast du schon.`
     };
   }
   return {
-    auge: 'Deine Abzeichen',
+    auge: 'Deine Badges',
     slogan: ['Das erste', 'wartet', 'auf dich.'],
     nachsatz: 'Es kommt von ganz allein.'
   };

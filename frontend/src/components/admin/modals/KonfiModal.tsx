@@ -30,6 +30,7 @@ import {
 } from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import type { KonfiFormDaten } from '../../../types/user';
+import { tastaturKlick } from '../../../utils/tastatur';
 
 interface Jahrgang {
   id: number;
@@ -133,7 +134,7 @@ const KonfiModal: React.FC<KonfiModalProps> = ({ jahrgaenge, onClose, onSave, di
             </IonButton>
           </IonButtons>
           <IonButtons slot="end">
-            <IonButton aria-label={bearbeiten ? "Aenderungen speichern" : "Konfi speichern"} onClick={handleSave} disabled={!isValid || isSubmitting || !isOnline} className="app-modal-submit-btn app-modal-submit-btn--konfi">
+            <IonButton aria-label={bearbeiten ? "Änderungen speichern" : "Konfi speichern"} onClick={handleSave} disabled={!isValid || isSubmitting || !isOnline} className="app-modal-submit-btn app-modal-submit-btn--konfi">
               {!isOnline ? <><IonIcon icon={ICON_OFFLINE} /> Du bist offline</> : isSubmitting ? <IonSpinner name="crescent" /> : <IonIcon icon={ICON_HAKEN} />}
             </IonButton>
           </IonButtons>
@@ -154,7 +155,7 @@ const KonfiModal: React.FC<KonfiModalProps> = ({ jahrgaenge, onClose, onSave, di
               <IonList style={{ background: 'transparent' }}>
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Name *</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Name" aria-required="true"
                     value={name}
                     onIonInput={(e) => setName(e.detail.value!)}
                     placeholder="Vor- und Nachname"
@@ -191,7 +192,7 @@ const KonfiModal: React.FC<KonfiModalProps> = ({ jahrgaenge, onClose, onSave, di
                     const isSelected = jahrgangId === jg.id;
 
                     return (
-                      <div
+                      <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-pressed={isSelected}
                         key={jg.id}
                         className={`app-list-item app-list-item--purple${isSelected ? ' app-list-item--selected' : ''}`}
                         onClick={() => !isSubmitting && setJahrgangId(jg.id)}
@@ -209,6 +210,8 @@ const KonfiModal: React.FC<KonfiModalProps> = ({ jahrgaenge, onClose, onSave, di
                               className="app-corner-badge"
                               style={{ backgroundColor: 'var(--app-color-konfis)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
                               title="Ausgewählt"
+                              role="img"
+                              aria-label="Ausgewählt"
                             >
                               <IonIcon icon={ICON_HAKEN_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                             </div>
@@ -246,14 +249,14 @@ const KonfiModal: React.FC<KonfiModalProps> = ({ jahrgaenge, onClose, onSave, di
                   Es gelten die Regeln des neuen Jahrgangs:
                 </p>
                 <ul style={{ margin: 0, paddingLeft: 'var(--app-abstand-gross)', fontSize: 'var(--app-text-basis)', lineHeight: '1.6' }}>
-                  <li>Anmeldungen zu künftigen Terminen des alten Jahrgangs fallen weg.</li>
-                  <li>Pflichttermine des neuen Jahrgangs kommen dazu.</li>
+                  <li>Anmeldungen zu künftigen Events des alten Jahrgangs fallen weg.</li>
+                  <li>Pflicht-Events des neuen Jahrgangs kommen dazu.</li>
                   <li>Der Jahrgangs-Chat wechselt mit.</li>
                   <li>Der Jahresrückblick erscheint erst wieder, wenn der neue
                       Jahrgang freigegeben ist.</li>
                 </ul>
                 <p style={{ margin: 'var(--app-abstand-schmal) 0 0', fontSize: 'var(--app-text-sekundaer)', lineHeight: '1.5', opacity: 0.85 }}>
-                  Bereits erfasste Anwesenheiten und vergangene Termine bleiben
+                  Bereits erfasste Anwesenheiten und vergangene Events bleiben
                   unberührt.
                 </p>
 
@@ -287,8 +290,11 @@ const KonfiModal: React.FC<KonfiModalProps> = ({ jahrgaenge, onClose, onSave, di
             </IonListHeader>
             <IonCard className="app-card" style={{ background: 'rgba(var(--app-color-konfis-rgb), 0.08)', border: '1px solid rgba(var(--app-color-konfis-rgb), 0.2)' }}>
               <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
-                <p style={{ margin: 0, fontSize: 'var(--app-text-basis)', lineHeight: '1.5', color: 'var(--app-color-konfis)' }}>
-                  Benutzername und Passwort werden automatisch generiert. Du kannst das Passwort später in der Detailansicht einsehen oder zurücksetzen.
+                <p style={{ margin: 0, fontSize: 'var(--app-text-basis)', lineHeight: '1.5', color: 'var(--app-text-konfis)' }}>
+                  {/* Das Passwort wird gehasht gespeichert und nur im Dialog
+                      nach dem Anlegen gezeigt; die Detailansicht kann nur ein
+                      neues erzeugen. */}
+                  Benutzername und Passwort werden automatisch generiert. Das Passwort wird dir nach dem Anlegen einmal angezeigt — kopiere es und gib es weiter. Einsehen lässt es sich danach nicht mehr; in der Detailansicht kannst du nur ein neues erzeugen.
                 </p>
               </IonCardContent>
             </IonCard>
@@ -308,7 +314,7 @@ const KonfiModal: React.FC<KonfiModalProps> = ({ jahrgaenge, onClose, onSave, di
             </IonListHeader>
             <IonCard className="app-card" style={{ background: 'rgba(var(--app-color-konfis-rgb), 0.08)', border: '1px solid rgba(var(--app-color-konfis-rgb), 0.2)' }}>
               <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
-                <p style={{ margin: 0, fontSize: 'var(--app-text-basis)', lineHeight: '1.5', color: 'var(--app-color-konfis)' }}>
+                <p style={{ margin: 0, fontSize: 'var(--app-text-basis)', lineHeight: '1.5', color: 'var(--app-text-konfis)' }}>
                   Der Benutzername zum Anmelden ändert sich nicht — auch dann
                   nicht, wenn du den Namen korrigierst.
                 </p>

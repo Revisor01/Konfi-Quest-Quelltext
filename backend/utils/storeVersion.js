@@ -35,7 +35,7 @@ const FEHLER_SPERRE_MS = 5 * 60 * 1000;
 // Modul-lokaler Cache (eine Node-Instanz bedient alle Requests).
 let cache = { wert: null, geholtAm: 0, letzterVersuch: 0 };
 
-// Versionsformat wie in scripts/apply-version.sh: x.y oder x.y.z, nur Ziffern.
+// Versionsformat wie in frontend/scripts/apply-version.sh: x.y oder x.y.z, nur Ziffern.
 // Alles andere (leer, "Varies with device", HTML-Fetzen) gilt als Fehlschlag.
 function istGueltigeVersion(v) {
   return typeof v === 'string' && /^[0-9]+\.[0-9]+(\.[0-9]+)?$/.test(v);

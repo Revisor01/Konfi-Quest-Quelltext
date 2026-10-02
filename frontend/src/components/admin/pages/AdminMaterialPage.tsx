@@ -10,17 +10,13 @@ import {
   ICON_TERMIN,
   ICON_TERMIN_GEFUELLT,
   ICON_WELT,
-  ICON_ZURUECK,
 } from '../../shared/icons';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
-  IonButtons,
   IonButton,
   IonInput,
   IonLabel,
@@ -47,6 +43,7 @@ import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import api from '../../../services/api';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../../services/offlineCache';
+import { materialVergessen, type MaterialDateiVerweis } from '../../../services/materialDetail';
 import EmptyState from '../../shared/EmptyState';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { SectionHeader } from '../../shared';
@@ -113,7 +110,12 @@ const AdminMaterialPage: React.FC = () => {
       setOhneJahrgang(res.headers?.['x-kein-jahrgang-zugewiesen'] === 'true');
       return res.data;
     },
-    { ttl: CACHE_TTL.PROFILE }
+    // vorigeDatenZeigen: Suchfeld und Jahrgangsauswahl stehen im Inhalt, der
+    // waehrend `loading` durch die Ladeanzeige ersetzt wird. Ein leerer Stand
+    // bei jedem Tippen liesse das Feld verschwinden (Fokus und Tastatur weg);
+    // die alte Liste bleibt deshalb bis zur Antwort stehen -- nach einem
+    // Fehlschlag aber nicht.
+    { ttl: CACHE_TTL.PROFILE, vorigeDatenZeigen: true }
   );
 
   // Material-Liste live halten: neue oder geloeschte Materialien erschienen
@@ -138,7 +140,11 @@ const AdminMaterialPage: React.FC = () => {
           role: 'destructive',
           handler: async () => {
             try {
+              const dateien: MaterialDateiVerweis[] = material.file_count !== 0
+                ? await api.get(`/material/${material.id}`).then(r => r.data?.files || []).catch(() => [])
+                : [];
               await api.delete(`/material/${material.id}`);
+              await materialVergessen(material.id, dateien);
               refreshMaterial();
             } catch (err) {
               setError(fehlerText(err, 'Fehler beim Löschen'));
@@ -181,28 +187,19 @@ const AdminMaterialPage: React.FC = () => {
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonButtons slot="start">
-            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-              <IonIcon icon={ICON_ZURUECK} />
-            </IonButton>
-          </IonButtons>
-          <IonTitle>Material verwalten</IonTitle>
-          <IonButtons slot="end">
-            <IonButton aria-label="Neues Material anlegen" onClick={openCreateModal}>
-              <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
-            </IonButton>
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile
+        titel="Material verwalten"
+        onZurueck={() => window.history.back()}
+        gemeindeUmschalter={false}
+        rechts={(
+          <IonButton aria-label="Neues Material anlegen" onClick={openCreateModal}>
+            <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
+          </IonButton>
+        )}
+      />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Material verwalten</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Material verwalten" />
 
         <IonRefresher slot="fixed" onIonRefresh={async (e) => {
           await refreshMaterial();
@@ -241,7 +238,7 @@ const AdminMaterialPage: React.FC = () => {
               <IonItemGroup>
                 <IonItem>
                   <IonIcon icon={ICON_SUCHE_GEFUELLT} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
-                  <IonInput
+                  <IonInput aria-label="Material durchsuchen"
                     value={search}
                     onIonInput={(e) => setSearch(e.detail.value || '')}
                     placeholder="Material durchsuchen..."
@@ -251,7 +248,7 @@ const AdminMaterialPage: React.FC = () => {
                 {(jahrgaenge || []).length > 0 && (
                   <IonItem>
                     <IonIcon icon={ICON_TERMIN} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
-                    <IonSelect
+                    <IonSelect aria-label="Jahrgang"
                       value={nurGlobal ? 'global' : (activeJahrgangId ?? 'alle')}
                       onIonChange={(e) => {
                         const wert = e.detail.value;
@@ -259,6 +256,7 @@ const AdminMaterialPage: React.FC = () => {
                         setActiveJahrgangId(wert === 'alle' || wert === 'global' ? undefined : wert);
                       }}
                       interface="popover"
+                      interfaceOptions={{ arrow: false }}
                       placeholder="Jahrgang"
                       style={{ width: '100%' }}
                     >
@@ -289,7 +287,7 @@ const AdminMaterialPage: React.FC = () => {
                       title={ohneJahrgang && !search && !nurGlobal ? 'Kein Jahrgang zugewiesen' : 'Keine Materialien'}
                       message={
                         ohneJahrgang && !search && !nurGlobal
-                          ? 'Dir ist noch kein Jahrgang zugewiesen — du siehst nur Material, das für alle freigegeben ist. Die Leitung deiner Gemeinde kann das in den Einstellungen ändern.'
+                          ? 'Dir ist noch kein Jahrgang zugewiesen — du siehst nur Material, das für alle freigegeben ist. Die Gemeindeleitung kann das in den Einstellungen ändern.'
                           : 'Erstelle dein erstes Material mit dem + Button'
                       }
                       iconColor="var(--app-color-material)"
@@ -332,25 +330,25 @@ const AdminMaterialPage: React.FC = () => {
                                     <div className="app-list-item__meta">
                                       {mat.ist_global && (
                                         <span className="app-list-item__meta-item">
-                                          <IonIcon icon={ICON_WELT} style={{ color: 'var(--app-color-material)' }} />
+                                          <IonIcon icon={ICON_WELT} style={{ color: 'var(--app-text-material)' }} />
                                           Für alle
                                         </span>
                                       )}
                                       {((mat.link_count ?? (mat.link_url ? 1 : 0)) > 0) && (
                                         <span className="app-list-item__meta-item">
-                                          <IonIcon icon={ICON_LINK} style={{ color: 'var(--app-color-material)' }} />
+                                          <IonIcon icon={ICON_LINK} style={{ color: 'var(--app-text-material)' }} />
                                           {(mat.link_count ?? 1) === 1 ? 'Link' : `${mat.link_count} Links`}
                                         </span>
                                       )}
                                       {mat.file_count !== undefined && mat.file_count > 0 && (
                                         <span className="app-list-item__meta-item">
-                                          <IonIcon icon={ICON_ANHANG} style={{ color: 'var(--app-color-material)' }} />
+                                          <IonIcon icon={ICON_ANHANG} style={{ color: 'var(--app-text-material)' }} />
                                           {mat.file_count} {mat.file_count === 1 ? 'Datei' : 'Dateien'}
                                         </span>
                                       )}
                                       {(mat.event_count || 0) > 0 && (
                                         <span className="app-list-item__meta-item">
-                                          <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ color: 'var(--app-color-events)' }} />
+                                          <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ color: 'var(--app-text-events)' }} />
                                           {mat.event_count} {mat.event_count === 1 ? 'Event' : 'Events'}
                                         </span>
                                       )}

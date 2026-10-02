@@ -6,6 +6,7 @@ import React from 'react';
 import { IonIcon } from '@ionic/react';
 import { ICON_EXTERN_OEFFNEN, ICON_MUSIK } from './icons';
 import { linkTeile } from '../../utils/linkDisplay';
+import { linkOeffnen } from '../../services/systemDialoge';
 
 interface MusikLinkProps {
   submission: {
@@ -35,7 +36,10 @@ const MusikLink: React.FC<MusikLinkProps> = ({
       title={url}
       // Der Tap gehoert dem Link — sonst faengt ein umgebendes IonItem ihn ab
       // und oeffnet statt der Seite das Aktions-Menue (Leitungsansicht).
-      onClick={(e) => e.stopPropagation()}
+      // Geoeffnet wird ueber linkOeffnen, damit der Abstecher in die
+      // Musik-App die App-Sperre nicht ausloest (href bleibt fuer Vorlesen
+      // und langes Druecken).
+      onClick={(e) => { e.stopPropagation(); e.preventDefault(); linkOeffnen(url); }}
       style={{
         display: 'flex',
         alignItems: 'center',

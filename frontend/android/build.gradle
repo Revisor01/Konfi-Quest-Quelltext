@@ -9,6 +9,16 @@ buildscript {
     dependencies {
         classpath 'com.android.tools.build:gradle:8.13.1'
         classpath 'com.google.gms:google-services:4.4.4'
+        // Das Plugin macht zwei Dinge, die kein Code zur Laufzeit nachholen
+        // kann: Es laedt beim Release-Bau die R8-MAPPING-DATEI zu Firebase
+        // hoch und erzeugt die Build-Kennung, ueber die Crashlytics den
+        // Stapelverlauf spaeter wieder entschleiert. Ohne das sind die
+        // Berichte bei minifyEnabled true unlesbar — die Klassen heissen
+        // dann a.b.c.
+        //
+        // Version 3.0.8 (nicht die 2.9.9 aus der Plugin-Doku): 2.x ist mit
+        // AGP 8.13 nicht mehr vertraeglich.
+        classpath 'com.google.firebase:firebase-crashlytics-gradle:3.0.8'
 
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files

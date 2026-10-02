@@ -35,7 +35,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }, checkAndAwardBadges) => {
 
       const zugriff = await darfTermin(client, req, eventId);
       if (!zugriff.erlaubt) {
-        return res.status(403).json({ error: 'Kein Zugriff auf diesen Termin' });
+        return res.status(403).json({ error: 'Kein Zugriff auf dieses Event' });
       }
 
       await client.query('BEGIN');
@@ -119,7 +119,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }, checkAndAwardBadges) => {
       nachAntwort(req, async () => {
         for (const userId of marked) {
           try {
-            await checkAndAwardBadges(db, userId);
+            await checkAndAwardBadges(db, userId, { organizationId: req.user.organization_id });
           } catch (badgeErr) {
             console.error('Error checking badges after bulk attendance:', badgeErr);
           }
@@ -130,7 +130,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }, checkAndAwardBadges) => {
             if (gotPoints) {
               await PushService.checkAndSendLevelUp(db, userId, req.user.organization_id);
             }
-            await PushService.sendEventAttendanceToKonfi(db, userId, event.name, 'present', gotPoints ? event.points : 0, null, req.user.organization_id);
+            await PushService.sendEventAttendanceToKonfi(db, userId, event.name, 'present', gotPoints ? event.points : 0, eventId, req.user.organization_id);
           } catch (pushErr) {
             console.error('Push notification failed (bulk attendance):', pushErr);
           }
@@ -271,7 +271,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }, checkAndAwardBadges) => {
       const zugriff = await darfTermin(client, req, eventId);
       if (!zugriff.erlaubt) {
         await client.query('ROLLBACK');
-        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf diesen Termin' } };
+        fruehAntwort = { status: 403, body: { error: 'Kein Zugriff auf dieses Event' } };
       } else {
 
       // Punkte gibt es NUR für Konfis. Teamer:innen nehmen zwar teil (Anwesenheit
@@ -354,6 +354,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }, checkAndAwardBadges) => {
                   ELSE status
                 END,
                 abgemeldet_durch_absage = CASE
+                  WHEN status = 'opted_out' THEN FALSE
                   WHEN status NOT IN ('confirmed', 'waitlist', 'excused') THEN abgemeldet_durch_absage
                   WHEN $1 = 'excused' THEN FALSE
                   WHEN status = 'excused' THEN FALSE
@@ -425,7 +426,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }, checkAndAwardBadges) => {
           await client.query(updateProfileQuery, [eventData.points, eventData.user_id]);
 
           try {
-            await checkAndAwardBadges(client, eventData.user_id);
+            await checkAndAwardBadges(client, eventData.user_id, { organizationId: req.user.organization_id });
           } catch (badgeErr) {
             console.error('Error checking badges after event attendance:', badgeErr);
           }
@@ -526,7 +527,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }, checkAndAwardBadges) => {
       // Badge-Check NACH COMMIT für alle User (Teamer + Konfis)
       if (attendance_status === 'present') {
         try {
-          await checkAndAwardBadges(db, eventData.user_id);
+          await checkAndAwardBadges(db, eventData.user_id, { organizationId: req.user.organization_id });
         } catch (badgeErr) {
           console.error('Error checking badges after attendance update:', badgeErr);
         }
@@ -538,15 +539,15 @@ module.exports = (db, rbacVerifier, { requireAdmin }, checkAndAwardBadges) => {
         if (attendance_status === 'present') {
           if (isKonfiParticipant && pointsAwarded) {
             try { await PushService.checkAndSendLevelUp(db, eventData.user_id, req.user.organization_id); } catch (e) { console.error('Level-up check failed:', e); }
-            try { await PushService.sendEventAttendanceToKonfi(db, eventData.user_id, eventData.name, 'present', eventData.points, null, req.user.organization_id); } catch (e) { console.error('Push notification failed:', e); }
+            try { await PushService.sendEventAttendanceToKonfi(db, eventData.user_id, eventData.name, 'present', eventData.points, eventId, req.user.organization_id); } catch (e) { console.error('Push notification failed:', e); }
             liveUpdate.sendToUser('konfi', eventData.user_id, 'dashboard', 'update', { points: eventData.points });
           } else if (isKonfiParticipant) {
-            try { await PushService.sendEventAttendanceToKonfi(db, eventData.user_id, eventData.name, 'present', 0, null, req.user.organization_id); } catch (e) { console.error('Push notification failed:', e); }
+            try { await PushService.sendEventAttendanceToKonfi(db, eventData.user_id, eventData.name, 'present', 0, eventId, req.user.organization_id); } catch (e) { console.error('Push notification failed:', e); }
           }
           liveUpdate.sendToOrgAdmins(req.user.organization_id, 'events', 'update', { eventId, action: 'attendance' });
         } else if (attendance_status === 'absent') {
           if (isKonfiParticipant) {
-            try { await PushService.sendEventAttendanceToKonfi(db, eventData.user_id, eventData.name, 'absent', 0, null, req.user.organization_id); } catch (e) { console.error('Push notification failed:', e); }
+            try { await PushService.sendEventAttendanceToKonfi(db, eventData.user_id, eventData.name, 'absent', 0, eventId, req.user.organization_id); } catch (e) { console.error('Push notification failed:', e); }
             if (pointsRemoved) {
               liveUpdate.sendToUser('konfi', eventData.user_id, 'dashboard', 'update', { points: -removedPointsAmount });
             }
@@ -557,7 +558,7 @@ module.exports = (db, rbacVerifier, { requireAdmin }, checkAndAwardBadges) => {
           // klaenge nach unentschuldigtem Fehlen. Siehe
           // pushService.sendEventAttendanceToKonfi.
           if (isKonfiParticipant) {
-            try { await PushService.sendEventAttendanceToKonfi(db, eventData.user_id, eventData.name, 'excused', 0, null, req.user.organization_id); } catch (e) { console.error('Push notification failed:', e); }
+            try { await PushService.sendEventAttendanceToKonfi(db, eventData.user_id, eventData.name, 'excused', 0, eventId, req.user.organization_id); } catch (e) { console.error('Push notification failed:', e); }
             if (pointsRemoved) {
               liveUpdate.sendToUser('konfi', eventData.user_id, 'dashboard', 'update', { points: -removedPointsAmount });
             }

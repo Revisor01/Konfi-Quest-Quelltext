@@ -46,6 +46,8 @@ import { EigenerJahrgang, KonfiEintrag } from '../../../types/chat';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 import { istTeamTyp } from '../../../utils/chatRoles';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { rollenName, rollenFarbeVar, rollenTextFarbeVar } from '../../../utils/rollenNamen';
 
 interface Participant {
   user_id: number;
@@ -92,12 +94,19 @@ const MembersModal: React.FC<MembersModalProps> = ({
   const [searchText, setSearchText] = useState('');
   const [selectedUsers, setSelectedUsers] = useState<Set<string>>(new Set());
 
+  const isGroupChat = roomType === 'group';
+  const canManageMembers = user?.type === 'admin' && isGroupChat;
+
   useEffect(() => {
-    if (roomId) {
-      loadParticipants();
-      loadAllUsers();
-    }
+    if (roomId) loadParticipants();
   }, [roomId]);
+
+  // Die Personenlisten braucht nur das Hinzufuegen, also nur, wer verwalten
+  // darf: Vorher holte jedes Mitglied beim Oeffnen
+  // /admin/konfis -- fuer Konfis jedes Mal ein 403.
+  useEffect(() => {
+    if (roomId && canManageMembers) loadAllUsers();
+  }, [roomId, canManageMembers]);
 
   const loadParticipants = async () => {
     try {
@@ -153,7 +162,7 @@ const MembersModal: React.FC<MembersModalProps> = ({
         .map((admin) => ({
           ...admin,
           type: 'admin' as const,
-          role_description: admin.role_title || admin.role_display_name
+          role_description: admin.role_title || rollenName(admin.role_name, admin.role_display_name)
         }));
 
       setAllUsers([...konfis, ...adminUsers]);
@@ -277,24 +286,20 @@ const MembersModal: React.FC<MembersModalProps> = ({
     return user.name || 'Unbekannt';
   };
 
-  const isGroupChat = roomType === 'group';
-  const canManageMembers = user?.type === 'admin' && isGroupChat;
-
   // Rolle/Funktion ermitteln (für Eselsohr)
   const getRoleText = (targetUser: ChatUser | Participant) => {
     if (isTeamUser(targetUser)) {
       if ('role_title' in targetUser && targetUser.role_title) {
         return targetUser.role_title;
       }
-      if ('role_display_name' in targetUser && targetUser.role_display_name) {
-        return targetUser.role_display_name;
-      }
-      if ('role_description' in targetUser && targetUser.role_description) {
-        return targetUser.role_description;
-      }
-      // Fallback nach echter Rolle (Teamer vs. Admin), wenn kein Titel hinterlegt ist.
+      // Ohne eigenen Titel das feste Wort nach der Rolle (utils/rollenNamen);
+      // role_display_name traegt in bestehenden Gemeinden noch die alten Namen.
       const roleName = 'role_name' in targetUser ? targetUser.role_name : undefined;
-      return roleName === 'teamer' ? 'Teamer:in' : 'Admin';
+      const ausDerAntwort =
+        ('role_display_name' in targetUser && targetUser.role_display_name)
+        || ('role_description' in targetUser && targetUser.role_description)
+        || 'Leitung';
+      return rollenName(roleName, ausDerAntwort);
     }
 
     return 'Konfi';
@@ -323,10 +328,11 @@ const MembersModal: React.FC<MembersModalProps> = ({
     const participantId = `${isTeam ? 'admin' : 'konfi'}-${'user_id' in targetUser ? targetUser.user_id : targetUser.id}`;
     const roleText = getRoleText(targetUser);
     const jahrgang = getJahrgang(targetUser);
-    const badgeColor = isTeam ? 'var(--app-color-teamer)' : 'var(--app-color-konfis)';
+    const rolleImTeam = 'role_name' in targetUser ? targetUser.role_name : undefined;
+    const badgeColor = isTeam ? rollenFarbeVar(rolleImTeam, 'teamer') : 'var(--app-color-konfis)';
 
     return (
-      <div
+      <div role={isSelectable ? 'button' : undefined} tabIndex={isSelectable ? 0 : undefined} onKeyDown={isSelectable ? tastaturKlick : undefined} aria-pressed={isSelectable ? isSelected : undefined}
         key={participantId}
         className={`app-list-item ${isTeam ? 'app-list-item--team' : 'app-list-item--konfi'} ${isSelected ? 'app-list-item--selected' : ''}`}
         onClick={isSelectable ? onToggle : undefined}
@@ -338,6 +344,8 @@ const MembersModal: React.FC<MembersModalProps> = ({
             className="app-corner-badge"
             style={{ backgroundColor: badgeColor, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
             title={roleText}
+            role="img"
+            aria-label={roleText}
           >
             <IonIcon icon={isTeam ? ICON_GRUPPE_GEFUELLT : ICON_PERSON_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
           </div>
@@ -354,7 +362,7 @@ const MembersModal: React.FC<MembersModalProps> = ({
               {isTeam && roleText && (
                 <div className="app-list-item__meta">
                   <span className="app-list-item__meta-item">
-                    <IonIcon icon={ICON_GRUPPE} style={{ color: 'var(--app-color-teamer)' }} />
+                    <IonIcon icon={ICON_GRUPPE} style={{ color: rollenTextFarbeVar(rolleImTeam, 'teamer') }} />
                     {roleText}
                   </span>
                 </div>
@@ -362,7 +370,7 @@ const MembersModal: React.FC<MembersModalProps> = ({
               {!isTeam && jahrgang && (
                 <div className="app-list-item__meta">
                   <span className="app-list-item__meta-item">
-                    <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ color: 'var(--app-color-jahrgang)' }} />
+                    <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ color: 'var(--app-text-jahrgang)' }} />
                     {jahrgang}
                   </span>
                 </div>
@@ -441,7 +449,7 @@ const MembersModal: React.FC<MembersModalProps> = ({
                         fontSize: 'var(--app-text-standard)'
                       }}
                     />
-                    <IonInput
+                    <IonInput aria-label="Person suchen"
                       value={searchText}
                       onIonInput={(e) => setSearchText(e.detail.value!)}
                       placeholder="Person suchen..."

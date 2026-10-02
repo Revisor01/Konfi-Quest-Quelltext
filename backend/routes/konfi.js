@@ -8,10 +8,15 @@ const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
 const { heuteBerlin } = require('../utils/zeitformat');
 const { beantworteTageslosung } = require('../services/losungService');
-const { encryptBuffer, decryptBuffer } = require('../utils/photoCrypto');
+const { encryptFileToFile, decryptFileToStream, leseKopfBytes } = require('../utils/photoCrypto');
 const { deletePhotoFile, istSichererDateiname } = require('../utils/photoStorage');
 const { darfKonfi } = require('../utils/jahrgangsZugriff');
-const { bucheTermin, zaehleBestaetigte, promoteFromWaitlist, rueckeNach } = require('../utils/bookingUtils');
+const { ladeLeitungZumAntrag } = require('../utils/antragLeitungSicht');
+const { ladeLeitungZumTermin } = require('../utils/terminLeitungSicht');
+const { nachAntwort } = require('../utils/nachAntwort');
+const { bucheTermin, zaehleBestaetigte, promoteFromWaitlist, rueckeNach, pruefeKonfiStorno, wartelistenPlatzSql } = require('../utils/bookingUtils');
+const { buchungszahlenJeTerminSql } = require('../utils/buchungszahlen');
+const { konfiSiehtTerminSql, konfiSiehtTermin } = require('../utils/konfiTerminSicht');
 const { meldeNachrueckern } = require('../utils/nachrueckMeldung');
 const { removeFromEventChat, addToEventChat } = require('../utils/eventChat');
 const { computeCurrentStreak } = require('../utils/streakCalculation');
@@ -25,6 +30,7 @@ const { getPunkteHistorie } = require('../utils/punkteHistorie');
 const { findeAntragZuClientId, behandleClientIdRace } = require('../utils/antragIdempotenz');
 const { berechneLevelFortschritt } = require('../utils/levelFortschritt');
 const { BIBEL_UEBERSETZUNGEN, KONFSPRUCH_TRANSLATIONS, ladeSpruchliste, loeseKonfspruchAuf } = require('../utils/konfspruch');
+const { loescheMitteilungenZuAntraegen } = require('../utils/postfachAufraeumen');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 if (!JWT_SECRET) {
@@ -95,7 +101,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
             AND e.organization_id = $2
             AND (e.cancelled IS NULL OR e.cancelled = false)
         ) ce ON ce.user_id = u.id
-        WHERE u.id = $1 AND r.name = 'konfi' AND u.deleted_at IS NULL
+        WHERE u.id = $1 AND u.deleted_at IS NULL
       `;
       const { rows: [konfi] } = await db.query(konfiQuery, [konfiId, req.user.organization_id]);
 
@@ -281,7 +287,6 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         );
       }
 
-      // Point config aus Jahrgang-Daten
       const point_config = {
         gottesdienst_enabled: konfi.gottesdienst_enabled !== false,
         gemeinde_enabled: konfi.gemeinde_enabled !== false,
@@ -411,7 +416,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         JOIN konfi_profiles kp ON u.id = kp.user_id
         JOIN jahrgaenge j ON kp.jahrgang_id = j.id
         JOIN roles r ON u.role_id = r.id
-        WHERE u.id = $1 AND r.name = 'konfi' AND u.deleted_at IS NULL
+        WHERE u.id = $1 AND u.deleted_at IS NULL
       `;
       const { rows: [konfi] } = await db.query(query, [konfiId]);
       
@@ -456,7 +461,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
           FROM event_bookings 
           GROUP BY user_id
         ) event_stats ON u.id = event_stats.user_id
-        WHERE u.id = $1 AND r.name = 'konfi' AND u.deleted_at IS NULL
+        WHERE u.id = $1 AND u.deleted_at IS NULL
         GROUP BY badge_stats.badge_count, activity_stats.activity_count, event_stats.event_count
       `;
       const { rows: [stats] } = await db.query(statsQuery, [konfiId, req.user.organization_id]);
@@ -669,37 +674,20 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         message: 'Antrag erfolgreich eingereicht'
       });
 
-      // Admin-Benachrichtigungen NACH der Antwort:
-      // Der Push-Versand läuft seriell über alle Admins und deren Geraete —
-      // je Token ein FCM-Roundtrip. Lief das vor res.json(), wartete der Konfi
-      // darauf (gemessen ~1,5 s p95 auf dem haeufigsten Antrags-Endpunkt).
-      // Muster wie in routes/chat.js: Block in eine selbst aufgerufene
-      // async-Funktion, Fehler nur loggen — die Antwort ist bereits raus.
-      (async () => {
-      try {
-        // In-App-Mitteilung an die GESAMTE Leitung (admin UND org_admin) —
-        // identisch zum Push-Versand in PushService.sendNewActivityRequestToAdmins.
-        // Vorher stand hier nur r.name='admin', org_admin ging leer aus (M6).
-        const { rows: admins } = await db.query(
-          `SELECT u.id, u.display_name
-           FROM users u
-           JOIN roles r ON u.role_id = r.id
-           WHERE r.name IN ('admin', 'org_admin') AND u.organization_id = $1`,
-          [req.user.organization_id]
-        );
+      nachAntwort(req, async () => {
+        const empfaenger = await ladeLeitungZumAntrag(db, newRequest.id);
 
         const { rows: [konfiData] } = await db.query(
           "SELECT display_name FROM users WHERE id = $1",
           [konfiId]
         );
 
-        if (admins.length > 0) {
-          const adminIds = admins.map(a => a.id);
+        if (empfaenger.length > 0) {
           await db.query(
             `INSERT INTO notifications (user_id, title, message, type, data, organization_id)
              SELECT unnest($1::int[]), $2, $3, $4, $5, $6`,
             [
-              adminIds,
+              empfaenger,
               'Neuer Antrag eingegangen',
               `${konfiData.display_name} hat einen Antrag für "${activity.name}" (${activity.points} ${activity.points === 1 ? 'Punkt' : 'Punkte'}) eingereicht.`,
               'new_activity_request',
@@ -715,20 +703,15 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
           );
         }
 
-
-        // Send push notifications to admins
-        await PushService.sendNewActivityRequestToAdmins(
+        await PushService.sendNewActivityRequestToLeadership(
           db,
           req.user.organization_id,
+          empfaenger,
           konfiData.display_name,
           activity.name,
           activity.points
         );
-      } catch (notifErr) {
-        console.error('Error sending admin notifications:', notifErr);
-        // Don't fail the request if notification fails
-      }
-      })();
+      }, 'Leitungs-Mitteilung zum neuen Antrag');
 
       // Live-Update an alle Admins über neuen Antrag senden
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'requests', 'create');
@@ -741,21 +724,26 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
   });
 
   // Upload photo for activity request (AES-256-GCM verschlüsselt at-rest)
-  // memoryStorage liefert req.file.buffer; wir validieren die Magic Bytes auf
-  // dem Buffer, verschluesseln und schreiben dann erst auf die Platte.
+  //
+  // diskStorage liefert req.file.path (eine Temporaerdatei im Zwischenlager),
+  // KEIN req.file.buffer mehr. Fuer die Magic-Bytes-Pruefung reichen die ersten
+  // Bytes; danach wird stromweise verschluesselt. So liegt auch ein grosses
+  // Foto nie komplett im Arbeitsspeicher. Das Aufraeumen der Temporaerdatei
+  // macht die zentrale Middleware in createApp.js — auch im Fehlerfall.
   router.post('/upload-photo', verifyTokenRBAC, requestUpload.single('photo'), async (req, res) => {
     if (req.user.type !== 'konfi' && req.user.type !== 'teamer') {
       return res.status(403).json({ error: 'Konfi- oder Teamer-Zugriff erforderlich' });
     }
 
     try {
-      if (!req.file || !req.file.buffer) {
+      if (!req.file || !req.file.path) {
         return res.status(400).json({ error: 'Kein Foto hochgeladen' });
       }
 
-      // Magic-Bytes-Prüfung direkt auf dem Buffer (nur echte Bilder zulassen)
+      // Magic-Bytes-Prüfung auf den Kopfbytes (nur echte Bilder zulassen).
+      // Sie greift damit weiterhin VOR dem endgueltigen Ablegen.
       const { fileTypeFromBuffer } = await import('file-type');
-      const detected = await fileTypeFromBuffer(req.file.buffer);
+      const detected = await fileTypeFromBuffer(await leseKopfBytes(req.file.path));
       if (!detected || !detected.mime.startsWith('image/')) {
         return res.status(415).json({ error: 'Dateityp konnte nicht als Bild verifiziert werden' });
       }
@@ -771,8 +759,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
 
       // Verschluesselt schreiben (Zielverzeichnis bei Bedarf anlegen)
       await fs.promises.mkdir(requestsDir, { recursive: true });
-      const encrypted = encryptBuffer(req.file.buffer);
-      await fs.promises.writeFile(photoPath, encrypted);
+      await encryptFileToFile(req.file.path, photoPath);
 
       res.json({
         filename: filename,
@@ -853,18 +840,20 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         return res.status(404).json({ error: 'Foto-Datei nicht gefunden' });
       }
 
-      // Datei lesen und (falls verschlüsselt) entschluesseln, dann senden
-      const fileBuffer = await fs.promises.readFile(photoPath);
-      let imageBuffer;
+      // Stromweise entschluesseln und senden (frueher: ganze Datei in den
+      // Arbeitsspeicher). Alte Klartext-Dateien reicht decryptFileToStream
+      // unveraendert durch, genau wie decryptBuffer es tat.
+      res.setHeader('Content-Type', 'image/jpeg');
       try {
-        imageBuffer = decryptBuffer(fileBuffer);
+        await decryptFileToStream(photoPath, res);
       } catch (decErr) {
         console.error('Error decrypting photo:', decErr);
-        return res.status(500).json({ error: 'Foto konnte nicht entschlüsselt werden' });
+        // Kopf ist bei einem Stromfehler schon draussen -> nur noch abbrechen.
+        if (!res.headersSent) {
+          return res.status(500).json({ error: 'Foto konnte nicht entschlüsselt werden' });
+        }
+        res.destroy();
       }
-
-      res.setHeader('Content-Type', 'image/jpeg');
-      res.send(imageBuffer);
     } catch (err) {
  console.error('Error serving photo:', err);
       res.status(500).json({ error: 'Serverfehler' });
@@ -900,6 +889,11 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         "DELETE FROM activity_requests WHERE id = $1 AND user_id = $2 AND organization_id = $3",
         [requestId, konfiId, req.user.organization_id]
       );
+      // Postfach: "Antrag eingereicht" (eigene) und "Neuer
+      // Antrag eingegangen" (Leitung) gehen mit dem Antrag. Vorher blieb die
+      // Mitteilung bei der Leitung stehen und fuehrte beim Antippen in eine
+      // Liste, in der der Antrag nicht mehr war (utils/postfachAufraeumen.js).
+      await loescheMitteilungenZuAntraegen(db, [requestId]);
 
       // Nachweisfoto vom Dateisystem entfernen (kein Orphan, Datensparsamkeit).
       // Bewusst NACH dem DB-Delete und nicht blockierend.
@@ -1059,17 +1053,12 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
     try {
       const konfiId = req.user.id;
 
-      // Jahrgang des Konfis laden für Filterung
       const { rows: [konfiProfile] } = await db.query(
         'SELECT jahrgang_id FROM konfi_profiles WHERE user_id = $1',
         [konfiId]
       );
 
-      if (!konfiProfile || !konfiProfile.jahrgang_id) {
-        return res.json([]); // Konfi ohne Jahrgang sieht keine Events
-      }
-
-      const jahrgangId = konfiProfile.jahrgang_id;
+      const jahrgangId = konfiProfile?.jahrgang_id ?? null;
 
       // Datumsfenster: standardmaessig nur Events des letzten Jahres (plus alle
       // zukuenftigen). Mit ?all=true wird die gesamte Historie geliefert.
@@ -1125,7 +1114,8 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
                CASE WHEN eb_konfi.status = 'opted_out' THEN true ELSE false END as is_opted_out,
                CASE
                  WHEN e.cancelled = true THEN false
-                 WHEN eb_konfi.id IS NOT NULL THEN false
+                 WHEN eb_konfi.id IS NOT NULL
+                      AND eb_konfi.status NOT IN ('excused', 'opted_out') THEN false
                  WHEN NOW() < e.registration_opens_at OR NOW() > e.registration_closes_at THEN false
                  ELSE true
                END as can_register,
@@ -1143,7 +1133,6 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         FROM events e
         LEFT JOIN users u_cancel ON e.cancelled_by = u_cancel.id
         LEFT JOIN users u_grund ON e.cancelled_reason_set_by = u_grund.id
-        INNER JOIN event_jahrgang_assignments eja ON e.id = eja.event_id
         -- Zahlen aus event_booking_stats statt aus einer eigenen Kopie
         -- Konfi-Sicht: registered_count UND waitlist_count
         -- zaehlen NUR Konfis. Teamer haben ein eigenes Kontingent mit eigener
@@ -1169,8 +1158,14 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
             -- kennen es nicht und zeigen weiter, was sie bisher zeigten.
             COALESCE(ebs.konfi_opted_out, 0)
               + COALESCE(ebs.konfi_excused, 0) as abgemeldet_count
-          FROM event_booking_stats ebs
-          WHERE ebs.event_id = e.id
+          -- JE TERMIN statt aus der View: Im
+          -- LATERAL gegen die Liste berechnete der Planer die GANZE View --
+          -- alle Buchungen aller Gemeinden, Seq Scan auf event_bookings und
+          -- users. 77 ms je Aufruf bei 100.000 Buchungen, 2 ms so. Spalte fuer
+          -- Spalte dieselbe Zaehlung wie die View (utils/buchungszahlen.js);
+          -- ein Termin ohne Buchung liefert Nullen statt keiner Zeile, das
+          -- aeussere COALESCE bleibt, die Antwort ist dieselbe.
+          FROM ${buchungszahlenJeTerminSql('e.id')} ebs
         ) bstats ON true
         LEFT JOIN LATERAL (
           SELECT STRING_AGG(DISTINCT c.id::text, ',') as category_ids,
@@ -1180,19 +1175,23 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
           WHERE ec.event_id = e.id
         ) cats ON true
         LEFT JOIN LATERAL (
-          SELECT eb_konfi_i.id, eb_konfi_i.status, eb_konfi_i.attendance_status,
-                 eb_konfi_i.timeslot_id, eb_konfi_i.created_at
+          SELECT eb_konfi_i.id, eb_konfi_i.event_id, eb_konfi_i.status, eb_konfi_i.attendance_status,
+                 eb_konfi_i.timeslot_id, eb_konfi_i.booking_date
           FROM event_bookings eb_konfi_i
           WHERE eb_konfi_i.event_id = e.id AND eb_konfi_i.user_id = $2
           LIMIT 1
         ) eb_konfi ON true
         LEFT JOIN event_timeslots et_booked ON eb_konfi.timeslot_id = et_booked.id
+        -- Wartelisten-Platz: dieselbe Regel wie das Nachruecken und die
+        -- Status-Route.
+        -- Vorher nach created_at, ueber alle Rollen und
+        -- Zeitfenster -- die Status-Route zaehlte nach booking_date, und
+        -- dieselbe Person sah zwei verschiedene Plaetze. Nur fuer Wartende
+        -- gerechnet.
         LEFT JOIN LATERAL (
-          SELECT COUNT(*) + 1 as waitlist_position
-          FROM event_bookings eb2
-          WHERE eb2.event_id = e.id
-            AND eb2.status = 'waitlist'
-            AND eb2.created_at < eb_konfi.created_at
+          SELECT CASE WHEN eb_konfi.status = 'waitlist'
+                      THEN ${wartelistenPlatzSql('eb_konfi', 'konfi')}
+                 END as waitlist_position
         ) wpos ON true
         LEFT JOIN LATERAL (
           SELECT SUM(max_participants) as total_capacity
@@ -1213,8 +1212,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
           LIMIT 1
         ) event_chat ON true
         WHERE e.organization_id = $1
-          AND eja.jahrgang_id = $3
-          AND e.teamer_only IS NOT TRUE
+          AND ${konfiSiehtTerminSql({ jahrgang: '$3', e: 'e' })}
           AND (e.cancelled IS NOT TRUE OR eb_konfi.id IS NOT NULL)
           ${dateWindowClause}
         ORDER BY e.event_date ASC
@@ -1269,6 +1267,10 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
     try {
       const konfiId = req.user.id;
       const eventId = req.params.id;
+
+      if (!(await konfiSiehtTermin(db, konfiId, eventId, { auchMitBuchung: true }))) {
+        return res.status(404).json({ error: 'Event nicht gefunden' });
+      }
       
       // Check if konfi is registered
       const { rows: [registration] } = await db.query(
@@ -1315,17 +1317,26 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
       
       const confirmedCount = parseInt(event.registered_count) || 0;
       const waitlistCount = parseInt(event.waitlist_count) || 0;
-      const can_register = !registration && event.registration_status === 'open';
+      // Dieselbe Regel wie can_register in GET /konfi/events:
+      // eine abgemeldete Zeile ('excused'/'opted_out') sperrt nicht.
+      const abgemeldet = !!registration
+        && (registration.status === 'excused' || registration.status === 'opted_out');
+      const can_register = (!registration || abgemeldet) && event.registration_status === 'open';
       
       // Get waitlist position if user is on waitlist
       let waitlist_position = null;
       if (registration && registration.status === 'waitlist') {
+        // Dieselbe Regel wie die Liste und das Nachruecken:
+        // nur die eigene
+        // Warteliste (Konfis, eigenes Zeitfenster), Rang nach booking_date.
+        // Vorher zaehlte hier jede wartende Buchung des Termins -- auch
+        // Teamer:innen und andere Zeitfenster.
         const positionQuery = `
-          SELECT COUNT(*) + 1 as position
-          FROM event_bookings
-          WHERE event_id = $1 AND status = 'waitlist' AND booking_date < $2
+          SELECT ${wartelistenPlatzSql('ich', 'konfi')} as position
+          FROM event_bookings ich
+          WHERE ich.id = $1
         `;
-        const { rows: [posResult] } = await db.query(positionQuery, [eventId, registration.booking_date]);
+        const { rows: [posResult] } = await db.query(positionQuery, [registration.id]);
         waitlist_position = parseInt(posResult.position) || 1;
       }
       
@@ -1356,6 +1367,10 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
 
     try {
       const eventId = req.params.id;
+
+      if (!(await konfiSiehtTermin(db, req.user.id, eventId, { auchMitBuchung: true }))) {
+        return res.status(404).json({ error: 'Event nicht gefunden' });
+      }
 
       // Get confirmed participants with anonymized names — Teamer rausfiltern
       const participantsQuery = `
@@ -1426,7 +1441,8 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
       // beide Routen rufen ladeZeitfenster, damit sie nicht auseinanderlaufen.
       const zeitfenster = await ladeZeitfenster(db, req.params.id, req.user.organization_id);
 
-      if (zeitfenster === null) {
+      if (zeitfenster === null
+          || !(await konfiSiehtTermin(db, req.user.id, req.params.id, { auchMitBuchung: true }))) {
         return res.status(404).json({ error: 'Event nicht gefunden' });
       }
 
@@ -1521,7 +1537,10 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
       const eventId = req.params.id;
       const { reason } = req.body;
 
-      // Guard: Pflicht-Events können nicht über DELETE abgemeldet werden
+      // Guard: Pflicht-Events können nicht über DELETE abgemeldet werden.
+      // Bewusst VOR der Buchungspruefung und ohne Org-Filter, damit die
+      // Antwort fuer einen Pflichttermin gleich bleibt, egal ob eine
+      // Buchung existiert (so war es, so lesen es die Apps).
       const { rows: [eventCheck] } = await db.query(
         'SELECT mandatory FROM events WHERE id = $1',
         [eventId]
@@ -1532,39 +1551,57 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
 
       // Check if konfi is registered
       const { rows: [registration] } = await db.query(
-        'SELECT id, user_id, event_id, status, booking_date, timeslot_id, organization_id FROM event_bookings WHERE user_id = $1 AND event_id = $2',
+        'SELECT id, user_id, event_id, status, attendance_status, booking_date, timeslot_id, organization_id FROM event_bookings WHERE user_id = $1 AND event_id = $2',
         [konfiId, eventId]
       );
 
       if (!registration) {
-        return res.status(400).json({ error: 'Du bist nicht für dieses Event angemeldet' });
+        // Keine Buchung (mehr) -- zwei sehr verschiedene Faelle,
+        // unterschieden wie in
+        // DELETE /events/:id/book (events/buchung.js):
+        //
+        // a) Das Event gibt es in dieser Gemeinde nicht -> 404.
+        //
+        // b) Das Event gibt es, die Buchung ist schon weg. Das Ziel ist
+        //    erreicht. Genau so kommt eine im Funkloch abgegebene Abmeldung
+        //    zurueck, wenn die Antwort auf dem Rueckweg verloren ging und die
+        //    Warteschlange sie erneut vorlegt. Hier stand ein 400 "Du bist
+        //    nicht fuer dieses Event angemeldet" -- die App meldete damit
+        //    einen Fehlschlag fuer eine gelungene Abmeldung. Der Zweig
+        //    `bereits_abgemeldet` weiter unten griff nie, weil diese Stelle
+        //    vorher antwortete.
+        //
+        //    Kein zweites Protokoll, keine zweite Mitteilung, kein
+        //    Nachruecken: Es ist nichts passiert.
+        const { rows: [terminDa] } = await db.query(
+          'SELECT 1 FROM events WHERE id = $1 AND organization_id = $2',
+          [eventId, req.user.organization_id]
+        );
+        if (!terminDa) {
+          return res.status(404).json({ error: 'Event nicht gefunden' });
+        }
+        return res.json({ message: 'Abmeldung erfolgreich', bereits_abgemeldet: true });
       }
-      
+
       // Check if event exists and get event details.
       // max_participants/has_timeslots werden für den Kapazitaetscheck beim
       // Nachruecken gebraucht — fehlten sie hier, war max_participants
       // undefined und es wurde IMMER nachgerueckt (auch über die Kapazität
       // hinaus).
       const { rows: [event] } = await db.query(
-        'SELECT name, event_date, max_participants, has_timeslots FROM events WHERE id = $1 AND organization_id = $2',
+        'SELECT name, event_date, mandatory, max_participants, has_timeslots FROM events WHERE id = $1 AND organization_id = $2',
         [eventId, req.user.organization_id]
       );
-      
+
       if (!event) {
         return res.status(404).json({ error: 'Event nicht gefunden' });
       }
-      
-      // Check if unregistration is still allowed (2 days before event)
-      const eventDate = new Date(event.event_date);
-      const now = new Date();
-      const twoDaysBeforeEvent = new Date(eventDate.getTime() - (2 * 24 * 60 * 60 * 1000));
-      
-      if (now >= twoDaysBeforeEvent) {
-        return res.status(400).json({ 
-          error: 'Abmeldung ist nur bis 2 Tage vor dem Event möglich' 
-        });
+
+      const verboten = pruefeKonfiStorno({ event, buchung: registration });
+      if (verboten) {
+        return res.status(verboten.status).json({ error: verboten.error });
       }
-      
+
       // Ab hier transaktional.
       //
       // Vorher liefen Loeschung, Chat-Austritt, Kapazitaets-Check, Nachruecken
@@ -1683,19 +1720,17 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
 
       res.json({ message: 'Abmeldung erfolgreich' });
 
-      // Push-Notification an Konfi senden
-      try {
-        await PushService.sendEventUnregisteredToKonfi(db, konfiId, event.name);
-      } catch (pushErr) {
- console.error('Error sending event unregistration push to konfi:', pushErr);
-      }
+      nachAntwort(req, async () => {
+        // Push-Notification an Konfi senden
+        try {
+          await PushService.sendEventUnregisteredToKonfi(db, konfiId, event.name, eventId);
+        } catch (pushErr) {
+          console.error('Error sending event unregistration push to konfi:', pushErr);
+        }
 
-      // Push-Notification an ALLE Admins senden
-      try {
-        await PushService.sendEventUnregistrationToAdmins(db, req.user.organization_id, konfiName, event.name, reason);
-      } catch (pushErr) {
- console.error('Error sending event unregistration push to admins:', pushErr);
-      }
+        const empfaenger = await ladeLeitungZumTermin(db, eventId);
+        await PushService.sendEventUnregistrationToLeadership(db, req.user.organization_id, empfaenger, konfiName, event.name, reason, eventId, konfiId);
+      }, 'Abmelde-Mitteilungen');
 
       // Live-Update an Konfi und Admins senden
       liveUpdate.sendToKonfi(konfiId, 'events', 'update');
@@ -1810,13 +1845,13 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
         nachgerueckt.map((promotedUserId) => ({ eventId, userId: promotedUserId, seite: 'konfi' }))
       );
 
-      // Push an Admins (fire-and-forget)
-      try {
+      // Push an die Leitung, die das Event sieht.
+      // Ueber nachAntwort, damit Tests darauf warten koennen.
+      nachAntwort(req, async () => {
         const konfiName = req.user.display_name || req.user.username;
-        await PushService.sendEventOptOutToAdmins(db, req.user.organization_id, konfiName, event.name, reason.trim());
-      } catch (pushErr) {
-        console.error('Opt-out push error:', pushErr);
-      }
+        const empfaenger = await ladeLeitungZumTermin(db, eventId);
+        await PushService.sendEventOptOutToLeadership(db, req.user.organization_id, empfaenger, konfiName, event.name, reason.trim(), eventId, konfiId);
+      }, 'Opt-out-Mitteilung an die Leitung');
 
       // Live-Update
       liveUpdate.sendToKonfi(konfiId, 'events', 'update');
@@ -1854,7 +1889,7 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
       //
       // ABMELDEN bleibt erlaubt — nur das Anmelden ist gesperrt.
       if (event.cancelled) {
-        return res.status(400).json({ error: 'Dieser Termin ist abgesagt' });
+        return res.status(400).json({ error: 'Dieses Event ist abgesagt' });
       }
 
       // Guard: Nur bei Pflicht-Events
@@ -1884,13 +1919,11 @@ module.exports = (db, rbacMiddleware, requestUpload) => {
 
       res.json({ message: 'Wieder angemeldet' });
 
-      // Push an Admins (fire-and-forget)
-      try {
+      nachAntwort(req, async () => {
         const konfiName = req.user.display_name || req.user.username;
-        await PushService.sendEventOptInToAdmins(db, req.user.organization_id, konfiName, event.name);
-      } catch (pushErr) {
-        console.error('Opt-in push error:', pushErr);
-      }
+        const empfaenger = await ladeLeitungZumTermin(db, eventId);
+        await PushService.sendEventOptInToLeadership(db, req.user.organization_id, empfaenger, konfiName, event.name, eventId, konfiId);
+      }, 'Opt-in-Mitteilung an die Leitung');
 
       // Live-Update
       liveUpdate.sendToKonfi(konfiId, 'events', 'update');

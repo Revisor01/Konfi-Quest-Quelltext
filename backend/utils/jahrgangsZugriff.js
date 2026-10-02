@@ -76,17 +76,33 @@ function darfJahrgang(req, jahrgangId, { edit = false } = {}) {
  * Unterscheidet bewusst zwischen "Konfi gibt es nicht" und "kein Zugriff",
  * damit die Aufrufer weiterhin 404 bzw. 403 senden koennen wie bisher.
  *
+ * NUR KONFIS DER AKTIVEN GEMEINDE: Eine
+ * Konfi einer anderen Gemeinde gilt als nicht gefunden. Vorher las die
+ * Abfrage konfi_profiles ohne Gemeinde, und die Leitung (org_admin) stieg in
+ * darfJahrgang vor jeder Pruefung mit "erlaubt" aus -- fuer JEDE Konfi im
+ * System. Die Grenze hielt dann nur noch, wo die Route spaeter selbst nach
+ * der Gemeinde filterte: Bonuspunkte und nachgetragene Aktivitaeten liefen
+ * in ein UPDATE mit 0 Zeilen und endeten mit 500, die Event-Punkte
+ * antworteten 200 mit leerer Liste. Jetzt greift die Grenze an allen
+ * Aufrufern zugleich.
+ *
+ * Die Gemeinde der Konfi steht in konfi_profiles.organization_id -- nicht in
+ * users.organization_id: Wer am Konto in Gemeinde A zuhause ist und ueber
+ * user_organizations in Gemeinde B Konfi ist, hat sein Profil in B
+ * (konfi_profiles.user_id ist eindeutig, eine Person hat genau ein Profil).
+ *
  * @param {object} db             Pool oder Client (muss .query haben).
- * @param {object} req
+ * @param {object} req            req.user.organization_id = aktive Gemeinde.
  * @param {number|string} konfiId
  * @param {object} [optionen]
  * @param {boolean} [optionen.edit=false]
  * @returns {Promise<{gefunden: boolean, erlaubt: boolean, jahrgangId: number|null}>}
  */
 async function darfKonfi(db, req, konfiId, { edit = false } = {}) {
+  const organisation = req && req.user ? req.user.organization_id : null;
   const { rows: [profil] } = await db.query(
-    'SELECT jahrgang_id FROM konfi_profiles WHERE user_id = $1',
-    [konfiId]
+    'SELECT jahrgang_id FROM konfi_profiles WHERE user_id = $1 AND organization_id = $2',
+    [konfiId, organisation]
   );
 
   if (!profil) return { gefunden: false, erlaubt: false, jahrgangId: null };
@@ -141,4 +157,86 @@ async function darfTermin(db, req, eventId, { edit = false } = {}) {
   return { gefunden: true, erlaubt: ids.some(id => darfJahrgang(req, id, { edit })) };
 }
 
-module.exports = { darfJahrgang, darfKonfi, darfTermin };
+/**
+ * Gehoert diese PERSON zu diesem Termin? — die Frage nach der hinzugefuegten
+ * oder buchenden Person, nicht nach dem Aufrufer (dafuer: darfTermin).
+ *
+ * Bis dahin pruefte POST /events/:id/participants nur den HANDELNDEN Admin
+ * (darfTermin) und holte die hinzugefuegte Person allein ueber
+ * organization_id — ein Konfi aus Jahrgang B liess sich in einen Termin von
+ * Jahrgang A eintragen, eine Teamer:in ohne jede Zuweisung ebenso.
+ *
+ * ZWEI DATENWEGE fuer die Jahrgaenge der Person, deshalb das UNION:
+ *   - Konfis tragen EINEN Jahrgang in konfi_profiles.jahrgang_id
+ *   - Teamer:innen und Admins tragen MEHRERE in user_jahrgang_assignments
+ * Ein Konfi hat keine user_jahrgang_assignments, eine Teamer:in kein
+ * konfi_profiles — das UNION liefert also fuer jede Rolle genau ihren Weg.
+ * can_view/can_edit spielen hier KEINE Rolle: Es geht um Zugehoerigkeit zum
+ * Jahrgang, nicht um ein Zugriffsrecht (wie in darfTeamerAnDiesenTermin).
+ *
+ * In SQL statt ueber req, weil die geprueften Personen nie der Aufrufer sind.
+ *
+ * VOLLZUGRIFF JE GEMEINDE: Die Gemeindeleitung zaehlt mit der
+ * Rolle, die die Person in der Gemeinde DES TERMINS hat (events.
+ * organization_id) -- nicht mit der Rolle am Konto. Vorher las die Abfrage
+ * users.role_id: Wer zuhause org_admin ist und in Gemeinde B nur
+ * Teamer:in, buchte in B jeden Termin fremder Jahrgaenge (ueber
+ * darfTeamerAnDiesenTermin, POST /events/:id/book und
+ * POST /teamer/events/:id/zusage). Umgekehrt blieb eine Person, die in B
+ * ueber user_organizations org_admin ist, dort an Jahrgaenge gebunden.
+ * Dieselben zwei Quellen wie utils/orgMitglieder.js und rbac.js:
+ * Stamm-Gemeinde -> users.role_id (sie gewinnt, wenn user_organizations die
+ * Stamm-Gemeinde doppelt fuehrt), weitere Gemeinden -> user_organizations.
+ * role_id. Ohne Mitgliedschaft in der Gemeinde des Termins gibt es keine
+ * Rolle und damit keinen Vollzugriff.
+ *
+ * Das Flag users.is_super_admin gilt dagegen gemeindeuebergreifend, bewusst:
+ * rbac.js setzt req.user.is_super_admin aus dem Flag unabhaengig von der
+ * aktiven Gemeinde, requireSuperAdmin laesst es in jeder Gemeinde durch
+ * (Gemeinden anlegen, sperren, verwalten), und darfJahrgang oben gibt ihm
+ * ueberall true. Ein Super-Admin administriert gemeindeuebergreifend; ihn
+ * hier anders zu behandeln als beim Aufrufer (darfTermin) hiesse, dass er
+ * einen Termin bearbeiten, sich selbst aber nicht eintragen darf.
+ *
+ * @param {object} db            Pool oder Client (muss .query haben).
+ * @param {number|string} userId Die Person, um die es geht.
+ * @param {number|string} eventId
+ * @returns {Promise<boolean>}   true = passt zum Termin. Ein unbekannter
+ *                               Termin ergibt true — der Aufrufer hat ihn
+ *                               vorher selbst geladen und 404 gesendet.
+ */
+async function gehoertZumTermin(db, userId, eventId) {
+  const { rows: [zugang] } = await db.query(
+    `SELECT
+       e.teamer_only,
+       EXISTS (SELECT 1 FROM event_jahrgang_assignments WHERE event_id = $1) AS hat_jahrgang,
+       EXISTS (
+         SELECT 1 FROM event_jahrgang_assignments eja
+         WHERE eja.event_id = $1
+           AND eja.jahrgang_id IN (
+             SELECT uja.jahrgang_id FROM user_jahrgang_assignments uja WHERE uja.user_id = $2
+             UNION
+             SELECT kp.jahrgang_id FROM konfi_profiles kp
+              WHERE kp.user_id = $2 AND kp.jahrgang_id IS NOT NULL
+           )
+       ) AS gemeinsam,
+       (
+         EXISTS (SELECT 1 FROM users u WHERE u.id = $2 AND u.is_super_admin = true)
+         OR COALESCE(
+           -- Stamm-Gemeinde: Rolle am Konto (gewinnt)
+           (SELECT r.name FROM users u JOIN roles r ON r.id = u.role_id
+             WHERE u.id = $2 AND u.organization_id = e.organization_id),
+           -- weitere Gemeinde: Rolle aus user_organizations
+           (SELECT r.name FROM user_organizations uo JOIN roles r ON r.id = uo.role_id
+             WHERE uo.user_id = $2 AND uo.organization_id = e.organization_id
+             LIMIT 1)
+         ) IN ('org_admin', 'super_admin')
+       ) AS vollzugriff
+     FROM events e WHERE e.id = $1`,
+    [eventId, userId]
+  );
+  if (!zugang) return true;
+  return Boolean(zugang.teamer_only || !zugang.hat_jahrgang || zugang.gemeinsam || zugang.vollzugriff);
+}
+
+module.exports = { darfJahrgang, darfKonfi, darfTermin, gehoertZumTermin };

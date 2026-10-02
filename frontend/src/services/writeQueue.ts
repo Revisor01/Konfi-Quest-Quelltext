@@ -1,9 +1,11 @@
 import type { AxiosRequestConfig } from 'axios';
 import { Preferences } from '@capacitor/preferences';
-import { fehlerStatus, fehlerTextOderMessage } from '../utils/fehler';
+import { endgueltigAbgelehnt, fehlerStatus, fehlerTextOderMessage } from '../utils/fehler';
+import { typFuerUpload } from '../utils/dateiTypen';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { toastController } from '@ionic/core';
 import { networkMonitor } from './networkMonitor';
+import { getUser } from './tokenStore';
 import api from './api';
 
 // --- Interfaces ---
@@ -105,6 +107,8 @@ const QUEUE_KEY = 'queue:items';
 const FAILED_CHAT_KEY = 'queue:failedChat';
 const FAILED_CHAT_MAX = 50;
 const FAILED_ACTIONS_KEY = 'queue:failedActions';
+// Für welches Konto die Warteschlange gefüllt wird (siehe kontoPruefen).
+const KONTO_KEY = 'queue:konto';
 const FAILED_ACTIONS_MAX = 50;
 let _items: QueueItem[] | null = null; // In-Memory-Cache, lazy geladen
 let _flushing = false;
@@ -191,6 +195,7 @@ async function rememberFailedAction(
 
 /** Alle gemerkten Fehlschlaege, neueste zuletzt. */
 async function getFailedActions(): Promise<FailedAction[]> {
+  await kontoPruefen();
   return [...(await _loadFailedActions())];
 }
 
@@ -223,11 +228,17 @@ async function _saveFailedChat(list: FailedChatMessage[]): Promise<void> {
   await Preferences.set({ key: FAILED_CHAT_KEY, value: JSON.stringify(list) });
 }
 
+async function _merkeFehlgeschlagenenChat(eintrag: FailedChatMessage): Promise<void> {
+  const list = await _loadFailedChat();
+  const ohneAlten = list.filter(f => f.clientId !== eintrag.clientId);
+  ohneAlten.push(eintrag);
+  while (ohneAlten.length > FAILED_CHAT_MAX) ohneAlten.shift();
+  await _saveFailedChat(ohneAlten);
+}
+
 async function rememberFailedChat(item: QueueItem, error: { status: number; message: string }): Promise<void> {
   if (item.metadata.type !== 'chat') return;
-  const list = await _loadFailedChat();
-  const ohneAlten = list.filter(f => f.clientId !== item.metadata.clientId);
-  ohneAlten.push({
+  await _merkeFehlgeschlagenenChat({
     clientId: item.metadata.clientId,
     roomId: item.metadata.roomId,
     content: item.body?.content || '',
@@ -238,8 +249,14 @@ async function rememberFailedChat(item: QueueItem, error: { status: number; mess
     failedAt: Date.now(),
     error,
   });
-  while (ohneAlten.length > FAILED_CHAT_MAX) ohneAlten.shift();
-  await _saveFailedChat(ohneAlten);
+}
+
+async function chatAblehnungMerken(
+  eintrag: Pick<FailedChatMessage, 'clientId' | 'roomId' | 'content' | 'fileName' | 'fileType' | 'createdAt'>,
+  error: { status: number; message: string }
+): Promise<void> {
+  await kontoPruefen();
+  await _merkeFehlgeschlagenenChat({ ...eintrag, failedAt: Date.now(), error });
 }
 
 async function forgetFailedChat(clientId?: string | null): Promise<void> {
@@ -258,6 +275,7 @@ async function forgetFailedChatMany(clientIds: Array<string | undefined | null>)
 }
 
 async function getFailedChat(roomId?: number): Promise<FailedChatMessage[]> {
+  await kontoPruefen();
   const list = await _loadFailedChat();
   return roomId ? list.filter(f => f.roomId === roomId) : [...list];
 }
@@ -421,12 +439,17 @@ async function resolveLocalFile(item: QueueItem): Promise<FormData | null> {
   for (let i = 0; i < byteChars.length; i++) {
     byteArray[i] = byteChars.charCodeAt(i);
   }
-  const blob = new Blob([byteArray], { type: body._fileType || 'image/jpeg' });
+  // Der Typ fuer den Upload: der gespeicherte, sonst der aus der Endung
+  // Bis dahin stand hier pauschal
+  // image/jpeg — auch fuer ein Word-Dokument ohne Typ. Alte Eintraege ganz
+  // ohne Namen gelten weiter als Foto (image.jpg -> image/jpeg).
+  const dateiname = body._fileName || 'image.jpg';
+  const blob = new Blob([byteArray], { type: typFuerUpload(body._fileType, dateiname) });
 
-  // FormData aufbauen (Chat-Bild-Upload)
+  // FormData aufbauen (Chat-Datei-Upload)
   const formData = new FormData();
   formData.append('content', body.content || '');
-  formData.append('file', blob, body._fileName || 'image.jpg');
+  formData.append('file', blob, dateiname);
   if (body.client_id) formData.append('client_id', body.client_id);
 
   return formData;
@@ -443,11 +466,43 @@ async function cleanupLocalFile(item: QueueItem): Promise<void> {
   }
 }
 
+// --- Die Warteschlange gehört zum Konto ---
+//
+// Pauschal leeren wäre falsch: Meldet sich DIESELBE Person neu an (etwa nach
+// einem Passwortwechsel auf einem anderen Gerät), sollen ihre wartenden
+// Aktionen mit ihrem eigenen Token rausgehen. Deshalb merkt sich die
+// Warteschlange ihr Konto und leert sich nur, wenn ein ANDERES angemeldet ist.
+// Ohne Markierung (Stand vor der Kontobindung) übernimmt die erste angemeldete
+// Person, was da ist. Geprüft wird vor jedem Senden und jedem Lesen; ohne
+// angemeldetes Konto bleibt alles, wie es ist.
+async function kontoPruefen(): Promise<void> {
+  const id = getUser()?.id;
+  if (id === undefined || id === null) return;
+  const konto = String(id);
+  let bisher: string | null;
+  try {
+    bisher = (await Preferences.get({ key: KONTO_KEY })).value;
+  } catch {
+    bisher = null;
+  }
+  if (bisher === konto) return;
+  if (bisher !== null) {
+    await clear();
+    await _saveFailedActions([]);
+  }
+  try {
+    await Preferences.set({ key: KONTO_KEY, value: konto });
+  } catch {
+    // Ohne Markierung prüft der nächste Aufruf erneut.
+  }
+}
+
 // --- Öffentliche API ---
 
 async function enqueue(
   item: Omit<QueueItem, 'id' | 'retryCount' | 'createdAt'>
 ): Promise<QueueItem> {
+  await kontoPruefen();
   const items = await _load();
   const newItem: QueueItem = {
     ...item,
@@ -468,6 +523,12 @@ async function flush(): Promise<FlushResult> {
   // moeglich war, und die Nachricht wurde aufgegeben.
   if (!networkMonitor.isOnline) return { succeeded: [], failed: [] };
   _flushing = true;
+  try {
+    await kontoPruefen();
+  } catch {
+    _flushing = false;
+    return { succeeded: [], failed: [] };
+  }
 
   const result: FlushResult = { succeeded: [], failed: [] };
   const gen = _generation;
@@ -528,7 +589,7 @@ async function flush(): Promise<FlushResult> {
         const status = fehlerStatus(err) || 0;
         const message = fehlerTextOderMessage(err, 'Unbekannter Fehler');
 
-        if (status >= 400 && status < 500 && status !== 408 && status !== 429) {
+        if (endgueltigAbgelehnt(status)) {
           // 4xx (außer 408/429): Item entfernen, als failed markieren
           const failedItem: FailedQueueItem = { ...item, error: { status, message } };
           await rememberFailedChat(item, failedItem.error);
@@ -566,6 +627,12 @@ async function flushTextOnly(): Promise<FlushResult> {
   if (_flushing) return { succeeded: [], failed: [] };
   if (!networkMonitor.isOnline) return { succeeded: [], failed: [] };
   _flushing = true;
+  try {
+    await kontoPruefen();
+  } catch {
+    _flushing = false;
+    return { succeeded: [], failed: [] };
+  }
 
   const result: FlushResult = { succeeded: [], failed: [] };
   const gen = _generation;
@@ -644,11 +711,13 @@ async function remove(id: string): Promise<void> {
 }
 
 async function getAll(): Promise<QueueItem[]> {
+  await kontoPruefen();
   const items = await _load();
   return [...items];
 }
 
 async function getByMetadata(filter: Partial<QueueItem['metadata']>): Promise<QueueItem[]> {
+  await kontoPruefen();
   const items = await _load();
   return items.filter(item => {
     for (const key of Object.keys(filter) as Array<keyof QueueItem['metadata']>) {
@@ -699,10 +768,12 @@ export const writeQueue = {
   getAll,
   getByMetadata,
   getFailedChat,
+  chatAblehnungMerken,
   forgetFailedChat,
   forgetFailedChatMany,
   getFailedActions,
   forgetFailedAction,
   forgetAllFailedActions,
   clear,
+  kontoPruefen,
 };

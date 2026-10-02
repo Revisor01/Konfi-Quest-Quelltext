@@ -1,9 +1,10 @@
 const express = require('express');
 const PushService = require('../../services/pushService');
 const liveUpdate = require('../../utils/liveUpdate');
-const { bucheTermin, zaehleBestaetigte, promoteFromWaitlist } = require('../../utils/bookingUtils');
+const { bucheTermin, zaehleBestaetigte, promoteFromWaitlist, pruefeKonfiStorno } = require('../../utils/bookingUtils');
 const { removeFromEventChat, addToEventChat } = require('../../utils/eventChat');
 const { nachAntwort } = require('../../utils/nachAntwort');
+const { ladeLeitungZumTermin } = require('../../utils/terminLeitungSicht');
 
 module.exports = (db, rbacVerifier) => {
   const router = express.Router();
@@ -65,13 +66,13 @@ module.exports = (db, rbacVerifier) => {
       liveUpdate.sendToUser('teamer', userId, 'events', 'update', { eventId, status });
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'events', 'update', { eventId, action: 'teamer_booking' });
 
-      try {
-        await PushService.sendTeamerEventBookingToAdmins(
-          db, req.user.organization_id, req.user.display_name, event.name, status, eventId
+      // An die Leitung, die das Event sieht.
+      nachAntwort(req, async () => {
+        const empfaenger = await ladeLeitungZumTermin(db, eventId, { ausser: userId });
+        await PushService.sendTeamerEventBookingToLeadership(
+          db, req.user.organization_id, empfaenger, req.user.display_name, event.name, status, eventId, userId
         );
-      } catch (pushErr) {
-        console.error('Push notification failed for teamer booking:', pushErr);
-      }
+      }, 'Push nach Teamer-Buchung');
 
       // Bestaetigung an die Teamer:in selbst (analog Konfi-Anmeldung)
       try {
@@ -137,7 +138,24 @@ module.exports = (db, rbacVerifier) => {
           return res.status(404).json({ error: 'Buchung nicht gefunden' });
         }
 
-        // War der Konfi als anwesend verbucht: Event-Punkte zuruecknehmen.
+        // KONFIS: DIESELBEN REGELN WIE AUF DER KONFI-ROUTE.
+        // Bis dahin loeschte dieser Weg jede Buchung
+        // -- am Pflichttermin, am Vortag, mit eingetragenem "gefehlt" -- und
+        // ohne Protokoll. Die Entscheidung steht in pruefeKonfiStorno, die
+        // Konfi-Route ruft dieselbe Funktion. Die Meldungen sind die der
+        // Konfi-Route; die Erfolgsform dieser Route bleibt unveraendert.
+        if (isKonfi) {
+          const { rows: [terminRegeln] } = await client.query(
+            'SELECT mandatory, event_date FROM events WHERE id = $1 AND organization_id = $2',
+            [eventId, req.user.organization_id]
+          );
+          const verboten = pruefeKonfiStorno({ event: terminRegeln, buchung: booking });
+          if (verboten) {
+            await client.query('ROLLBACK');
+            return res.status(verboten.status).json({ error: verboten.error });
+          }
+        }
+
         if (booking.attendance_status === 'present') {
           const { rows: [pts] } = await client.query(
             "SELECT id, points, point_type FROM event_points WHERE konfi_id = $1 AND event_id = $2",
@@ -158,6 +176,16 @@ module.exports = (db, rbacVerifier) => {
         // Wer sich vom Event abmeldet, fliegt auch aus dem zugehörigen Event-Chat.
         // Sonst bleibt man im Chat, obwohl man nicht mehr teilnimmt.
         await removeFromEventChat(client, eventId, userId, req.user.organization_id);
+
+        // Protokoll wie auf der Konfi-Route: Die Leitung liest
+        // event_unregistrations; eine Abmeldung ueber diesen Weg blieb bisher
+        // ohne Spur. Nur fuer Konfis -- Team-Absagen haben ihren eigenen Push.
+        if (isKonfi) {
+          await client.query(
+            'INSERT INTO event_unregistrations (user_id, event_id, reason, unregistered_at, organization_id) VALUES ($1, $2, $3, NOW(), $4)',
+            [userId, eventId, (req.body && req.body.reason) || null, req.user.organization_id]
+          );
+        }
 
         // If a confirmed Konfi-spot was opened, auto-promote from waitlist (nur für Konfis relevant).
         // Kapazität wird SLOT-bezogen geprüft, wenn die Buchung an einem Timeslot hing —
@@ -244,17 +272,38 @@ module.exports = (db, rbacVerifier) => {
         liveUpdate.sendToUser(userType, userId, 'events', 'update', { eventId, action: 'canceled' });
         liveUpdate.sendToOrgAdmins(req.user.organization_id, 'events', 'update', { eventId, action: 'cancellation' });
 
-        // Push an Admins bei Teamer-Storno
+        // Push an die Leitung, die das Event sieht.
         if (isTeamer) {
           try {
             const { rows: [eventInfo] } = await db.query("SELECT name FROM events WHERE id = $1", [eventId]);
-            await PushService.sendTeamerEventCancellationToAdmins(
-              db, req.user.organization_id, req.user.display_name,
-              eventInfo ? eventInfo.name : 'Event', eventId
+            const empfaenger = await ladeLeitungZumTermin(db, eventId, { ausser: userId });
+            await PushService.sendTeamerEventCancellationToLeadership(
+              db, req.user.organization_id, empfaenger, req.user.display_name,
+              eventInfo ? eventInfo.name : 'Event', eventId, null, userId
             );
           } catch (pushErr) {
             console.error('Push notification failed for teamer cancellation:', pushErr);
           }
+        }
+
+        if (isKonfi) {
+          const { rows: [eventInfo] } = await db.query('SELECT name FROM events WHERE id = $1', [eventId]);
+          const eventName = eventInfo ? eventInfo.name : 'Event';
+          try {
+            await PushService.sendEventUnregisteredToKonfi(db, userId, eventName, eventId);
+          } catch (pushErr) {
+            console.error('Push notification failed for konfi cancellation:', pushErr);
+          }
+          const empfaenger = await ladeLeitungZumTermin(db, eventId);
+          // Mit konfi_id: Ohne sie blieb die Mitteilung mit dem
+          // Namen der Konfi nach deren Kontoloeschung im Postfach der Leitung
+          // stehen (loescheMitteilungenUeberPerson findet sie ueber die
+          // Kennung). Alle uebrigen Aufrufer gaben sie schon mit.
+          await PushService.sendEventUnregistrationToLeadership(
+            db, req.user.organization_id, empfaenger,
+            req.user.display_name || 'Ein Konfi', eventName,
+            (req.body && req.body.reason) || null, eventId, userId
+          );
         }
       }, 'DELETE /events/:eventId/book');
 

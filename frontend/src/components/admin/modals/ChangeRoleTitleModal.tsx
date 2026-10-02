@@ -113,7 +113,7 @@ const ChangeRoleTitleModal: React.FC<ChangeRoleTitleModalProps> = ({
               <IonList style={{ background: 'transparent' }}>
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Funktionsbeschreibung</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Funktionsbeschreibung"
                     value={roleTitle}
                     onIonInput={(e) => setRoleTitle(e.detail.value!)}
                     placeholder="z.B. Pastor, Diakonin, Jugendmitarbeiter"
@@ -138,7 +138,7 @@ const ChangeRoleTitleModal: React.FC<ChangeRoleTitleModalProps> = ({
             <IonCardContent className="app-info-box">
               <p style={{ margin: 0 }}>
                 Deine Funktionsbeschreibung wird anderen Nutzern im Chat und an anderen Stellen angezeigt.
-                Sie ersetzt nicht deine Rolle (Admin, Teamer:in), sondern ergänzt sie.
+                Sie ersetzt nicht deine Rolle (Leitung, Gemeindeleitung, Teamer:in), sondern ergänzt sie.
               </p>
               <p style={{ margin: 'var(--app-abstand-mittel) 0 0 0', fontSize: 'var(--app-text-sekundaer)', fontStyle: 'italic' }}>
                 Beispiele: Pastor, Diakonin, Jugendmitarbeiter, Gemeindediakon, Pfarrerin

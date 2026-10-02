@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- allowBackup=false: Die App haelt Login-Token und Chat-Inhalte von
          Jugendlichen vor. Mit Androids Auto-Backup landeten die im Google-Konto
@@ -14,6 +15,18 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
+        <!--
+             WARUM NICHT NACH GERAETEGROESSE GETRENNT: Der Versuch, hier eine
+             Ressource aus values/ und values-sw600dp/ zu lesen, scheitert an
+             Android selbst. Lint sagt: "Resources referenced from the manifest
+             cannot vary by configuration [...] This value will not be used."
+             Das Manifest wird beim Installieren aufgeloest, nicht zur
+             Laufzeit; die Tablet-Fassung waere nie gezogen worden, und wir
+             haetten etwas ausgeliefert, das nur so aussieht, als taete es was.
+
+             Ab Android 16 ignorieren grosse Displays die Sperre ohnehin,
+             genau darauf weist die Play Console hin. Auf Telefonen bleibt sie
+             wirksam, und das ist der Zweck. -->
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:screenOrientation="portrait"
@@ -28,7 +41,66 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
 
+            <!-- App Links: Links auf konfi-quest.de oeffnen die
+                 App statt des Browsers. Android prueft dafuer beim Installieren
+                 https://konfi-quest.de/.well-known/assetlinks.json (liegt in
+                 frontend/public/.well-known) gegen den Signaturschluessel;
+                 nur mit autoVerify entfaellt die Nachfrage "Oeffnen mit".
+
+                 NUR https und NUR die Pfade, die die App auch hat: Die
+                 Einladung (/register?code=...) aus QR-Code und Elternbrief,
+                 der Link aus der Passwort-vergessen-Mail (/reset-password)
+                 und /login von der Werbeseite. Werbeseite, Datenschutz,
+                 Impressum, Handbuch und API-Doku bleiben im Browser, denn die
+                 App hat dafuer keine Seite und wuerde nur ins Leere springen.
+
+                 KEIN www.konfi-quest.de: Der Server leitet www per 301 auf
+                 konfi-quest.de um, auch fuer die assetlinks.json. Android
+                 verlangt fuer die Pruefung aber 200 ohne Umleitung; ein
+                 unpruefbarer Host liesse vor Android 12 die Pruefung ALLER
+                 Hosts scheitern. Und kein Code der App erzeugt www-Links.
+
+                 Die Pfadliste spiegelt utils/deepLinks.ts; der Test in
+                 __tests__/navigation/appLinksAndroid.test.ts haelt beide
+                 in Deckung. Wer hier einen Pfad ergaenzt, ergaenzt ihn dort. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" />
+                <data android:host="konfi-quest.de" />
+                <data android:pathPrefix="/login" />
+                <data android:pathPrefix="/register" />
+                <data android:pathPrefix="/reset-password" />
+            </intent-filter>
+
         </activity>
+
+        <!-- EIN Empfaenger fuer Push-Nachrichten.
+
+             KonfiMessagingService setzt die Zahl am App-Symbol auch bei
+             geschlossener App: Der Server schickt dafuer ein reines
+             Datenpaket (badge_update), und nur ein Messaging-Dienst wird
+             davon geweckt, nicht die WebView. Auf dem iPhone erledigt das
+             aps.badge. Alles andere reicht der Dienst unveraendert an
+             @capacitor/push-notifications weiter, von dessen Dienst er
+             abgeleitet ist: Empfang bei offener App
+             ('pushNotificationReceived') und neuer Token ('registration')
+             bleiben, wie sie waren. Das Antippen laeuft ueber die Activity.
+             -->
+        <service
+            android:name=".KonfiMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        <service
+            android:name="com.capacitorjs.plugins.pushnotifications.MessagingService"
+            tools:node="remove" />
+        <service
+            android:name="io.capawesome.capacitorjs.plugins.firebase.messaging.MessagingService"
+            tools:node="remove" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -39,6 +111,28 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!--
+             Ohne diese Eintraege nimmt das FCM-SDK das App-Symbol als kleines
+             Symbol. Android wertet davon nur die Deckkraft aus; das
+             Launcher-Symbol ist ein volles Quadrat, heraus kam ein weisser
+             bzw. grauer Fleck in Statusleiste und Mitteilung, ohne Farbe.
+             ic_stat_konfi ist die Lutherrose der Monochrom-Ebene des
+             App-Symbols, weiss auf durchsichtig, 20 dp Motiv auf 24 dp. Die
+             Farbe steht in values/ und values-night/benachrichtigung.xml.
+
+             Beide Wege lesen dieselben Eintraege: die Mitteilung, die Android
+             bei geschlossener App selbst zeigt (FCM-SDK), und die, die
+             @capacitor/push-notifications bei offener App baut
+             (CommonNotificationBuilder mit den Metadaten der App). Das Plugin
+             hat dafuer keine eigene Einstellung.
+             Geprueft in frontend/src/__tests__/config/androidMitteilungsSymbol.test.ts. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_konfi" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/benachrichtigung_farbe" />
     </application>
 
     <!-- Permissions -->
@@ -61,13 +155,60 @@
          installieren koennen, sie sehen den Schalter dann einfach nicht. -->
     <uses-feature android:name="android.hardware.biometrics" android:required="false" />
 
-    <!-- Kamera fuer den QR-Scanner (Event-Checkin). Ohne diese Deklaration
+    <!-- Kamera fuer den QR-Scanner (Event-Checkin) und fuer Fotos aus der
+         Dateiauswahl (Chat, Challenges, Aktivitaeten). Ohne diese Deklaration
          verweigert Android getUserMedia in der WebView, ohne dass der Nutzer
-         ueberhaupt einen Berechtigungsdialog zu sehen bekommt. -->
+         ueberhaupt einen Berechtigungsdialog zu sehen bekommt. Eine eigene
+         Begruendung wie NSCameraUsageDescription auf iOS gibt es bei Android
+         nicht; der Dialog zeigt den Systemtext. -->
     <uses-permission android:name="android.permission.CAMERA" />
 
     <!-- Die Kamera ist kein Muss: Geraete ohne Kamera sollen die App weiterhin
          aus dem Play Store installieren koennen. -->
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+
+    <!-- Sonys Zahl-Anbieter nimmt die Zahl nur mit dieser Berechtigung an.
+         ShortcutBadger bringt sie ebenfalls mit; hier steht sie,
+         weil die App den Anbieter selbst anspricht (AppSymbolZahl.java) und
+         nicht davon abhaengen soll, welche Bibliothek sie gerade mitbringt. -->
+    <uses-permission android:name="com.sonymobile.home.permission.PROVIDER_INSERT_BADGE" />
+
+    <!-- Zahl am App-Symbol. Android hat dafuer keine offizielle
+         Schnittstelle; das Badge-Plugin nutzt ShortcutBadger, das den
+         Launcher sucht und ueber dessen eigene Wege anspricht. Seit
+         targetSdk 30 sieht die App fremde Pakete nur, wenn sie hier
+         angemeldet sind. Ohne diesen Block bleibt ShortcutBadger der
+         Launcher verborgen, und die Zahl der App kommt nicht an (nach
+         Android-Doku und Quelltext; an einem Geraet nicht gemessen).
+
+         Angemeldet ist nur, was ShortcutBadger tatsaechlich benutzt:
+         die Suche nach dem Startbildschirm, der Broadcast, ueber den Samsung
+         die Zahl annimmt (ab Android 8 sucht ShortcutBadger zuerst seine
+         eigene Fassung me.leolin.shortcutbadger.BADGE_COUNT_UPDATE), und die
+         Zahl-Anbieter von Sony, Samsung, Huawei, OPPO/ZUK und ZTE. Bewusst
+         NICHT QUERY_ALL_PACKAGES, das verlangt im Play Store eine eigene
+         Begruendung.
+
+         Der Pixel-Launcher und andere Standard-Launcher kennen keine Zahl von
+         aussen; dort zeigt Android einen Punkt, solange eine Mitteilung der
+         App in der Leiste liegt. Geprueft in
+         frontend/src/__tests__/config/androidAppSymbolZahl.test.ts. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.BADGE_COUNT_UPDATE" />
+        </intent>
+        <intent>
+            <action android:name="me.leolin.shortcutbadger.BADGE_COUNT_UPDATE" />
+        </intent>
+        <provider android:authorities="com.sonymobile.home.resourceprovider" />
+        <provider android:authorities="com.sec.badge" />
+        <provider android:authorities="com.huawei.android.launcher.settings" />
+        <provider android:authorities="com.android.badge" />
+        <provider android:authorities="com.android.launcher3.cornermark.unreadbadge" />
+    </queries>
 </manifest>

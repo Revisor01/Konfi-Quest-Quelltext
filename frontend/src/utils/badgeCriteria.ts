@@ -25,6 +25,7 @@ import {
   ICON_UHRZEIT_GEFUELLT,
   ICON_ZUSAGE_GEFUELLT,
 } from '../components/shared/icons';
+import { KRITERIUM_FARBEN } from '../theme/colors';
 
 /**
  * Die Zusatzangaben eines Kriteriums (`custom_badges.criteria_extra`).
@@ -61,25 +62,15 @@ export interface BadgeKriteriumExtra {
   weeks?: number;
 }
 
-/** Standardfarbe eines Kriterientyps. Auch die Vorgabe für die Badge-Farbe. */
-export const CRITERIA_COLORS: Record<string, string> = {
-  total_points: '#ffd700',
-  gottesdienst_points: '#ff9500',
-  gemeinde_points: '#059669',
-  bonus_points: '#ff6b9d',
-  both_categories: '#5856d6',
-  activity_count: '#3880ff',
-  unique_activities: '#10dc60',
-  activity_combination: '#7044ff',
-  category_activities: '#0cd1e8',
-  category_combination: '#0891b2',
-  specific_activity: '#ffce00',
-  streak: '#eb445a',
-  time_based: '#8e8e93',
-  event_count: '#e63946',
-  mandatory_event_count: '#b91c1c',
-  teamer_year: '#5b21b6'
-};
+/**
+ * Standardfarbe eines Kriterientyps. Auch die Vorgabe für die Badge-Farbe.
+ *
+ * Die Werte stehen als Tokens in theme/variables.css
+ * (--app-color-kriterium-<typ>) und als Hex-Spiegel in theme/colors.ts
+ * (KRITERIUM_FARBEN) -- hier keine eigenen mehr.
+ */
+const { standard: kriteriumStandard, ...kriteriumJeTyp } = KRITERIUM_FARBEN;
+export const CRITERIA_COLORS: Record<string, string> = kriteriumJeTyp;
 
 const CRITERIA_ICONS: Record<string, string> = {
   total_points: ICON_STATISTIK_GEFUELLT,
@@ -100,11 +91,22 @@ const CRITERIA_ICONS: Record<string, string> = {
   teamer_year: ICON_TERMIN_GEFUELLT
 };
 
-/** Farbe für Kriterientypen ohne eigenen Eintrag (entspricht --app-color-users). */
-export const CRITERIA_FALLBACK_COLOR = '#667eea';
+/** Farbe für Kriterientypen ohne eigenen Eintrag (--app-color-kriterium-standard, == --app-color-users). */
+export const CRITERIA_FALLBACK_COLOR: string = kriteriumStandard;
 
 export const getCriteriaColor = (criteriaType: string): string =>
   CRITERIA_COLORS[criteriaType] || CRITERIA_FALLBACK_COLOR;
+
+/**
+ * Kriterienfarbe als SCHRIFT auf einer Karte, als Token (`--app-text-kriterium-<typ>`
+ * in variables.css): hell die Kriterienfarbe selbst, dunkel eine aufgehellte
+ * Stufe mit mindestens 4,5:1 auf der Karte. Fuer die Prozentzahl im
+ * Fortschrittsring -- die Kriterienfarbe #eb445a stand dort im Dunkeln bei
+ * 4,06:1. Fuer Flaechen (Ring, Kachel)
+ * weiter getCriteriaColor().
+ */
+export const getCriteriaTextColor = (criteriaType: string): string =>
+  `var(--app-text-kriterium-${(criteriaType in CRITERIA_COLORS ? criteriaType : 'standard').replace(/_/g, '-')})`;
 
 export const getCriteriaIcon = (criteriaType: string): string =>
   CRITERIA_ICONS[criteriaType] || ICON_AKTION_GEFUELLT;

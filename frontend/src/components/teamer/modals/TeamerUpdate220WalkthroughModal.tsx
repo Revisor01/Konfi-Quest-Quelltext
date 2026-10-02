@@ -24,7 +24,7 @@ export const SLIDES: OnboardingSlide[] = [
     color: 'var(--app-color-events)',
     rgb: '--app-color-events-rgb',
     title: 'Ihr seht, wer kommt',
-    text: 'Am Termin steht jetzt die Teilnehmerliste: Konfis und Team getrennt, mit Jahrgang und Stand der Anmeldung. Wer auf eine Freizeit mitfährt, weiß damit vorher, wen er erwartet.',
+    text: 'Am Event steht jetzt die Teilnehmerliste: Konfis und Team getrennt, mit Jahrgang und Stand der Anmeldung. Wer auf eine Freizeit mitfährt, weiß damit vorher, wen er erwartet.',
   },
   {
     icon: ICON_ANWESEND,
@@ -38,7 +38,7 @@ export const SLIDES: OnboardingSlide[] = [
     color: 'var(--app-color-events)',
     rgb: '--app-color-events-rgb',
     title: 'Klarheit bei Absagen',
-    text: 'Fällt ein Termin aus, steht der Grund dabei — in der Liste und auf der Startseite. Findet er doch statt, seht ihr das ebenso. Eure eigene Zu- und Absage wirkt jetzt sofort, ohne Neuladen.',
+    text: 'Fällt ein Event aus, steht der Grund dabei — in der Liste und auf der Startseite. Findet es doch statt, seht ihr das ebenso. Eure eigene Zu- und Absage wirkt jetzt sofort, ohne Neuladen.',
   },
   {
     icon: ICON_FINGERABDRUCK,

@@ -1,19 +1,56 @@
 const PushService = require('./pushService');
 const cron = require('node-cron');
-const { deleteKonfiCascade } = require('../utils/konfiDeletion');
-const { meldeNachrueckern } = require('../utils/nachrueckMeldung');
+const { kontoDatenLoeschen, kontoDateienLoeschen, meldeNachKontoLoeschung } = require('../utils/kontoLoeschen');
 const emailService = require('./emailService');
 const apm = require('../utils/apm');
-const { formatUhrzeit, heuteBerlin } = require('../utils/zeitformat');
-const { appIconSummenFuerAlle } = require('../utils/appIconBadge');
+const { formatUhrzeit } = require('../utils/zeitformat');
+const { appIconSummenAllerGemeinden } = require('../utils/appIconBadge');
 const { abzeichenFingerabdruecke } = require('../utils/abzeichenKandidaten');
+const { ladeMitgliederDerOrganisation } = require('../utils/orgMitglieder');
+// Empfaenger der Leitungs-Meldungen aus dem Hintergrund: die
+// Regel-Stellen fuer Events und Jahrgaenge, nicht mehr die ganze Leitung.
+const { terminWartetAufVerbuchungSql, zaehleWartendeTermineJeLeitung } = require('../utils/terminLeitungSicht');
+const { ladeLeitungZumJahrgang } = require('../utils/jahrgangLeitungSicht');
+const { invalidateUserCache } = require('../middleware/rbac');
+const liveUpdate = require('../utils/liveUpdate');
+const { loescheMitteilungenZuErledigtenEinladungen } = require('../utils/postfachAufraeumen');
+const { WOANDERS_MITGLIED_SQL } = require('../utils/konfiOderTeam');
 
 // Vorlauf für die Lizenz-Ablauf-Erinnerung (Tage vor trial_ends_at)
 const LICENSE_REMINDER_DAYS = 14;
 
+// Termin-Erinnerungen: Vorlauf
+// je Art und der Spielraum danach. Der Takt laeuft zur vollen Viertelstunde;
+// der Spielraum von zwei Takten faengt einen ausgefallenen Takt auf.
+const MINUTE_MS = 60 * 1000;
+const ERINNERUNG_VORLAUF_MS = { '1_day': 24 * 60 * MINUTE_MS, '1_hour': 60 * MINUTE_MS };
+const ERINNERUNG_SPIELRAUM_MS = 30 * MINUTE_MS;
+const ERINNERUNG_TAKT = '*/15 * * * *';
+
+// Deshalb filtert jede Sammelabfrage eines Laufs, der Mitteilungen
+// ausloest, auf aktive Gemeinden, mit derselben Bedingung wie rbac.js und
+// ladeMitgliedschaftenVieler (COALESCE(is_active, true): NULL gilt als
+// aktiv). Gefiltert wird in der Abfrage, nicht je Person -- kein Lauf kostet
+// dadurch eine Abfrage mehr. Wo ein Merker den Versand festhaelt
+// (registration_open_notified, start_push_sent, event_reminders,
+// deletion_reminder_sent_at), bleibt er fuer die gesperrte Gemeinde offen:
+// Wird sie wieder freigegeben, kommt nach, was dann noch ansteht.
+// Unveraendert laufen die Loeschfristen (runAutoDeletion) -- nur deren
+// Nachrueck-Meldung bleibt in einer gesperrten Gemeinde aus -- und die
+// Lizenz-Erinnerung, die ohnehin nur aktive Gemeinden fragt.
+const NUR_AKTIVE_GEMEINDE = (alias) => `COALESCE(${alias}.is_active, true) = true`;
+
 class BackgroundService {
   static badgeUpdateInterval = null;
-  static eventReminderInterval = null;
+  static eventReminderCronTask = null;
+  // Laufmerker fuer sendEventReminders: Der 15-Minuten-Takt startet, ob der
+  // letzte Lauf fertig ist oder nicht. Dauert ein Lauf laenger als einen Takt
+  // (tausende Empfaenger, FCM-Latenz je Geraet), faende der naechste dieselben
+  // noch nicht eingetragenen Erinnerungen und schickte sie ein zweites Mal —
+  // der UNIQUE-Index auf event_reminders faengt nur die zweite Zeile, nicht
+  // den zweiten Push. Ein Prozess-Merker reicht, weil nur die
+  // Cron-Leader-Replica die Hintergrund-Jobs startet (server.js).
+  static eventReminderLaeuft = false;
   static pendingEventsCronTask = null;
   static tokenCleanupInterval = null;
   static wrappedCronTask = null;
@@ -27,6 +64,25 @@ class BackgroundService {
   // jeder Takt dieselbe Zahl erneut schickt, und erlaubt trotzdem das
   // Zuruecknehmen auf null (siehe updateAllUserBadges).
   static letzterZaehler = new Map();
+  static letzterZaehlerAlteApps = new Map();
+  // Ist der Merker seit dem Prozessstart einmal gefuellt worden? Der erste
+  // Lauf nach einem Neustart fuellt ihn nur und sendet NICHTS:
+  // Mit leerem Merker "weicht" jeder Stand ab,
+  // und der Lauf schickte an JEDES Geraet einen stillen Push -- gemessen fuer
+  // 25.000 Konten mit 48.000 Tokens 214,8 s, 328.403 Abfragen und 96.000
+  // Log-Zeilen, nach jedem Deploy. Was waehrend der kurzen Auszeit an
+  // Zaehlern anfiel, traegt der jeweilige Push (Chat, Antrag, Termin) ohnehin
+  // selbst; der Hintergrundlauf holt nur nach, was der Client sonst nicht
+  // erfaehrt (Zuruecknehmen auf null), und das ab dem zweiten Lauf.
+  static zaehlerMerkerGefuellt = false;
+  // Laufmerker fuer updateAllUserBadges (Muster wie eventReminderLaeuft): die
+  // Promise des laufenden Laufs oder null. Der 5-Minuten-Takt ueberspringt,
+  // wenn noch einer laeuft; der Stundenlauf WARTET stattdessen -- beide Takte
+  // sind am Prozessstart verankert und treffen sich jede volle Stunde, der
+  // Zaehler-Takt ist zuerst registriert und startet zuerst. Wuerde der
+  // Stundenlauf dann uebersprungen, liefe die Abzeichen-Pruefung nie.
+  static badgeLauf = null;
+  static badgeLaufVoll = false;
   // Fingerabdruck der Datenlage je Person beim letzten Abzeichen-Lauf. Wer
   // denselben Abdruck hat wie vorher, kann kein Abzeichen neu verdient haben
   // und wird uebersprungen (Begruendung in utils/abzeichenKandidaten.js).
@@ -50,6 +106,17 @@ class BackgroundService {
   // setzt dort fort (abzeichenZeiger).
   static ABZEICHEN_MAX_JE_LAUF = 800;
   static abzeichenZeiger = 0;
+
+  // Hoechstens so viele Termine je Minutenlauf bekommen den "Anmeldung
+  // moeglich"-Push. Im Regelbetrieb flippt
+  // das Anlegen eines Termins das Flag sofort, der Lauf findet ein, zwei
+  // zeitgesteuerte Faelle je Minute -- die Grenze greift dann nie. Stauen
+  // sich faellige Termine (Import, langer Ausfall des Cron-Leaders,
+  // Migration mit false-Vorgabe), gingen vorher ALLE in einem Lauf hinaus:
+  // gemessen mit 5.000 Terminen 34,1 s, 50.365 Abfragen, 137.910 Log-Zeilen.
+  // Mit 20 je Minute sind 5.000 Termine in gut vier Stunden abgearbeitet,
+  // ohne dass ein einzelner Lauf die Datenbank blockiert.
+  static REGISTRIERUNG_MAX_JE_LAUF = 20;
 
   /**
    * Startet regelmäßige Badge Updates für alle User (alle 5 Minuten)
@@ -107,9 +174,40 @@ class BackgroundService {
    * @param {object} db
    * @param {{nurZaehler?: boolean}} optionen  nurZaehler = App-Icon-Zähler
    *        aktualisieren, die teure Abzeichen-Prüfung auslassen.
+   * @returns {Promise<{updated:number, total:number, geprueft:number, uebersprungen?: true}>}
+   *   `uebersprungen` nur, wenn ein Zaehler-Takt einen laufenden Vorgaenger
+   *   traf und deshalb nichts getan hat (siehe badgeLauf).
    */
   static async updateAllUserBadges(db, optionen = {}) {
     const { nurZaehler = false } = optionen;
+    while (this.badgeLauf) {
+      if (nurZaehler) {
+        if (!this.badgeLaufVoll) {
+          console.warn('updateAllUserBadges: vorheriger Lauf noch aktiv — Zähler-Takt übersprungen');
+        }
+        return { updated: 0, total: 0, geprueft: 0, uebersprungen: true };
+      }
+      // Stundenlauf: warten, nicht ueberspringen (Begruendung an badgeLauf).
+      await this.badgeLauf.catch(() => {});
+    }
+    const lauf = this.zaehlerUndAbzeichenLauf(db, nurZaehler);
+    this.badgeLauf = lauf;
+    this.badgeLaufVoll = !nurZaehler;
+    try {
+      return await lauf;
+    } finally {
+      if (this.badgeLauf === lauf) {
+        this.badgeLauf = null;
+        this.badgeLaufVoll = false;
+      }
+    }
+  }
+
+  /**
+   * Der eigentliche Lauf -- nur ueber updateAllUserBadges aufrufen, das den
+   * Laufmerker fuehrt.
+   */
+  static async zaehlerUndAbzeichenLauf(db, nurZaehler) {
     try {
       // Alle Konfis und Teamer:innen laden — NICHT nur die mit Push-Token.
       //
@@ -128,6 +226,9 @@ class BackgroundService {
                ) AS hat_push
         FROM users u
         JOIN roles r ON u.role_id = r.id
+        -- Gesperrte Stamm-Gemeinde: keine Anmeldung, also auch kein stiller
+        -- Push und keine Abzeichen-Pruefung.
+        JOIN organizations o ON o.id = u.organization_id AND ${NUR_AKTIVE_GEMEINDE('o')}
         WHERE r.name IN ('konfi', 'teamer', 'admin', 'org_admin')
           AND u.deleted_at IS NULL
           AND u.is_active = true
@@ -146,93 +247,32 @@ class BackgroundService {
       if (this.letzterZaehler.size > users.length) {
         const aktuell = new Set(users.map(u => `${u.user_id}_${u.user_type}`));
         for (const schluessel of this.letzterZaehler.keys()) {
-          if (!aktuell.has(schluessel)) this.letzterZaehler.delete(schluessel);
+          if (!aktuell.has(schluessel)) {
+            this.letzterZaehler.delete(schluessel);
+            this.letzterZaehlerAlteApps.delete(schluessel);
+          }
         }
       }
 
       // BULK: Die App-Icon-Summe fuer ALLE auf einmal, nicht pro Person.
       //
-      // Gerechnet wird fuer alle, gesendet nur an Geraete mit Token — die
-      // Abzeichen-Pruefung unten braucht ohnehin die volle Liste.
-      // Jahrgaenge fuer Teamer:innen UND die Rolle 'admin', in
-      // EINER Abfrage: Bei beiden haengen die Zaehler an der Zuweisung
-      // (Freigaben bei Teamer:innen; Antraege, Termine und Freigaben bei
-      // gebundenen Admins). org_admin zaehlt org-weit und braucht keine.
-      const teamerIds = users
-        .filter(u => u.user_type === 'teamer' || u.role_name === 'admin')
-        .map(u => u.user_id);
-      const jahrgaengeProTeamer = new Map();
-      if (teamerIds.length > 0) {
-        const { rows: zuweisungen } = await db.query(
-          'SELECT user_id, jahrgang_id AS id, can_view FROM user_jahrgang_assignments WHERE user_id = ANY($1::int[])',
-          [teamerIds]
-        );
-        for (const z of zuweisungen) {
-          if (!jahrgaengeProTeamer.has(z.user_id)) jahrgaengeProTeamer.set(z.user_id, []);
-          jahrgaengeProTeamer.get(z.user_id).push({ id: z.id, can_view: z.can_view });
-        }
-      }
-
-      // MULTI-ORG: Hier stand nur
-      // `organization_id: u.organization_id` -- die PRIMAER-Organisation. Wer
-      // mehreren Gemeinden angehoert, bekam damit alle fuenf Minuten die Zahl
-      // EINER Organisation aufs Icon, egal was in den anderen offen war.
+      // Gerechnet wird fuer alle, gesendet nur an Geraete mit Token.
       //
-      // Gemessen an einem echten Konto: Org 1 = 6, Org 2 = 0, Org 4 = 29.
-      // Der Push (berechneBadge) sendete nach seinem Fix korrekt 35 -- der
-      // Hintergrund-Sync ueberschrieb sie kurz darauf wieder mit 6. Genau das
-      // war beobachtbar: Push zeigt 35, App oeffnen zeigt 6, wenig spaeter 0.
+      // Kosten: zwei Abfragen fuer die Zugehoerigkeit und EINE Zaehlrunde
+      // ueber alle Personen und Gemeinden -- vorher eine Runde je Gemeinde,
+      // die Zahl hing also an der Zahl der Gemeinden (nie an der Personenzahl).
       //
-      // Loesung wie in berechneBadge: je Organisation ein Eintrag, danach
-      // aufaddieren. Fuer Single-Org-Konten (alle Konfis, die meisten
-      // Teamer:innen) aendert sich nichts -- ein Eintrag wie bisher.
-      const orgsProUser = new Map();
-      const mehrfachIds = users.map(u => u.user_id);
-      if (mehrfachIds.length > 0) {
-        const { rows: zuordnungen } = await db.query(
-          'SELECT user_id, organization_id FROM user_organizations WHERE user_id = ANY($1::int[])',
-          [mehrfachIds]
-        );
-        for (const z of zuordnungen) {
-          if (!orgsProUser.has(z.user_id)) orgsProUser.set(z.user_id, new Set());
-          orgsProUser.get(z.user_id).add(z.organization_id);
-        }
-      }
-
-      const empfaenger = [];
-      for (const u of users) {
-        const orgs = orgsProUser.get(u.user_id) || new Set();
-        // Die Primaer-Org gehoert immer dazu, auch wenn user_organizations
-        // sie (noch) nicht fuehrt.
-        if (u.organization_id != null) orgs.add(u.organization_id);
-        // Ohne jede Organisation trotzdem EINEN Eintrag anlegen: Sonst faellt
-        // das Konto stillschweigend aus der Zaehlung, statt eine 0 zu bekommen.
-        if (orgs.size === 0) orgs.add(u.organization_id ?? null);
-        for (const orgId of orgs) {
-          empfaenger.push({
-            id: u.user_id,
-            type: u.user_type,
-            role_name: u.role_name,
-            organization_id: orgId,
-            assigned_jahrgaenge: jahrgaengeProTeamer.get(u.user_id) || []
-          });
-        }
-      }
-
-      // appIconSummenFuerAlle schluesselt nach `id_type` -- bei mehreren
-      // Organisationen desselben Kontos kaeme sonst nur die letzte an.
-      // Deshalb je Organisation einmal rechnen und hier addieren.
+      // Fuer Personen mit einer Gemeinde ist das dieselbe Rechnung wie zuvor.
+      // Wer keiner aktiven Gemeinde mehr angehoert (gesperrt), bekommt 0 --
+      // wie am Umschalter; oeffnen liesse sich dort ohnehin nichts.
+      const jePerson = await appIconSummenAllerGemeinden(db, users.map(u => u.user_id));
       const summen = new Map();
-      const nachOrg = new Map();
-      for (const e of empfaenger) {
-        if (!nachOrg.has(e.organization_id)) nachOrg.set(e.organization_id, []);
-        nachOrg.get(e.organization_id).push(e);
-      }
-      for (const [, liste] of nachOrg) {
-        const teil = await appIconSummenFuerAlle(db, liste);
-        for (const [schluessel, wert] of teil) {
-          if (wert == null) continue;
-          summen.set(schluessel, (summen.get(schluessel) || 0) + wert);
+      const summenAlteApps = new Map();
+      for (const u of users) {
+        const person = jePerson.get(Number(u.user_id));
+        if (person) {
+          summen.set(`${u.user_id}_${u.user_type}`, person.summe);
+          summenAlteApps.set(`${u.user_id}_${u.user_type}`, person.summeAlteApps);
         }
       }
 
@@ -256,9 +296,23 @@ class BackgroundService {
       // verschlucken, was waehrend der Auszeit faellig wurde. Damit dieser
       // eine Lauf den Pool nicht minutenlang belegt, begrenzt
       // ABZEICHEN_MAX_JE_LAUF ihn; der Rest kommt in den Folgelaeufen dran.
-      const abzeichenPersonen = (!nurZaehler)
-        ? users.filter(u => u.user_type === 'konfi' || u.user_type === 'teamer')
-        : [];
+      //
+      // abzeichenPersonen hat EINEN Eintrag je (Person, Gemeinde); Auswahl,
+      // Merker und Obergrenze arbeiten weiter je Person, geprueft wird dann
+      // jede ihrer Gemeinden fuer sich.
+      const abzeichenPersonen = [];
+      const abzeichenGemeindenJe = new Map();
+      if (!nurZaehler) {
+        for (const u of users) {
+          const eintrag = jePerson.get(Number(u.user_id));
+          for (const m of (eintrag ? eintrag.mitgliedschaften : [])) {
+            if (m.role_name !== 'konfi' && m.role_name !== 'teamer') continue;
+            abzeichenPersonen.push({ user_id: u.user_id, organization_id: m.organization_id });
+            if (!abzeichenGemeindenJe.has(u.user_id)) abzeichenGemeindenJe.set(u.user_id, []);
+            abzeichenGemeindenJe.get(u.user_id).push(m.organization_id);
+          }
+        }
+      }
       let zuPruefen = new Set();
       let neueAbdruecke = null;
       if (abzeichenPersonen.length > 0) {
@@ -284,9 +338,9 @@ class BackgroundService {
         if (zuPruefen.size > this.ABZEICHEN_MAX_JE_LAUF) {
           // Ab dem Zeiger weiterlaufen und hinten wieder vorn anfangen, damit
           // ueber die Laeufe hinweg jeder drankommt und niemand dauerhaft
-          // hinten liegen bleibt.
-          const warteschlange = abzeichenPersonen
-            .map(u => u.user_id)
+          // hinten liegen bleibt. Je Person EIN Platz, auch mit mehreren
+          // Gemeinden.
+          const warteschlange = [...abzeichenGemeindenJe.keys()]
             .filter(id => zuPruefen.has(id));
           const start = this.abzeichenZeiger % warteschlange.length;
           const dranheute = new Set();
@@ -303,6 +357,11 @@ class BackgroundService {
       }
 
       let geprueft = 0;
+      // Wer bekommt in diesem Takt einen stillen Push? Erst sammeln, dann
+      // EINMAL gesammelt senden (sendBadgeUpdates) -- nicht je Kopf in der
+      // Schleife. Beim ersten Lauf nach dem Start bleibt die Liste leer, der
+      // Merker wird nur gefuellt (zaehlerMerkerGefuellt).
+      const zuSendende = [];
       for (const user of users) {
         try {
           // App-Icon-Zähler nachfuehren. Nur für Geraete mit Token — ohne
@@ -323,16 +382,27 @@ class BackgroundService {
             // Erst vergleichen, dann senden — sonst ginge bei JEDEM Lauf ein
             // stiller Push raus und der Merker liefe leer.
             const zuSenden = summen.get(schluessel);
+            const zuSendenAlteApps = summenAlteApps.get(schluessel);
 
-            if (zuSenden != null && this.letzterZaehler.get(schluessel) !== zuSenden) {
-              await PushService.sendBadgeUpdate(db, user.user_id);
-              this.letzterZaehler.set(schluessel, zuSenden);
-              updatedCount++;
+            if (zuSenden != null && (this.letzterZaehler.get(schluessel) !== zuSenden
+                || this.letzterZaehlerAlteApps.get(schluessel) !== zuSendenAlteApps)) {
+              if (this.zaehlerMerkerGefuellt) {
+                zuSendende.push({ userId: user.user_id, badge: zuSenden, badgeAlteApps: zuSendenAlteApps, schluessel });
+              } else {
+                // Erster Lauf nach dem Start: nur merken, nicht senden.
+                this.letzterZaehler.set(schluessel, zuSenden);
+                this.letzterZaehlerAlteApps.set(schluessel, zuSendenAlteApps);
+              }
             }
           }
 
           if (!nurZaehler && zuPruefen.has(user.user_id)) {
-            await checkAndAwardBadges(db, user.user_id);
+            // Jede Gemeinde fuer sich (siehe abzeichenPersonen oben):
+            // checkAndAwardBadges zaehlt, prueft und bucht nur in der
+            // uebergebenen Gemeinde.
+            for (const organizationId of (abzeichenGemeindenJe.get(user.user_id) || [])) {
+              await checkAndAwardBadges(db, user.user_id, { organizationId });
+            }
             geprueft++;
 
             // In Bloecken arbeiten statt am Stueck: Nach je
@@ -349,6 +419,23 @@ class BackgroundService {
         }
       }
 
+      // Stille Pushes gesammelt: Tokens einmal fuer alle, die Zahl ist schon
+      // gerechnet (summen), Buchfuehrung je Block. Vorher rief die Schleife
+      // sendBadgeUpdate je Kopf, das Summe und Tokens erneut holte -- rund 7
+      // Abfragen je Person, 439 fuer eine Chat-Nachricht an 60 Teilnehmende.
+      // Der Merker wird erst NACH dem Versand fortgeschrieben: Scheitert der
+      // Versand als Ganzes, sieht der naechste Takt die Staende weiter als
+      // abweichend und holt sie nach (wie vorher beim Einzelweg).
+      if (zuSendende.length > 0) {
+        await PushService.sendBadgeUpdates(db, zuSendende);
+        for (const e of zuSendende) {
+          this.letzterZaehler.set(e.schluessel, e.badge);
+          this.letzterZaehlerAlteApps.set(e.schluessel, e.badgeAlteApps);
+        }
+        updatedCount = zuSendende.length;
+      }
+      this.zaehlerMerkerGefuellt = true;
+
       // Den Merker erst NACH dem Lauf fortschreiben, und nur fuer die
       // Personen, die auch tatsaechlich geprueft wurden. Waere er vorher
       // gesetzt, ginge eine Aenderung verloren, sobald eine Pruefung
@@ -362,8 +449,8 @@ class BackgroundService {
         }
         // Geloeschte Konten aus dem Merker werfen, sonst waechst er mit der
         // Laufzeit (dieselbe Vorsorge wie bei letzterZaehler oben).
-        if (this.letzterAbzeichenAbdruck.size > abzeichenPersonen.length) {
-          const aktuell = new Set(abzeichenPersonen.map(u => u.user_id));
+        if (this.letzterAbzeichenAbdruck.size > abzeichenGemeindenJe.size) {
+          const aktuell = new Set(abzeichenGemeindenJe.keys());
           for (const id of this.letzterAbzeichenAbdruck.keys()) {
             if (!aktuell.has(id)) this.letzterAbzeichenAbdruck.delete(id);
           }
@@ -383,14 +470,14 @@ class BackgroundService {
   // ====================================================================
 
   /**
-   * Startet den Event-Erinnerungs-Service (alle 15 Minuten)
+   * Startet den Event-Erinnerungs-Service (zur vollen Viertelstunde).
    */
   static startEventReminderService(db) {
-    if (this.eventReminderInterval) {
+    if (this.eventReminderCronTask) {
       return;
     }
 
-    // Sofort einmal ausfuehren, dann alle 15 Minuten.
+    // Sofort einmal ausfuehren, dann zur vollen Viertelstunde.
     // .catch() ist Pflicht: sendEventReminders wirft den Fehler weiter (rethrow),
     // ein nackter Aufruf ohne await/catch wuerde als unhandled rejection den
     // Prozess beenden — und mit `restart: unless-stopped` eine Neustartschleife
@@ -399,23 +486,24 @@ class BackgroundService {
     this.sendEventReminders(db).catch(err =>
       console.error('Event reminder (initial) failed:', err));
 
-    const FIFTEEN_MINUTES = 15 * 60 * 1000;
-    this.eventReminderInterval = setInterval(async () => {
+    this.eventReminderCronTask = cron.schedule(ERINNERUNG_TAKT, async () => {
       try {
         await this.sendEventReminders(db);
       } catch (error) {
         console.error('Event reminder service failed:', error);
       }
-    }, FIFTEEN_MINUTES);
+    }, {
+      timezone: 'Europe/Berlin'
+    });
   }
 
   /**
    * Stoppt den Event-Erinnerungs-Service
    */
   static stopEventReminderService() {
-    if (this.eventReminderInterval) {
-      clearInterval(this.eventReminderInterval);
-      this.eventReminderInterval = null;
+    if (this.eventReminderCronTask) {
+      this.eventReminderCronTask.stop();
+      this.eventReminderCronTask = null;
     }
   }
 
@@ -464,17 +552,33 @@ class BackgroundService {
       // false->true setzt, ist allein für den Push zustaendig.
       // Anmeldbar = Fenster offen, nicht abgesagt, kein reines Teamer-Event,
       // kein Pflicht-Event (eigener Erstellungs-Push).
+      //
+      // GEDROSSELT: hoechstens
+      // REGISTRIERUNG_MAX_JE_LAUF Termine je Lauf, die am laengsten offenen
+      // zuerst (registration_opens_at, NULL = "schon immer offen" vorn). Der
+      // Rest kommt in den naechsten Minuten dran. FOR UPDATE SKIP LOCKED: ein
+      // zweiter Lauf, der zeitgleich dieselben Zeilen greift, ueberspringt die
+      // schon gesperrten statt auf sie zu warten; die Flanke bleibt atomar.
       const { rows: events } = await db.query(`
         UPDATE events
         SET registration_open_notified = true
-        WHERE registration_open_notified = false
-          AND cancelled IS NOT TRUE
-          AND (teamer_only IS NULL OR teamer_only = false)
-          AND (mandatory IS NULL OR mandatory = false)
-          AND (registration_opens_at IS NULL OR registration_opens_at <= NOW())
-          AND (registration_closes_at IS NULL OR registration_closes_at >= NOW())
+        WHERE id IN (
+          SELECT id FROM events
+          WHERE registration_open_notified = false
+            AND cancelled IS NOT TRUE
+            AND (teamer_only IS NULL OR teamer_only = false)
+            AND (mandatory IS NULL OR mandatory = false)
+            AND (registration_opens_at IS NULL OR registration_opens_at <= NOW())
+            AND (registration_closes_at IS NULL OR registration_closes_at >= NOW())
+            AND EXISTS (SELECT 1 FROM organizations o
+                         WHERE o.id = events.organization_id AND ${NUR_AKTIVE_GEMEINDE('o')})
+          ORDER BY registration_opens_at NULLS FIRST, id
+          LIMIT $1
+          FOR UPDATE SKIP LOCKED
+        )
+          AND registration_open_notified = false
         RETURNING id, name, event_date, organization_id
-      `);
+      `, [this.REGISTRIERUNG_MAX_JE_LAUF]);
 
       for (const ev of events) {
         try {
@@ -545,6 +649,8 @@ class BackgroundService {
           AND is_draft = false
           AND starts_at <= NOW()
           AND ends_at > NOW()
+          AND EXISTS (SELECT 1 FROM organizations o
+                       WHERE o.id = challenges.organization_id AND ${NUR_AKTIVE_GEMEINDE('o')})
         RETURNING id, title
       `);
 
@@ -561,6 +667,96 @@ class BackgroundService {
   }
 
   /**
+   * Erinnerungen je Termin vormerken -- EIN INSERT je Termin, VOR dem Versand
+   * 
+   *
+   * Die Abfragen oben liefern eine Zeile je (Termin, Empfaenger:in). Vorher
+   * lief die Schleife ueber genau diese Zeilen: je Kopf ein Push ueber
+   * sendToUser (Postfach-Pruefung, Tokens, Badge-Summe, UPDATE je Geraet) und
+   * DANACH ein INSERT. Gemessen: 14 Abfragen und 9,2 ms je Kopf; bei 6.000
+   * Empfaengern je Takt 55 s Datenbankzeit, mit FCM-Latenz rund zehn Minuten
+   * -- laenger als der Takt. Der Laufmerker faengt den naechsten Takt im
+   * selben Prozess ab, nicht aber eine zweite Replica, die zum Cron-Leader
+   * geworden ist.
+   *
+   * Deshalb hier je Termin: alle Empfaenger:innen in einem
+   * `INSERT ... ON CONFLICT DO NOTHING RETURNING user_id`. Zurueck kommen
+   * genau die, deren Zeile NEU war -- wer die Zeile setzt, sendet; wer sie
+   * schon vorfindet (zweiter Lauf, andere Replica), bekommt niemanden zurueck
+   * und sendet nichts. Der Push geht danach als EIN Sammelversand je Termin
+   * (der Text ist je Termin gleich; sendToMultipleUsers rechnet Tokens und
+   * Badge einmal fuer alle).
+   *
+   * Gemessen (tests/services/eventRemindersSammelversand.test.js, ein Termin
+   * mit 200 Zusagen): 200 Push-Aufrufe, 200 INSERTs und 1.802 Abfragen ->
+   * 1 Push-Aufruf, 1 INSERT, 35 Abfragen.
+   *
+   * Was UNVERAENDERT bleibt: Fenster, Laufmerker und die Auswahl, wer
+   * erinnert wird (die Abfragen oben). Schlaegt das Vormerken fuer einen
+   * Termin fehl, wird er geloggt und uebersprungen -- der naechste Takt
+   * findet seine Empfaenger:innen ueber NOT EXISTS wieder.
+   *
+   * @param {object} db
+   * @param {Array<{id:number, name:string, event_date:Date, organization_id:number, user_id:number}>} zeilen
+   * @param {'1_day'|'1_hour'} typ
+   * @returns {Promise<Array<{event: object, empfaenger: number[]}>>} nur Termine
+   *   mit mindestens einer neu vorgemerkten Person, in der Reihenfolge der Zeilen
+   */
+  static async erinnerungenVormerken(db, zeilen, typ) {
+    const jeTermin = new Map();
+    for (const z of zeilen) {
+      if (!jeTermin.has(z.id)) {
+        jeTermin.set(z.id, {
+          event: { id: z.id, name: z.name, event_date: z.event_date, organization_id: z.organization_id },
+          kandidaten: [],
+        });
+      }
+      jeTermin.get(z.id).kandidaten.push(z.user_id);
+    }
+
+    const ergebnis = [];
+    for (const { event, kandidaten } of jeTermin.values()) {
+      try {
+        const { rows } = await db.query(
+          `INSERT INTO event_reminders (event_id, user_id, reminder_type, sent_at)
+           SELECT $1, unnest($2::int[]), $3, NOW()
+           ON CONFLICT DO NOTHING
+           RETURNING user_id`,
+          [event.id, kandidaten, typ]
+        );
+        const empfaenger = rows.map((r) => r.user_id);
+        if (empfaenger.length > 0) ergebnis.push({ event, empfaenger });
+      } catch (err) {
+        console.error(`Erinnerungen (${typ}) für Termin ${event.id} konnten nicht vorgemerkt werden:`, err);
+      }
+    }
+    return ergebnis;
+  }
+
+  /**
+   * Das Fenster einer Erinnerung als [von, bis) fuer event_date.
+   *
+   * Erinnert wird, wessen Beginn -- auf die Minute gerechnet -- hoechstens den
+   * Vorlauf und mehr als den Vorlauf minus 30 Minuten nach der laufenden
+   * Minute liegt. Fuer die Ein-Stunden-Erinnerung um 15:00 Uhr also Beginn
+   * 15:31 bis 16:00 Uhr, um 15:15 Uhr 15:46 bis 16:15 Uhr. Nie frueher als
+   * angekuendigt, hoechstens eine halbe Stunde spaeter; mit dem Takt zur
+   * vollen Viertelstunde in der Regel genau puenktlich.
+   *
+   * "Auf die Minute": Sekunden im Beginn (16:00:30) und der Takt, der ein paar
+   * Millisekunden nach 15:00:00 laeuft, verschieben nichts.
+   *
+   * @param {Date} jetzt
+   * @param {'1_day'|'1_hour'} typ
+   * @returns {{von: Date, bis: Date}}
+   */
+  static erinnerungsFenster(jetzt, typ) {
+    const minute = Math.floor(jetzt.getTime() / MINUTE_MS) * MINUTE_MS;
+    const bis = minute + ERINNERUNG_VORLAUF_MS[typ] + MINUTE_MS;
+    return { von: new Date(bis - ERINNERUNG_SPIELRAUM_MS), bis: new Date(bis) };
+  }
+
+  /**
    * Sendet Event-Erinnerungen (1 Tag und 1 Stunde vorher)
    *
    * Der Filter haengt bewusst NICHT an eb.status: sollte das Abmelden spaeter
@@ -572,22 +768,26 @@ class BackgroundService {
    * Erinnerung bekommen.
    */
   static async sendEventReminders(db) {
+    if (this.eventReminderLaeuft) {
+      console.warn('sendEventReminders: vorheriger Lauf noch aktiv — Takt uebersprungen');
+      return;
+    }
+    this.eventReminderLaeuft = true;
     try {
       const now = new Date();
 
-      // 1. Events die morgen stattfinden (1 Tag vorher Erinnerung)
-      const oneDayFromNow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-      const oneDayWindowStart = new Date(oneDayFromNow.getTime() - 15 * 60 * 1000);
-      const oneDayWindowEnd = new Date(oneDayFromNow.getTime() + 15 * 60 * 1000);
+      // 1. Events, die in 24 Stunden beginnen (bis 30 Minuten Spielraum) — Vortags-Erinnerung
+      const vortag = this.erinnerungsFenster(now, '1_day');
 
       const oneDayQuery = `
         SELECT DISTINCT e.id, e.name, e.event_date, e.organization_id, eb.user_id
         FROM events e
+        JOIN organizations o ON o.id = e.organization_id AND ${NUR_AKTIVE_GEMEINDE('o')}
         JOIN event_bookings eb ON e.id = eb.event_id
         WHERE eb.status = 'confirmed'
           AND eb.attendance_status IS NULL
           AND e.cancelled IS NOT TRUE
-          AND e.event_date::date = $1::date
+          AND e.event_date >= $1 AND e.event_date < $2
           AND NOT EXISTS (
             SELECT 1 FROM event_reminders er
             WHERE er.event_id = e.id
@@ -596,49 +796,42 @@ class BackgroundService {
           )
       `;
 
-      // heuteBerlin() statt toISOString(): Der Vergleich unten laeuft gegen
-      // e.event_date::date unter Berliner Sitzungszone. Mit dem UTC-Tag traf
-      // der nachts laufende Terminhinweis den falschen Kalendertag.
-      const tomorrowDate = heuteBerlin(oneDayFromNow);
-      const { rows: oneDayEvents } = await db.query(oneDayQuery, [tomorrowDate]);
+      const { rows: oneDayEvents } = await db.query(oneDayQuery, [vortag.von, vortag.bis]);
 
-      for (const event of oneDayEvents) {
+      // Je Termin: erst alle Empfaenger:innen in EINEM INSERT vormerken, dann
+      // EIN Sammel-Push an genau die, deren Zeile neu war (Begruendung an
+      // erinnerungenVormerken).
+      for (const { event, empfaenger } of await this.erinnerungenVormerken(db, oneDayEvents, '1_day')) {
         try {
           // Extrahiere Zeit aus event_date
           const eventTime = event.event_date ? formatUhrzeit(event.event_date) : null;
           await PushService.sendEventReminderToKonfi(
             db,
-            event.user_id,
+            empfaenger,
             event.name,
             event.event_date,
             eventTime,
             '1_day',
-            event.organization_id
-          );
-
-          // Erinnerung als gesendet markieren
-          await db.query(
-            `INSERT INTO event_reminders (event_id, user_id, reminder_type, sent_at) VALUES ($1, $2, '1_day', NOW())`,
-            [event.id, event.user_id]
+            event.organization_id,
+            event.id
           );
         } catch (err) {
-          console.error(`1-day reminder failed for event ${event.id}, user ${event.user_id}:`, err);
+          console.error(`1-day reminder failed for event ${event.id} (${empfaenger.length} Empfänger):`, err);
         }
       }
 
-      // 2. Events die in ca. 1 Stunde stattfinden
-      const oneHourFromNow = new Date(now.getTime() + 60 * 60 * 1000);
-      const oneHourWindowStart = new Date(oneHourFromNow.getTime() - 15 * 60 * 1000);
-      const oneHourWindowEnd = new Date(oneHourFromNow.getTime() + 15 * 60 * 1000);
+      // 2. Events, die in einer Stunde beginnen (bis 30 Minuten Spielraum)
+      const gleich = this.erinnerungsFenster(now, '1_hour');
 
       const oneHourQuery = `
         SELECT DISTINCT e.id, e.name, e.event_date, e.organization_id, eb.user_id
         FROM events e
+        JOIN organizations o ON o.id = e.organization_id AND ${NUR_AKTIVE_GEMEINDE('o')}
         JOIN event_bookings eb ON e.id = eb.event_id
         WHERE eb.status = 'confirmed'
           AND eb.attendance_status IS NULL
           AND e.cancelled IS NOT TRUE
-          AND e.event_date BETWEEN $1 AND $2
+          AND e.event_date >= $1 AND e.event_date < $2
           AND NOT EXISTS (
             SELECT 1 FROM event_reminders er
             WHERE er.event_id = e.id
@@ -647,33 +840,31 @@ class BackgroundService {
           )
       `;
 
-      const { rows: oneHourEvents } = await db.query(oneHourQuery, [oneHourWindowStart, oneHourWindowEnd]);
+      const { rows: oneHourEvents } = await db.query(oneHourQuery, [gleich.von, gleich.bis]);
 
-      for (const event of oneHourEvents) {
+      for (const { event, empfaenger } of await this.erinnerungenVormerken(db, oneHourEvents, '1_hour')) {
         try {
           const eventTime = event.event_date ? formatUhrzeit(event.event_date) : null;
           await PushService.sendEventReminderToKonfi(
             db,
-            event.user_id,
+            empfaenger,
             event.name,
             event.event_date,
             eventTime,
             '1_hour',
-            event.organization_id
-          );
-
-          await db.query(
-            `INSERT INTO event_reminders (event_id, user_id, reminder_type, sent_at) VALUES ($1, $2, '1_hour', NOW())`,
-            [event.id, event.user_id]
+            event.organization_id,
+            event.id
           );
         } catch (err) {
-          console.error(`1-hour reminder failed for event ${event.id}, user ${event.user_id}:`, err);
+          console.error(`1-hour reminder failed for event ${event.id} (${empfaenger.length} Empfänger):`, err);
         }
       }
 
     } catch (error) {
       console.error('Error in sendEventReminders:', error);
       throw error;
+    } finally {
+      this.eventReminderLaeuft = false;
     }
   }
 
@@ -725,26 +916,48 @@ class BackgroundService {
       //
       // Geloeschte Konten zaehlen nicht mit: Sonst erinnerte die App ewig an
       // eine Buchung, die niemand mehr verbuchen kann.
-      const query = `
-        SELECT e.organization_id, COUNT(DISTINCT e.id) as pending_count
-        FROM events e
-        JOIN event_bookings eb ON e.id = eb.event_id
-        JOIN users u ON eb.user_id = u.id AND u.deleted_at IS NULL
-        WHERE e.event_date < CURRENT_DATE
-          AND e.cancelled IS NOT TRUE
-          AND eb.status = 'confirmed'
-          AND eb.attendance_status IS NULL
-        GROUP BY e.organization_id
-        HAVING COUNT(DISTINCT e.id) > 0
-      `;
+      //
+      // JE PERSON DIE ZAHL IHRES REITERS.
+      // Vorher zaehlte der Lauf je Gemeinde und schickte dieselbe Zahl
+      // an jeden Admin -- auch an Admins, deren Verbuchen-Reiter keinen dieser
+      // Events zeigt. Jetzt zaehlt zaehleWartendeTermineJeLeitung
+      // (utils/terminLeitungSicht.js) mit derselben Regel wie
+      // badge-counts.pendingEvents: Org-Admins die ganze Gemeinde, Admins ihre
+      // Jahrgaenge plus "Nur Team" und Events ohne Jahrgang. Wer 0 hat, bekommt
+      // nichts. Die Bedingung "wartet auf Verbuchung" ist dieselbe wie am
+      // Reiter (terminWartetAufVerbuchungSql): ab Beginn des Events statt ab
+      // dem Vortag, weiterhin ohne abgesagte Events und ohne Buchungen
+      // geloeschter Konten.
+      //
+      // Kosten: eine Abfrage fuer die Gemeinden, zwei je Gemeinde fuer die
+      // Empfaenger, eine Zaehlung fuer alle Personen zusammen, dann ein
+      // Versand je Gemeinde und Zahl -- keine Abfrage je Person.
+      const { rows: pendingOrgs } = await db.query(
+        `SELECT DISTINCT e.organization_id
+           FROM events e
+           -- Gesperrte Gemeinden nicht.
+           JOIN organizations o ON o.id = e.organization_id AND ${NUR_AKTIVE_GEMEINDE('o')}
+          WHERE ${terminWartetAufVerbuchungSql()}
+          ORDER BY e.organization_id`
+      );
+      const zahlen = await zaehleWartendeTermineJeLeitung(db, pendingOrgs.map((o) => o.organization_id));
 
-      const { rows: pendingOrgs } = await db.query(query);
+      // Gruppen: Gemeinde -> Zahl -> Personen
+      const gruppen = new Map();
+      for (const z of zahlen) {
+        if (z.anzahl <= 0) continue;
+        const schluessel = `${z.organization_id}:${z.anzahl}`;
+        if (!gruppen.has(schluessel)) {
+          gruppen.set(schluessel, { organizationId: z.organization_id, anzahl: z.anzahl, empfaenger: [] });
+        }
+        gruppen.get(schluessel).empfaenger.push(z.user_id);
+      }
 
-      for (const org of pendingOrgs) {
+      for (const g of gruppen.values()) {
         try {
-          await PushService.sendEventsPendingApprovalToAdmins(db, org.organization_id, org.pending_count);
+          await PushService.sendEventsPendingApprovalToLeadership(db, g.organizationId, g.empfaenger, g.anzahl);
         } catch (err) {
-          console.error(`Pending events reminder failed for org ${org.organization_id}:`, err);
+          console.error(`Pending events reminder failed for org ${g.organizationId}:`, err);
         }
       }
 
@@ -772,6 +985,8 @@ class BackgroundService {
     // eine unhandled rejection beenden (siehe startEventReminderService).
     this.cleanupStaleTokens(db).catch(err =>
       console.error('Token cleanup (initial) failed:', err));
+    this.cleanupRefreshTokens(db).catch(err =>
+      console.error('Refresh-Token cleanup (initial) failed:', err));
 
     const SIX_HOURS = 6 * 60 * 60 * 1000;
     this.tokenCleanupInterval = setInterval(async () => {
@@ -780,7 +995,27 @@ class BackgroundService {
       } catch (error) {
         console.error('Token cleanup service failed:', error);
       }
+      try {
+        await this.cleanupRefreshTokens(db);
+      } catch (error) {
+        console.error('Refresh-Token cleanup failed:', error);
+      }
     }, SIX_HOURS);
+  }
+
+  /**
+   * Loescht abgelaufene Refresh-Tokens und solche, die seit mehr als sieben
+   * Tagen widerrufen sind (die sieben Tage braucht die Erkennung einer
+   * Wiederverwendung, routes/auth.js).
+   *
+   * @returns {Promise<number>} Zahl der geloeschten Zeilen
+   */
+  static async cleanupRefreshTokens(db) {
+    const { rowCount } = await db.query(
+      "DELETE FROM refresh_tokens WHERE expires_at < NOW() OR (revoked_at IS NOT NULL AND revoked_at < NOW() - INTERVAL '7 days')"
+    );
+    if (rowCount > 0) console.log(`Cleanup: ${rowCount} abgelaufene Refresh-Tokens entfernt`);
+    return rowCount || 0;
   }
 
   /**
@@ -906,7 +1141,11 @@ class BackgroundService {
 
       let teamerOrgsGenerated = 0;
 
-      const { rows: orgs } = await db.query('SELECT id FROM organizations');
+      // Gesperrte Gemeinden nicht: Niemand kann den
+      // Rueckblick dort oeffnen; nach der Freigabe geht es von Hand.
+      const { rows: orgs } = await db.query(
+        `SELECT id FROM organizations o WHERE ${NUR_AKTIVE_GEMEINDE('o')}`
+      );
 
       for (const org of orgs) {
         try {
@@ -969,9 +1208,43 @@ class BackgroundService {
       } catch (e) {
         console.error('Auto-Deletion-Cron failed:', e);
       }
+      // Dritter, eigenstaendig fehler-isolierter Schritt: alte
+      // Postfach-Mitteilungen. Ein Fehler hier darf die Konto-Loeschung
+      // oben nicht beruehren und umgekehrt.
+      try {
+        await this.cleanupAlteMitteilungen(db);
+      } catch (e) {
+        console.error('Mitteilungs-Aufraeum-Cron failed:', e);
+      }
+      // Vierter Schritt: "Einladung in eine Gemeinde" zu
+      // Einladungen, die abgelaufen oder erledigt sind. Einen eigenen
+      // Ablauf-Job fuer Einladungen gibt es nicht -- sie laufen still ab
+      // (utils/postfachAufraeumen.js).
+      try {
+        const n = await loescheMitteilungenZuErledigtenEinladungen(db);
+        if (n > 0) {
+          console.log(`Mitteilungs-Aufraeumen: ${n} Einladungs-Mitteilungen ohne offene Einladung geloescht`);
+        }
+      } catch (e) {
+        console.error('Einladungs-Mitteilungen aufraeumen failed:', e);
+      }
     }, {
       timezone: 'Europe/Berlin'
     });
+  }
+
+  /**
+   * Loescht Postfach-Mitteilungen (Tabelle notifications), die aelter als
+   * ein Jahr sind. Gibt die Anzahl geloeschter Zeilen zurueck.
+   */
+  static async cleanupAlteMitteilungen(db) {
+    const { rowCount } = await db.query(
+      `DELETE FROM notifications WHERE created_at < NOW() - INTERVAL '365 days'`
+    );
+    if (rowCount > 0) {
+      console.log(`Mitteilungs-Aufraeumen: ${rowCount} Mitteilungen aelter als ein Jahr geloescht`);
+    }
+    return rowCount;
   }
 
   /**
@@ -1076,16 +1349,24 @@ class BackgroundService {
 
       for (const org of orgs) {
         try {
-          // Org-Admins mit E-Mail laden (admin + org_admin, aktiv)
-          const { rows: admins } = await db.query(
-            `SELECT u.display_name, u.email
-             FROM users u
-             JOIN roles r ON u.role_id = r.id
-             WHERE u.organization_id = $1
-               AND u.is_active = true
-               AND r.name IN ('admin', 'org_admin')
-               AND u.email IS NOT NULL AND u.email <> ''`,
-            [org.id]
+          // Org-Admins mit E-Mail laden -- NUR die Rolle org_admin, ueber
+          // BEIDE Quellen der Zugehoerigkeit.
+          // Vorher fragte die Abfrage nur
+          // users.organization_id und die Rollen admin UND org_admin: Wer die
+          // Gemeinde ueber user_organizations leitet, bekam die Erinnerung nie
+          // -- eine Gemeinde, deren ganze Leitung per Einladung mitarbeitet,
+          // wurde ohne Vorwarnung gesperrt --, dafuer jeder Admin, auch
+          // jahrgangsgebundene, die mit der Lizenz nichts zu tun haben.
+          // Gesperrte und geloeschte Konten fallen in
+          // ladeMitgliederDerOrganisation heraus.
+          const orgAdminIds = await ladeMitgliederDerOrganisation(db, org.id, ['org_admin']);
+          const { rows: admins } = orgAdminIds.length === 0 ? { rows: [] } : await db.query(
+            `SELECT u.id, u.display_name, u.email
+               FROM users u
+              WHERE u.id = ANY($1::bigint[])
+                AND u.email IS NOT NULL AND u.email <> ''
+              ORDER BY u.id`,
+            [orgAdminIds]
           );
 
           const end = new Date(org.trial_ends_at);
@@ -1100,7 +1381,8 @@ class BackgroundService {
               anySent = true;
               sent++;
             } catch (mailErr) {
-              console.error(`Lizenz-Erinnerung: Mail an ${admin.email} fehlgeschlagen:`, mailErr.message);
+              // Konto-Kennung statt Adresse.
+              console.error(`Lizenz-Erinnerung: Mail an Konto ${admin.id} fehlgeschlagen:`, mailErr.message);
             }
           }
 
@@ -1138,11 +1420,6 @@ class BackgroundService {
    * ein Konfi nie gleichzeitig in beiden Buckets landet (T-114-17).
    */
   /**
-   * "Letzte Chance"-Reminder: 7 Tage VOR der automatischen Löschung (Tag 60
-   * nach Konfirmation = Soft-Delete) bekommen die Org-Admins eine Mail + Push,
-   * dass der Jahrgang gelöscht wird und sie jetzt noch Konfis befoerdern
-   * können. Idempotent pro Jahrgang via deletion_reminder_sent_at.
-   *
    * Stichtag-Logik identisch zu runAutoDeletion (frueheste, nicht-cancelled
    * is_konfirmation, org-gescopt). Fenster: Tag 53..59 (>= 60-WARN, < 60),
    * damit ein verpasster Tag (Cron-Ausfall) bis zur Soft-Delete-Grenze noch
@@ -1153,7 +1430,14 @@ class BackgroundService {
     const WARN_LEAD_DAYS = 7;     // so viele Tage vorher warnen
     let sent = 0;
     try {
-      const { rows: jahrgaenge } = await db.query('SELECT id, name, organization_id FROM jahrgaenge');
+      // Nur Jahrgaenge aktiver Gemeinden: Eine
+      // gesperrte Leitung kann niemanden mehr befoerdern; der Merker bleibt
+      // offen, nach einer Freigabe im Warnfenster kommt die Warnung noch.
+      const { rows: jahrgaenge } = await db.query(
+        `SELECT j.id, j.name, j.organization_id
+           FROM jahrgaenge j
+           JOIN organizations o ON o.id = j.organization_id AND ${NUR_AKTIVE_GEMEINDE('o')}`
+      );
 
       for (const jg of jahrgaenge) {
         try {
@@ -1184,27 +1468,32 @@ class BackgroundService {
 
           // Gibt es überhaupt noch AKTIVE Konfis, die gelöscht wuerden?
           // Sonst ist die Warnung sinnlos (nur befoerderte/keine).
+          // Wer woanders noch Mitglied ist, wird nicht geloescht (siehe
+          // runAutoDeletion) und zaehlt hier deshalb auch nicht mit.
           const { rows: [{ count: konfiCount }] } = await db.query(
             `SELECT COUNT(*)::int AS count
                FROM users u
                JOIN konfi_profiles kp ON kp.user_id = u.id
                JOIN roles r ON u.role_id = r.id
               WHERE kp.jahrgang_id = $1 AND u.organization_id = $2
-                AND r.name = 'konfi' AND u.deleted_at IS NULL`,
+                AND r.name = 'konfi' AND u.deleted_at IS NULL
+                AND NOT ${WOANDERS_MITGLIED_SQL('u')}`,
             [jg.id, jg.organization_id]
           );
           if (konfiCount === 0) continue;
 
           const daysLeft = SOFT_DELETE_DAY - age; // Tage bis zur Loeschung
 
-          // Org-Admins mit E-Mail laden
-          const { rows: admins } = await db.query(
-            `SELECT u.display_name, u.email
-               FROM users u JOIN roles r ON u.role_id = r.id
-              WHERE u.organization_id = $1 AND u.is_active = true
-                AND r.name IN ('admin', 'org_admin')
+          // Empfaenger mit E-Mail laden -- ueber beide Quellen der
+          // Zugehoerigkeit (Stamm-Org UND user_organizations, Rolle je
+          // Organisation), dieselbe Liste wie der Push darunter.
+          const leitungIds = await ladeLeitungZumJahrgang(db, jg.organization_id, jg.id, { schreibrecht: true });
+          const { rows: admins } = leitungIds.length === 0 ? { rows: [] } : await db.query(
+            `SELECT u.id, u.display_name, u.email
+               FROM users u
+              WHERE u.id = ANY($1::bigint[])
                 AND u.email IS NOT NULL AND u.email <> ''`,
-            [jg.organization_id]
+            [leitungIds]
           );
 
           const { rows: [org] } = await db.query('SELECT display_name FROM organizations WHERE id = $1', [jg.organization_id]);
@@ -1219,14 +1508,14 @@ class BackgroundService {
               anySent = true;
               sent++;
             } catch (mailErr) {
-              console.error(`Jahrgang-Loesch-Reminder: Mail an ${admin.email} fehlgeschlagen:`, mailErr.message);
+              console.error(`Jahrgang-Loesch-Reminder: Mail an Konto ${admin.id} fehlgeschlagen:`, mailErr.message);
             }
           }
 
-          // Push an alle Org-Admins (zuverlaessiger Kanal, kein externer SMTP).
+          // Push an dieselbe Leitung (zuverlaessiger Kanal, kein externer SMTP).
           let pushSent = false;
           try {
-            const pushRes = await PushService.sendJahrgangDeletionWarningToAdmins(db, jg.organization_id, jg.name, daysLeft);
+            const pushRes = await PushService.sendJahrgangDeletionWarningToLeadership(db, jg.organization_id, leitungIds, jg.name, daysLeft, jg.id);
             // sendToMultipleUsers liefert kein einheitliches Erfolgsflag; wir
             // werten "kein Fehler geworfen" als zugestellt-versucht. Ein echtes
             // false (z.B. keine Admins) liefert {success:false}.
@@ -1262,8 +1551,13 @@ class BackgroundService {
 
     let jahrgaenge;
     try {
+      // org_aktiv: Geloescht wird auch in einer gesperrten Gemeinde (die
+      // Fristen haengen nicht an der Sperre), gemeldet wird dort nichts
+      // 
       const res = await db.query(
-        'SELECT id, organization_id FROM jahrgaenge'
+        `SELECT j.id, j.organization_id, ${NUR_AKTIVE_GEMEINDE('o')} AS org_aktiv
+           FROM jahrgaenge j
+           LEFT JOIN organizations o ON o.id = j.organization_id`
       );
       jahrgaenge = res.rows;
     } catch (error) {
@@ -1293,13 +1587,32 @@ class BackgroundService {
           continue;
         }
 
+        const { rows: uebersprungen } = await db.query(
+          `SELECT u.id, (CURRENT_DATE - $2::date) AS tag
+             FROM users u
+             JOIN konfi_profiles kp ON kp.user_id = u.id
+             JOIN roles r ON u.role_id = r.id
+            WHERE kp.jahrgang_id = $1
+              AND u.organization_id = $3
+              AND r.name = 'konfi'
+              AND (CURRENT_DATE - $2::date) >= 60
+              AND ${WOANDERS_MITGLIED_SQL('u')}`,
+          [jg.id, stichtag, jg.organization_id]
+        );
+        for (const { id, tag } of uebersprungen) {
+          console.warn(
+            `Auto-Deletion: Konto ${id} übersprungen (Jahrgang ${jg.id}, Tag ${tag} nach der Konfirmation): ` +
+            'gehört noch zu einer weiteren Gemeinde.'
+          );
+        }
+
         // --- HARD-DELETE (>= 120 Tage) ---
         // Nur aktive Konfis (r.name='konfi'); promotete Teamer (role gewechselt,
         // teamer_since gesetzt) werden durch den Rollen-Filter NIE erfasst.
         // Bewusst KEIN deleted_at-Guard: ab Tag 120 wird hart gelöscht, auch wenn
         // der Soft-Delete-Lauf (Tag 60-120) nie stattfand (z.B. Cron-Ausfall) —
         // sonst bliebe der Datensatz über die Aufbewahrungsfrist hinaus erhalten.
-        // deleteKonfiCascade entfernt den User physisch -> kein wiederholter Lauf.
+        // kontoDatenLoeschen entfernt den User physisch -> kein wiederholter Lauf.
         const { rows: hardKandidaten } = await db.query(
           `SELECT u.id
              FROM users u
@@ -1308,7 +1621,8 @@ class BackgroundService {
             WHERE kp.jahrgang_id = $1
               AND u.organization_id = $3
               AND r.name = 'konfi'
-              AND (CURRENT_DATE - $2::date) >= 120`,
+              AND (CURRENT_DATE - $2::date) >= 120
+              AND NOT ${WOANDERS_MITGLIED_SQL('u')}`,
           [jg.id, stichtag, jg.organization_id]
         );
 
@@ -1320,20 +1634,27 @@ class BackgroundService {
             console.error(`Auto-Deletion: Client-Fehler bei Konfi ${konfi.id} (Jahrgang ${jg.id}):`, clientErr.message);
             continue;
           }
+          let ergebnis = null;
           try {
             await client.query('BEGIN');
-            const nachgerueckt = await deleteKonfiCascade(client, konfi.id, jg.organization_id);
+            ergebnis = await kontoDatenLoeschen(client, konfi.id);
             await client.query('COMMIT');
             totalHard++;
-            // Benachrichtigung nach dem COMMIT; Fehler werden dort je Person
-            // geschluckt und duerfen den Lauf nicht abbrechen.
-            await meldeNachrueckern(db, jg.organization_id, nachgerueckt);
           } catch (delErr) {
             try { await client.query('ROLLBACK'); } catch (_) { /* ignore */ }
             console.error(`Auto-Deletion: Hard-Delete fuer Konfi ${konfi.id} (Jahrgang ${jg.id}) fehlgeschlagen:`, delErr.message);
+            continue;
           } finally {
             client.release();
           }
+          // Nach dem COMMIT: Dateien von der Platte, Sitzung beenden, dann
+          // Benachrichtigung; Fehler werden dort geschluckt und duerfen den
+          // Lauf nicht abbrechen. In einer gesperrten Gemeinde keine Meldung
+          // -- nachgerueckt ist trotzdem.
+          await kontoDateienLoeschen(ergebnis?.dateien);
+          invalidateUserCache(konfi.id);
+          liveUpdate.disconnectUserSockets(konfi.id);
+          await meldeNachKontoLoeschung(db, ergebnis, { melden: jg.org_aktiv });
         }
 
         // --- SOFT-DELETE (>= 60 und < 120 Tage, deleted_at IS NULL) ---
@@ -1350,10 +1671,20 @@ class BackgroundService {
               AND u.deleted_at IS NULL
               AND (CURRENT_DATE - $2::date) >= 60
               AND (CURRENT_DATE - $2::date) < 120
+              AND NOT ${WOANDERS_MITGLIED_SQL('u')}
             RETURNING u.id`,
           [jg.id, stichtag, jg.organization_id]
         );
         totalSoft += softUpdated.length;
+
+        // Die Sperre soll SOFORT gelten, nicht erst nach dem 30-Sekunden-
+        // Cache von rbac.js oder beim naechsten Socket-Verbindungsaufbau
+        // Wirkt auf dieser
+        // Replica; die anderen laufen in den TTL.
+        for (const { id } of softUpdated) {
+          invalidateUserCache(id);
+          liveUpdate.disconnectUserSockets(id);
+        }
       } catch (jgErr) {
         // Fehler pro Jahrgang isolieren -> Job läuft weiter.
         console.error(`Auto-Deletion: Jahrgang ${jg.id} fehlgeschlagen:`, jgErr.message);

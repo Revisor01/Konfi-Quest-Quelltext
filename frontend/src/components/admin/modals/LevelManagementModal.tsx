@@ -29,7 +29,9 @@ import api from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
+import { sendenOderEinreihen } from '../../../utils/sendenOderEinreihen';
 import { ICON_CHOICES as LEVEL_ICONS, getIconFromString } from '../../../utils/badgeIcons';
+import { tastaturKlick } from '../../../utils/tastatur';
 
 
 
@@ -111,36 +113,38 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
         is_active: formData.is_active !== false
       };
 
-      if (networkMonitor.isOnline) {
-        // Online-Pfad: direkt senden
-        if (level?.id) {
-          await api.put(`/levels/${level.id}`, payload);
-        } else {
-          await api.post('/levels', payload);
-        }
-      } else {
-        // Offline-Pfad: Queue-Fallback
-        if (level?.id) {
-          await writeQueue.enqueue({
+      // Bearbeiten (PUT) faellt auch bei einem Netzabbruch im Online-Zweig in
+      // die Warteschlange; Anlegen (POST ohne Idempotenzschluessel) nur
+      // offline -- nach einem Abbruch bleibt es dort beim Fehler, sonst
+      // entstuende der Eintrag womoeglich doppelt.
+      const { weg } = await sendenOderEinreihen({
+        online: networkMonitor.isOnline,
+        methode: level?.id ? 'PUT' : 'POST',
+        senden: () => (level?.id
+          ? api.put(`/levels/${level.id}`, payload)
+          : api.post('/levels', payload)),
+        einreihen: () => (level?.id
+          ? writeQueue.enqueue({
             method: 'PUT',
             url: `/levels/${level.id}`,
             body: payload,
             maxRetries: 5,
             hasFileUpload: false,
             metadata: { type: 'admin', clientId: safeUUID(), label: 'Level bearbeiten' },
-          });
-          setSuccess('Level wird aktualisiert sobald du wieder online bist');
-        } else {
-          await writeQueue.enqueue({
+          })
+          : writeQueue.enqueue({
             method: 'POST',
             url: '/levels',
             body: payload,
             maxRetries: 5,
             hasFileUpload: false,
             metadata: { type: 'admin', clientId: safeUUID(), label: 'Level erstellen' },
-          });
-          setSuccess('Level wird erstellt sobald du wieder online bist');
-        }
+          })),
+      });
+      if (weg === 'eingereiht') {
+        setSuccess(level?.id
+          ? 'Level wird aktualisiert sobald du wieder online bist'
+          : 'Level wird erstellt sobald du wieder online bist');
       }
       onSuccess();
       handleClose();
@@ -196,7 +200,7 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
               <IonList style={{ background: 'transparent', padding: '0' }}>
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Titel *</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Titel" aria-required="true"
                     value={formData.title}
                     onIonInput={(e) => setFormData({ ...formData, title: e.detail.value! })}
                     placeholder="z.B. Anfänger, Bronze, Meister"
@@ -209,7 +213,7 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
                   <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Benötigte Punkte * <span style={{ fontWeight: 'var(--app-schrift-fett)', color: 'var(--ion-color-primary)' }}>{formData.points_required}</span></IonLabel>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-eng)', width: '100%' }}>
                     <span style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)', minWidth: '24px', textAlign: 'center' }}>1</span>
-                    <IonRange
+                    <IonRange aria-label="Benötigte Punkte" aria-required="true"
                       min={1} max={40} step={1}
                       pin={true} pinFormatter={(value: number) => `${value}`}
                       value={formData.points_required}
@@ -223,7 +227,7 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
 
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Beschreibung</IonLabel>
-                  <IonTextarea
+                  <IonTextarea aria-label="Beschreibung"
                     value={formData.description}
                     onIonInput={(e) => setFormData({ ...formData, description: e.detail.value! })}
                     placeholder="Optionale Beschreibung..."
@@ -251,11 +255,11 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
                         />
                       </div>
                       <IonLabel>
-                        <h3 className="app-settings-item__subtitle" style={{ margin: '0 0 var(--app-abstand-mini) 0' }}>
+                        <h3 className="app-list-item__subtitle" style={{ margin: '0 0 var(--app-abstand-mini) 0' }}>
                           Icon *
                         </h3>
                         {formData.icon && LEVEL_ICONS[formData.icon as keyof typeof LEVEL_ICONS] && (
-                          <p className="app-settings-item__title" style={{ margin: '0' }}>
+                          <p className="app-list-item__title" style={{ margin: '0' }}>
                             {LEVEL_ICONS[formData.icon as keyof typeof LEVEL_ICONS].name} ({LEVEL_ICONS[formData.icon as keyof typeof LEVEL_ICONS].category})
                           </p>
                         )}
@@ -272,12 +276,12 @@ const LevelManagementModal: React.FC<LevelManagementModalProps> = ({ level, onCl
                         return acc;
                       }, []).map((group) => (
                         <div key={group.category} style={{ marginBottom: 'var(--app-abstand-basis)' }}>
-                          <span className="app-settings-item__subtitle" style={{ fontWeight: 'var(--app-schrift-halbfett)', marginBottom: 'var(--app-abstand-eng)', display: 'block' }}>
+                          <span className="app-list-item__subtitle" style={{ fontWeight: 'var(--app-schrift-halbfett)', marginBottom: 'var(--app-abstand-eng)', display: 'block' }}>
                             {group.category}
                           </span>
                           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(60px, 1fr))', gap: 'var(--app-abstand-eng)' }}>
                             {group.icons.map(({ key, data }) => (
-                              <div
+                              <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-label={data.name} aria-pressed={formData.icon === key}
                                 key={key}
                                 onClick={() => setFormData({ ...formData, icon: key })}
                                 style={{

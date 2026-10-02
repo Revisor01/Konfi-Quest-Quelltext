@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { CRITERIA_COLORS } from '../../../utils/badgeCriteria';
+import { CRITERIA_COLORS, getCriteriaTextColor } from '../../../utils/badgeCriteria';
 import {
   IonCard,
   IonCardContent,
@@ -175,7 +175,7 @@ const BadgesView: React.FC<BadgesViewProps> = ({
         <IonItemGroup>
           <IonItem>
             <IonIcon icon={ICON_SUCHE_GEFUELLT} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
-            <IonInput
+            <IonInput aria-label="Badges durchsuchen"
               value={searchText}
               onIonInput={(e) => setSearchText(e.detail.value || '')}
               placeholder="Badges durchsuchen..."
@@ -259,13 +259,15 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                     {/* Progress Circle */}
                     <div style={{ width: '48px', height: '48px', position: 'relative' }}>
                       <svg width="48" height="48" style={{ transform: 'rotate(-90deg)' }}>
-                        <circle cx="24" cy="24" r="20" fill="none" stroke={FARBEN.silberHell} strokeWidth="4" />
+                        <circle cx="24" cy="24" r="20" fill="none" style={{ stroke: 'var(--app-border)' }} strokeWidth="4" />
                         <circle cx="24" cy="24" r="20" fill="none" stroke={category.color} strokeWidth="4" strokeLinecap="round" strokeDasharray={`${progressPercent * 1.257} 125.7`} />
                       </svg>
                       <span style={{
                         position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
                         fontSize: progressPercent === 100 && categoryHasUndiscoveredSecrets ? 'var(--app-text-winzig)' : 'var(--app-text-meta)',
-                        fontWeight: 'var(--app-schrift-fett)', color: category.color
+                        fontWeight: 'var(--app-schrift-fett)',
+                        // Text-Token statt Kriterienfarbe: im Dunkeln eine hellere Stufe
+                        color: getCriteriaTextColor(category.key)
                       }}>
                         {progressPercent === 100 && categoryHasUndiscoveredSecrets ? '100%?' : `${progressPercent}%`}
                       </span>
@@ -298,7 +300,7 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                         symbolZusatz: hasProgress ? (
                           <svg style={{ position: 'absolute', top: '-4px', left: '-4px', width: '60px', height: '60px', transform: 'rotate(-90deg)' }}>
                             <circle cx="30" cy="30" r="26" fill="none" stroke="rgba(0,0,0,0.1)" strokeWidth="3" />
-                            <circle cx="30" cy="30" r="26" fill="none" stroke={FARBEN.abzeichenFallback} strokeWidth="3" strokeLinecap="round" strokeDasharray={`${(badge.progress_percentage || 0) * 1.63} 163`} />
+                            <circle cx="30" cy="30" r="26" fill="none" style={{ stroke: 'var(--app-color-users)' }} strokeWidth="3" strokeLinecap="round" strokeDasharray={`${(badge.progress_percentage || 0) * 1.63} 163`} />
                           </svg>
                         ) : undefined,
                         // Eselsohr fuer geheime, bereits erreichte Abzeichen.
@@ -314,6 +316,8 @@ const BadgesView: React.FC<BadgesViewProps> = ({
                                 padding: 'var(--app-abstand-mini) var(--app-abstand-eng)'
                               }}
                               title="Geheimes Badge"
+                              role="img"
+                              aria-label="Geheimes Badge"
                             >
                               <IonIcon icon={ICON_VERBORGEN_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                             </div>

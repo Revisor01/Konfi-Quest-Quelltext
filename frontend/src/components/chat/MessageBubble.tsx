@@ -9,6 +9,7 @@ import {
   ICON_HAKEN_GEFUELLT,
   ICON_HINZUFUEGEN,
   ICON_LOESCHEN,
+  ICON_MEHR,
   ICON_RUECKGAENGIG,
   ICON_TEILEN,
   ICON_UHRZEIT,
@@ -21,18 +22,16 @@ import { REACTION_EMOJIS } from './constants';
 import { formatFileSize } from '../../utils/helpers';
 import VideoPreview from './VideoPreview';
 import LazyImage from './LazyImage';
+import FortschrittsBalken from '../shared/FortschrittsBalken';
+import { ladeText, sendeText } from '../../utils/fortschritt';
+import { tastaturKlick } from '../../utils/tastatur';
+import { datumUhrzeit, uhrzeit } from '../../utils/dateUtils';
+import { rollenName } from '../../utils/rollenNamen';
+import { mimeAusDateiname } from '../../utils/dateiTypen';
+import { linkOeffnen } from '../../services/systemDialoge';
+import { sendeFehlerText } from './sendeFehler';
 
-const getMimeFromFileName = (fileName: string): string => {
-  const ext = (fileName.split('.').pop() || '').toLowerCase();
-  const mimeMap: Record<string, string> = {
-    jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp',
-    mp4: 'video/mp4', mov: 'video/quicktime', avi: 'video/x-msvideo', webm: 'video/webm', m4v: 'video/mp4',
-    pdf: 'application/pdf',
-    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-  };
-  return mimeMap[ext] || 'application/octet-stream';
-};
+const getMimeFromFileName = (fileName: string): string => mimeAusDateiname(fileName);
 
 // Wandelt URLs (http/https und www.) in klickbare Links um. Gibt ein Array aus
 // Text-Fragmenten und <a>-Elementen zurück, das direkt in JSX gerendert werden kann.
@@ -60,7 +59,7 @@ const linkifyText = (text: string): React.ReactNode => {
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            window.open(href, '_blank');
+            linkOeffnen(href);
           }}
           style={{ color: 'inherit', textDecoration: 'underline', wordBreak: 'break-all' }}
         >
@@ -113,14 +112,9 @@ const formatMessageTime = (dateString: string) => {
   const isToday = date.toDateString() === now.toDateString();
 
   if (isToday) {
-    return date.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+    return uhrzeit(date);
   } else {
-    return date.toLocaleDateString('de-DE', {
-      day: '2-digit',
-      month: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
+    return datumUhrzeit(date, { ohneJahr: true });
   }
 };
 
@@ -147,6 +141,12 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   onRetry,
 }) => {
   const isOwnMessage = message.sender_id === user?.id && message.sender_type === user?.type;
+  // Eigene Funktionsbezeichnung vor dem festen Rollenwort (utils/rollenNamen);
+  // sender_role_display_name traegt in bestehenden Gemeinden die alten Namen.
+  const rolleImChat = message.sender_role_title
+    || (message.sender_role_name || message.sender_role_display_name
+      ? rollenName(message.sender_role_name, message.sender_role_display_name)
+      : '');
 
   // Laedt GENAU diese Datei gerade? Der Vergleich laeuft ueber den Pfad, damit
   // bei mehreren Dateien im Raum nur die angetippte den Fortschritt zeigt.
@@ -159,11 +159,56 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
     message.localId != null &&
     uploadFortschritt.localId === message.localId;
 
+  // Vom Server endgueltig abgelehnt (413, 415 ...)? Dann der feste Text dazu,
+  // sonst null (components/chat/sendeFehler.ts).
+  const sendeFehlerGrund = message.queueStatus === 'error' ? sendeFehlerText(message.sendeFehlerStatus) : null;
+
   // Merkt sich, ob die aktuelle Long-Press-Geste schon behandelt wurde. Android
   // löst bei einem langen Druck BEIDE Wege aus (eigener Touch-Timer und danach
   // das native 'contextmenu'); ohne diese Sperre hob der zweite Aufruf den
   // ersten sofort wieder auf, weil onLongPress ein Toggle ist.
   const longPressFiredRef = React.useRef(false);
+
+  const ausgewaehlt = selectedMessage?.id === message.id;
+  const leisteOffen = ausgewaehlt && !showReactionPicker;
+  const pickerOffen = showReactionPicker && reactionTargetMessage?.id === message.id;
+  const aktionenKnopfRef = React.useRef<HTMLButtonElement>(null);
+  const ersteAktionRef = React.useRef<HTMLDivElement>(null);
+  const ersteReaktionRef = React.useRef<HTMLDivElement>(null);
+  // Über den Knopf geöffnet -> Fokus auf die erste Aktion der Leiste.
+  const fokusInLeisteRef = React.useRef(false);
+  // Picker per Tastatur geöffnet -> Fokus auf die erste Reaktion, danach
+  // zurück auf den Knopf (sonst fiele er an den Seitenanfang).
+  const pickerPerTastaturRef = React.useRef(false);
+
+  React.useEffect(() => {
+    if (leisteOffen && fokusInLeisteRef.current) {
+      fokusInLeisteRef.current = false;
+      ersteAktionRef.current?.focus();
+    }
+  }, [leisteOffen]);
+
+  React.useEffect(() => {
+    if (!pickerPerTastaturRef.current) return;
+    if (pickerOffen) {
+      ersteReaktionRef.current?.focus();
+    } else {
+      pickerPerTastaturRef.current = false;
+      aktionenKnopfRef.current?.focus();
+    }
+  }, [pickerOffen]);
+
+  // Escape schließt Leiste bzw. Picker und gibt den Fokus an den Knopf
+  // zurück. Nur wenn hier etwas offen ist -- sonst gehört Escape dem Fenster
+  // darüber (der Chatraum kann in einem Modal stehen).
+  const mitEscapeSchliessen = (e: React.KeyboardEvent<HTMLElement>) => {
+    if (e.key !== 'Escape' || !(ausgewaehlt || pickerOffen)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    pickerPerTastaturRef.current = false;
+    onDeselectMessage();
+    aktionenKnopfRef.current?.focus();
+  };
 
   if (message.deleted) {
     return (
@@ -180,7 +225,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
   }
 
   return (
-    <div key={message.id} id={`msg-${message.id}`} style={{
+    <div key={message.id} id={`msg-${message.id}`} className="app-chat-nachricht" style={{
       display: 'flex',
       flexDirection: isOwnMessage ? 'row-reverse' : 'row',
       margin: 'var(--app-abstand-eng) var(--app-abstand-basis)',
@@ -208,7 +253,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
         </IonAvatar>
       )}
 
-      <div
+      <div role="presentation"
         style={{
           maxWidth: '70%',
           backgroundColor: isOwnMessage ? 'var(--app-color-chat)' : 'var(--app-surface-soft)',
@@ -265,17 +310,17 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             fontSize: 'var(--app-text-klein)',
             fontWeight: 'var(--app-schrift-halbfett)',
             marginBottom: 'var(--app-abstand-mini)',
-            color: 'var(--app-color-chat)'
+            color: 'var(--app-text-chat)'
           }}>
             {message.sender_name || 'Unbekannter User'}
-            {(message.sender_role_title || message.sender_role_display_name) && (
+            {rolleImChat && (
               <span style={{
                 fontWeight: 'var(--app-schrift-normal)',
                 color: 'var(--app-text-system)',
                 marginLeft: 'var(--app-abstand-kompakt)',
                 fontSize: 'var(--app-text-meta)'
               }}>
-                ({message.sender_role_title || message.sender_role_display_name})
+                ({rolleImChat})
               </span>
             )}
           </div>
@@ -283,7 +328,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
 
         {/* Reply Anzeige */}
         {message.reply_to_id && (
-          <div
+          <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-label="Zur beantworteten Nachricht springen"
             onClick={(e) => {
               e.stopPropagation();
               const replyElement = window.document.getElementById(`msg-${message.reply_to_id}`);
@@ -298,7 +343,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             style={{
               padding: 'var(--app-abstand-kompakt) var(--app-abstand-schmal)',
               marginBottom: 'var(--app-abstand-kompakt)',
-              backgroundColor: isOwnMessage ? 'white' : 'rgba(var(--app-color-chat-rgb), 0.08)',
+              // Kartengrund statt 'white': hell derselbe Ton, dunkel eine
+              // dunkle Flaeche -- die Schrift (Text-Tokens) wechselt mit.
+              backgroundColor: isOwnMessage ? 'var(--app-surface-card)' : 'rgba(var(--app-color-chat-rgb), 0.08)',
               borderRadius: 'var(--app-radius-klein)',
               borderLeft: '3px solid var(--app-color-chat)',
               cursor: 'pointer'
@@ -307,7 +354,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             <div style={{
               fontSize: 'var(--app-text-meta)',
               fontWeight: 'var(--app-schrift-halbfett)',
-              color: 'var(--app-color-chat)',
+              color: 'var(--app-text-chat)',
               marginBottom: 'var(--app-abstand-winzig)'
             }}>
               {message.reply_to_sender_name}
@@ -336,13 +383,18 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             opacity: 0.6,
             fontSize: 'var(--app-text-basis)',
             whiteSpace: 'nowrap',
-            color: isOwnMessage ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.5)'
+            /* Gleiches Muster wie am Reaktionszaehler: rohes Schwarz
+               auf der fremden Blase, im Dunkeln unsichtbar. Die Daempfung
+               traegt schon `opacity` darueber. */
+            color: isOwnMessage ? 'rgba(255,255,255,0.7)' : 'var(--app-text-emphasis)'
           }}>
             {message.content}
           </div>
         ) : message.message_type === 'poll' && message.question && message.options ? (
           <div style={{
-            background: isOwnMessage ? 'white' : 'rgba(var(--app-color-chat-rgb), 0.06)',
+            // Kartengrund statt 'white': Frage und Antworten
+            // schreiben mit --app-text-emphasis, im Dunkeln fast Weiss.
+            background: isOwnMessage ? 'var(--app-surface-card)' : 'rgba(var(--app-color-chat-rgb), 0.06)',
             borderRadius: 'var(--app-radius-weich)',
             padding: 'var(--app-abstand-basis)',
             marginTop: 'var(--app-abstand-mini)',
@@ -389,7 +441,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                   padding: 'var(--app-abstand-eng) var(--app-abstand-mittel)',
                   background: isExpired ? 'rgba(var(--app-color-danger-rgb), 0.12)' : 'rgba(var(--app-color-chat-rgb), 0.1)',
                   borderRadius: 'var(--app-radius-klein)',
-                  color: isExpired ? 'var(--app-color-danger)' : 'var(--app-color-chat)',
+                  color: isExpired ? 'var(--app-color-danger)' : 'var(--app-text-chat)',
                   display: 'flex',
                   alignItems: 'center',
                   gap: 'var(--app-abstand-kompakt)'
@@ -399,7 +451,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <span style={{ fontWeight: 'var(--app-schrift-mittel)' }}>Beendet</span>
                   ) : (
                     <span>
-                      Endet: {expiresDate.toLocaleString('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                      Endet: {datumUhrzeit(expiresDate, { ohneJahr: true })}
                       {hoursRemaining < 24 && ` (${hoursRemaining > 0 ? `${hoursRemaining}h ` : ''}${minutesRemaining}min)`}
                     </span>
                   )}
@@ -424,12 +476,17 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
               const voterNames = optionVotes.map(v => v.user_name).filter(Boolean) as string[];
 
               return (
-                <div
+                <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-pressed={userVoted} aria-disabled={takenByOther}
                   key={index}
                   onClick={() => { if (!takenByOther) onVoteInPoll(message.id, index); }}
                   style={{
-                    background: userVoted ? 'rgba(var(--app-color-chat-rgb), 0.12)' : takenByOther ? 'rgba(0,0,0,0.04)' : 'white',
-                    border: userVoted ? '2px solid var(--app-color-chat)' : '1px solid rgba(0,0,0,0.08)',
+                    // Flaechen und Rahmen aus Tokens: 'white' mit
+                    // Schrift aus --app-text-emphasis war im Dunkeln Weiss auf
+                    // Weiss; Schwarz mit Deckkraft (vergeben, Rahmen)
+                    // verschwindet auf dunklem Grund. Hell tragen die Tokens
+                    // dieselben Toene wie vorher (#fff, #f5f5f5, #eee).
+                    background: userVoted ? 'rgba(var(--app-color-chat-rgb), 0.12)' : takenByOther ? 'var(--app-surface-muted)' : 'var(--app-surface-card)',
+                    border: userVoted ? '2px solid var(--app-color-chat)' : '1px solid var(--app-border-soft)',
                     borderRadius: 'var(--app-radius-knopf)',
                     padding: 'var(--app-abstand-mittel)',
                     marginBottom: 'var(--app-abstand-eng)',
@@ -488,7 +545,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                     <div style={{
                       fontSize: 'var(--app-text-hinweis)',
                       fontWeight: 'var(--app-schrift-halbfett)',
-                      color: takenByOther ? 'var(--app-text-system)' : 'var(--app-color-chat)',
+                      color: takenByOther ? 'var(--app-text-system)' : 'var(--app-text-chat)',
                       display: 'flex',
                       alignItems: 'center',
                       gap: 'var(--app-abstand-mini)',
@@ -570,11 +627,13 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
               </div>
             ) : message.file_name?.match(/\.(mp4|mov|avi|webm|m4v)$/i) ? (
               <VideoPreview
-                message={message}
+                filePath={message.file_path}
+                fileName={message.file_name}
+                fileSize={message.file_size}
                 onError={(error) => onError('Fehler beim Laden des Videos: ' + error)}
               />
             ) : (
-              <div
+              <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                 style={{
                   border: '1px solid rgba(255,255,255,0.3)',
                   borderRadius: 'var(--app-radius-klein)',
@@ -601,9 +660,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                   </div>
                   {laedtGerade ? (
                     <div style={{ fontSize: 'var(--app-text-klein)', opacity: 0.9 }}>
-                      {ladendeDatei?.prozent != null
-                        ? `Wird geladen… ${ladendeDatei.prozent} %`
-                        : 'Wird geladen…'}
+                      {ladeText(ladendeDatei?.prozent)}
                     </div>
                   ) : message.file_size ? (
                     <div style={{ fontSize: 'var(--app-text-klein)', opacity: 0.8 }}>
@@ -611,29 +668,10 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                     </div>
                   ) : null}
                   {laedtGerade && ladendeDatei?.prozent != null && (
-                    <div
-                      role="progressbar"
-                      aria-valuenow={ladendeDatei.prozent}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-label={`Datei wird geladen: ${ladendeDatei.prozent} Prozent`}
-                      style={{
-                        height: '3px',
-                        marginTop: 'var(--app-abstand-mini)',
-                        borderRadius: 'var(--app-abstand-winzig)',
-                        backgroundColor: 'currentColor',
-                        opacity: 0.25,
-                        overflow: 'hidden'
-                      }}
-                    >
-                      <div style={{
-                        width: `${ladendeDatei.prozent}%`,
-                        height: '100%',
-                        backgroundColor: 'currentColor',
-                        borderRadius: 'var(--app-abstand-winzig)',
-                        transition: 'width 0.2s ease-out'
-                      }} />
-                    </div>
+                    <FortschrittsBalken
+                      prozent={ladendeDatei.prozent}
+                      beschriftung={`Datei wird geladen: ${ladendeDatei.prozent} Prozent`}
+                    />
                   )}
                 </div>
                 {laedtGerade ? (
@@ -666,50 +704,48 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           )}
           {sendetGerade && (
             <span style={{ marginLeft: 'var(--app-abstand-mini)' }}>
-              {uploadFortschritt!.prozent >= 100
-                ? 'Wird verarbeitet…'
-                : `Wird gesendet… ${uploadFortschritt!.prozent} %`}
+              {sendeText(uploadFortschritt!.prozent)}
             </span>
           )}
           {isOwnMessage && !message.queueStatus && (
             <IonIcon icon={ICON_HAKEN_GEFUELLT} style={{ fontSize: 'var(--app-text-klein)', marginLeft: 'var(--app-abstand-mini)', verticalAlign: 'middle', opacity: 0.7 }} />
           )}
           {message.queueStatus === 'error' && (
-            <IonIcon
-              icon={ICON_WARNHINWEIS}
-              style={{ fontSize: 'var(--app-text-klein)', marginLeft: 'var(--app-abstand-mini)', color: 'var(--app-color-danger)', verticalAlign: 'middle', cursor: 'pointer' }}
+            <button
+              type="button"
+              className="app-knopf-nackt"
+              aria-label={sendeFehlerGrund ? 'Nachricht nicht gesendet' : 'Nachricht erneut senden'}
+              style={{ marginLeft: 'var(--app-abstand-mini)', verticalAlign: 'middle', cursor: 'pointer' }}
               onClick={(e) => {
                 e.stopPropagation();
                 if (onRetry) onRetry(message);
               }}
-            />
+            >
+              <IonIcon
+                icon={ICON_WARNHINWEIS}
+                aria-hidden="true"
+                style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-color-danger)', display: 'block' }}
+              />
+            </button>
           )}
         </div>
 
-        {sendetGerade && (
-          <div
-            role="progressbar"
-            aria-valuenow={uploadFortschritt!.prozent}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-label={`Datei wird gesendet: ${uploadFortschritt!.prozent} Prozent`}
-            style={{
-              height: '3px',
-              marginTop: 'var(--app-abstand-mini)',
-              borderRadius: 'var(--app-abstand-winzig)',
-              backgroundColor: 'currentColor',
-              opacity: 0.25,
-              overflow: 'hidden'
-            }}
-          >
-            <div style={{
-              width: `${uploadFortschritt!.prozent}%`,
-              height: '100%',
-              backgroundColor: 'currentColor',
-              borderRadius: 'var(--app-abstand-winzig)',
-              transition: 'width 0.2s ease-out'
-            }} />
+        {message.queueStatus === 'error' && sendeFehlerGrund && (
+          <div style={{
+            fontSize: 'var(--app-text-meta)',
+            marginTop: 'var(--app-abstand-mini)',
+            textAlign: 'right',
+            fontWeight: 'var(--app-schrift-mittel)'
+          }}>
+            {`Nicht gesendet: ${sendeFehlerGrund}`}
           </div>
+        )}
+
+        {sendetGerade && (
+          <FortschrittsBalken
+            prozent={uploadFortschritt!.prozent}
+            beschriftung={`Datei wird gesendet: ${uploadFortschritt!.prozent} Prozent`}
+          />
         )}
 
         {/* Reaktionen Anzeige */}
@@ -732,7 +768,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                 r => r.user_id === user?.id && r.user_type === user?.type
               );
               return (
-                <div
+                <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-pressed={userHasReacted}
                   key={emoji}
                   onClick={(e) => {
                     e.stopPropagation();
@@ -744,9 +780,14 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                     gap: 'var(--app-abstand-mini)',
                     padding: 'var(--app-abstand-mini) var(--app-abstand-eng)',
                     borderRadius: 'var(--app-radius-karte)',
+                    /* Fremde Blase: Chip-Grund und Zaehler aus Tokens, nicht aus
+                       rohem Schwarz -- die Blase ist im Dunkeln #242426, und
+                       rgba(0,0,0,…) blieb dort Schwarz auf Schwarz: Zaehler
+                       1,25:1. Auf der
+                       eigenen, tuerkisen Blase bleibt Weiss richtig. */
                     backgroundColor: userHasReacted
                       ? (isOwnMessage ? 'rgba(255,255,255,0.25)' : 'rgba(var(--app-color-chat-rgb), 0.12)')
-                      : (isOwnMessage ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.05)'),
+                      : (isOwnMessage ? 'rgba(255,255,255,0.12)' : 'rgba(var(--app-text-system-rgb), 0.12)'),
                     border: userHasReacted
                       ? `1.5px solid ${emojiData?.color || 'var(--app-color-chat)'}`
                       : '1px solid transparent',
@@ -760,12 +801,12 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
                     icon={userHasReacted ? emojiData?.filled : emojiData?.outline}
                     style={{
                       fontSize: 'var(--app-text-basis)',
-                      color: emojiData?.color || 'var(--app-color-chat)'
+                      color: emojiData?.color || 'var(--app-text-chat)'
                     }}
                   />
                   <span style={{
                     fontWeight: userHasReacted ? 'var(--app-schrift-halbfett)' : 'var(--app-schrift-mittel)',
-                    color: isOwnMessage ? 'rgba(255,255,255,0.95)' : 'rgba(0,0,0,0.75)'
+                    color: isOwnMessage ? 'rgba(255,255,255,0.95)' : 'var(--app-text-emphasis)'
                   }}>
                     {reactions.length}
                   </span>
@@ -776,8 +817,9 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
         )}
 
         {/* Inline Aktionsleiste unter ausgewählter Nachricht */}
-        {selectedMessage?.id === message.id && !showReactionPicker && (
-          <div
+        {leisteOffen && (
+          <div role="presentation"
+            id={`aktionen-${message.id}`}
             style={{
               display: 'flex',
               gap: 'var(--app-abstand-mini)',
@@ -785,9 +827,16 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
               justifyContent: isOwnMessage ? 'flex-end' : 'flex-start'
             }}
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={mitEscapeSchliessen}
           >
-            <div
-              onClick={() => onOpenReactionPicker(message)}
+            <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-label="Reaktion hinzufügen"
+              ref={ersteAktionRef}
+              onClick={(e) => {
+                // detail 0: ausgelöst über Enter/Leertaste (tastaturKlick ruft
+                // click()), nicht über Maus oder Finger.
+                if (e.detail === 0) pickerPerTastaturRef.current = true;
+                onOpenReactionPicker(message);
+              }}
               style={{
                 width: '32px',
                 height: '32px',
@@ -801,7 +850,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             >
               <IonIcon icon={ICON_HINZUFUEGEN} style={{ fontSize: 'var(--app-text-gross)', color: isOwnMessage ? 'white' : 'var(--app-text-secondary)' }} />
             </div>
-            <div
+            <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-label="Antworten"
               onClick={() => {
                 onReply(message);
                 onDeselectMessage();
@@ -820,7 +869,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
             >
               <IonIcon icon={ICON_RUECKGAENGIG} style={{ fontSize: 'var(--app-text-standard)', color: isOwnMessage ? 'white' : 'var(--app-text-secondary)' }} />
             </div>
-            <div
+            <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-label="Teilen"
               onClick={() => onShare(message)}
               style={{
                 width: '32px',
@@ -844,7 +893,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
               ['admin', 'org_admin'].includes(user.role_name) ||
               (user.role_name === 'teamer' && isOwnMessage)
             ) && (
-              <div
+              <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-label="Nachricht löschen"
                 onClick={() => {
                   onDelete(message.id);
                   onDeselectMessage();
@@ -867,34 +916,36 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
         )}
 
         {/* Inline Reaktions-Picker */}
-        {showReactionPicker && reactionTargetMessage?.id === message.id && (
-          <div
+        {pickerOffen && (
+          <div role="presentation"
+            onKeyDown={mitEscapeSchliessen}
             style={{
               display: 'flex',
               gap: 'var(--app-abstand-winzig)',
               marginTop: 'var(--app-abstand-eng)',
               padding: 'var(--app-abstand-kompakt) var(--app-abstand-schmal)',
-              backgroundColor: 'white',
+              backgroundColor: 'var(--app-surface-card)',
               borderRadius: 'var(--app-radius-gross)',
               boxShadow: 'var(--app-schatten-schwebend-stark)',
               justifyContent: isOwnMessage ? 'flex-end' : 'flex-start'
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {Object.entries(REACTION_EMOJIS).map(([emoji, data]) => {
+            {Object.entries(REACTION_EMOJIS).map(([emoji, data], index) => {
               const userHasThisReaction = message.reactions?.some(
                 r => r.user_id === user?.id && r.user_type === user?.type && r.emoji === emoji
               );
               return (
-                <div
+                <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-pressed={userHasThisReaction} aria-label={`Mit ${emoji} reagieren`}
                   key={emoji}
+                  ref={index === 0 ? ersteReaktionRef : undefined}
                   onClick={() => onToggleReaction(message.id, emoji)}
                   style={{
                     width: '36px',
                     height: '36px',
                     borderRadius: 'var(--app-radius-kreis)',
                     cursor: 'pointer',
-                    backgroundColor: userHasThisReaction ? `${data.color}18` : 'transparent',
+                    backgroundColor: userHasThisReaction ? `rgba(${data.rgb}, 0.1)` : 'transparent',
                     border: userHasThisReaction ? `2px solid ${data.color}` : '2px solid transparent',
                     display: 'flex',
                     alignItems: 'center',
@@ -912,6 +963,27 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({
           </div>
         )}
       </div>
+
+      {/* Aktionen per Maus und Tastatur -- in der Zeile neben der Blase (bei
+          eigenen Nachrichten links, sonst rechts), damit die Blase nicht
+          verrutscht. Klick bis hierher stoppen: sonst wählte der Klick-Handler
+          des Chatinhalts die gerade geöffnete Auswahl sofort wieder ab. */}
+      <button
+        type="button"
+        ref={aktionenKnopfRef}
+        className="app-knopf-nackt app-beruehrungsziel app-chat-aktionen-knopf"
+        aria-label="Aktionen zu dieser Nachricht"
+        aria-expanded={ausgewaehlt || pickerOffen}
+        aria-controls={leisteOffen ? `aktionen-${message.id}` : undefined}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (!ausgewaehlt) fokusInLeisteRef.current = true;
+          onLongPress(message);
+        }}
+        onKeyDown={mitEscapeSchliessen}
+      >
+        <IonIcon icon={ICON_MEHR} aria-hidden="true" />
+      </button>
     </div>
   );
 };

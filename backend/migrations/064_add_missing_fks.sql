@@ -4,6 +4,15 @@
 -- Alle FK-Constraints sind idempotent (IF NOT EXISTS Check via
 -- information_schema). Alle mit ON DELETE CASCADE, da Organization-
 -- Delete bereits kaskadierend loescht.
+--
+-- IDEMPOTENZ: Die Datei nannte sich
+-- idempotent, scheiterte aber bei jedem zweiten Lauf -- das Aufraeumen von
+-- activity_requests fragte nach konfi_id, die Migration 077 in user_id
+-- umbenennt ("column konfi_id does not exist"). Der Schritt laeuft jetzt nur,
+-- solange es die Spalte gibt. Fuer bereits gelaufene Staende aendert das
+-- nichts: Der Migrationslauf fuehrt eine vermerkte Datei nie erneut aus
+-- (utils/migrationslauf.js vergleicht nur den Namen). Waechter:
+-- tests/schema/migrationenIdempotent.test.js.
 -- ====================================================================
 
 -- ====================================================================
@@ -22,7 +31,14 @@ DELETE FROM chat_poll_votes WHERE user_id NOT IN (SELECT id FROM users);
 DELETE FROM chat_poll_votes WHERE poll_id NOT IN (SELECT id FROM chat_polls);
 DELETE FROM bonus_points WHERE konfi_id NOT IN (SELECT id FROM users);
 DELETE FROM bonus_points WHERE organization_id NOT IN (SELECT id FROM organizations);
-DELETE FROM activity_requests WHERE konfi_id NOT IN (SELECT id FROM users);
+-- activity_requests.konfi_id heisst seit Migration 077 user_id.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'activity_requests'
+               AND column_name = 'konfi_id') THEN
+    EXECUTE 'DELETE FROM activity_requests WHERE konfi_id NOT IN (SELECT id FROM users)';
+  END IF;
+END $$;
 DELETE FROM activity_requests WHERE organization_id NOT IN (SELECT id FROM organizations);
 DELETE FROM event_bookings WHERE user_id NOT IN (SELECT id FROM users);
 DELETE FROM event_bookings WHERE event_id NOT IN (SELECT id FROM events);

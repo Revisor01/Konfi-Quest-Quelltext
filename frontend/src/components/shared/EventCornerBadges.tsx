@@ -63,6 +63,8 @@ const EventCornerBadges: React.FC<EventCornerBadgesProps> = ({
             className="app-corner-badge"
             style={badgeStyle('var(--app-color-teamer)')}
             title={event.teamer_only ? 'Nur Team' : 'Team gesucht'}
+            role="img"
+            aria-label={event.teamer_only ? 'Nur Team' : 'Team gesucht'}
           >
             <IonIcon icon={ICON_GRUPPE_GEFUELLT} style={iconStyle} />
           </div>
@@ -71,7 +73,7 @@ const EventCornerBadges: React.FC<EventCornerBadgesProps> = ({
       )}
       {isKonfirmation && (
         <>
-          <div className="app-corner-badge" style={badgeStyle('var(--app-color-konfis)')} title="Konfirmation">
+          <div className="app-corner-badge" style={badgeStyle('var(--app-color-konfis)')} title="Konfirmation" role="img" aria-label="Konfirmation">
             <IonIcon icon={ICON_FLAMME_GEFUELLT} style={iconStyle} />
           </div>
           <Separator />
@@ -79,7 +81,7 @@ const EventCornerBadges: React.FC<EventCornerBadgesProps> = ({
       )}
       {isMandatory && (
         <>
-          <div className="app-corner-badge" style={badgeStyle('var(--app-color-events)')} title="Pflichtveranstaltung">
+          <div className="app-corner-badge" style={badgeStyle('var(--app-color-events)')} title="Pflichtveranstaltung" role="img" aria-label="Pflichtveranstaltung">
             <IonIcon icon={ICON_SCHUTZ_GEFUELLT} style={iconStyle} />
           </div>
           <Separator />

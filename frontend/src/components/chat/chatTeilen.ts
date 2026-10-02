@@ -3,6 +3,7 @@ import { Capacitor } from '@capacitor/core';
 import { teilen } from '../../services/systemDialoge';
 import { Filesystem, Directory, Encoding } from '@capacitor/filesystem';
 import api, { DATEI_TIMEOUT_MS } from '../../services/api';
+import { getMediaBlob } from '../../services/mediaCache';
 import { Message } from '../../types/chat';
 
 /**
@@ -19,12 +20,19 @@ export async function nachrichtTeilen(
 ): Promise<void> {
   try {
     if (message.file_path) {
-      // For files, share the actual file natively (with auth token)
-      const response = await api.get(`/chat/files/${message.file_path}`, { responseType: 'blob', timeout: DATEI_TIMEOUT_MS });
-      const blob = response.data;
+      // Die Datei über den Medien-Cache holen: Was schon im
+      // Chat angezeigt wurde, liegt auf dem Gerät — Teilen lud es bisher
+      // trotzdem noch einmal vom Server.
+      const blob = await getMediaBlob(message.file_path);
       const fileName = message.file_name || 'file';
 
-      // Write to Documents directory for sharing
+      // In den CACHE schreiben, nicht nach Documents. Documents
+      // ist auf Android der OEFFENTLICHE Ordner "Dokumente" -- dort lesen
+      // andere Apps und jeder Dateimanager mit --, auf dem iPhone der
+      // Documents-Ordner der App. Geteilt werden Chat-Anhaenge, oft Fotos
+      // von Jugendlichen, und sie blieben dort liegen. Aus dem Cache nimmt
+      // das Teilen-Blatt sie genauso (Android: cache-path in file_paths.xml),
+      // der Chat-Export unten macht es schon so.
       const base64Data = await new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onloadend = () => {
@@ -38,13 +46,13 @@ export async function nachrichtTeilen(
       await Filesystem.writeFile({
         path,
         data: base64Data,
-        directory: Directory.Documents,
+        directory: Directory.Cache,
         recursive: true
       });
 
       // Get local file URI for sharing
       const fileUri = await Filesystem.getUri({
-        directory: Directory.Documents,
+        directory: Directory.Cache,
         path
       });
 

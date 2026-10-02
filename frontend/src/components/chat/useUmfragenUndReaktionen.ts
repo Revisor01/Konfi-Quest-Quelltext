@@ -6,7 +6,7 @@ import api from '../../services/api';
 import { writeQueue } from '../../services/writeQueue';
 import { networkMonitor } from '../../services/networkMonitor';
 import { safeUUID } from '../../utils/uuid';
-import { Message, PollVote } from '../../types/chat';
+import { Message, PollVote, ChatUserType } from '../../types/chat';
 
 /**
  * Umfrage-Stimmen und Emoji-Reaktionen des Chatraums (beim Aufteilen von
@@ -117,7 +117,7 @@ export function useUmfragenUndReaktionen({
             id: 0,
             emoji,
             user_id: user!.id,
-            user_type: user!.type as 'admin' | 'konfi',
+            user_type: user!.type as ChatUserType,
             user_name: user!.display_name || ''
           }]
         };
@@ -165,7 +165,7 @@ export function useUmfragenUndReaktionen({
               id: response.data.id,
               emoji,
               user_id: user!.id,
-              user_type: user!.type as 'admin' | 'konfi',
+              user_type: user!.type as ChatUserType,
               user_name: user!.display_name || ''
             }]
           };

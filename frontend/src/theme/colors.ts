@@ -50,7 +50,7 @@ export const FARBEN = {
   successFresh: '#10b981', // --app-color-success-fresh
   neutral: '#6c757d', // --app-color-neutral (vergangene/neutrale Zustaende)
   neutralHell: '#9ca3af', // --app-color-neutral-hell
-  textSystem: '#8e8e93', // --app-text-system
+  textSystem: '#6e6e73',
 
   // Medaillen (Abzeichen-Stufen nach Punktewert)
   gold: '#ffd700', // --app-color-gold
@@ -62,6 +62,36 @@ export const FARBEN = {
 
   // Fallback fuer Abzeichen/Level ohne eigene Farbe (Wert == users)
   abzeichenFallback: '#667eea', // --app-color-users
+} as const;
+
+/**
+ * Abzeichen-Kriterienfarben als FLAECHE.
+ *
+ * Spiegel von --app-color-kriterium-<typ> in variables.css. Hexwerte, weil
+ * die Aufrufer daraus rechnen: Alpha-Suffix (`${farbe}40`), SVG-stroke im
+ * Fortschrittsring und die Vorgabe fuer die gespeicherte Badge-Farbe (die
+ * Datenbank und die Store-Apps kennen nur Hex). In beiden Modi gleich;
+ * als SCHRIFT gilt getCriteriaTextColor() in utils/badgeCriteria.ts.
+ * Schluessel = criteria_type; `standard` ist der Rueckfall (== users).
+ */
+export const KRITERIUM_FARBEN = {
+  total_points: '#ffd700', // --app-color-kriterium-total-points
+  gottesdienst_points: '#ff9500', // --app-color-kriterium-gottesdienst-points
+  gemeinde_points: '#059669', // --app-color-kriterium-gemeinde-points
+  bonus_points: '#ff6b9d', // --app-color-kriterium-bonus-points
+  both_categories: '#5856d6', // --app-color-kriterium-both-categories
+  activity_count: '#3880ff', // --app-color-kriterium-activity-count
+  unique_activities: '#10dc60', // --app-color-kriterium-unique-activities
+  activity_combination: '#7044ff', // --app-color-kriterium-activity-combination
+  category_activities: '#0cd1e8', // --app-color-kriterium-category-activities
+  category_combination: '#0891b2', // --app-color-kriterium-category-combination
+  specific_activity: '#ffce00', // --app-color-kriterium-specific-activity
+  streak: '#eb445a', // --app-color-kriterium-streak
+  time_based: '#8e8e93', // --app-color-kriterium-time-based
+  event_count: '#e63946', // --app-color-kriterium-event-count
+  mandatory_event_count: '#b91c1c', // --app-color-kriterium-mandatory-event-count
+  teamer_year: '#5b21b6', // --app-color-kriterium-teamer-year
+  standard: '#667eea', // --app-color-kriterium-standard
 } as const;
 
 /**
@@ -99,15 +129,10 @@ export const WRAPPED_KONFETTI = [
   '#ffffff', '#f97316', '#34d399', '#60a5fa',
 ] as const;
 
-/**
- * Ampel der Admin-Metrikseite (Antwortzeiten/Statuscodes). Interne
- * Diagnoseseite mit eigener, feinerer Abstufung als die Status-Tokens —
- * zentralisiert statt verstreut.
- */
 export const METRIK_AMPEL = {
-  gut: '#28a745',
-  maessig: '#f0ad4e',
-  erhoeht: '#fd7e14', // eigener Ampel-Ton; das gleichlautende
-  kritisch: '#dc3545', // == --app-color-danger
-  blass: '#b0b0b5', // gedaempfte Nebenwerte
+  gut: 'var(--app-color-success-klassisch)',
+  maessig: 'var(--app-color-ampel-maessig)',
+  erhoeht: 'var(--app-color-ampel-erhoeht)', // eigener Ampel-Ton; das
+  kritisch: 'var(--app-color-danger)',
+  blass: 'var(--app-color-ampel-blass)', // gedaempfte Nebenwerte
 } as const;

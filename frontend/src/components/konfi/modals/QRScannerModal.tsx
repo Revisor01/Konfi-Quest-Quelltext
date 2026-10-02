@@ -27,7 +27,18 @@ const QRScannerModal: React.FC<QRScannerModalProps> = ({ onClose, onSuccess }) =
   const { isOnline } = useApp();
   const videoRef = useRef<HTMLVideoElement>(null);
   const scannerRef = useRef<QrScanner | null>(null);
-  const [scanning, setScanning] = useState(false);
+  // Netz- und Scan-Zustand als Ref: Der
+  // Rueckruf des Scanners entsteht einmal im Mount-Effekt. Als Zustand
+  // gelesen sah er `isOnline` und `scanning` fuer immer vom ersten Rendern --
+  // offline lief der Scan trotzdem ans Netz ("QR-Code konnte nicht
+  // verarbeitet werden" statt "Du bist offline"), und der Scan-Merker war
+  // fuer ihn immer false. Der Rueckruf ruft deshalb die jeweils aktuelle
+  // Fassung von handleScanResult ueber scanRef, und der Merker sitzt in
+  // einem Ref, der sofort gilt, nicht erst nach dem naechsten Rendern.
+  const isOnlineRef = useRef(isOnline);
+  useEffect(() => { isOnlineRef.current = isOnline; }, [isOnline]);
+  const scanningRef = useRef(false);
+  const scanRef = useRef<(data: string) => void>(() => undefined);
   const [banner, setBanner] = useState<{ type: 'error' | 'info'; message: string } | null>(null);
   const [permissionDenied, setPermissionDenied] = useState(false);
 
@@ -37,7 +48,7 @@ const QRScannerModal: React.FC<QRScannerModalProps> = ({ onClose, onSuccess }) =
     const scanner = new QrScanner(
       videoRef.current,
       (result: QrScanner.ScanResult) => {
-        handleScanResult(result.data);
+        scanRef.current(result.data);
       },
       {
         preferredCamera: 'environment',
@@ -65,12 +76,14 @@ const QRScannerModal: React.FC<QRScannerModalProps> = ({ onClose, onSuccess }) =
   }, []);
 
   const handleScanResult = async (data: string) => {
-    if (scanning) return;
-    if (!isOnline) {
+    if (scanningRef.current) return;
+    if (!isOnlineRef.current) {
       setBanner({ type: 'error', message: 'Du bist offline' });
       return;
     }
-    setScanning(true);
+    scanningRef.current = true;
+    // Ein Offline-Hinweis von vorhin gilt nicht mehr.
+    setBanner(null);
 
     if (scannerRef.current) {
       scannerRef.current.stop();
@@ -84,7 +97,7 @@ const QRScannerModal: React.FC<QRScannerModalProps> = ({ onClose, onSuccess }) =
         setBanner({ type: 'info', message: 'Du bist bereits eingecheckt' });
         setTimeout(() => {
           setBanner(null);
-          setScanning(false);
+          scanningRef.current = false;
           scannerRef.current?.start();
         }, 2000);
       } else {
@@ -95,11 +108,13 @@ const QRScannerModal: React.FC<QRScannerModalProps> = ({ onClose, onSuccess }) =
       setBanner({ type: 'error', message: errorMessage });
       setTimeout(() => {
         setBanner(null);
-        setScanning(false);
+        scanningRef.current = false;
         scannerRef.current?.start();
       }, 3000);
     }
   };
+
+  useEffect(() => { scanRef.current = handleScanResult; });
 
   if (permissionDenied) {
     return (

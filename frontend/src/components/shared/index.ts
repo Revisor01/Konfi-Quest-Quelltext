@@ -9,6 +9,6 @@ export { default as EventLegendModal } from './EventLegendModal';
 export { default as ChallengeLegendModal } from './ChallengeLegendModal';
 export { default as TrialBanner } from './TrialBanner';
 export { default as StoreUpdateBanner } from './StoreUpdateBanner';
-export { formatEventDate, formatEventTime, formatEventDateLong, eventEnde, istVergangen, kategorienText, zeigtPunkteart, punkteartText, istAbgesagt, streichtDurch, titelDekoration, zaehltAlsMeiner, aktuelleTermine, zuVerbuchendeTermine, vergangeneTermine } from './eventFormatting';
+export { formatEventDate, formatEventTime, formatEventDateLong, zeitraumText, eventEnde, istVergangen, kategorienText, zeigtPunkteart, punkteartText, istAbgesagt, streichtDurch, titelDekoration, zaehltAlsMeiner, aktuelleTermine, zuVerbuchendeTermine, vergangeneTermine } from './eventFormatting';
 export { default as EventCornerBadges } from './EventCornerBadges';
 export { default as AbsageBlock } from './AbsageBlock';

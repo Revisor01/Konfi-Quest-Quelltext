@@ -1,5 +1,9 @@
 const express = require('express');
 const { anmeldeStatusSql, kapazitaetSql, ZEITFENSTER_SQL } = require('../../utils/terminAnmeldeStatus');
+const { buchungszahlenJeTerminSql } = require('../../utils/buchungszahlen');
+const { darfTermin } = require('../../utils/jahrgangsZugriff');
+const { leitungSiehtAlleTermine, gebundeneLeitungSiehtTermin } = require('../../utils/terminLeitungSicht');
+const { wartelistenRangSql } = require('../../utils/bookingUtils');
 
 module.exports = (db, rbacVerifier, { requireTeamer }) => {
   const router = express.Router();
@@ -97,7 +101,8 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
         FROM events e
         LEFT JOIN users u_cancel ON e.cancelled_by = u_cancel.id
         LEFT JOIN users u_grund ON e.cancelled_reason_set_by = u_grund.id
-        -- Zahlen aus der View statt aus einer eigenen Kopie.
+        -- Zahlen mit der Zaehlung der View statt aus einer eigenen Kopie
+        -- 
         --
         -- event_booking_stats liegt seit Migration 128 bereit und wurde von
         -- keinem Endpunkt gelesen: Fuenf Stellen zaehlten dieselben Buchungen
@@ -105,10 +110,19 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
         -- deckungsgleich, nur anders benannt; die Namen nach aussen bleiben,
         -- damit kein Aufrufer bricht.
         --
-        -- Eine Verhaltensaenderung ist dabei: Die alte Kopie hatte einen
+        -- Eine Verhaltensaenderung war dabei: Die alte Kopie hatte einen
         -- LEFT JOIN auf users ohne deleted_at-Filter und zaehlte Buchungen
         -- geloeschter Konten mit. Die View filtert sie heraus — das ist der
         -- Fehler, den ihr Kommentar (Migration 128) ausdruecklich meint.
+        --
+        -- JE TERMIN statt aus der View: Im LATERAL
+        -- gegen die Liste berechnete der Planer die GANZE View -- alle
+        -- Buchungen aller Gemeinden, Seq Scan auf event_bookings und users --
+        -- und prüfte dann gegen die Termine dieser Gemeinde. 77 ms je
+        -- Listenaufruf bei 100.000 Buchungen, 2 ms als Aggregat je Termin
+        -- (utils/buchungszahlen.js, Spalte fuer Spalte dieselbe Zaehlung).
+        -- Ein Termin ohne Buchung liefert jetzt Nullen statt keiner Zeile;
+        -- das aeussere COALESCE bleibt, die Antwort ist dieselbe.
         LEFT JOIN LATERAL (
           SELECT
             COALESCE(ebs.konfi_confirmed, 0)   as registered_count,
@@ -137,8 +151,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
             -- andere Groesse als die Konfi-Zahl daneben.
             COALESCE(ebs.konfi_opted_out, 0)
               + COALESCE(ebs.konfi_excused, 0) as abgemeldet_count
-          FROM event_booking_stats ebs
-          WHERE ebs.event_id = e.id
+          FROM ${buchungszahlenJeTerminSql('e.id')} ebs
         ) bstats ON true
         LEFT JOIN LATERAL (
           -- Wie viele beim Zuruecknehmen der Absage wieder angemeldet wuerden
@@ -153,6 +166,10 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
           FROM event_bookings eb
           JOIN users u ON eb.user_id = u.id AND u.deleted_at IS NULL
           WHERE eb.event_id = e.id AND eb.abgemeldet_durch_absage = TRUE
+            -- Die verbuchte Selbstabmeldung, die die Absage entschuldigt hat
+            -- kommt beim Zuruecknehmen nicht als Angemeldete
+            -- zurueck und bekommt keinen Push (hebeAbsageAbmeldungenAuf).
+            AND eb.status <> 'opted_out'
         ) absage_abm ON true
         LEFT JOIN LATERAL (
           SELECT STRING_AGG(DISTINCT c.id::text, ',') as category_ids,
@@ -208,7 +225,7 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
       // ODER die keinem Jahrgang zugeordnet sind (allgemeine Events)
       // ODER die teamer_only/teamer_needed sind (immer sichtbar für Teamer)
       let filteredRows = rows;
-      if (!req.user.is_super_admin
+      if (!leitungSiehtAlleTermine(req.user)
           && ['teamer', 'admin'].includes(req.user.role_name)) {
         // Ohne jede Zuweisung griff der Filter früher gar nicht (die Bedingung
         // verlangte length > 0) — eine Teamer:in ohne Jahrgang sah damit ALLE
@@ -228,12 +245,12 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
         filteredRows = rows.filter(row => {
           // Reine Teamer-Events sind immer sichtbar: Sie haengen an keinem
           // Jahrgang, es gibt nichts zu schuetzen.
-          if (row.teamer_only) return true;
           // Allgemeine Events (keine Jahrgang-Zuweisung) sind für alle sichtbar
-          if (!row.jahrgang_ids) return true;
-          // Prüfen ob mindestens ein zugewiesener Jahrgang dabei ist
-          const eventJahrgangIds = row.jahrgang_ids.split(',').map(id => parseInt(id, 10));
-          return eventJahrgangIds.some(id => viewableJahrgaenge.includes(id));
+          // Sonst muss mindestens ein zugewiesener Jahrgang dabei sein
+          return gebundeneLeitungSiehtTermin({
+            teamerOnly: row.teamer_only,
+            jahrgangIds: row.jahrgang_ids ? row.jahrgang_ids.split(',').map(id => parseInt(id, 10)) : []
+          }, viewableJahrgaenge);
         });
       }
 
@@ -359,7 +376,11 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
         FROM events e
         LEFT JOIN users u_cancel ON e.cancelled_by = u_cancel.id
         LEFT JOIN users u_grund ON e.cancelled_reason_set_by = u_grund.id
-        LEFT JOIN event_booking_stats ebs ON ebs.event_id = e.id
+        -- Je Termin statt LEFT JOIN auf die View:
+        -- Der Join gegen die Liste materialisierte die ganze View ueber alle
+        -- Buchungen aller Gemeinden (62 ms bei 100.000 Buchungen, 2 ms so).
+        -- Gleicher Alias, gleiche Spalten -- das GROUP BY unten bleibt.
+        LEFT JOIN LATERAL ${buchungszahlenJeTerminSql('e.id')} ebs ON true
         LEFT JOIN LATERAL (
           -- Geloeschte Konten zaehlen nicht mit: Sie bekommen keinen Push
           -- (getTokensForUser filtert sie) und stehen in keiner Liste.
@@ -367,6 +388,10 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
           FROM event_bookings eb
           JOIN users u ON eb.user_id = u.id AND u.deleted_at IS NULL
           WHERE eb.event_id = e.id AND eb.abgemeldet_durch_absage = TRUE
+            -- Die verbuchte Selbstabmeldung, die die Absage entschuldigt hat
+            -- kommt beim Zuruecknehmen nicht als Angemeldete
+            -- zurueck und bekommt keinen Push (hebeAbsageAbmeldungenAuf).
+            AND eb.status <> 'opted_out'
         ) absage_abm ON true
         LEFT JOIN event_categories ec ON e.id = ec.event_id
         LEFT JOIN categories c ON ec.category_id = c.id
@@ -418,9 +443,6 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
           }
         }
         
-        // Abgesagte Termine: unprocessed_count zaehlt hier bereits ueber ALLE
-        // Rollen (events.js:305, keine Rollen-Trennung) — nicht addieren,
-        // das wuerde Teamer doppelt zaehlen.
         const unprocessedCount = parseInt(row.unprocessed_count, 10) || 0;
         return {
           ...row,
@@ -560,6 +582,10 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
           FROM event_bookings eb
           JOIN users u ON eb.user_id = u.id AND u.deleted_at IS NULL
           WHERE eb.event_id = e.id AND eb.abgemeldet_durch_absage = TRUE
+            -- Die verbuchte Selbstabmeldung, die die Absage entschuldigt hat
+            -- kommt beim Zuruecknehmen nicht als Angemeldete
+            -- zurueck und bekommt keinen Push (hebeAbsageAbmeldungenAuf).
+            AND eb.status <> 'opted_out'
         ) absage_abm ON true
         LEFT JOIN LATERAL (
           SELECT SUM(et.max_participants) as total_capacity
@@ -572,6 +598,24 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
 
       if (!event) {
         return res.status(404).json({ error: 'Event nicht gefunden' });
+      }
+
+      // Dieselbe Bedingung wie der Listenfilter (Rolle teamer/admin, kein
+      // super_admin) und dieselbe Regel wie beim Schreiben (darfTermin:
+      // teamer_only und Termine ohne Jahrgang immer, org_admin ausgenommen).
+      // Konfis bleiben unberuehrt -- fuer sie gilt weiter nur der Org-Riegel.
+      //
+      // Ausgelieferte Apps: Sie rufen diese Route nur fuer Termine aus ihrer
+      // (bereits gefilterten) Liste auf -- die bekommen weiterhin 200. 403
+      // trifft ausschliesslich Aufrufe mit fremder Kennung.
+      if (!req.user.is_super_admin && ['teamer', 'admin'].includes(req.user.role_name)) {
+        const zugriff = await darfTermin(db, req, eventId);
+        if (!zugriff.erlaubt) {
+          return res.status(403).json({
+            error: 'Kein Zugriff auf dieses Event',
+            error_code: 'jahrgang_nicht_zugewiesen'
+          });
+        }
       }
 
       // Get participants
@@ -641,7 +685,12 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
             WHEN 'opted_out' THEN 3
             ELSE 3
           END,
-          eb.created_at ASC
+          -- Innerhalb der Gruppe die Reihenfolge des Nachrueckens:
+          -- Wer oben
+          -- in der Warteliste steht, rueckt als naechste nach. Vorher
+          -- created_at -- nach einer Wiederanmeldung stand die Person hier an
+          -- ihrem alten Platz, obwohl sie sich hinten angestellt hatte.
+          ${wartelistenRangSql('eb')}
       `;
       const { rows: participants } = await db.query(participantsQuery, [eventId, req.user.organization_id]);
       
@@ -663,10 +712,18 @@ module.exports = (db, rbacVerifier, { requireTeamer }) => {
         //
         // Das ist derselbe Fehler, den Migration 128 fuer fuenf Endpunkte
         // behoben hat; diese Stelle wurde damals uebersehen.
+        // Nur die Felder, die die Serienliste anzeigt.
+        //
+        // Angezeigt werden in der Serienliste Name, Datum und die beiden
+        // Zahlen (EventDetailSections.tsx, SeriesEventsSection). Mehr braucht
+        // die Ansicht nicht; wer hier ein Feld ergaenzt, ergaenzt es bewusst.
         const seriesQuery = `
-          SELECT e.*, COALESCE(ebs.konfi_confirmed, 0) as registered_count
+          SELECT e.id, e.name, e.event_date, e.max_participants,
+                 COALESCE(ebs.konfi_confirmed, 0) as registered_count
           FROM events e
-          LEFT JOIN event_booking_stats ebs ON ebs.event_id = e.id
+          -- Je Termin statt LEFT JOIN auf die View,
+          -- dieselbe Zaehlung: utils/buchungszahlen.js.
+          LEFT JOIN LATERAL ${buchungszahlenJeTerminSql('e.id')} ebs ON true
           WHERE e.series_id = $1 AND e.organization_id = $2 AND e.id != $3
           ORDER BY e.event_date ASC
         `;

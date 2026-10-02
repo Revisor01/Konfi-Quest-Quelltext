@@ -143,7 +143,7 @@ const ChangeEmailModal: React.FC<ChangeEmailModalProps> = ({
                       <IonSpinner name="crescent" style={{ width: '20px', height: '20px' }} />
                     </div>
                   ) : (
-                    <IonInput
+                    <IonInput aria-label="E-Mail-Adresse (optional)"
                       type="email"
                       value={email}
                       onIonInput={(e) => setEmail(e.detail.value!)}

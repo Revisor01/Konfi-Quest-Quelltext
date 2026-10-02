@@ -239,16 +239,16 @@ export const ICON_CHOICES: Record<string, IconChoice> = {
   bookmark: { icon: bookmark, name: 'Lesezeichen', category: 'Erfolg' },
 
   megaphone: { icon: megaphone, name: 'Megafon', category: 'Engagement' },
-  bulb: { icon: bulb, name: 'Gluehbirne', category: 'Engagement' },
+  bulb: { icon: bulb, name: 'Glühbirne', category: 'Engagement' },
   handLeft: { icon: handLeft, name: 'Hand', category: 'Engagement' },
   walk: { icon: walk, name: 'Unterwegs', category: 'Engagement' },
 
-  happy: { icon: happy, name: 'Laecheln', category: 'Gemeinschaft' },
+  happy: { icon: happy, name: 'Lächeln', category: 'Gemeinschaft' },
   peopleCircleGruppe: { icon: peopleCircle, name: 'Gruppenkreis', category: 'Gemeinschaft' },
   bonfire: { icon: bonfire, name: 'Lagerfeuer', category: 'Gemeinschaft' },
   ticket: { icon: ticket, name: 'Eintrittskarte', category: 'Gemeinschaft' },
 
-  library: { icon: library, name: 'Buecherei', category: 'Lernen' },
+  library: { icon: library, name: 'Bücherei', category: 'Lernen' },
   easel: { icon: easel, name: 'Staffelei', category: 'Lernen' },
   shapes: { icon: shapes, name: 'Formen', category: 'Lernen' },
   clipboardListe: { icon: clipboardIcon, name: 'Klemmbrett', category: 'Lernen' },
@@ -266,19 +266,19 @@ export const ICON_CHOICES: Record<string, IconChoice> = {
 
   musicalNotesMehr: { icon: musicalNotes2, name: 'Noten', category: 'Aktivitäten' },
   mic: { icon: mic, name: 'Mikrofon', category: 'Aktivitäten' },
-  headset: { icon: headset, name: 'Kopfhoerer', category: 'Aktivitäten' },
-  football: { icon: football, name: 'Fussball', category: 'Aktivitäten' },
+  headset: { icon: headset, name: 'Kopfhörer', category: 'Aktivitäten' },
+  football: { icon: football, name: 'Fußball', category: 'Aktivitäten' },
   gameController: { icon: gameController, name: 'Spielkonsole', category: 'Aktivitäten' },
-  dice: { icon: dice, name: 'Wuerfel', category: 'Aktivitäten' },
+  dice: { icon: dice, name: 'Würfel', category: 'Aktivitäten' },
   extensionPuzzle: { icon: extensionPuzzle, name: 'Puzzleteil', category: 'Aktivitäten' },
   pizza: { icon: pizza, name: 'Pizza', category: 'Aktivitäten' },
   iceCream: { icon: iceCream, name: 'Eis', category: 'Aktivitäten' },
-  cafe: { icon: cafe, name: 'Heissgetraenk', category: 'Aktivitäten' },
+  cafe: { icon: cafe, name: 'Heißgetränk', category: 'Aktivitäten' },
   nutrition: { icon: nutrition, name: 'Obst', category: 'Aktivitäten' },
 
   bus: { icon: bus, name: 'Bus', category: 'Orte' },
   trailSign: { icon: trailSign, name: 'Wegweiser', category: 'Orte' },
-  schluessel: { icon: schluessel, name: 'Schluessel', category: 'Orte' },
+  schluessel: { icon: schluessel, name: 'Schlüssel', category: 'Orte' },
   umbrella: { icon: umbrella, name: 'Schirm', category: 'Orte' }
 };
 

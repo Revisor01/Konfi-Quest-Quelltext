@@ -12,15 +12,18 @@
 // darf wegfallen oder umbenannt werden.
 
 // Aktivitaeten (Gottesdienst- & Gemeinde-Punkte)
+const { abfragenBuendeln } = require('./abfragenBuendeln');
+
 const ACTIVITIES_QUERY = `
   SELECT
     ka.id,
     a.name as title,
-    a.points,
+    COALESCE(ka.points, a.points) AS points,
     a.type as category,
     ka.completed_date as date,
     ka.comment,
-    'activity' as source_type
+    'activity' as source_type,
+    NULL::timestamptz as event_date
   FROM user_activities ka
   JOIN activities a ON ka.activity_id = a.id
   WHERE ka.user_id = $1 AND ka.organization_id = $2
@@ -36,7 +39,8 @@ const BONUS_QUERY = `
     type as category,
     completed_date as date,
     NULL as comment,
-    'bonus' as source_type
+    'bonus' as source_type,
+    NULL::timestamptz as event_date
   FROM bonus_points
   WHERE konfi_id = $1 AND organization_id = $2
   ORDER BY completed_date DESC
@@ -51,7 +55,8 @@ const EVENT_POINTS_QUERY = `
     ep.point_type as category,
     ep.awarded_date as date,
     ep.description as comment,
-    'event' as source_type
+    'event' as source_type,
+    e.event_date
   FROM event_points ep
   JOIN events e ON ep.event_id = e.id
   WHERE ep.konfi_id = $1 AND ep.organization_id = $2
@@ -61,7 +66,7 @@ const EVENT_POINTS_QUERY = `
 /**
  * Liefert Verlauf und Gesamtstaende der Punkte eines Users.
  *
- * @param {object} db - pg Pool
+ * @param {object} db - Pool oder Client (auf einem Client nacheinander, utils/abfragenBuendeln.js)
  * @param {number} userId - users.id
  * @param {number} organizationId - Mandant; filtert ALLE vier Queries
  * @returns {Promise<{history: object[], totals: {gottesdienst:number, gemeinde:number, total:number}}>}
@@ -72,11 +77,11 @@ async function getPunkteHistorie(db, userId, organizationId) {
     { rows: bonusPoints },
     { rows: eventPoints },
     { rows: [konfiProfile] }
-  ] = await Promise.all([
-    db.query(ACTIVITIES_QUERY, [userId, organizationId]),
-    db.query(BONUS_QUERY, [userId, organizationId]),
-    db.query(EVENT_POINTS_QUERY, [userId, organizationId]),
-    db.query(
+  ] = await abfragenBuendeln(db, [
+    () => db.query(ACTIVITIES_QUERY, [userId, organizationId]),
+    () => db.query(BONUS_QUERY, [userId, organizationId]),
+    () => db.query(EVENT_POINTS_QUERY, [userId, organizationId]),
+    () => db.query(
       'SELECT gottesdienst_points, gemeinde_points FROM konfi_profiles WHERE user_id = $1 AND organization_id = $2',
       [userId, organizationId]
     )

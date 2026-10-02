@@ -3,6 +3,7 @@ import { IonIcon } from '@ionic/react';
 import { ICON_SPERRE_GEFUELLT, ICON_UHRZEIT_GEFUELLT, ICON_ZUSAGE_GEFUELLT } from './icons';
 import { getIconFromString } from '../../utils/badgeIcons';
 import { FARBEN } from '../../theme/colors';
+import { datumKurz } from '../../utils/dateUtils';
 
 /**
  * Gemeinsamer Abzeichen-Popover fuer alle fuenf Stellen, an denen er vorkommt:
@@ -86,7 +87,7 @@ export const getBadgeColor = (badge: BadgePopoverBadge): string => {
  * Fortschritt zaehlt — sonst wirkt es willkuerlich, dass er wieder sinkt.
  */
 const getTimeWindowHint = (badge: BadgePopoverBadge): string | null => {
-  const fmt = (d: Date) => d.toLocaleDateString('de-DE', { day: 'numeric', month: 'short' });
+  const fmt = (d: Date) => datumKurz(d, { ohneJahr: true });
 
   if (badge.criteria_type === 'time_based') {
     let days: number | null = null;
@@ -148,7 +149,7 @@ const BadgePopoverContent: React.FC<{
   const zeitfenster = daten.showProgress ? getTimeWindowHint(badge) : null;
 
   return (
-    <div style={{ padding: 'var(--app-abstand-mittel)', background: 'white', maxWidth: '100%', overflow: 'hidden' }}>
+    <div style={{ padding: 'var(--app-abstand-mittel)', background: 'var(--app-surface-card)', maxWidth: '100%', overflow: 'hidden' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittel)' }}>
         <div style={{
           width: '48px',
@@ -205,9 +206,7 @@ const BadgePopoverContent: React.FC<{
             </div>
             {datum && (
               <span style={{ fontSize: 'var(--app-text-meta)', color: 'var(--app-text-tertiary)' }}>
-                {new Date(datum).toLocaleDateString('de-DE', {
-                  day: 'numeric', month: 'short', year: 'numeric',
-                })}
+                {datumKurz(datum)}
               </span>
             )}
           </>

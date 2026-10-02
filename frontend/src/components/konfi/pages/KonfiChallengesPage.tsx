@@ -1,15 +1,14 @@
 import React, { useState, useCallback } from 'react';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
   IonRefresher,
   IonRefresherContent,
   useIonModal
 } from '@ionic/react';
 import { useApp } from '../../../contexts/AppContext';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
+import { useBadge } from '../../../contexts/BadgeContext';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
@@ -26,6 +25,9 @@ const EMPTY_RESPONSE: KonfiChallengesResponse = { active: [], archive: [], marks
 
 const KonfiChallengesPage: React.FC = () => {
   const { user } = useApp();
+  // Neuigkeiten je Challenge aus derselben Quelle wie die Zahl am Reiter --
+  // der Eintrag zeigt, WO es Neues gibt, der Reiter WIE VIEL insgesamt.
+  const { challengeUpdatesByChallenge } = useBadge();
   const { pageRef, presentingElement } = useModalPage('konfi-challenges');
 
   const { data, loading, refresh, refreshLive } = useOfflineQuery<KonfiChallengesResponse>(
@@ -85,18 +87,10 @@ const KonfiChallengesPage: React.FC = () => {
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonTitle>Challenges</IonTitle>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile titel="Challenges" />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Challenges</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Challenges" />
 
         <IonRefresher
           slot="fixed"
@@ -117,6 +111,7 @@ const KonfiChallengesPage: React.FC = () => {
             archive={archive}
             marks={marks}
             offeneStempel={offeneStempel}
+            neuigkeiten={challengeUpdatesByChallenge}
             onSelectChallenge={handleSelectChallenge}
           />
         )}

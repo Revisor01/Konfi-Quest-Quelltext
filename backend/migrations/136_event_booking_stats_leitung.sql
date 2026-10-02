@@ -15,6 +15,17 @@
 -- Reine Sichtdefinition: Es werden KEINE Buchungen und KEINE Chat-Teilnehmer
 -- veraendert. Bestehende Termine zaehlen nur dann anders, wenn dort bereits
 -- eine Leitung gebucht war — und dann zaehlen sie ab jetzt richtig.
+-- IDEMPOTENZ: Nur solange die View die
+-- Spalten aus Migration 154 (konfi_excused, teamer_excused) noch nicht hat.
+-- Danach scheiterte ein zweiter Lauf mit "cannot drop columns from view"
+-- bzw. haette die Zaehlung der Abmeldungen still wieder entfernt. Vermerkte
+-- Staende betrifft das nicht (der Migrationslauf vergleicht nur den Namen).
+-- Waechter: tests/schema/migrationenIdempotent.test.js.
+DO $migration$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                 WHERE table_schema = 'public' AND table_name = 'event_booking_stats'
+                   AND column_name = 'konfi_excused') THEN
+    EXECUTE $view$
 CREATE OR REPLACE VIEW event_booking_stats AS
 SELECT
   eb.event_id,
@@ -52,4 +63,7 @@ FROM event_bookings eb
 -- Konfis (bei denen sie ein Kontingent belegen wuerde).
 JOIN users u ON eb.user_id = u.id AND u.deleted_at IS NULL
 LEFT JOIN roles r ON u.role_id = r.id
-GROUP BY eb.event_id;
+GROUP BY eb.event_id
+$view$;
+  END IF;
+END $migration$;

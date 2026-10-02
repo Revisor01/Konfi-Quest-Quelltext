@@ -24,7 +24,9 @@ export interface ChallengeLegendModalProps {
 
 interface LegendEntry {
   color: string;
-  icon: string;
+  icon?: string;
+  /** Statt eines Symbols eine Zahl im Kreis (rote Kugel fuer Neues). */
+  zahl?: string;
   label: string;
   description: string;
 }
@@ -65,8 +67,24 @@ const STATUS_ENTRIES: LegendEntry[] = [
 const COUNTER_ENTRY: LegendEntry = {
   color: 'var(--app-color-warning)',
   icon: ICON_UHRZEIT,
-  label: 'Zahl mit Uhr',
-  description: 'So viele Beiträge warten noch auf Freigabe.',
+  label: 'Oranges Feld mit Uhr',
+  description: 'An dieser Challenge warten Beiträge auf Freigabe. Wie viele, zeigt die orange Zahl an „Wartet“.',
+};
+
+const NEU_ENTRY: LegendEntry = {
+  color: 'var(--app-color-danger)',
+  zahl: '1',
+  label: 'Rote Zahl am Symbol',
+  description: 'Neue Beiträge seit deinem letzten Öffnen, auch solche, die noch auf Freigabe warten — wie ungelesene Nachrichten im Chat. Sie verschwindet beim Öffnen.',
+};
+
+// Orange Zahl im Umschalter Aktuell/Geplant/Archiv und am
+// Reiter "Wartet" in der geoeffneten Challenge: nur Wartendes.
+const SEGMENT_ENTRY: LegendEntry = {
+  color: 'var(--app-color-warning)',
+  zahl: '1',
+  label: 'Orange Zahl am Umschalter und an „Wartet“',
+  description: 'So viele Beiträge warten auf Freigabe — am Umschalter Aktuell, Geplant und Archiv, auch im Archiv, und in der geöffneten Challenge am Reiter „Wartet“. Neue Beiträge zählen hier nicht mit.',
 };
 
 // Moderations-Badges aus ChallengeLeitungModal (STATUS_BADGE + CONSENT_BADGE).
@@ -121,7 +139,7 @@ const renderRow = (entry: LegendEntry, i: number) => (
     key={i}
     style={{
       display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-mittelweit)',
-      background: 'rgba(255,255,255,0.7)', borderRadius: 'var(--app-radius-weich)',
+      background: 'var(--app-surface-card)', borderRadius: 'var(--app-radius-weich)',
       padding: 'var(--app-abstand-mittel) var(--app-abstand-mittelweit)', boxShadow: 'var(--app-schatten-hauch)'
     }}
   >
@@ -131,7 +149,9 @@ const renderRow = (entry: LegendEntry, i: number) => (
         background: entry.color, display: 'flex', alignItems: 'center', justifyContent: 'center'
       }}
     >
-      <IonIcon icon={entry.icon} style={{ color: 'white', fontSize: 'var(--app-text-untertitel)' }} />
+      {entry.zahl
+        ? <span style={{ color: 'white', fontSize: 'var(--app-text-untertitel)', fontWeight: 'var(--app-schrift-fett)' }}>{entry.zahl}</span>
+        : <IonIcon icon={entry.icon} style={{ color: 'white', fontSize: 'var(--app-text-untertitel)' }} />}
     </div>
     <div>
       <div style={{ fontSize: 'var(--app-text-standard)', fontWeight: 'var(--app-schrift-fett)', color: 'var(--app-text-emphasis)', marginBottom: 'var(--app-abstand-winzig)' }}>
@@ -179,6 +199,8 @@ const ChallengeLegendModal: React.FC<ChallengeLegendModalProps> = ({ onClose }) 
           <div style={{ maxWidth: '520px', width: '100%', display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-schmal)' }}>
             {STATUS_ENTRIES.map(renderRow)}
             {renderRow(COUNTER_ENTRY, STATUS_ENTRIES.length)}
+            {renderRow(NEU_ENTRY, STATUS_ENTRIES.length + 1)}
+            {renderRow(SEGMENT_ENTRY, STATUS_ENTRIES.length + 2)}
           </div>
 
           <h2 style={{ fontSize: 'var(--app-text-gross)', fontWeight: 'var(--app-schrift-extrafett)', margin: 'var(--app-abstand-sehrweit) 0 var(--app-abstand-kompakt)', textAlign: 'center', color: 'var(--app-text-emphasis)' }}>

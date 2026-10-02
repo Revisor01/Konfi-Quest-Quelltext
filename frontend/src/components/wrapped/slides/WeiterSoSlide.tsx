@@ -3,6 +3,7 @@ import { IonIcon } from '@ionic/react';
 import { ICON_FLAMME, ICON_HERZ } from '../../shared/icons';
 import SlideBase from './SlideBase';
 import type { SlideProps, KonfiEndspurtSlide } from '../../../types/wrapped';
+import { punkteText } from '../../../utils/punkteText';
 
 interface WeiterSoSlideProps extends SlideProps {
   /** Zielwerte des Jahrgangs. Fehlt der Block, bleibt es beim Zuspruch ohne Zahl. */
@@ -52,7 +53,7 @@ const WeiterSoSlide: React.FC<WeiterSoSlideProps> = ({ isActive, endspurt }) => 
   const nachsatz = geschafft
     ? 'Alles, was jetzt noch kommt, machst du, weil du willst — nicht, weil du musst.'
     : nahDran
-      ? `Noch ${fehlend} ${fehlend === 1 ? 'Punkt' : 'Punkte'}. Das ist ein Gottesdienst und ein Nachmittag.`
+      ? `Noch ${punkteText(fehlend)}. Das ist ein Gottesdienst und ein Nachmittag.`
       : 'Es ist noch Zeit. Und es zählt nicht, wie schnell du bist — sondern dass du da bist.';
 
   return (
@@ -74,7 +75,7 @@ const WeiterSoSlide: React.FC<WeiterSoSlideProps> = ({ isActive, endspurt }) => 
         <span>
           {geschafft
             ? 'Schön, dass du dabei bist'
-            : 'Jeder Termin zählt, auch der kleine'}
+            : 'Jedes Event zählt, auch das kleine'}
         </span>
       </div>
     </SlideBase>

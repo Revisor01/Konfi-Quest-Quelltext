@@ -13,15 +13,12 @@ import {
   ICON_STERN_GEFUELLT,
   ICON_TERMIN,
   ICON_UHRZEIT,
-  ICON_ZURUECK,
 } from '../../shared/icons';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useCallback } from 'react';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
   IonRefresher,
   IonRefresherContent,
@@ -33,7 +30,6 @@ import {
   IonCard,
   IonCardContent,
   IonButton,
-  IonButtons,
   useIonModal,
   useIonAlert,
   useIonRouter
@@ -49,22 +45,31 @@ import { setUser as setTokenStoreUser } from '../../../services/tokenStore';
 import ChangeEmailModal from '../../shared/ChangeEmailModal';
 import ChangePasswordModal from '../../shared/ChangePasswordModal';
 import AppSperreSchalter from '../../shared/AppSperreSchalter';
+import EinladungenKarte from '../../shared/EinladungenKarte';
+import PushAuswahlEintrag from '../../shared/PushAuswahl';
+import AbsturzberichteSchalter from '../../shared/AbsturzberichteSchalter';
 import ChangeRoleTitleModal from '../../admin/modals/ChangeRoleTitleModal';
 import DeleteAccountModal from '../../shared/DeleteAccountModal';
 import SpiritFooter from '../../shared/SpiritFooter';
 import TeamerOnboardingModal from '../modals/TeamerOnboardingModal';
-import TeamerUpdate220WalkthroughModal from '../modals/TeamerUpdate220WalkthroughModal';
+import TeamerUpdate230WalkthroughModal from '../modals/TeamerUpdate230WalkthroughModal';
 import WrappedModal from '../../wrapped/WrappedModal';
 import type { WrappedHistoryEntry } from '../../../types/wrapped';
 import LoadingSpinner from '../../common/LoadingSpinner';
+import { useAppLocation } from '../../../navigation/useAppLocation';
+import { RUECKBLICK_PARAMETER, waehleRueckblick } from '../../../utils/pushNavigation';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { useMediaCacheControl } from '../../../hooks/useMediaCacheControl';
 import BibleTranslationModal, { getTranslationName } from '../../shared/BibleTranslationModal';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { writeQueue } from '../../../services/writeQueue';
 import { safeUUID } from '../../../utils/uuid';
+import { sendenOderEinreihen } from '../../../utils/sendenOderEinreihen';
 import NeuerungenBanner from '../../shared/NeuerungenBanner';
 import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { datumKurz } from '../../../utils/dateUtils';
+import { selbstbezeichnung } from '../../../utils/rollenNamen';
 
 interface TeamerProfile {
   user: {
@@ -117,23 +122,25 @@ const TeamerProfilePage: React.FC = () => {
   }, [profile?.user?.bible_translation]);
 
   const handleTranslationChange = async (translation: string) => {
-    if (!networkMonitor.isOnline) {
-      setSelectedTranslation(translation);
-      writeQueue.enqueue({
-        method: 'PUT',
-        url: '/teamer/bible-translation',
-        body: { translation },
-        maxRetries: 3,
-        hasFileUpload: false,
-        metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Bibelübersetzung' },
-      });
-      return;
-    }
-
+    // Auch ein Netzabbruch im Online-Zweig landet in der Warteschlange
+    // PUT ist
+    // wiederholbar.
     setSelectedTranslation(translation); // optimistisch
     try {
-      await api.put('/teamer/bible-translation', { translation });
-      refresh();
+      const { weg } = await sendenOderEinreihen({
+        online: networkMonitor.isOnline,
+        methode: 'PUT',
+        senden: () => api.put('/teamer/bible-translation', { translation }),
+        einreihen: () => writeQueue.enqueue({
+          method: 'PUT',
+          url: '/teamer/bible-translation',
+          body: { translation },
+          maxRetries: 3,
+          hasFileUpload: false,
+          metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Bibelübersetzung' },
+        }),
+      });
+      if (weg === 'gesendet') refresh();
     } catch (err) {
       setError(fehlerText(err, 'Fehler beim Ändern der Bibelübersetzung'));
     }
@@ -220,6 +227,27 @@ const TeamerProfilePage: React.FC = () => {
     }
   }, [wrappedModalData]);
 
+  // Rueckblick per Adresse oeffnen: Der Wrapped-Push fuehrt
+  // Teamer:innen auf /teamer/profile?rueckblick=<ausgabe_id>, weil das
+  // Modal keine eigene Route hat (pushNavigation, Kopfkommentar). Einmal je
+  // Wert, wie ?eventId= in TeamerEventsPage; gleiche Logik wie im
+  // Konfi-Profil (ProfileView).
+  const { search } = useAppLocation();
+  const rueckblickParameter = new URLSearchParams(search).get(RUECKBLICK_PARAMETER);
+  const [rueckblickGeoeffnetFuer, setRueckblickGeoeffnetFuer] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!rueckblickParameter) {
+      setRueckblickGeoeffnetFuer(null);
+      return;
+    }
+    if (wrappedHistory.length === 0 || rueckblickParameter === rueckblickGeoeffnetFuer) return;
+    const eintrag = waehleRueckblick(wrappedHistory, rueckblickParameter);
+    if (!eintrag) return;
+    setRueckblickGeoeffnetFuer(rueckblickParameter);
+    setWrappedModalData(eintrag);
+  }, [rueckblickParameter, rueckblickGeoeffnetFuer, wrappedHistory]);
+
   // Logout
   const handleLogout = () => {
     presentAlert({
@@ -268,23 +296,10 @@ const TeamerProfilePage: React.FC = () => {
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()} aria-label="Zurück">
-              <IonIcon icon={ICON_ZURUECK} slot="icon-only" />
-            </IonButton>
-          </IonButtons>
-          <IonTitle>Profil</IonTitle>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile titel="Profil" onZurueck={() => window.history.back()} gemeindeUmschalter={false} />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Profil</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Profil" />
 
         <IonRefresher slot="fixed" onIonRefresh={(e) => {
           refresh().then(() => e.detail.complete());
@@ -317,7 +332,9 @@ const TeamerProfilePage: React.FC = () => {
             </div>
             <h1 className="app-detail-header__title">{profile.user.display_name}</h1>
             <p className="app-detail-header__subtitle">
-              {profile.user.role_title || 'Teamer:in'}
+              {/* Selbstbezeichnung (Funktionsbeschreibung unten), sonst
+                  „Teamer:in" wie auf der Startseite. */}
+              {selbstbezeichnung(profile.user.role_title, 'Teamer:in')}
             </p>
             <div className="app-detail-header__info-row" style={{ justifyContent: 'center' }}>
               {profile.user.email && (
@@ -329,7 +346,7 @@ const TeamerProfilePage: React.FC = () => {
               {profile.user.teamer_since && (
                 <div className="app-detail-header__info-chip">
                   <IonIcon icon={ICON_TERMIN} style={{ fontSize: 'var(--app-text-sekundaer)' }} />
-                  Dabei seit {new Date(profile.user.teamer_since).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  Dabei seit {datumKurz(profile.user.teamer_since)}
                 </div>
               )}
             </div>
@@ -352,7 +369,7 @@ const TeamerProfilePage: React.FC = () => {
             <IonCard className="app-card">
               <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
                 {wrappedHistory.map((entry) => (
-                  <div
+                  <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                     key={entry.id}
                     className="app-list-item"
                     style={{ width: '100%', cursor: 'pointer', marginBottom: 'var(--app-abstand-eng)', borderLeftColor: 'var(--app-color-teamer)' }}
@@ -371,7 +388,7 @@ const TeamerProfilePage: React.FC = () => {
                           </div>
                           <div className="app-list-item__meta">
                             <span className="app-list-item__meta-item">
-                              {new Date(entry.computed_at).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric' })}
+                              {datumKurz(entry.computed_at)}
                             </span>
                           </div>
                         </div>
@@ -509,7 +526,7 @@ const TeamerProfilePage: React.FC = () => {
                     .app-list-item selbst -- von Hand gesetzt wuerde er auch
                     dann stehen bleiben, wenn der Eintrag einmal ans Ende der
                     Liste rutscht. */}
-                <div
+                <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                   className="app-list-item app-list-item--teamer"
                   onClick={() => setShowOnboarding(true)}
                 >
@@ -555,6 +572,10 @@ const TeamerProfilePage: React.FC = () => {
 
                 {/* App-Sperre: Face ID / Fingerabdruck vor der laufenden App */}
                 <AppSperreSchalter variante="teamer" />
+                {/* Absturzberichte an/aus (nur in der App, im Browser leer) */}
+                <AbsturzberichteSchalter variante="teamer" />
+                <EinladungenKarte variante="teamer" />
+                <PushAuswahlEintrag variante="teamer" presentingRef={pageRef} />
 
               </div>
             </IonCardContent>
@@ -573,7 +594,7 @@ const TeamerProfilePage: React.FC = () => {
             <IonCardContent>
               {/* Abzeichen: Aus der Tab-Leiste ins
                   Profil geholt -- unter "Inhalt" steht danach nur noch das. */}
-              <div
+              <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                 className="app-list-item app-list-item--badges"
                 onClick={() => router.push('/teamer/badges')}
               >
@@ -602,7 +623,7 @@ const TeamerProfilePage: React.FC = () => {
                   haben konfi_data=null und sehen den Einstieg weiterhin
                   nicht — er fuehrte fuer sie ins Leere. */}
               {profile.konfi_data && (
-                <div
+                <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                   className="app-list-item app-list-item--konfi"
                   onClick={() => router.push('/teamer/profile/konfi-stats')}
                 >
@@ -664,7 +685,7 @@ const TeamerProfilePage: React.FC = () => {
       )}
 
       {showUpdateWalkthrough && (
-        <TeamerUpdate220WalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
+        <TeamerUpdate230WalkthroughModal onClose={() => setShowUpdateWalkthrough(false)} />
       )}
 
       {showMitmachenErklaerung && (

@@ -3,6 +3,7 @@ import { initializeWebSocket, getSocket, joinRoom, leaveRoom, onReconnect } from
 import { getToken } from '../../services/tokenStore';
 import { writeQueue } from '../../services/writeQueue';
 import { Message, PollStand, Reaction } from '../../types/chat';
+import { alsGeloescht } from './chatVerlauf';
 
 /**
  * Socket-Verdrahtung des Chatraums (beim Aufteilen von ChatRoom.tsx hierher
@@ -108,11 +109,14 @@ export function useChatSocket({
         }
       });
 
-      // Listen for deleted messages
+      // Listen for deleted messages. Die Blase zeigt den Platzhalter anhand
+      // von is_deleted (wie vom Server geliefert) — deleted_at allein wertet
+      // sie nicht aus; ohne alsGeloescht blieb die Nachricht bis zum
+      // naechsten Laden mit Inhalt stehen.
       socket.on('messageDeleted', (data: { roomId: number; messageId: number }) => {
         if (data.roomId === roomId) {
           setMessages(prev => prev.map(m =>
-            m.id === data.messageId ? { ...m, deleted_at: new Date().toISOString() } : m
+            m.id === data.messageId ? { ...alsGeloescht(m), deleted_at: new Date().toISOString() } : m
           ));
         }
       });

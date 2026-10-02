@@ -3,6 +3,14 @@
 --
 -- Alle Indizes basieren auf tatsaechlichen WHERE/JOIN-Klauseln in den
 -- Backend-Routes. Idempotent durch IF NOT EXISTS.
+--
+-- IDEMPOTENZ: Der Index auf
+-- activity_requests(konfi_id) scheiterte bei jedem zweiten Lauf, weil
+-- Migration 077 die Spalte in user_id umbenennt -- IF NOT EXISTS prueft den
+-- Namen des Index erst, nachdem die Spalte aufgeloest ist. Er entsteht jetzt
+-- nur, solange es die Spalte gibt. Vermerkte Staende betrifft das nicht (der
+-- Migrationslauf vergleicht nur den Namen). Waechter:
+-- tests/schema/migrationenIdempotent.test.js.
 -- ====================================================================
 
 -- ====================================================================
@@ -119,7 +127,14 @@ CREATE INDEX IF NOT EXISTS idx_notifications_user_id ON notifications(user_id);
 -- activity_requests (konfi.js, konfi-managment.js, activities.js, organizations.js)
 -- WHERE ar.konfi_id = $1, WHERE ar.organization_id = $1, WHERE ar.status = 'pending'
 -- ====================================================================
-CREATE INDEX IF NOT EXISTS idx_activity_requests_konfi_id ON activity_requests(konfi_id);
+-- konfi_id heisst seit Migration 077 user_id.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns
+             WHERE table_schema = 'public' AND table_name = 'activity_requests'
+               AND column_name = 'konfi_id') THEN
+    EXECUTE 'CREATE INDEX IF NOT EXISTS idx_activity_requests_konfi_id ON activity_requests(konfi_id)';
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_activity_requests_organization_id ON activity_requests(organization_id);
 CREATE INDEX IF NOT EXISTS idx_activity_requests_status ON activity_requests(status);
 

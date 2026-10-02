@@ -10,6 +10,7 @@ import {
 // INEFFECTIVE_DYNAMIC_IMPORT-Warnung im Build.
 import { clearAuth } from '../../services/tokenStore';
 import { offlineCache } from '../../services/offlineCache';
+import { fehlerMelden } from '../../services/absturzdiagnose';
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -33,6 +34,27 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
     console.error('ErrorBoundary hat einen Fehler gefangen:', error, errorInfo);
+
+    // Zusaetzlich als nicht-fatalen Bericht an die Absturzdiagnose melden.
+    //
+    // WARUM: Bis hierher endete jeder abgefangene Renderfehler ALLEIN in der
+    // Konsole eines Geraetes, das niemand ansieht — und der Mensch davor sah
+    // nur "Bitte melde dich erneut an". Genau die Faelle, die Nutzende als
+    // "die App wirft mich raus" melden, waren so nicht nachvollziehbar.
+    //
+    // Nicht-fatal, nicht `crash()`: Die App laeuft ja weiter (Fehlerseite).
+    // Die Drosselung im Service verhindert, dass ein Fehler, der bei jedem
+    // Render erneut auftritt, tausendfach gemeldet wird.
+    //
+    // `void`: Der Bericht geht fire-and-forget raus. Diese Methode darf auf
+    // nichts warten — und `fehlerMelden` wirft nie, faengt also auch ein
+    // fehlendes Plugin selbst ab.
+    void fehlerMelden('error-boundary', error, {
+      // Der Komponentenname aus React. Enthaelt keine Nutzdaten, sagt aber,
+      // WELCHER Baum gebrochen ist — bei minifiziertem Build ist das oft die
+      // einzige brauchbare Spur.
+      komponente: errorInfo.componentStack?.trim().split('\n')[0],
+    });
   }
 
   // Raus aus der Fehlerseite — MUSS auch im nativen Capacitor-WebView funktionieren.

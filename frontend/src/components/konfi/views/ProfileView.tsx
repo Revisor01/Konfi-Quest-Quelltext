@@ -17,7 +17,6 @@ import {
 } from '../../shared/icons';
 import { useApp } from '../../../contexts/AppContext';
 import api from '../../../services/api';
-import type { BadgeUebersicht } from '../../../types/dashboard';
 import type { ChallengeMark } from '../../../types/challenges';
 import { setUser as setTokenStoreUser } from '../../../services/tokenStore';
 import { writeQueue } from '../../../services/writeQueue';
@@ -26,6 +25,9 @@ import { SectionHeader } from '../../shared';
 import { useMediaCacheControl } from '../../../hooks/useMediaCacheControl';
 import ChangePasswordModal from '../../shared/ChangePasswordModal';
 import AppSperreSchalter from '../../shared/AppSperreSchalter';
+import EinladungenKarte from '../../shared/EinladungenKarte';
+import PushAuswahlEintrag from '../../shared/PushAuswahl';
+import AbsturzberichteSchalter from '../../shared/AbsturzberichteSchalter';
 import ChangeEmailModal from '../../shared/ChangeEmailModal';
 import DeleteAccountModal from '../../shared/DeleteAccountModal';
 import BibleTranslationModal, { getTranslationName } from '../../shared/BibleTranslationModal';
@@ -33,11 +35,18 @@ import SpiritFooter from '../../shared/SpiritFooter';
 import PointsHistoryModal from '../modals/PointsHistoryModal';
 import WrappedModal from '../../wrapped/WrappedModal';
 import KonfiOnboardingModal from '../modals/KonfiOnboardingModal';
-import KonfiUpdate220WalkthroughModal from '../modals/KonfiUpdate220WalkthroughModal';
+import KonfiUpdate230WalkthroughModal from '../modals/KonfiUpdate230WalkthroughModal';
 import type { WrappedHistoryEntry } from '../../../types/wrapped';
 import { safeUUID } from '../../../utils/uuid';
+import { sendenOderEinreihen } from '../../../utils/sendenOderEinreihen';
+import { useAppLocation } from '../../../navigation/useAppLocation';
+import { PUNKTE_PARAMETER, RUECKBLICK_PARAMETER, waehleRueckblick } from '../../../utils/pushNavigation';
 import NeuerungenBanner from '../../shared/NeuerungenBanner';
 import MitmachenErklaerungModal from '../../shared/MitmachenErklaerungModal';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { datumKurz, uhrzeit } from '../../../utils/dateUtils';
+import { linkOeffnen } from '../../../services/systemDialoge';
+import { punkteText } from '../../../utils/punkteText';
 
 interface KonfiProfile {
   id: number;
@@ -92,7 +101,6 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
   const [presentAlert] = useIonAlert();
 
   const [selectedTranslation, setSelectedTranslation] = useState<string>(profile.bible_translation || 'LUT');
-  const [earnedBadgesCount, setEarnedBadgesCount] = useState<number>(0);
   // Die eigenen Challenge-Stempel (marks). Schlanker Zusatzabruf — faellt er
   // aus, bleibt die Kachel bei 0 und der Stempel-Abschnitt aus, statt das
   // Profil zu stoeren.
@@ -128,23 +136,18 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
     }
   }, [wrappedModalData]);
   
-  // Load badges for accurate count
-  React.useEffect(() => {
-    const loadBadges = async () => {
-      try {
-        const response = await api.get('/konfi/badges/v2');
-        const uebersicht = response.data as BadgeUebersicht;
-        // GET /konfi/badges fuehrt den Status als `earned`; `is_earned` gibt es
-        // nur in der Anzeige-Form der Abzeichen-Seite.
-        const badges = [...(uebersicht.available || []), ...(uebersicht.earned || [])];
-        const earnedCount = badges.filter((badge) => badge.earned).length;
-        setEarnedBadgesCount(earnedCount);
-      } catch (err) {
- console.warn('Could not load badges for count:', err);
-      }
-    };
-    loadBadges();
-  }, []);
+  // Die Zahl der Abzeichen steht in profile.badge_count — kein eigener Abruf
+  // noetig.
+  //
+  // Hier stand ein rohes api.get('/konfi/badges/v2'), an der
+  // Zwischenspeicherung vorbei. Die Route fuehrt elf Datenbankabfragen aus und
+  // liefert die vollstaendige Abzeichenuebersicht; gebraucht wurde davon EINE
+  // Zahl, die das Profil ohnehin schon mitbringt (im Backend ein einzelnes
+  // COUNT(*) ueber user_badges, routes/konfi.js).
+  //
+  // Gegen Produktion geprueft, bevor umgestellt wurde: beide Wege lieferten
+  // dieselbe Zahl (24 gegen 24). Die Kachel liest sie jetzt direkt aus dem
+  // Profil, siehe unten.
 
   React.useEffect(() => {
     api.get('/challenges/konfi')
@@ -156,25 +159,26 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
   }, []);
 
   const handleTranslationChange = async (translation: string) => {
-    // Offline: Optimistic UI + Queue-Fallback (fire-and-forget)
-    if (!networkMonitor.isOnline) {
-      setSelectedTranslation(translation);
-      writeQueue.enqueue({
-        method: 'PUT',
-        url: '/konfi/bible-translation',
-        body: { translation },
-        maxRetries: 3,
-        hasFileUpload: false,
-        metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Bibelübersetzung' },
-      });
-      return;
-    }
-
+    // Offline -- oder online, aber das Netz reisst ab: Auswahl uebernehmen
+    // und in die Warteschlange.
+    // PUT ist wiederholbar.
     try {
-      await api.put('/konfi/bible-translation', { translation });
+      const { weg } = await sendenOderEinreihen({
+        online: networkMonitor.isOnline,
+        methode: 'PUT',
+        senden: () => api.put('/konfi/bible-translation', { translation }),
+        einreihen: () => writeQueue.enqueue({
+          method: 'PUT',
+          url: '/konfi/bible-translation',
+          body: { translation },
+          maxRetries: 3,
+          hasFileUpload: false,
+          metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Bibelübersetzung' },
+        }),
+      });
       setSelectedTranslation(translation);
       // Update profile to reflect the change
-      await onReload();
+      if (weg === 'gesendet') await onReload();
     } catch (err) {
       setError(fehlerText(err, 'Fehler beim Ändern der Bibelübersetzung'));
     }
@@ -270,16 +274,50 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
     } : undefined
   });
 
+  // Modale per Adresse oeffnen: Push und Postfach fuehren
+  // Punkte-Meldungen auf /konfi/profile?punkte=1 und den Rueckblick auf
+  // /konfi/profile?rueckblick=<ausgabe_id> -- die Uebersicht und der
+  // Rueckblick sind Modale ohne eigene Route (pushNavigation, Kopfkommentar).
+  // Dasselbe Muster wie ?eventId= in TeamerEventsPage: einmal je Wert
+  // reagieren, damit ein Neu-Montieren des Profils das Modal nicht erneut
+  // aufreisst; ohne Parameter wird der Merker geloescht, damit der naechste
+  // Tap wieder wirkt.
+  const { search } = useAppLocation();
+  const punkteParameter = new URLSearchParams(search).get(PUNKTE_PARAMETER);
+  const rueckblickParameter = new URLSearchParams(search).get(RUECKBLICK_PARAMETER);
+  const [punkteGeoeffnetFuer, setPunkteGeoeffnetFuer] = useState<string | null>(null);
+  const [rueckblickGeoeffnetFuer, setRueckblickGeoeffnetFuer] = useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!punkteParameter) {
+      setPunkteGeoeffnetFuer(null);
+      return;
+    }
+    if (punkteParameter === punkteGeoeffnetFuer) return;
+    setPunkteGeoeffnetFuer(punkteParameter);
+    presentPointsModal({
+      presentingElement: pageRef?.current || presentingElement || undefined
+    });
+  }, [punkteParameter, punkteGeoeffnetFuer]);
+
+  React.useEffect(() => {
+    if (!rueckblickParameter) {
+      setRueckblickGeoeffnetFuer(null);
+      return;
+    }
+    // Erst, wenn die Liste da ist -- vorher gibt es nichts zu oeffnen.
+    if (wrappedHistory.length === 0 || rueckblickParameter === rueckblickGeoeffnetFuer) return;
+    const eintrag = waehleRueckblick(wrappedHistory, rueckblickParameter);
+    if (!eintrag) return;
+    setRueckblickGeoeffnetFuer(rueckblickParameter);
+    openWrapped(eintrag);
+  }, [rueckblickParameter, rueckblickGeoeffnetFuer, wrappedHistory, openWrapped]);
 
   const formatDate = (dateString: string | undefined) => {
     if (!dateString) return 'Unbekannt';
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return 'Ungültiges Datum';
-    return date.toLocaleDateString('de-DE', {
-      day: 'numeric',
-      month: 'short',
-      year: 'numeric'
-    });
+    return datumKurz(date);
   };
 
   return (
@@ -294,7 +332,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
         // Punkte-Übersicht weiter unten. Hier zählt der Ueberblick.
         stats={[
           { value: profile.total_points || 0, label: 'PUNKTE' },
-          { value: earnedBadgesCount, label: 'BADGES' },
+          { value: profile.badge_count, label: 'BADGES' },
           { value: challengeMarks.length, label: 'CHALLENGES' }
         ]}
       />
@@ -379,10 +417,10 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                     color: 'rgba(255, 255, 255, 0.8)', 
                     fontSize: 'var(--app-text-basis)' 
                   }}>
-                    {new Date(profile.confirmation_date).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr
+                    {uhrzeit(profile.confirmation_date)} Uhr
                   </p>
                   {profile.confirmation_location && (
-                    <p 
+                    <button type="button" className="app-knopf-nackt" aria-label={`${profile.confirmation_location} auf der Karte öffnen`} 
                       style={{ 
                         margin: '0', 
                         color: 'rgba(255, 255, 255, 0.9)', 
@@ -395,13 +433,13 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                       }}
                       onClick={() => {
                         if (profile.confirmation_location) {
-                          window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(profile.confirmation_location)}`, '_blank');
+                          linkOeffnen(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(profile.confirmation_location)}`);
                         }
                       }}
                     >
                       <IonIcon icon={ICON_ORT} style={{ fontSize: 'var(--app-text-standard)' }} />
                       {profile.confirmation_location}
-                    </p>
+                    </button>
                   )}
                 </div>
               ) : (
@@ -431,7 +469,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
           <IonCard className="app-card">
             <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
               {wrappedHistory.map((entry) => (
-                <div
+                <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                   key={entry.id}
                   className="app-list-item app-list-item--purple"
                   style={{ width: '100%', cursor: 'pointer' }}
@@ -448,7 +486,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                         </div>
                         <div className="app-list-item__meta">
                           <span className="app-list-item__meta-item">
-                            {new Date(entry.computed_at).toLocaleDateString('de-DE', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            {datumKurz(entry.computed_at)}
                           </span>
                         </div>
                       </div>
@@ -473,7 +511,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
           <IonCardContent style={{ padding: 'var(--app-abstand-mittel)' }}>
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {/* Punkte-Übersicht */}
-              <div
+              <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                 className="app-list-item app-list-item--purple"
                 style={{ width: '100%', cursor: 'pointer' }}
                 onClick={() => {
@@ -490,7 +528,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                     <div className="app-list-item__content">
                       <div className="app-list-item__title">Punkte-Übersicht</div>
                       <div className="app-list-item__meta">
-                        <span className="app-list-item__meta-item">{profile.total_points || 0} Punkte gesamt</span>
+                        <span className="app-list-item__meta-item">{punkteText(profile.total_points || 0)} gesamt</span>
                       </div>
                     </div>
                   </div>
@@ -498,7 +536,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
               </div>
 
               {/* App-Tour erneut ansehen */}
-              <div
+              <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                 className="app-list-item app-list-item--purple"
                 style={{ width: '100%', cursor: 'pointer' }}
                 onClick={() => setShowOnboarding(true)}
@@ -519,7 +557,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
               </div>
 
               {/* E-Mail ändern */}
-              <div
+              <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                 className="app-list-item app-list-item--purple"
                 style={{ width: '100%', cursor: 'pointer' }}
                 onClick={() => {
@@ -546,7 +584,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
               </div>
 
               {/* Passwort ändern */}
-              <div
+              <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                 className="app-list-item app-list-item--purple"
                 style={{ width: '100%', cursor: 'pointer' }}
                 onClick={() => {
@@ -571,7 +609,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
               </div>
 
               {/* Bibelübersetzung */}
-              <div
+              <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                 className="app-list-item app-list-item--purple"
                 style={{ width: '100%', cursor: 'pointer' }}
                 onClick={() => {
@@ -599,9 +637,14 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
                   Blendet sich selbst aus, wenn das Geraet keine eingerichtete
                   Biometrie hat. */}
               <AppSperreSchalter variante="purple" />
+              {/* Absturzberichte an/aus (nur in der App, im Browser leer) */}
+              <AbsturzberichteSchalter variante="purple" />
+              <EinladungenKarte variante="purple" />
+              <PushAuswahlEintrag variante="purple" presentingRef={pageRef} presentingElement={presentingElement} />
+
 
               {/* Medien-Cache leeren */}
-              <div
+              <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                 className="app-list-item app-list-item--purple"
                 style={{ width: '100%', cursor: 'pointer' }}
                 onClick={handleClearMediaCache}
@@ -666,7 +709,7 @@ const ProfileView: React.FC<ProfileViewProps> = ({ profile, onReload, presenting
           displayName: Die Begrüßung mit Namen gehört zur Onboarding-Tour,
           nicht zur Änderungsanzeige. */}
       {showUpdateWalkthrough && (
-        <KonfiUpdate220WalkthroughModal
+        <KonfiUpdate230WalkthroughModal
           onClose={() => setShowUpdateWalkthrough(false)}
         />
       )}

@@ -40,20 +40,27 @@ import {
   ICON_SCHLIESSEN,
   ICON_VIDEO,
 } from '../../shared/icons';
-import { haptik, ImpactStyle } from '../../../utils/haptics';
-import { Filesystem, Directory } from '@capacitor/filesystem';
-import { FileViewer } from '@capacitor/file-viewer';
-import { FileOpener } from '@capacitor-community/file-opener';
 import { useApp } from '../../../contexts/AppContext';
 import { useActionGuard } from '../../../hooks/useActionGuard';
+import { useDateiOeffnen } from '../../../hooks/useDateiOeffnen';
 import api, { DATEI_TIMEOUT_MS } from '../../../services/api';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
+import { medienVergessen } from '../../../services/mediaCache';
+import { fuerUploadVorbereiten, DateiZuGrossFehler, UPLOAD_GRENZE } from '../../../services/mediaCompression';
+import { dateiAuswaehlen } from '../../../services/systemDialoge';
 import FileViewerModal from '../../shared/FileViewerModal';
+import LadeStandZeile from '../../shared/LadeStandZeile';
+import SendeAnzeige from '../../shared/SendeAnzeige';
 import { safeUUID } from '../../../utils/uuid';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
 import { istWebLink } from '../../../utils/linkDisplay';
-import { trackHandlung } from '../../../services/analytics';
+import { materialInhalt, trackHandlung } from '../../../services/analytics';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { datumKurz } from '../../../utils/dateUtils';
+
+/** Was die Leitung ins Material hochladen kann (Auswahl im System). */
+const MATERIAL_DATEIAUSWAHL = 'image/*,application/pdf,video/*,audio/*,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp';
 
 interface MaterialFile {
   id: number;
@@ -105,7 +112,6 @@ interface MaterialFormModalProps {
 const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLesen = false, onClose, onSuccess }) => {
   const { setError, setSuccess } = useApp();
   const [presentAlert] = useIonAlert();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const pageRef = useRef<HTMLElement>(null);
 
   const [title, setTitle] = useState(material?.title || '');
@@ -118,11 +124,17 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
   );
   const [existingFiles, setExistingFiles] = useState<MaterialFile[]>(material?.files || []);
   const [newFiles, setNewFiles] = useState<File[]>([]);
+  // Das beim Speichern NEU angelegte Material. Das Formular legt
+  // zuerst den Eintrag an und laedt danach die Dateien hoch. Scheitert der
+  // Upload, steht das Material schon -- ohne diese Merkstelle legte jedes
+  // weitere Speichern ein weiteres an, jeweils ohne Datei.
+  const angelegtRef = useRef<number | null>(null);
   const [linkUrls, setLinkUrls] = useState<string[]>(
     material?.links?.map(l => l.url)
     ?? (material?.link_url ? [material.link_url] : [])
   );
   const { isSubmitting, guard } = useActionGuard();
+  const [sendeProzent, setSendeProzent] = useState(0);
 
   const [events, setEvents] = useState<EventOption[]>([]);
   const [jahrgaenge, setJahrgaenge] = useState<JahrgangOption[]>([]);
@@ -178,70 +190,44 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  const openFile = async (file: MaterialFile) => {
-    try {
-      await haptik(ImpactStyle.Medium);
-      const response = await api.get(`/material/files/${file.stored_name}`, {
-        responseType: 'blob',
-        timeout: DATEI_TIMEOUT_MS
-      });
-      const blob = response.data;
-      const base64Data = await new Promise<string>((resolve) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const base64 = (reader.result as string).split(',')[1];
-          resolve(base64);
-        };
-        reader.readAsDataURL(blob);
-      });
+  const { dateiOeffnen, ladendeDatei } = useDateiOeffnen({
+    quelle: 'material',
+    kontext: () => existingFiles.map((f) => ({ pfad: f.stored_name, name: f.original_name, typ: f.mime_type })),
+    fehlerOrt: 'material-admin-formular',
+  });
 
-      const ext = file.original_name.split('.').pop() || '';
-      const tempPath = `temp/material_${file.id}.${ext}`;
+  const openFile = (file: MaterialFile) => dateiOeffnen(file.stored_name, file.original_name, file.mime_type);
 
+  // Eine gewählte Datei vorbereiten wie in Chat und Challenges: Fotos
+  // verkleinern, dann gegen die Grenze des Servers prüfen (20 MB je Datei).
+  // Was zu groß bleibt, kommt nicht in die Liste — mit demselben Satz wie
+  // überall. Vorher ging jede Datei ungeprüft in die Liste und scheiterte
+  // erst beim Speichern.
+  const dateienVorbereiten = async (gewaehlt: File[]) => {
+    const fertig: File[] = [];
+    let zuGross: string | null = null;
+    for (const datei of gewaehlt) {
       try {
-        await Filesystem.mkdir({ path: 'temp', directory: Directory.Documents, recursive: true });
-      } catch { /* existiert bereits */ }
-
-      await Filesystem.writeFile({
-        path: tempPath,
-        data: base64Data,
-        directory: Directory.Documents,
-        recursive: true
-      });
-
-      const fileUri = await Filesystem.getUri({ directory: Directory.Documents, path: tempPath });
-
-      if (file.mime_type.startsWith('image/')) {
-        await FileOpener.open({ filePath: fileUri.uri, contentType: file.mime_type });
-      } else {
-        await FileViewer.openDocumentFromLocalPath({ path: fileUri.uri });
-      }
-    } catch (err) {
-      console.warn('Native file viewer failed, using in-app fallback:', err);
-      try {
-        const response = await api.get(`/material/files/${file.stored_name}`, { responseType: 'blob', timeout: DATEI_TIMEOUT_MS });
-        openInAppViewer(response.data, file.original_name, file.mime_type);
-      } catch (fallbackErr) {
-        setError('Fehler beim Öffnen der Datei', { ort: 'material-admin-formular', fehler: fallbackErr });
+        const { file, bildVorschau } = await fuerUploadVorbereiten(datei, UPLOAD_GRENZE.material);
+        if (bildVorschau) URL.revokeObjectURL(bildVorschau);
+        fertig.push(file);
+      } catch (err) {
+        if (err instanceof DateiZuGrossFehler) zuGross = err.message;
       }
     }
+    if (zuGross) setError(zuGross);
+    if (fertig.length > 0) setNewFiles(prev => [...prev, ...fertig]);
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Vorher stand Array.from(e.target.files) INNERHALB des
-    // setNewFiles(prev => ...)-Updaters. React ruft diesen Updater verzoegert
-    // auf -- zu diesem Zeitpunkt hatte die Zeile darunter den Input laengst
-    // geleert, und die Datei kam nie im State an. Gemessen: files.length
-    // 1 -> 1 -> 0 ueber das change-Event hinweg.
-    //
-    // Das Leeren selbst bleibt noetig, damit dieselbe Datei ein zweites Mal
-    // gewaehlt werden kann (ohne Wertwechsel feuert change nicht).
-    const gewaehlt = e.target.files ? Array.from(e.target.files) : [];
-    if (gewaehlt.length > 0) {
-      setNewFiles(prev => [...prev, ...gewaehlt]);
-    }
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+  // Die Auswahl des Systems über die Hülle (services/systemDialoge): Sie
+  // meldet den Ausflug der App-Sperre an — ohne ihn sperrte die Dateiauswahl
+  // bei „Sofort" die App. Sie liefert die
+  // Liste schon ausgelesen und legt je Auswahl ein frisches Feld an; dieselbe
+  // Datei ist damit gleich wieder wählbar.
+  const dateienWaehlen = async () => {
+    const gewaehlt = await dateiAuswaehlen({ accept: MATERIAL_DATEIAUSWAHL, multiple: true });
+    if (gewaehlt && gewaehlt.length > 0) {
+      void dateienVorbereiten(gewaehlt);
     }
   };
 
@@ -262,6 +248,9 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
             try {
               await api.delete(`/material/files/${file.id}`);
               setExistingFiles(prev => prev.filter(f => f.id !== file.id));
+              // Auch vom eigenen Gerät: Sonst läge die Datei
+              // weiter im Medien-Cache, obwohl es sie nicht mehr gibt.
+              await medienVergessen(file.stored_name, 'material');
             } catch {
               setError('Fehler beim Löschen der Datei');
             }
@@ -288,6 +277,9 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
     }
 
     await guard(async () => {
+      // Steht das Material, fehlen nur noch die Dateien: dann sagt die Meldung
+      // genau das, statt "Fehler beim Speichern".
+      let dateienStehenAus = false;
       try {
         const payload = {
           title: title.trim(),
@@ -305,25 +297,35 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
 
         if (networkMonitor.isOnline) {
           // Online-Pfad: direkt senden
-          let materialId = material?.id;
+          let materialId = material?.id ?? angelegtRef.current ?? undefined;
 
-          if (material) {
-            await api.put(`/material/${material.id}`, payload);
+          if (materialId) {
+            await api.put(`/material/${materialId}`, payload);
           } else {
             const res = await api.post('/material', payload);
             materialId = res.data.id;
+            angelegtRef.current = res.data.id;
           }
 
           // Neue Dateien hochladen -- unabhaengig von den Links, beides
           // ist parallel erlaubt.
           if (newFiles.length > 0 && materialId) {
+            dateienStehenAus = true;
             const formData = new FormData();
             newFiles.forEach(file => {
               formData.append('files', file);
             });
+            // Mit Sende-Anzeige wie beim Challenge-Einreichen und dem
+            // Zeitlimit für Dateien: Zehn Dateien zu 20 MB brauchen länger
+            // als die 20 s, die sonst gelten.
             await api.post(`/material/${materialId}/files`, formData, {
-              headers: { 'Content-Type': 'multipart/form-data' }
+              headers: { 'Content-Type': 'multipart/form-data' },
+              timeout: DATEI_TIMEOUT_MS,
+              onUploadProgress: (event) => {
+                if (event.total) setSendeProzent(Math.round((event.loaded * 100) / event.total));
+              }
             });
+            dateienStehenAus = false;
           }
 
           // Anonyme Messung, erst wenn ALLE Aufrufe des Online-Zweigs durch
@@ -337,9 +339,7 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
             const hatDatei = newFiles.length > 0;
             const hatLink = bereinigt.length > 0;
             trackHandlung('material-bereitgestellt', {
-              inhalt: hatDatei && hatLink
-                ? 'beides'
-                : hatDatei ? 'datei' : hatLink ? 'link' : 'nur-text'
+              inhalt: materialInhalt(hatDatei, hatLink)
             });
           }
 
@@ -363,7 +363,12 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
 
         onSuccess();
       } catch (err) {
-        setError(fehlerText(err, 'Fehler beim Speichern'));
+        setError(fehlerText(err, dateienStehenAus
+          ? 'Das Material ist gespeichert, die Dateien noch nicht. Tippe noch einmal auf Speichern.'
+          : 'Fehler beim Speichern'),
+        { ort: dateienStehenAus ? 'material-dateien-hochladen' : 'material-speichern', fehler: err });
+      } finally {
+        setSendeProzent(0);
       }
     });
   };
@@ -388,6 +393,12 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
             </IonButtons>
           )}
         </IonToolbar>
+        {/* Dieselbe Anzeige wie beim Einreichen eines Challenge-Beitrags.
+            Vorher lief das Hochladen ohne jede Rückmeldung
+            außer dem drehenden Knopf. */}
+        {isSubmitting && (
+          <SendeAnzeige prozent={sendeProzent} was={newFiles.length === 1 ? 'Datei' : 'Dateien'} farbe="var(--app-text-material)" />
+        )}
       </IonHeader>
 
       <IonContent className="app-gradient-background">
@@ -457,7 +468,7 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
             <IonCardContent style={{ padding: '0' }}>
               <IonAccordionGroup>
                 <IonAccordion value="events" toggleIcon={ICON_AUFKLAPPEN} toggleIconSlot="end">
-                  <IonItem slot="header" lines="none" style={{ '--padding-start': '16px' }}>
+                  <IonItem slot="header" lines="none" style={{ '--padding-start': 'var(--app-abstand-basis)' }}>
                     <IonLabel>
                       <h3 style={{ fontSize: 'var(--app-text-betont)', fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-primary)', margin: '0 0 var(--app-abstand-winzig) 0' }}>
                         Events
@@ -476,7 +487,7 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
                         .map(ev => {
                           const isSelected = eventIds.includes(ev.id);
                           return (
-                            <div
+                            <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                               key={ev.id}
                               className="app-list-item"
                               onClick={() => {
@@ -500,7 +511,7 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
                                     <div className="app-list-item__title">{ev.name}</div>
                                     {ev.event_date && (
                                       <div className="app-list-item__subtitle">
-                                        {new Date(ev.event_date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                                        {datumKurz(ev.event_date)}
                                       </div>
                                     )}
                                   </div>
@@ -514,7 +525,7 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
                 </IonAccordion>
 
                 <IonAccordion value="jahrgaenge" toggleIcon={ICON_AUFKLAPPEN} toggleIconSlot="end">
-                  <IonItem slot="header" lines="none" style={{ '--padding-start': '16px' }}>
+                  <IonItem slot="header" lines="none" style={{ '--padding-start': 'var(--app-abstand-basis)' }}>
                     <IonLabel>
                       <h3 style={{ fontSize: 'var(--app-text-betont)', fontWeight: 'var(--app-schrift-halbfett)', color: 'var(--app-text-primary)', margin: '0 0 var(--app-abstand-winzig) 0' }}>
                         Jahrgänge
@@ -531,7 +542,7 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
                       {jahrgaenge.map(jg => {
                         const isSelected = jahrgangIds.includes(jg.id);
                         return (
-                          <div
+                          <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                             key={jg.id}
                             className="app-list-item"
                             onClick={() => {
@@ -666,11 +677,12 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
                               </div>
                               <div className="app-list-item__content">
                                 <div className="app-list-item__title">{file.original_name}</div>
-                                <div className="app-list-item__meta">
-                                  <span className="app-list-item__meta-item">
-                                    {formatFileSize(file.file_size)}
-                                  </span>
-                                </div>
+                                <LadeStandZeile
+                                  laedt={ladendeDatei?.pfad === file.stored_name}
+                                  prozent={ladendeDatei?.prozent ?? null}
+                                  sonst={formatFileSize(file.file_size)}
+                                  farbe="var(--app-text-material)"
+                                />
                               </div>
                             </div>
                           </div>
@@ -753,18 +765,10 @@ const MaterialFormModal: React.FC<MaterialFormModalProps> = ({ material, nurLese
                   ))}
                 </div>
               )}
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept="image/*,application/pdf,video/*,audio/*,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.odt,.ods,.odp"
-                style={{ display: 'none' }}
-                onChange={handleFileSelect}
-              />
               <IonButton
                 expand="block"
                 fill="solid"
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => void dateienWaehlen()}
                 style={{
                   '--background': 'var(--ion-color-primary)',
                   marginTop: 'var(--app-abstand-basis)',

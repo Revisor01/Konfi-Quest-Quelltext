@@ -14,11 +14,22 @@ import {
 } from '../shared/icons';
 import { ReactionEmojiData } from '../../types/chat';
 
+/**
+ * Reaktionsfarben als CSS-Variablen: Sie stehen als Symbol-
+ * und Rahmenfarbe auf Karten und muessen im Dunkelmodus heller werden.
+ * `rgb` ist das -rgb-Tripel desselben Tokens fuer den durchscheinenden
+ * Hintergrund der gewaehlten Reaktion (`rgba(rgb, 0.1)`).
+ */
+const farbe = (token: string) => ({
+  color: `var(--app-color-${token})`,
+  rgb: `var(--app-color-${token}-rgb)`,
+});
+
 export const REACTION_EMOJIS: Record<string, ReactionEmojiData> = {
-  like: { outline: ICON_DAUMEN_HOCH, filled: ICON_DAUMEN_HOCH_GEFUELLT, label: 'Gefaellt mir', color: '#3b82f6' },
-  heart: { outline: ICON_HERZ, filled: ICON_HERZ_GEFUELLT, label: 'Liebe', color: '#ef4444' },
-  laugh: { outline: ICON_FROEHLICH, filled: ICON_FROEHLICH_GEFUELLT, label: 'Lustig', color: '#f59e0b' },
-  wow: { outline: ICON_WARNHINWEIS, filled: ICON_WARNHINWEIS_GEFUELLT, label: 'Wow', color: '#5b21b6' },
-  sad: { outline: ICON_TRAURIG, filled: ICON_TRAURIG_GEFUELLT, label: 'Traurig', color: '#6b7280' },
-  pray: { outline: ICON_HAND, filled: ICON_HAND_GEFUELLT, label: 'Beten', color: '#10b981' }
+  like: { outline: ICON_DAUMEN_HOCH, filled: ICON_DAUMEN_HOCH_GEFUELLT, label: 'Gefällt mir', ...farbe('gottesdienst') },
+  heart: { outline: ICON_HERZ, filled: ICON_HERZ_GEFUELLT, label: 'Liebe', ...farbe('danger-hell') },
+  laugh: { outline: ICON_FROEHLICH, filled: ICON_FROEHLICH_GEFUELLT, label: 'Lustig', ...farbe('badges') },
+  wow: { outline: ICON_WARNHINWEIS, filled: ICON_WARNHINWEIS_GEFUELLT, label: 'Wow', ...farbe('konfis') },
+  sad: { outline: ICON_TRAURIG, filled: ICON_TRAURIG_GEFUELLT, label: 'Traurig', ...farbe('neutral') },
+  pray: { outline: ICON_HAND, filled: ICON_HAND_GEFUELLT, label: 'Beten', ...farbe('success-fresh') }
 };

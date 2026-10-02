@@ -23,8 +23,8 @@ const TeamerAnfangSlide: React.FC<TeamerAnfangSlideProps> = ({ isActive, anfang 
   <SlideBase isActive={isActive} className="teamer-anfang-slide" kachel="teamer-anfang">
     <div className="kat-auge">So fing es an</div>
     <div className="kat-slogan">
-      <span style={{ display: 'block' }}>Dein erster</span>
-      <span style={{ display: 'block' }}>Termin.</span>
+      <span style={{ display: 'block' }}>Dein erstes</span>
+      <span style={{ display: 'block' }}>Event.</span>
     </div>
     <div className="kat-nachsatz">{anfang.name}</div>
     {monat(anfang.datum) && <div className="kat-fussnote">Am {monat(anfang.datum)}</div>}

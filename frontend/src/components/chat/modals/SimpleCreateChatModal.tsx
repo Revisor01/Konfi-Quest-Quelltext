@@ -44,6 +44,8 @@ import api from '../../../services/api';
 import { ChatUser } from '../../../types/user';
 import { EigenerJahrgang, KonfiEintrag, TeamKontakt, VerfuegbarerPartner } from '../../../types/chat';
 import { istTeamTyp } from '../../../utils/chatRoles';
+import { rollenFarbeVar, rollenTextFarbeVar } from '../../../utils/rollenNamen';
+import { tastaturKlick } from '../../../utils/tastatur';
 
 interface SimpleCreateChatModalProps {
   onClose: () => void;
@@ -396,7 +398,7 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
               </IonListHeader>
               <IonItemGroup>
                 <IonItem>
-                  <IonInput
+                  <IonInput aria-label="Gruppenname eingeben"
                     value={groupName}
                     onIonInput={(e) => setGroupName(e.detail.value!)}
                     placeholder="Gruppenname eingeben"
@@ -427,7 +429,7 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
                     fontSize: 'var(--app-text-standard)'
                   }}
                 />
-                <IonInput
+                <IonInput aria-label="Person suchen"
                   value={searchText}
                   onIonInput={(e) => setSearchText(e.detail.value!)}
                   placeholder="Person suchen..."
@@ -441,11 +443,12 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
                     slot="start"
                     style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }}
                   />
-                  <IonSelect
+                  <IonSelect aria-label="Nach Rolle filtern"
                     value={selectedRole}
                     onIonChange={(e) => setSelectedRole(e.detail.value!)}
                     placeholder="Alle Rollen"
                     interface="popover"
+                    interfaceOptions={{ arrow: false }}
                     style={{ width: '100%' }}
                   >
                     <IonSelectOption value="alle">Alle</IonSelectOption>
@@ -462,11 +465,12 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
                     slot="start"
                     style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }}
                   />
-                  <IonSelect
+                  <IonSelect aria-label="Nach Jahrgang filtern"
                     value={selectedJahrgang}
                     onIonChange={(e) => setSelectedJahrgang(e.detail.value!)}
                     placeholder="Alle Jahrgänge"
                     interface="popover"
+                    interfaceOptions={{ arrow: false }}
                     style={{ width: '100%' }}
                   >
                     <IonSelectOption value="alle">Alle Jahrgänge</IonSelectOption>
@@ -512,7 +516,7 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
                       const isAdmin = istTeamTyp(targetUser.type);
 
                       return (
-                        <div
+                        <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                           key={participantId}
                           className={`app-list-item ${isAdmin ? 'app-list-item--team' : 'app-list-item--konfi'}`}
                           onClick={() => {
@@ -532,12 +536,13 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
                             background: isSelected ? (isAdmin ? 'rgba(var(--app-color-teamer-rgb), 0.08)' : 'rgba(var(--app-color-konfis-rgb), 0.08)') : undefined
                           }}
                         >
-                          {/* Eselsohr mit Rolle als Icon */}
                           <div className="app-corner-badges">
                             <div
                               className="app-corner-badge"
-                              style={{ backgroundColor: isAdmin ? 'var(--app-color-teamer)' : 'var(--app-color-konfis)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
-                              title={isAdmin ? (targetUser.role_description || 'Admin') : 'Konfi'}
+                              style={{ backgroundColor: isAdmin ? rollenFarbeVar(targetUser.role_name, 'teamer') : 'var(--app-color-konfis)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
+                              title={isAdmin ? (targetUser.role_description || 'Leitung') : 'Konfi'}
+                              role="img"
+                              aria-label={isAdmin ? (targetUser.role_description || 'Leitung') : 'Konfi'}
                             >
                               <IonIcon icon={isAdmin ? ICON_GRUPPE_GEFUELLT : ICON_PERSON_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                             </div>
@@ -555,7 +560,7 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
                                 {isAdmin && targetUser.role_description && (
                                   <div className="app-list-item__meta">
                                     <span className="app-list-item__meta-item">
-                                      <IonIcon icon={ICON_GRUPPE} style={{ color: 'var(--app-color-teamer)' }} />
+                                      <IonIcon icon={ICON_GRUPPE} style={{ color: rollenTextFarbeVar(targetUser.role_name, 'teamer') }} />
                                       {targetUser.role_description}
                                     </span>
                                   </div>
@@ -563,7 +568,7 @@ const SimpleCreateChatModal: React.FC<SimpleCreateChatModalProps> = ({ onClose, 
                                 {!isAdmin && (targetUser.jahrgang_name || targetUser.jahrgang) && (
                                   <div className="app-list-item__meta">
                                     <span className="app-list-item__meta-item">
-                                      <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ color: 'var(--app-color-jahrgang)' }} />
+                                      <IonIcon icon={ICON_TERMIN_GEFUELLT} style={{ color: 'var(--app-text-jahrgang)' }} />
                                       {targetUser.jahrgang_name || targetUser.jahrgang}
                                     </span>
                                   </div>

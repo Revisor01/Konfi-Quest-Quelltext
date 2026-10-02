@@ -1,0 +1,24 @@
+-- 171_refresh_tokens_geraet.sql
+--
+-- Refresh-Tokens an das Geraet binden.
+--
+-- DAS PROBLEM: Ein Refresh-Token gilt 90 Tage und rotiert bei jeder Nutzung.
+-- Wer es abgreift (Geraetesicherung, Protokoll, Proxy), kann es von jedem
+-- anderen Geraet aus eintauschen; nichts unterscheidet ihn vom Geraet, dem
+-- es ausgestellt wurde.
+--
+-- device_id: die Geraete-Kennung, die die App bei Anmeldung, Registrierung
+-- und Refresh mitschickt (dieselbe Kennung wie bei push_tokens.device_id,
+-- daher auch TEXT). routes/auth.js speichert sie bei der Ausgabe; die
+-- Rotation uebernimmt sie. Ein Refresh mit einem gebundenen Token und einer
+-- ANDEREN oder fehlenden Kennung endet mit 401 und widerruft dieses Token.
+--
+-- NULL-faehig und ohne Default, rein additiv: Tokens aus der Zeit davor und
+-- Tokens alter Apps (2.2.x, 2.3.0 senden keine Kennung) bleiben ungebunden
+-- und gelten wie bisher. Die Antwortform von /auth/login, /auth/refresh und
+-- /auth/register-konfi aendert sich nicht.
+--
+-- Kein Index: gesucht wird weiter ueber token_hash (Unique-Index); die
+-- Kennung wird nur an der gefundenen Zeile verglichen.
+
+ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS device_id TEXT;

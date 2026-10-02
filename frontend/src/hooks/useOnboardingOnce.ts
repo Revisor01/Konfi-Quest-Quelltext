@@ -15,7 +15,7 @@ import { entscheideNeuerungen } from '../utils/neuerungenGate';
 // 1. Hier die Version hochsetzen (z.B. '2_3').
 // 2. Texte der Banner und den Walkthrough der jeweiligen Rolle anpassen.
 // Wann die Anzeige kommt, ergibt sich von selbst aus version.json.
-export const NEUERUNGEN_VERSION = '2_2';
+export const NEUERUNGEN_VERSION = '2_3';
 
 // Zuletzt GESEHENE Version, als 'major.minor' ('2.1'). Ein einziger,
 // stabiler Schluessel -- er wandert nicht mehr mit jeder Version, sondern

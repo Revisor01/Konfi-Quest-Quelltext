@@ -1,33 +1,22 @@
 // ChatRoomView.tsx
 
-// 1. Benötigte Imports hinzufügen
-import { ICON_ZURUECK } from '../../shared/icons';
-import React from 'react'; // useRef hinzufügen
+import React from 'react';
 import { useAppLocation } from '../../../navigation/useAppLocation';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
   IonButton,
-  IonButtons,
-  IonIcon,
 } from '@ionic/react';
- // Hinzufügen
-import { useModalPage } from '../../../contexts/ModalContext'; // Hinzufügen
+import AppKopfzeile from '../../shared/AppKopfzeile';
+import { useModalPage } from '../../../contexts/ModalContext';
 import ChatRoom from '../ChatRoom';
 import api from '../../../services/api';
 import LoadingSpinner from '../../common/LoadingSpinner';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
 import { CACHE_TTL } from '../../../services/offlineCache';
-
-interface ChatRoomData {
-  id: number;
-  name: string;
-  type: 'group' | 'direct' | 'jahrgang' | 'admin';
-  participants?: Array<{ user_id: number; user_type: 'admin' | 'konfi'; name: string; display_name?: string; }>;
-}
+// Derselbe Raum-Typ, den ChatRoom erwartet. Der fruehere eigene Typ kannte
+// als user_type nur 'admin' | 'konfi' -- Teamer:innen fehlten.
+import type { ChatRoomBase } from '../../../types/chat';
 
 interface ChatRoomViewProps {
   roomId: number;
@@ -39,7 +28,7 @@ const ChatRoomView: React.FC<ChatRoomViewProps> = ({ roomId, onBack }) => {
   // der Cache sofort den Raum, sodass ChatRoom mit seinem Nachrichten-Cache
   // gerendert wird. Vorher war das ein ungecachter api.get -> offline blieb der
   // Raum null -> "Chat wird geladen" / Fehlerseite, OBWOHL Nachrichten im Cache lagen.
-  const { data: room, loading, isOffline } = useOfflineQuery<ChatRoomData>(
+  const { data: room, loading, isOffline } = useOfflineQuery<ChatRoomBase>(
     'chat:room:' + roomId,
     () => api.get(`/chat/rooms/${roomId}`).then(r => r.data),
     { ttl: CACHE_TTL.CHAT_ROOMS, enabled: !!roomId }
@@ -57,16 +46,9 @@ const ChatRoomView: React.FC<ChatRoomViewProps> = ({ roomId, onBack }) => {
     // 3. Wichtig: Die Fehlerseite muss auch eine IonPage mit dem Ref sein
     return (
       <IonPage ref={pageRef}>
-        <IonHeader>
-          <IonToolbar>
-            <IonButtons slot="start">
-              <IonButton aria-label="Zurück" onClick={onBack}>
-                <IonIcon icon={ICON_ZURUECK} />
-              </IonButton>
-            </IonButtons>
-            <IonTitle>Fehler</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        {/* Wie im Chatraum selbst opak (translucent={false}): der Inhalt
+            darunter ist nicht fullscreen, siehe ChatHeader. */}
+        <AppKopfzeile titel="Fehler" onZurueck={onBack} translucent={false} gemeindeUmschalter={false} />
         <IonContent className="ion-padding" style={{ textAlign: 'center' }}>
           <p>{isOffline
             ? 'Dieser Chat ist offline noch nicht verfügbar. Sobald du wieder online bist, wird er geladen.'

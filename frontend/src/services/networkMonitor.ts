@@ -1,5 +1,6 @@
 import { Network } from '@capacitor/network';
 import { Capacitor } from '@capacitor/core';
+import { API_BASE_URL } from './apiBasis';
 
 // Modul-Level State (Singleton-Pattern wie websocket.ts)
 let _isOnline: boolean = true; // Optimistisch starten
@@ -13,35 +14,81 @@ function notifyListeners() {
   _listeners.forEach(fn => fn(_isOnline));
 }
 
-// Robuste Online-Auswertung: Manche Plattformen (v.a. Android-Emulatoren,
-// teils auch echte Geraete + die Google-Play-Review-Umgebung) melden
-// connected=false bei connectionType='unknown' ODER 'none', obwohl Netz
-// vorhanden ist (Ping/HTTP funktionieren). In diesen Faellen optimistisch
-// online bleiben — sonst blockt die App den Login VOR dem ersten Request
-// ("Keine Verbindung"), was zu Google-Play-Rejections (Login fehlgeschlagen)
-// geführt hat. Ein echter fehlgeschlagener Request fällt ohnehin in den
-// Fehler-Handler; lieber den Request versuchen als ihn faelschlich zu blocken.
-function evaluateOnline(status: { connected: boolean; connectionType?: string }): boolean {
-  if (status.connectionType === 'unknown' || status.connectionType === 'none') return true;
-  return status.connected;
+// Online-Auswertung auf dem Gerät.
+//
+// Jetzt entscheidet in diesem unsicheren Fall eine echte Probe an /health:
+// Kommt irgendeine Antwort (auch 503 beim Neustart), ist Netz da — der
+// Play-Fall bleibt online. Kommt keine, ist die App offline, und die Probe
+// wiederholt sich im Abstand PROBE_ABSTAND_MS, bis Netz da ist oder das Plugin
+// wieder eine Verbindung meldet. 'no-cors': Es zählt nur, OB eine Antwort
+// kommt; der Inhalt wird nicht gelesen, CORS spielt keine Rolle.
+const PROBE_ABSTAND_MS = 15_000;
+const PROBE_ZEITLIMIT_MS = 4_000;
+let _probeTimer: ReturnType<typeof setTimeout> | null = null;
+// Jede Auswertung bekommt eine Nummer; eine ältere Probe, die nach einer
+// neueren Statusmeldung zurückkommt, darf deren Ergebnis nicht überschreiben.
+let _auswertung = 0;
+
+function unsicher(status: { connected: boolean; connectionType?: string }): boolean {
+  return !status.connected && (status.connectionType === 'none' || status.connectionType === 'unknown');
+}
+
+async function serverAntwortet(): Promise<boolean> {
+  const abbruch = new AbortController();
+  const zeitlimit = setTimeout(() => abbruch.abort(), PROBE_ZEITLIMIT_MS);
+  try {
+    await fetch(`${API_BASE_URL}/health`, { method: 'GET', mode: 'no-cors', cache: 'no-store', signal: abbruch.signal });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(zeitlimit);
+  }
+}
+
+function probeStoppen() {
+  if (_probeTimer) clearTimeout(_probeTimer);
+  _probeTimer = null;
+}
+
+function setzen(online: boolean) {
+  if (online === _isOnline) return;
+  _isOnline = online;
+  notifyListeners();
+}
+
+async function proben(nummer: number): Promise<void> {
+  const online = await serverAntwortet();
+  if (nummer !== _auswertung) return;
+  setzen(online);
+  probeStoppen();
+  if (!online) _probeTimer = setTimeout(() => { void proben(nummer); }, PROBE_ABSTAND_MS);
+}
+
+async function auswerten(status: { connected: boolean; connectionType?: string }): Promise<void> {
+  const nummer = ++_auswertung;
+  probeStoppen();
+  if (unsicher(status)) {
+    await proben(nummer);
+    return;
+  }
+  setzen(status.connected);
 }
 
 async function initNetworkMonitor(): Promise<void> {
   if (_initialized) return;
 
   try {
-    // Initialen Status abfragen
-    const status = await Network.getStatus();
-    _isOnline = evaluateOnline(status);
+    if (Capacitor.isNativePlatform()) {
+      // Initialen Status abfragen
+      await auswerten(await Network.getStatus());
 
-    // Listener für Status-Änderungen
-    Network.addListener('networkStatusChange', (status) => {
-      if (_debounceTimer) clearTimeout(_debounceTimer);
-      _debounceTimer = setTimeout(() => {
-        _isOnline = evaluateOnline(status);
-        notifyListeners();
-      }, 300);
-    });
+      // Listener für Status-Änderungen
+      Network.addListener('networkStatusChange', (status) => {
+        if (_debounceTimer) clearTimeout(_debounceTimer);
+        _debounceTimer = setTimeout(() => { void auswerten(status); }, 300);
+      });
+    }
   } catch {
     console.warn('Capacitor Network Plugin nicht verfügbar, nutze Web-Fallback');
   }

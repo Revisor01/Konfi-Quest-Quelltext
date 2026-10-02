@@ -11,9 +11,9 @@ import {
   ICON_LOESCHEN_GEFUELLT,
   ICON_POKAL_GEFUELLT,
   ICON_SCHLIESSEN,
-  ICON_ZURUECK,
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import { fehlerDaten, fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -48,6 +48,7 @@ import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { useModalPage } from '../../../contexts/ModalContext';
 import { useLiveRefresh } from '../../../contexts/LiveUpdateContext';
 import api from '../../../services/api';
+import { jahrgangLoeschHinweis, istLoeschVorschau, type JahrgangLoeschVorschau } from '../../../utils/jahrgangLoeschen';
 import { writeQueue } from '../../../services/writeQueue';
 import { networkMonitor } from '../../../services/networkMonitor';
 import { useOfflineQuery } from '../../../hooks/useOfflineQuery';
@@ -56,7 +57,11 @@ import LoadingSpinner from '../../common/LoadingSpinner';
 import { SectionHeader, ListSection } from '../../shared';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import { safeUUID } from '../../../utils/uuid';
+import { sendenOderEinreihen } from '../../../utils/sendenOderEinreihen';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { datumKurz } from '../../../utils/dateUtils';
+import { rollenName } from '../../../utils/rollenNamen';
 
 // Ionic 9 gibt bei ref an IonItemSliding die React-Komponente zurueck, nicht
 // mehr das DOM-Element. Gebraucht wird hier nur close() — das haben beide.
@@ -132,8 +137,9 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
         name: jahrgang.name,
         gottesdienst_enabled: jahrgang.gottesdienst_enabled ?? true,
         gemeinde_enabled: jahrgang.gemeinde_enabled ?? true,
-        target_gottesdienst: jahrgang.target_gottesdienst ?? 10,
-        target_gemeinde: jahrgang.target_gemeinde ?? 10,
+        // `|| 10` wie ueberall: eine 0 aus frueheren Tagen heisst 10.
+        target_gottesdienst: jahrgang.target_gottesdienst || 10,
+        target_gemeinde: jahrgang.target_gemeinde || 10,
         konfspruch_enabled: jahrgang.konfspruch_enabled ?? true
       });
     } else {
@@ -202,38 +208,36 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
       }));
     }
 
-    if (networkMonitor.isOnline) {
-      setLoading(true);
-      try {
-        if (jahrgang) {
-          await api.put(`/admin/jahrgaenge/${jahrgang.id}`, payload);
-        } else {
-          await api.post('/admin/jahrgaenge', payload);
-        }
-
-        onSuccess();
-        handleClose();
-      } catch (error) {
-        setError(fehlerText(error, 'Fehler beim Speichern des Jahrgangs'));
-      } finally {
-        setLoading(false);
-      }
-    } else {
-      await writeQueue.enqueue({
-        method: jahrgang ? 'PUT' : 'POST',
-        url: jahrgang ? `/admin/jahrgaenge/${jahrgang.id}` : '/admin/jahrgaenge',
-        body: payload,
-        maxRetries: 5,
-        hasFileUpload: false,
-        metadata: {
-          type: 'admin',
-          clientId: safeUUID(),
-          label: jahrgang ? 'Jahrgang bearbeiten' : 'Jahrgang erstellen'
-        }
+    setLoading(true);
+    try {
+      // Bearbeiten (PUT) faellt auch bei einem Netzabbruch im Online-Zweig in
+      // die Warteschlange; Anlegen (POST ohne Idempotenzschluessel) nur
+      // offline -- nach einem Abbruch bleibt es dort beim Fehler, sonst
+      // entstuende der Eintrag womoeglich doppelt.
+      const { weg } = await sendenOderEinreihen({
+        online: networkMonitor.isOnline,
+        methode: jahrgang ? 'PUT' : 'POST',
+        senden: () => (jahrgang ? api.put(`/admin/jahrgaenge/${jahrgang.id}`, payload) : api.post('/admin/jahrgaenge', payload)),
+        einreihen: () => writeQueue.enqueue({
+          method: jahrgang ? 'PUT' : 'POST',
+          url: jahrgang ? `/admin/jahrgaenge/${jahrgang.id}` : '/admin/jahrgaenge',
+          body: payload,
+          maxRetries: 5,
+          hasFileUpload: false,
+          metadata: {
+            type: 'admin',
+            clientId: safeUUID(),
+            label: jahrgang ? 'Jahrgang bearbeiten' : 'Jahrgang erstellen'
+          }
+        }),
       });
-      setSuccess('Wird gespeichert sobald du wieder online bist');
+      if (weg === 'eingereiht') setSuccess('Wird gespeichert sobald du wieder online bist');
       onSuccess();
       handleClose();
+    } catch (error) {
+      setError(fehlerText(error, 'Fehler beim Speichern des Jahrgangs'));
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -280,7 +284,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
               <IonList style={{ background: 'transparent', padding: '0' }}>
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Name *</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Name" aria-required="true"
                     value={formData.name}
                     onIonInput={(e) => setFormData({ ...formData, name: e.detail.value! })}
                     placeholder="z.B. Jahrgang 2024/2025"
@@ -309,7 +313,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
               <IonList style={{ background: 'transparent', padding: '0' }}>
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel>Gottesdienst-Punkte aktiviert</IonLabel>
-                  <IonToggle
+                  <IonToggle aria-label="Gottesdienst-Punkte aktiviert"
                     slot="end"
                     className="app-toggle--jahrgang"
                     checked={formData.gottesdienst_enabled}
@@ -318,7 +322,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
                   />
                 </IonItem>
                 {!formData.gemeinde_enabled && formData.gottesdienst_enabled && (
-                  <div style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-color-badges)', marginTop: 'var(--app-abstand-mini)', paddingLeft: 'var(--app-abstand-basis)' }}>
+                  <div style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-badges)', marginTop: 'var(--app-abstand-mini)', paddingLeft: 'var(--app-abstand-basis)' }}>
                     Mindestens ein Punkt-Typ muss aktiv bleiben.{jahrgang?.konfi_count ? ` ${jahrgang.konfi_count} Konfis haben bereits Gottesdienst-Punkte.` : ''}
                   </div>
                 )}
@@ -327,7 +331,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
                     <IonLabel position="stacked">Ziel Gottesdienst <span style={{ fontWeight: 'var(--app-schrift-fett)', color: 'var(--ion-color-primary)' }}>{formData.target_gottesdienst}</span></IonLabel>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-eng)', width: '100%' }}>
                       <span style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)', minWidth: '24px', textAlign: 'center' }}>1</span>
-                      <IonRange
+                      <IonRange aria-label="Ziel Gottesdienst"
                         min={1} max={20} step={1}
                         pin={true} pinFormatter={(value: number) => `${value}`}
                         value={formData.target_gottesdienst}
@@ -341,7 +345,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
                 )}
                 <IonItem lines="full" style={{ '--background': 'transparent' }}>
                   <IonLabel>Gemeinde-Punkte aktiviert</IonLabel>
-                  <IonToggle
+                  <IonToggle aria-label="Gemeinde-Punkte aktiviert"
                     slot="end"
                     className="app-toggle--jahrgang"
                     checked={formData.gemeinde_enabled}
@@ -350,7 +354,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
                   />
                 </IonItem>
                 {!formData.gottesdienst_enabled && formData.gemeinde_enabled && (
-                  <div style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-color-badges)', marginTop: 'var(--app-abstand-mini)', paddingLeft: 'var(--app-abstand-basis)' }}>
+                  <div style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-badges)', marginTop: 'var(--app-abstand-mini)', paddingLeft: 'var(--app-abstand-basis)' }}>
                     Mindestens ein Punkt-Typ muss aktiv bleiben.{jahrgang?.konfi_count ? ` ${jahrgang.konfi_count} Konfis haben bereits Gemeinde-Punkte.` : ''}
                   </div>
                 )}
@@ -359,7 +363,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
                     <IonLabel position="stacked">Ziel Gemeinde <span style={{ fontWeight: 'var(--app-schrift-fett)', color: 'var(--ion-color-primary)' }}>{formData.target_gemeinde}</span></IonLabel>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-eng)', width: '100%' }}>
                       <span style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)', minWidth: '24px', textAlign: 'center' }}>1</span>
-                      <IonRange
+                      <IonRange aria-label="Ziel Gemeinde"
                         min={1} max={20} step={1}
                         pin={true} pinFormatter={(value: number) => `${value}`}
                         value={formData.target_gemeinde}
@@ -394,7 +398,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
                       Konfis dieses Jahrgangs können ihren Konfispruch wählen.
                     </p>
                   </IonLabel>
-                  <IonToggle
+                  <IonToggle aria-label="Konfispruch-Auswahl"
                     slot="end"
                     className="app-toggle--jahrgang"
                     checked={formData.konfspruch_enabled}
@@ -424,7 +428,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
               <div className="app-section-icon app-section-icon--jahrgang">
                 <IonIcon icon={ICON_GRUPPE_GEFUELLT} />
               </div>
-              <IonLabel>Zugriff für Admins & Team</IonLabel>
+              <IonLabel>Zugriff für Leitung & Team</IonLabel>
             </IonListHeader>
             <IonCard className="app-card">
               <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
@@ -432,7 +436,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
                   {zuweisbare.map((person, index) => {
                     const istGewaehlt = ausgewaehlt[person.id] || false;
                     return (
-                      <div
+                      <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                         key={person.id}
                         className="app-list-item app-list-item--jahrgang"
                         onClick={() => !loading && setAusgewaehlt(prev => ({ ...prev, [person.id]: !istGewaehlt }))}
@@ -449,7 +453,7 @@ const JahrgangModal: React.FC<JahrgangModalProps> = ({
                         <span style={{ fontWeight: 'var(--app-schrift-mittel)', color: 'var(--app-text-primary)' }}>{person.display_name}</span>
                         <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--app-abstand-eng)' }}>
                           <span style={{ fontSize: 'var(--app-text-klein)', color: 'var(--app-text-system)' }}>
-                            {person.role_name === 'admin' ? 'Admin' : 'Teamer:in'}
+                            {rollenName(person.role_name)}
                           </span>
                           {istGewaehlt && <IonIcon icon={ICON_ZUSAGE_GEFUELLT} style={{ color: 'var(--app-color-success)' }} />}
                         </span>
@@ -520,10 +524,11 @@ const AdminJahrgaengeePage: React.FC = () => {
         }
 
         if (fehlerDaten(error)?.canForceDelete) {
-          // Org Admin kann trotzdem löschen
+          // Wer den Jahrgang loeschen darf, darf es auch mit Chat-Nachrichten
+          // (jahrgaenge.js setzt canForceDelete fuer alle mit Loeschrecht).
           presentAlert({
             header: 'Chat-Nachrichten vorhanden',
-            message: `${fehlerText(error, 'Der Jahrgang enthält Chat-Nachrichten.')}\n\nAls Organisation-Admin können Sie dennoch löschen. Dadurch werden ALLE Chat-Nachrichten unwiderruflich gelöscht!`,
+            message: `${fehlerText(error, 'Der Jahrgang enthält Chat-Nachrichten.')}\n\nDu kannst den Jahrgang trotzdem löschen. Dadurch werden ALLE Chat-Nachrichten unwiderruflich gelöscht!`,
             buttons: [
               { text: 'Abbrechen', role: 'cancel' },
               {
@@ -542,9 +547,21 @@ const AdminJahrgaengeePage: React.FC = () => {
     if (forceDelete) {
       await performDelete();
     } else {
+      // Was mitgeht, mit Zahlen: Seit das Loeschen die Events
+      // und Challenges des Jahrgangs mitnimmt, fragt die Rueckfrage vorher
+      // beim Server nach -- dieselbe Regel-Stelle wie das Loeschen selbst.
+      // Ohne Antwort (aelterer Server, Netzfehler) steht die allgemeine
+      // Fassung da (utils/jahrgangLoeschen.ts).
+      let vorschau: JahrgangLoeschVorschau | null = null;
+      try {
+        const res = await api.get(`/admin/jahrgaenge/${jahrgang.id}/loeschvorschau`);
+        if (istLoeschVorschau(res.data)) vorschau = res.data;
+      } catch {
+        // Keine Vorschau: die allgemeine Fassung der Rueckfrage.
+      }
       presentAlert({
         header: 'Jahrgang löschen',
-        message: `Jahrgang "${jahrgang.name}" wirklich löschen?\n\nDer Jahrgang und sein Chatverlauf werden unwiderruflich entfernt. Solange dem Jahrgang noch aktive Konfis zugeordnet sind, ist das Löschen nicht möglich. Zu Teamer:innen beförderte Konfis bleiben mit ihren Punkten und Abzeichen erhalten.`,
+        message: jahrgangLoeschHinweis(jahrgang.name, vorschau),
         buttons: [
           { text: 'Abbrechen', role: 'cancel' },
           {
@@ -575,30 +592,19 @@ const AdminJahrgaengeePage: React.FC = () => {
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonButtons slot="start">
-            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-              <IonIcon icon={ICON_ZURUECK} />
-            </IonButton>
-          </IonButtons>
-          <IonTitle>Jahrgänge</IonTitle>
-          {canCreate && (
-            <IonButtons slot="end">
-              <IonButton aria-label="Neuen Jahrgang anlegen" onClick={openCreateModal}>
-                <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
-              </IonButton>
-            </IonButtons>
-          )}
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile
+        titel="Jahrgänge"
+        onZurueck={() => window.history.back()}
+        gemeindeUmschalter={false}
+        rechts={canCreate ? (
+          <IonButton aria-label="Neuen Jahrgang anlegen" onClick={openCreateModal}>
+            <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
+          </IonButton>
+        ) : undefined}
+      />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Jahrgänge</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Jahrgänge" />
         
         <IonRefresher slot="fixed" onIonRefresh={handleRefresh} onIonPull={triggerPullHaptic}>
           <IonRefresherContent refreshingSpinner="crescent" />
@@ -673,13 +679,13 @@ const AdminJahrgaengeePage: React.FC = () => {
                                   {jahrgang.gottesdienst_enabled !== false && (
                                     <span className="app-list-item__meta-item">
                                       <IonIcon icon={ICON_GOTTESDIENST_GEFUELLT} className="app-icon-color--gottesdienst" />
-                                      {`GD-Ziel ${jahrgang.target_gottesdienst ?? 10}`}
+                                      {`GD-Ziel ${jahrgang.target_gottesdienst || 10}`}
                                     </span>
                                   )}
                                   {jahrgang.gemeinde_enabled !== false && (
                                     <span className="app-list-item__meta-item">
                                       <IonIcon icon={ICON_GRUPPE_GEFUELLT} className="app-icon-color--gemeinde" />
-                                      {`Gem-Ziel ${jahrgang.target_gemeinde ?? 10}`}
+                                      {`Gem-Ziel ${jahrgang.target_gemeinde || 10}`}
                                     </span>
                                   )}
                                   <span className="app-list-item__meta-item">
@@ -695,7 +701,7 @@ const AdminJahrgaengeePage: React.FC = () => {
                                       style={{ color: jahrgang.wrapped_released_at ? 'var(--app-color-warning)' : 'var(--app-text-system)' }}
                                     />
                                     {jahrgang.wrapped_released_at
-                                      ? `Rückblick gestartet am ${new Date(jahrgang.wrapped_released_at).toLocaleDateString('de-DE')}`
+                                      ? `Rückblick gestartet am ${datumKurz(jahrgang.wrapped_released_at)}`
                                       : 'Noch kein Rückblick'}
                                   </span>
                                 </div>

@@ -12,6 +12,16 @@ const USER_CACHE_TTL = 30 * 1000; // 30 Sekunden
 const USER_CACHE_MAX = 500;
 const userCache = new Map();
 
+// ============================================
+// ABLEHNUNG "nicht Mitglied der aktiven Gemeinde" (403)
+// ============================================
+// Eine Antwort fuer rbac.js und die beiden Datei-Routen mit eigener
+// Anmeldung (challenges.js und chat.js, GET /files/:filename).
+const ORG_KEIN_ZUGRIFF = Object.freeze({
+  error: 'Kein Zugriff auf diese Organisation',
+  error_code: 'org_kein_zugriff',
+});
+
 // Cache-Key haelt die AKTIVE Org mit rein: ein User kann (Multi-Org) je nach
 // aktivem Org-Kontext ein voellig anderes req.user-Objekt haben (andere Org,
 // andere Rolle, andere Jahrgänge). Ohne Org im Key wuerde der 30s-Cache nach
@@ -114,7 +124,7 @@ const verifyTokenRBAC = (db) => {
 
       // User-Query mit LEFT JOIN für super_admin (organization_id kann NULL sein)
       const userQuery = `
-        SELECT u.id, u.organization_id, u.username, u.display_name, u.is_active,
+        SELECT u.id, u.organization_id, u.username, u.display_name, u.is_active, u.deleted_at,
                u.role_title, u.is_super_admin, u.token_invalidated_at,
                r.name as role_name, r.display_name as role_display_name,
                o.name as organization_name, o.slug as organization_slug,
@@ -130,7 +140,13 @@ const verifyTokenRBAC = (db) => {
         return res.status(401).json({ error: 'User not found' });
       }
 
-      if (!user.is_active) {
+      // Soft-geloescht (deleted_at, Auto-Loeschlauf 60 Tage nach der
+      // Konfirmation) zaehlt wie deaktiviert -- gleiche Antwort, kein Hinweis,
+      // dass es das Konto noch gibt. Socket-Auth (server.js) und die Datei-
+      // Auslieferung (chat.js) filterten deleted_at laengst, diese Middleware
+      // nicht: Ein ausgeblendetes Konto bediente die API bis zur harten
+      // Loeschung weiter.
+      if (!user.is_active || user.deleted_at) {
         return res.status(401).json({ error: 'User account is inactive' });
       }
 
@@ -162,7 +178,7 @@ const verifyTokenRBAC = (db) => {
         if (!membership) {
           // Nicht Mitglied der angeforderten Org -> Zugriff verweigern (kein
           // stilles Zurueckfallen auf die Primaer-Org, das wäre verwirrend).
-          return res.status(403).json({ error: 'Kein Zugriff auf diese Organisation' });
+          return res.status(403).json(ORG_KEIN_ZUGRIFF);
         }
 
         user.organization_id = membership.organization_id;
@@ -281,6 +297,7 @@ const requireTeamer = requireRole('org_admin', 'admin', 'teamer'); // Events, Pu
 module.exports = {
   verifyTokenRBAC,
   invalidateUserCache,
+  ORG_KEIN_ZUGRIFF,
   // Rollen-Checks
   requireRole,
   requireSuperAdmin,

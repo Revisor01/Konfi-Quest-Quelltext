@@ -4,8 +4,8 @@ import {
   ICON_SCHLIESSEN_GEFUELLT,
   ICON_SCHLUESSEL_GEFUELLT,
   ICON_UHRZEIT,
-  ICON_ZURUECK,
 } from '../../shared/icons';
+import AppKopfzeile from '../../shared/AppKopfzeile';
 import { fehlerText } from '../../../utils/fehler';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -25,7 +25,8 @@ import {
   useIonModal,
   useIonAlert
 } from '@ionic/react';
-import api, { DATEI_TIMEOUT_MS } from '../../../services/api';
+import api from '../../../services/api';
+import NachweisFoto from '../../shared/NachweisFoto';
 import { useApp } from '../../../contexts/AppContext';
 import { offlineBlockiert } from '../../../utils/offlineAktion';
 import { offlineCache } from '../../../services/offlineCache';
@@ -43,15 +44,16 @@ import {
 import KonfiModal from '../modals/KonfiModal';
 import type { Konfi, Activity } from './KonfiDetailSections';
 import type { BonusEintrag, EventPunkteEintrag } from '../../../types/user';
+import { datumKurz } from '../../../utils/dateUtils';
 
 /**
- * Ein Aktivitaets-Antrag aus GET /admin/activities/requests, soweit diese
- * Ansicht ihn liest: Die offenen Antraege der Konfi werden als "wartende"
- * Aktivitaeten unter die verbuchten gemischt.
+ * Ein Aktivitaets-Antrag aus GET /admin/activities/requests?user_id=,
+ * soweit diese Ansicht ihn liest: Die offenen Antraege der Konfi werden als
+ * "wartende" Aktivitaeten unter die verbuchten gemischt.
  */
 interface OffenerAntrag {
   id: number;
-  konfi_id: number;
+  user_id: number;
   status: 'pending' | 'approved' | 'rejected';
   activity_name: string;
   activity_points: number;
@@ -60,10 +62,42 @@ interface OffenerAntrag {
 }
 import KonfiBadgesSection from './KonfiBadgesSection';
 import ChallengeStempelSektion from '../../shared/ChallengeStempelSektion';
+import { mitBewahrtenStempeln } from '../../../utils/bewahrteStempel';
+import KonfiZeitTermine from '../../shared/KonfiZeitTermine';
+import { alsKonfiZeit } from '../../../utils/konfiZeit';
+import type { KonfiZeit } from '../../../types/konfiZeit';
+import type { ChallengeMark } from '../../../types/challenges';
 import WrappedModal from '../../wrapped/WrappedModal';
 import type { WrappedHistoryEntry } from '../../../types/wrapped';
 import { triggerPullHaptic } from '../../../utils/haptics';
 import LoadingSpinner from '../../common/LoadingSpinner';
+import { tastaturKlick } from '../../../utils/tastatur';
+
+/**
+ * Das Nachweisfoto eines Antrags auf ganzer Fläche. Steht außerhalb von
+ * KonfiDetailView: Innen definiert, war es bei jedem Zeichnen der Ansicht ein
+ * neuer Komponententyp — das Modal hängte seinen Inhalt jedes Mal neu ein, und
+ * das Foto hätte jedes Mal neu geladen.
+ */
+const NachweisFotoAnsicht: React.FC<{ onClose: () => void; antragId: number | null }> = ({ onClose, antragId }) => (
+  <IonPage>
+    <IonHeader>
+      <IonToolbar>
+        <IonTitle>Foto</IonTitle>
+        <IonButtons slot="start">
+          <IonButton aria-label="Schließen" onClick={onClose}>
+            <IonIcon icon={ICON_SCHLIESSEN_GEFUELLT} />
+          </IonButton>
+        </IonButtons>
+      </IonToolbar>
+    </IonHeader>
+    <IonContent>
+      <div style={{ padding: 'var(--app-abstand-basis)', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
+        {antragId !== null && <NachweisFoto key={antragId} antragId={antragId} leitung vollflaeche />}
+      </div>
+    </IonContent>
+  </IonPage>
+);
 
 interface KonfiDetailViewProps {
   konfiId: number;
@@ -92,7 +126,7 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
     id: number; name: string; gottesdienst_enabled?: boolean; gemeinde_enabled?: boolean;
   }>>([]);
   const isTeamer = targetRole === 'teamer';
-  const [selectedPhoto, setSelectedPhoto] = useState<string | null>(null);
+  const fotoAntragRef = React.useRef<number | null>(null);
   const [teamerEvents, setTeamerEvents] = useState<Array<{
     id: number;
     name: string;
@@ -103,8 +137,17 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
     booking_status: string;
     booking_date: string;
   }>>([]);
+  // Stempel einer Teamer:in aus Challenges, die mit ihrem Jahrgang geloescht
+  // wurden. GET /admin/konfis/:id leitet challengeMarks aus den
+  // lebenden Beitraegen ab -- die bewahrten kommen aus einer eigenen Route.
+  const [bewahrteStempel, setBewahrteStempel] = useState<ChallengeMark[]>([]);
+  // Die dauerhafte Kopie der Konfi-Zeit einer befoerderten Teamer:in
+  // besuchte Termine samt Anwesenheit und Punkten, die mit der
+  // Befoerderung bzw. dem Loeschen des alten Jahrgangs sonst verschwunden
+  // waeren.
+  const [konfiZeit, setKonfiZeit] = useState<KonfiZeit | null>(null);
   const [konfiHistory, setKonfiHistory] = useState<{
-    history: Array<{ id: number; title: string; points: number; category: string; date: string; source_type: string }>;
+    history: Array<{ id: number; title: string; points: number; category: string; date: string; source_type: string; event_date?: string | null }>;
     totals: { gottesdienst: number; gemeinde: number; total: number };
   } | null>(null);
   const [certificates, setCertificates] = useState<Array<{
@@ -175,46 +218,15 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
     }
   });
 
-  // Photo Modal Component
-  const PhotoModal: React.FC<{ onClose: () => void; photoUrl: string }> = ({ onClose, photoUrl }) => (
-    <IonPage>
-      <IonHeader>
-        <IonToolbar>
-          <IonTitle>Foto</IonTitle>
-          <IonButtons slot="start">
-            <IonButton aria-label="Schließen" onClick={onClose}>
-              <IonIcon icon={ICON_SCHLIESSEN_GEFUELLT} />
-            </IonButton>
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
-      <IonContent>
-        <div style={{ padding: 'var(--app-abstand-basis)', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }}>
-          <img
-            src={photoUrl}
-            alt="Aktivitätsfoto"
-            style={{
-              maxWidth: '100%',
-              maxHeight: '100%',
-              objectFit: 'contain',
-              borderRadius: 'var(--app-radius-klein)'
-            }}
-          />
-        </div>
-      </IonContent>
-    </IonPage>
-  );
-
-  // Photo Modal mit useIonModal Hook
-  const [presentPhotoModalHook, dismissPhotoModalHook] = useIonModal(PhotoModal, {
+  // Foto-Ansicht mit useIonModal. Welcher Antrag gemeint ist, steht im Ref
+  // (Getter wie beim Material-Modal in EventDetailView): Er ist gesetzt, BEVOR
+  // das Modal aufgeht, so zeigt schon das erste Zeichnen den richtigen Antrag.
+  const [presentPhotoModalHook, dismissPhotoModalHook] = useIonModal(NachweisFotoAnsicht, {
     onClose: () => {
-      if (selectedPhoto && selectedPhoto.startsWith('blob:')) {
-        URL.revokeObjectURL(selectedPhoto);
-      }
-      setSelectedPhoto(null);
+      fotoAntragRef.current = null;
       dismissPhotoModalHook();
     },
-    photoUrl: selectedPhoto || ''
+    get antragId() { return fotoAntragRef.current; }
   });
 
   // Certificate Assign Modal mit useIonModal Hook
@@ -401,9 +413,16 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
     try {
       const konfiRes = await api.get(`/admin/konfis/${konfiId}`);
 
-      let requestsRes = { data: [] };
+      // Nur die OFFENEN Anträge DIESER Person.
+      // Vorher lud die Ansicht die ganze Antragsgeschichte der Gemeinde und
+      // filterte sie hier nach `konfi_id` — ein Feld, das die Liste seit der
+      // Umbenennung in `user_id` nicht mehr trägt. Die offenen Anträge
+      // erschienen deshalb nie.
+      let requestsRes: { data: OffenerAntrag[] } = { data: [] };
       try {
-        requestsRes = await api.get('/admin/activities/requests');
+        requestsRes = await api.get<OffenerAntrag[]>('/admin/activities/requests', {
+          params: { user_id: konfiId, status: 'pending' },
+        });
       } catch (requestsError) {
  console.warn('Could not load activity requests:', requestsError);
       }
@@ -422,10 +441,26 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
         setCertificates(konfiData.certificates || []);
         setTeamerEvents(konfiData.teamerEvents || []);
         setKonfiHistory(konfiData.konfiHistory || null);
+        // Zusatz: ein Fehler (etwa ein aelterer Server ohne die Route) darf
+        // die Detailansicht nicht kippen -- dann fehlen nur diese Stempel.
+        try {
+          const bewahrtRes = await api.get(`/challenges/admin/bewahrte-stempel/${konfiId}`);
+          setBewahrteStempel(Array.isArray(bewahrtRes.data) ? bewahrtRes.data : []);
+        } catch {
+          setBewahrteStempel([]);
+        }
+        try {
+          const konfiZeitRes = await api.get(`/teamer/${konfiId}/konfi-zeit`);
+          setKonfiZeit(alsKonfiZeit(konfiZeitRes.data));
+        } catch {
+          setKonfiZeit(null);
+        }
       } else {
         setCertificates([]);
         setTeamerEvents([]);
         setKonfiHistory(null);
+        setBewahrteStempel([]);
+        setKonfiZeit(null);
       }
 
       // Zertifikat-Typen laden (für die Zuweisung)
@@ -467,7 +502,8 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
       }));
 
       const pendingRequests: Activity[] = (requestsRes.data || [])
-        .filter((req: OffenerAntrag) => req.konfi_id === konfiId && req.status === 'pending')
+        // Der Server filtert bereits; die Prüfung bleibt als Absicherung.
+        .filter((req: OffenerAntrag) => req.user_id === konfiId && req.status === 'pending')
         .map((req: OffenerAntrag) => ({
           id: `request-${req.id}`,
           name: `${req.activity_name} (gemeldet)`,
@@ -509,11 +545,7 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
   };
 
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('de-DE', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
+    return datumKurz(dateString);
   };
 
   const handlePasswordAction = () => {
@@ -612,27 +644,17 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
     }
   };
 
-  const handlePhotoClick = async (activity: Activity) => {
+  // Die Ansicht geht SOFORT auf und lädt darin — mit Fortschritt, "Erneut
+  // versuchen" und der Zeile ohne Netz (NachweisFoto). Vorher lud diese Stelle
+  // erst still im Hintergrund und öffnete danach; bis dahin passierte beim
+  // Antippen sichtbar nichts, bei einem Fehler kam nur "Foto konnte nicht
+  // geladen werden".
+  const handlePhotoClick = (activity: Activity) => {
     if (activity.hasPhoto && activity.requestId) {
-      try {
-        const response = await api.get(`/admin/activities/requests/${activity.requestId}/photo`, {
-          responseType: 'blob',
-          timeout: DATEI_TIMEOUT_MS
-        });
-        const photoUrl = URL.createObjectURL(response.data);
-        // Vorherige Blob-URL freigeben, falls direkt ein weiteres Foto geoeffnet wird
-        setSelectedPhoto((prev) => {
-          if (prev && prev.startsWith('blob:')) {
-            try { URL.revokeObjectURL(prev); } catch { /* Freigeben darf scheitern: die URL war schon ungueltig. Das neue Foto trotzdem zeigen. */ }
-          }
-          return photoUrl;
-        });
-        presentPhotoModalHook({
-          presentingElement: presentingElement || undefined
-        });
-      } catch {
-        setError('Foto konnte nicht geladen werden');
-      }
+      fotoAntragRef.current = activity.requestId;
+      presentPhotoModalHook({
+        presentingElement: presentingElement || undefined
+      });
     }
   };
 
@@ -705,18 +727,11 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
   if (loading) {
     return (
       <IonPage ref={pageRef}>
-        <IonHeader translucent={true}>
-          <IonToolbar>
-            {!hideBackButton && (
-              <IonButtons slot="start">
-                <IonButton aria-label="Zurück" onClick={onBack}>
-                  <IonIcon icon={ICON_ZURUECK} />
-                </IonButton>
-              </IonButtons>
-            )}
-            <IonTitle>{isTeamer ? 'Teamer:in Details' : 'Konfi Details'}</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeile
+          titel={isTeamer ? 'Teamer:in Details' : 'Konfi Details'}
+          onZurueck={hideBackButton ? undefined : onBack}
+          gemeindeUmschalter={false}
+        />
         <IonContent fullscreen>
           <LoadingSpinner message={isTeamer ? 'Teamer:in wird geladen...' : 'Konfi wird geladen...'} />
         </IonContent>
@@ -726,17 +741,15 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          {!hideBackButton && (
-            <IonButtons slot="start">
-              <IonButton aria-label="Zurück" onClick={onBack}>
-                <IonIcon icon={ICON_ZURUECK} />
-              </IonButton>
-            </IonButtons>
-          )}
-          <IonTitle>{currentKonfi?.name || (isTeamer ? 'Teamer:in Details' : 'Konfi Details')}</IonTitle>
-          <IonButtons slot="end">
+      <AppKopfzeile
+        titel={currentKonfi?.name || (isTeamer ? 'Teamer:in Details' : 'Konfi Details')}
+        onZurueck={hideBackButton ? undefined : onBack}
+        /* Detailansicht EINER Person -- gehoert zu genau einer Gemeinde.
+           Ein Wechsel fuehrte auf einen Datensatz, den
+           es dort nicht gibt. */
+        gemeindeUmschalter={false}
+        rechts={(
+          <>
             {/* Bearbeiten nur bei Konfis: Teamer:innen haben keinen einzelnen
                 Jahrgang, ihre Stammdaten liegen in der Benutzerverwaltung. */}
             {!isTeamer && (
@@ -760,9 +773,9 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
             <IonButton aria-label="Passwort zurücksetzen" disabled={!isOnline} onClick={handlePasswordAction}>
               <IonIcon icon={ICON_SCHLUESSEL_GEFUELLT} />
             </IonButton>
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
+          </>
+        )}
+      />
 
       <IonContent className="app-gradient-background" fullscreen>
         <IonRefresher
@@ -823,12 +836,17 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
           />
         )}
 
+        {/* Besuchte Termine aus der dauerhaften Kopie der Konfi-Zeit */}
+        {isTeamer && konfiZeit && (
+          <KonfiZeitTermine termine={konfiZeit.termine} />
+        )}
+
         {wrappedListe.length > 0 && (
           <IonList inset={true} style={{ margin: 'var(--app-abstand-basis)' }}>
             <IonCard className="app-card">
               <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
                 {wrappedListe.map((eintrag, i) => (
-                <div
+                <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                   key={eintrag.id}
                   className="app-list-item"
                   style={{
@@ -927,7 +945,7 @@ const KonfiDetailView: React.FC<KonfiDetailViewProps> = ({ konfiId, onBack, hide
         )}
 
         <ChallengeStempelSektion
-          marks={currentKonfi?.challengeMarks || []}
+          marks={mitBewahrtenStempeln(currentKonfi?.challengeMarks || [], bewahrteStempel)}
           offeneStempel={currentKonfi?.offeneStempel || []}
           titel="Stempel"
         />

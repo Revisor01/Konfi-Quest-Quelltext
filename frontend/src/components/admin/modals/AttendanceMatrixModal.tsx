@@ -46,6 +46,7 @@ import {
   MatrixZellStatus,
   MatrixZeilenStats
 } from '../../../utils/anwesenheitsMatrix';
+import { datumKurz, uhrzeit } from '../../../utils/dateUtils';
 
 interface Jahrgang {
   id: number;
@@ -107,7 +108,7 @@ interface AttendanceMatrixModalProps {
 const formatShortDate = (iso: string): string => {
   try {
     const d = new Date(iso);
-    return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+    return datumKurz(d, { ohneJahr: true });
   } catch {
     return iso;
   }
@@ -266,7 +267,7 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
             {/* Suchfeld */}
             <IonItem>
               <IonIcon icon={ICON_SUCHE_GEFUELLT} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
-              <IonInput
+              <IonInput aria-label="Konfi suchen"
                 value={searchTerm}
                 onIonInput={(e) => setSearchTerm(e.detail.value!)}
                 placeholder="Konfi suchen..."
@@ -275,10 +276,11 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
             {/* Jahrgang Filter */}
             <IonItem>
               <IonIcon icon={ICON_TERMIN} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
-              <IonSelect
+              <IonSelect aria-label="Jahrgang"
                 value={jahrgangId}
                 onIonChange={(e) => setJahrgangId(e.detail.value)}
                 interface="popover"
+                interfaceOptions={{ arrow: false }}
                 placeholder="Jahrgang"
                 style={{ width: '100%' }}
               >
@@ -344,7 +346,7 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
                           <td className="attendance-matrix__td-konfi">{s.display_name}</td>
                           <td className="attendance-matrix__td-cell">
                             {s.konfirmation_date
-                              ? `${new Date(s.konfirmation_date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })}, ${new Date(s.konfirmation_date).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })} Uhr`
+                              ? `${datumKurz(s.konfirmation_date)}, ${uhrzeit(s.konfirmation_date)} Uhr`
                               : <span style={{ color: 'var(--app-text-muted)', fontStyle: 'italic' }}>nicht gebucht</span>}
                           </td>
                           <td className="attendance-matrix__td-cell">
@@ -376,8 +378,8 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
         ) : data.events.length === 0 ? (
           <EmptyState
             icon={ICON_TERMIN}
-            title="Keine Pflichtevents"
-            message="Für diesen Jahrgang gibt es keine Pflichtevents."
+            title="Keine Pflicht-Events"
+            message="Für diesen Jahrgang gibt es keine Pflicht-Events."
           />
         ) : data.konfis.length === 0 ? (
           <EmptyState
@@ -392,7 +394,7 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
                 <IonIcon icon={ICON_TERMIN} />
               </div>
               <IonLabel>
-                {data.events.length} Pflichtevent{data.events.length === 1 ? '' : 's'} · {filteredKonfis.length} Konfi{filteredKonfis.length === 1 ? '' : 's'}
+                {data.events.length} Pflicht-Event{data.events.length === 1 ? '' : 's'} · {filteredKonfis.length} Konfi{filteredKonfis.length === 1 ? '' : 's'}
               </IonLabel>
             </IonListHeader>
             <IonCard className="app-card">
@@ -518,7 +520,7 @@ const AttendanceMatrixModal: React.FC<AttendanceMatrixModalProps> = ({
             <div style={{ fontWeight: 'var(--app-schrift-halbfett)', fontSize: 'var(--app-text-basis)' }}>{eventPopover?.event.name}</div>
             <div style={{ color: 'var(--app-text-secondary)', fontSize: 'var(--app-text-hinweis)', marginTop: 'var(--app-abstand-winzig)' }}>
               {eventPopover
-                ? new Date(eventPopover.event.event_date).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' })
+                ? datumKurz(eventPopover.event.event_date)
                 : ''}
             </div>
           </div>

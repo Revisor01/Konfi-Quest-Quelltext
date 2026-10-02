@@ -1,0 +1,37 @@
+# Was NICHT ins Backend-Image gehoert.
+# Ohne diese Datei nahm `COPY . .` alles mit: tests/ samt
+# dem Produktions-Schema-Dump (das Image ist auf ghcr oeffentlich lesbar),
+# die Analyse-Notizen und -- bei einem lokalen Bau -- node_modules mit
+# fremden Binaerdateien, .env und uploads/.
+
+# Abhaengigkeiten entstehen im Image (npm ci).
+node_modules
+
+# Tests, Testdatenbank und Schema-Dump
+tests
+coverage
+docker-compose.test.yml
+
+# Notizen und Doku
+*.md
+
+# Alte Einzel-SQL, zur Laufzeit ungenutzt (das Schema kommt aus init-scripts/
+# im Repo-Wurzelverzeichnis und aus migrations/)
+init-scripts
+
+# Geheimnisse und Laufzeitdaten: kommen in Produktion als Variable bzw.
+# Volume (compose), nie ueber das Image
+.env
+.env.*
+uploads
+push/*.json
+
+# Werkzeug der Entwicklung (Lint laeuft in der CI, nicht im Container)
+eslint.config.js
+
+# Bau-Beiwerk
+Dockerfile
+.dockerignore
+.git
+.DS_Store
+*.log

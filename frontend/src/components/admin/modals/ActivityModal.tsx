@@ -19,6 +19,7 @@ import { networkMonitor } from '../../../services/networkMonitor';
 import { safeUUID } from '../../../utils/uuid';
 import { istPunkteartAktiv, type PunkteartFlags } from '../../../utils/punktearten';
 import { trackHandlung } from '../../../services/analytics';
+import { tastaturKlick } from '../../../utils/tastatur';
 
 interface Activity {
   id: number;
@@ -192,8 +193,8 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
             <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
               <p className="app-text-sub" style={{ marginBottom: 'var(--app-abstand-mini)' }}>Datum *</p>
               <IonDatetimeButton datetime="activity-date" style={{ justifyContent: 'flex-start' }} />
-              <IonModal keepContentsMounted={true}>
-                <IonDatetime
+              <IonModal aria-label="Datum wählen" keepContentsMounted={true}>
+                <IonDatetime aria-label="Datum" aria-required="true"
                   id="activity-date"
                   presentation="date"
                   firstDayOfWeek={1}
@@ -211,7 +212,7 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
               <p className="app-text-sub" style={{ marginTop: 'var(--app-abstand-basis)', marginBottom: 'var(--app-abstand-mini)' }}>Kommentar (optional)</p>
               <IonList style={{ background: 'transparent' }}>
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
-                  <IonTextarea
+                  <IonTextarea aria-label="Zusätzliche Informationen"
                     value={comment}
                     onIonInput={(e) => setComment(e.detail.value!)}
                     placeholder="Zusätzliche Informationen..."
@@ -263,7 +264,7 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
                       : (activity.type === 'gottesdienst' ? 'var(--app-color-gottesdienst-rgb)' : 'var(--app-color-gemeinde-rgb)');
 
                     return (
-                      <div
+                      <div role="button" tabIndex={0} onKeyDown={tastaturKlick}
                         key={activity.id}
                         className={`app-list-item app-list-item--${sectionClass}`}
                         onClick={() => !isSubmitting && setSelectedActivity(activity.id)}
@@ -307,7 +308,7 @@ const ActivityModal: React.FC<ActivityModalProps> = ({ konfiId, onClose, onSave,
                               {activity.categories && activity.categories.length > 0 && (
                                 <div className="app-list-item__meta">
                                   <span className="app-list-item__meta-item">
-                                    <IonIcon icon={ICON_KATEGORIE_GEFUELLT} style={{ color: 'var(--app-color-categories)' }} />
+                                    <IonIcon icon={ICON_KATEGORIE_GEFUELLT} style={{ color: 'var(--app-text-categories)' }} />
                                     {activity.categories.map(cat => cat.name).join(', ')}
                                   </span>
                                 </div>

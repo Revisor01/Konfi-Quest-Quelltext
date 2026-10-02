@@ -10,9 +10,9 @@ import {
   ICON_SICHTBAR_GEFUELLT,
   ICON_TERMIN,
   ICON_TERMIN_GEFUELLT,
-  ICON_ZURUECK,
   ICON_ZUSAGE_GEFUELLT,
 } from '../../shared/icons';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   IonPage, IonContent, IonHeader, IonToolbar, IonTitle, IonList, IonItem,
@@ -28,6 +28,8 @@ import api from '../../../services/api';
 import { useApp } from '../../../contexts/AppContext';
 import { SectionHeader, EmptyState } from '../../shared';
 import { closeOpenSlidingItems } from '../../../utils/slidingItems';
+import { datumKurz } from '../../../utils/dateUtils';
+import { fehlerText } from '../../../utils/fehler';
 
 /**
  * Die Rueckblick-Ausgaben verwalten.
@@ -65,7 +67,7 @@ interface Jahrgang {
 }
 
 const datum = (iso: string | null) =>
-  iso ? new Date(iso).toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '';
+  iso ? datumKurz(iso) : '';
 
 /**
  * Die waehlbaren Jahre fuer einen TEAM-Rueckblick.
@@ -175,8 +177,7 @@ const AdminWrappedPage: React.FC = () => {
       setNeuerName('');
       await laden();
     } catch (e) {
-      const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
-      setError(msg || 'Rückblick konnte nicht erstellt werden');
+      setError(fehlerText(e, 'Rückblick konnte nicht erstellt werden'));
     } finally {
       setErzeugt(false);
     }
@@ -199,8 +200,7 @@ const AdminWrappedPage: React.FC = () => {
               setSuccess('Ausgabe gelöscht');
               await laden();
             } catch (e) {
-              const msg = (e as { response?: { data?: { error?: string } } })?.response?.data?.error;
-              setError(msg || 'Löschen fehlgeschlagen');
+              setError(fehlerText(e, 'Löschen fehlgeschlagen'));
             }
           },
         },
@@ -212,28 +212,19 @@ const AdminWrappedPage: React.FC = () => {
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonButtons slot="start">
-            <IonButton aria-label="Zurück" onClick={() => window.history.back()}>
-              <IonIcon icon={ICON_ZURUECK} />
-            </IonButton>
-          </IonButtons>
-          <IonTitle>Jahresrückblick</IonTitle>
-          <IonButtons slot="end">
-            <IonButton aria-label="Neuen Rückblick anlegen" onClick={() => setModalOffen(true)} disabled={!istLeitung && segment === 'teamer'}>
-              <IonIcon icon={ICON_HINZUFUEGEN} slot="icon-only" />
-            </IonButton>
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile
+        titel="Jahresrückblick"
+        onZurueck={() => window.history.back()}
+        gemeindeUmschalter={false}
+        rechts={(
+          <IonButton aria-label="Neuen Rückblick anlegen" onClick={() => setModalOffen(true)} disabled={!istLeitung && segment === 'teamer'}>
+            <IonIcon icon={ICON_HINZUFUEGEN} slot="icon-only" />
+          </IonButton>
+        )}
+      />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Jahresrückblick</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Jahresrückblick" />
 
         <IonRefresher slot="fixed" onIonRefresh={async (e) => { await laden(); e.detail.complete(); }}>
           <IonRefresherContent />
@@ -294,12 +285,12 @@ const AdminWrappedPage: React.FC = () => {
                     // Derselbe Wortlaut wie in der Konfi-Liste
                     // (KonfisView.tsx): Es GIBT Rückblicke, dieser Zugang
                     // darf sie nur nicht sehen.
-                    ? 'Dir ist noch kein Jahrgang zugewiesen. Die Leitung deiner Gemeinde kann das in den Einstellungen ändern.'
+                    ? 'Dir ist noch kein Jahrgang zugewiesen. Die Gemeindeleitung kann das in den Einstellungen ändern.'
                     : segment === 'konfi'
                       ? 'Über das Plus oben legst du einen an — du wählst nur den Jahrgang, alles andere steht fest.'
                       : istLeitung
                         ? 'Über das Plus oben legst du einen an — fürs ganze Team gemeinsam, du wählst nur das Jahr.'
-                        : 'Für das Team ist noch keiner erstellt. Rückblicke fürs Team legt die Leitung deiner Gemeinde an.'}
+                        : 'Für das Team ist noch keiner erstellt. Rückblicke fürs Team legt die Gemeindeleitung an.'}
                   iconColor="var(--app-color-wrapped)"
                 />
               </IonCardContent>
@@ -348,6 +339,8 @@ const AdminWrappedPage: React.FC = () => {
                               className="app-corner-badge"
                               style={{ backgroundColor: 'var(--app-color-success)' }}
                               title="Freigegeben"
+                              role="img"
+                              aria-label="Freigegeben"
                             >
                               <IonIcon icon={ICON_SICHTBAR_GEFUELLT} />
                             </div>
@@ -416,6 +409,7 @@ const AdminWrappedPage: React.FC = () => {
         )}
 
         <IonModal
+          aria-labelledby="wrapped-neu-titel"
           isOpen={modalOffen}
           onDidDismiss={() => setModalOffen(false)}
           presentingElement={presentingElement || undefined}
@@ -427,7 +421,7 @@ const AdminWrappedPage: React.FC = () => {
                   <IonIcon icon={ICON_SCHLIESSEN} slot="icon-only" />
                 </IonButton>
               </IonButtons>
-              <IonTitle>Neuer Rückblick</IonTitle>
+              <IonTitle id="wrapped-neu-titel">Neuer Rückblick</IonTitle>
               <IonButtons slot="end">
                 <IonButton onClick={erzeugen} disabled={erzeugt} aria-label="Rückblick erstellen und freigeben">
                   {erzeugt ? <IonSpinner name="crescent" /> : <IonIcon icon={ICON_HAKEN} slot="icon-only" />}
@@ -450,8 +444,10 @@ const AdminWrappedPage: React.FC = () => {
                     <IonItem lines="none" style={{ '--background': 'transparent' }}>
                       <IonIcon icon={ICON_TERMIN} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
                       <IonSelect
+                        aria-label="Jahrgang"
                         placeholder="Jahrgang"
                         interface="popover"
+                        interfaceOptions={{ arrow: false }}
                         style={{ width: '100%' }}
                         value={neuerJahrgang}
                         onIonChange={(e) => setNeuerJahrgang(e.detail.value)}
@@ -484,6 +480,7 @@ const AdminWrappedPage: React.FC = () => {
                     <IonItem lines="none" style={{ '--background': 'transparent' }}>
                       <IonIcon icon={ICON_TERMIN} slot="start" style={{ color: 'var(--app-text-system)', fontSize: 'var(--app-text-standard)' }} />
                       <IonSelect
+                        aria-label="Jahr"
                         placeholder="Jahr"
                         interface="action-sheet"
                         interfaceOptions={{ header: 'Welches Jahr?' }}

@@ -42,6 +42,19 @@ export interface AdminUser {
   assigned_jahrgaenge_count: number;
   assigned_jahrgaenge?: { id: number; name: string; can_view?: boolean; can_edit?: boolean; assigned_at?: string; assigned_by_name?: string }[];
   can_edit?: boolean;
+  /**
+   * 'stamm': das Konto ist in dieser Gemeinde zuhause. 'weitere': die Person
+   * arbeitet hier ueber eine Gemeinde-Einladung mit -- verwaltbar sind dann
+   * nur Rolle und Jahrgaenge, nicht Name, E-Mail, Passwort oder Sperre.
+   */
+  mitgliedschaft?: 'stamm' | 'weitere';
+  /**
+   * In wie vielen ANDEREN Gemeinden die Person ausserdem Mitglied ist (nur die
+   * Zahl, keine Namen; GET /users). Bei 'stamm' und einem Wert ueber 0 loescht
+   * DELETE nicht das Konto, sondern entfernt die Person nur aus dieser
+   * Gemeinde -- ihr Konto zieht in eine der anderen um.
+   */
+  weitere_gemeinden?: number;
 }
 
 /**
@@ -117,6 +130,7 @@ export interface EventPunkteEintrag {
   created_at?: string;
   admin_id?: number;
   event_name?: string;
+  /** Datum des Termins -- angezeigt wird DIESES, nicht awarded_date. */
   event_date?: string;
   admin_name?: string;
 }

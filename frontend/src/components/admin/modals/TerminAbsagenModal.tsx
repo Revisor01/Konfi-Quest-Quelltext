@@ -108,7 +108,7 @@ const TerminAbsagenModal: React.FC<TerminAbsagenModalProps> = ({
       } catch (err) {
         setError(fehlerText(err, istGrundModus
           ? 'Fehler beim Speichern des Absagegrundes'
-          : 'Fehler beim Absagen des Termins'));
+          : 'Fehler beim Absagen des Events'));
       }
     });
   };
@@ -125,7 +125,7 @@ const TerminAbsagenModal: React.FC<TerminAbsagenModalProps> = ({
           </IonButtons>
           <IonButtons slot="end">
             <IonButton
-              aria-label={istGrundModus ? 'Absagegrund speichern' : 'Termin absagen'}
+              aria-label={istGrundModus ? 'Absagegrund speichern' : 'Event absagen'}
               className="app-modal-submit-btn app-modal-submit-btn--events"
               onClick={handleSave}
               disabled={isSubmitting || !isOnline}
@@ -172,8 +172,8 @@ const TerminAbsagenModal: React.FC<TerminAbsagenModalProps> = ({
               </IonList>
               <IonNote className="app-hinweis-text">
                 {istGrundModus
-                  ? 'Alle Angemeldeten sehen den Grund am Termin. Es geht keine neue Mitteilung raus — die Absage ist schon gemeldet. Leerst du das Feld, fällt der Grund weg.'
-                  : 'Alle Angemeldeten sehen den Grund am Termin und bekommen ihn in der Mitteilung. Ohne Grund wird nur die Absage gemeldet.'}
+                  ? 'Alle Angemeldeten sehen den Grund am Event. Es geht keine neue Mitteilung raus — die Absage ist schon gemeldet. Leerst du das Feld, fällt der Grund weg.'
+                  : 'Alle Angemeldeten sehen den Grund am Event und bekommen ihn in der Mitteilung. Ohne Grund wird nur die Absage gemeldet.'}
               </IonNote>
             </IonCardContent>
           </IonCard>

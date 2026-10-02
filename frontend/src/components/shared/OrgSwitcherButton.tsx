@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
+  IonBadge,
   IonButtons,
   IonButton,
   IonIcon,
@@ -11,13 +12,18 @@ import {
   IonLabel
 } from '@ionic/react';
 import { useIonRouter } from '@ionic/react';
-import { ICON_HAKEN_GEFUELLT, ICON_ORGANISATION, ICON_WECHSEL } from './icons';
+import { ICON_ORGANISATION, ICON_WECHSEL } from './icons';
 import { useApp } from '../../contexts/AppContext';
 import { UserOrganization } from '../../contexts/AppContext';
+import api from '../../services/api';
+import { offenJeOrgAusAntwort } from '../../utils/offenJeGemeinde';
 
 // Kurzname für die Header-Anzeige (Platz neben dem Seitentitel ist knapp).
 // Explizites Mapping für die bekannten Orgs; Fallback für kuenftige Orgs ist
 // das letzte Slug-Segment, kapitalisiert (z.B. 'kirchengemeinde-heide' -> 'Heide').
+// Eine Kurzform in den Organisationsdaten gibt es nicht; die Breite deckelt
+// zusaetzlich das CSS (app-org-switcher-btn__name), der volle Name steht im
+// aria-label des Knopfs und in der Liste.
 const ORG_SHORT_NAMES: Record<string, string> = {
   'test-demo': 'Test'
 };
@@ -32,22 +38,34 @@ const shortOrgName = (org?: UserOrganization): string => {
   return org.display_name || org.name || '';
 };
 
+// Die Regel, wie die Antwort gelesen wird, steht in utils/offenJeGemeinde.ts:
+// Das App-Symbol liest dieselbe Antwort.
+export { offenJeOrgAusAntwort };
+
 /**
- * Org-Switcher oben links im Header. Erscheint NUR, wenn der eingeloggte User in
- * mehreren Organisationen Mitglied ist (Multi-Org). Der Button zeigt das Wechsel-
- * Symbol UND den Namen der aktuell aktiven Org (so weiß man immer, wo man ist).
- * Tippen oeffnet ein Popover mit allen Orgs; die aktive ist mit Haekchen markiert.
- * Bei Auswahl wird über den AppContext gewechselt (neues Token, Cache-Reset,
- * org:switched-Event + Root-Navigation -> alle Views laden frisch in der neuen Org).
- *
  * Das Icon hat KEINE Farbklasse -> Standard-Toolbar-Farbe, genau wie die
  * Action-Buttons rechts im selben Header.
+ *
+ * Abgefragt wird beim Oeffnen, damit die Zahl dann frisch ist. Schlaegt die
+ * Abfrage fehl, bleibt die Liste ohne Zahlen benutzbar -- der Indikator ist
+ * Beiwerk. Die Summe der Eintraege ist die Zahl am App-Symbol:
+ * Server und BadgeContext rechnen sie aus derselben Aufteilung.
  */
 const OrgSwitcherButton: React.FC = () => {
   const { organizations, activeOrgId, user, switchOrg } = useApp();
   const router = useIonRouter();
   const [popoverEvent, setPopoverEvent] = useState<MouseEvent | undefined>(undefined);
   const [isOpen, setIsOpen] = useState(false);
+  const [offenJeOrg, setOffenJeOrg] = useState<Record<number, number>>({});
+
+  const ladeOffenJeOrg = useCallback(async () => {
+    try {
+      const { data } = await api.get('/notifications/badge-counts/je-organisation');
+      setOffenJeOrg(offenJeOrgAusAntwort(data));
+    } catch {
+      // Ohne Zahl bleibt die Liste, wie sie war -- kein Hinweis, kein Fehler.
+    }
+  }, []);
 
   // Nur bei echtem Multi-Org-User anzeigen
   if (!organizations || organizations.length <= 1) {
@@ -62,6 +80,7 @@ const OrgSwitcherButton: React.FC = () => {
   const open = (e: React.MouseEvent) => {
     setPopoverEvent(e.nativeEvent);
     setIsOpen(true);
+    void ladeOffenJeOrg();
   };
 
   const handleSelect = async (orgId: number) => {
@@ -86,7 +105,11 @@ const OrgSwitcherButton: React.FC = () => {
       <IonButtons slot="start">
         {/* Icon + aktiver Org-Name -> man sieht immer, in welcher Org man ist.
             Kein Groessen-/Farb-Override: Standard-Toolbar-Look wie die Buttons rechts. */}
-        <IonButton onClick={open} className="app-org-switcher-btn">
+        <IonButton
+          onClick={open}
+          className="app-org-switcher-btn"
+          aria-label={`Gemeinde wechseln, gerade ${currentOrg?.display_name || currentOrg?.name || currentShort}`}
+        >
           <IonIcon slot="start" icon={ICON_WECHSEL} />
           <span className="app-org-switcher-btn__name">{currentShort}</span>
         </IonButton>
@@ -104,22 +127,37 @@ const OrgSwitcherButton: React.FC = () => {
         <IonContent>
           <IonList>
             <IonListHeader>
-              <IonLabel>Organisation wechseln</IonLabel>
+              <IonLabel>Gemeinde wechseln</IonLabel>
             </IonListHeader>
-            {organizations.map((org) => (
-              <IonItem
-                key={org.id}
-                button
-                detail={false}
-                onClick={() => handleSelect(org.id)}
-              >
-                <IonIcon slot="start" icon={ICON_ORGANISATION} />
-                <IonLabel>{org.display_name || org.name}</IonLabel>
-                {org.id === currentId && (
-                  <IonIcon slot="end" icon={ICON_HAKEN_GEFUELLT} color="success" />
-                )}
-              </IonItem>
-            ))}
+            {organizations.map((org) => {
+              const offen = offenJeOrg[org.id] || 0;
+              const aktiv = org.id === currentId;
+              return (
+                <IonItem
+                  key={org.id}
+                  button
+                  detail={false}
+                  onClick={() => handleSelect(org.id)}
+                  className={aktiv ? 'app-org-switcher__eintrag app-org-switcher__eintrag--aktiv' : 'app-org-switcher__eintrag'}
+                  aria-current={aktiv ? 'true' : undefined}
+                >
+                  <IonIcon slot="start" icon={ICON_ORGANISATION} />
+                  <IonLabel>{org.display_name || org.name}</IonLabel>
+                  {/* Rote Zahl wie am Reiter (MainTabs): "da liegt etwas". Bei 0
+                      nichts -- ruhige Liste, die Zahl ist der Hinweis. */}
+                  {offen > 0 && (
+                    <IonBadge
+                      slot="end"
+                      color="danger"
+                      className="app-org-switcher__offen"
+                      aria-label={`${offen} offen`}
+                    >
+                      {offen > 99 ? '99+' : offen}
+                    </IonBadge>
+                  )}
+                </IonItem>
+              );
+            })}
           </IonList>
         </IonContent>
       </IonPopover>

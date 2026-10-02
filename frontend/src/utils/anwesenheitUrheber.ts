@@ -1,3 +1,4 @@
+import { datumKurz } from './dateUtils';
 // NULL HEISST UNBEKANNT, NICHT NIEMAND: Buchungen von vor der Migration und
 // Selbst-Check-ins per QR-Code tragen keinen Urheber. Dann faellt die Zeile
 // ersatzlos weg -- "Eingetragen von unbekannt" behauptet mehr, als bekannt
@@ -183,5 +184,5 @@ const kurzesDatum = (zeitstempel: string | null | undefined): string | null => {
   if (!zeitstempel) return null;
   const d = new Date(zeitstempel);
   if (Number.isNaN(d.getTime())) return null;
-  return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+  return datumKurz(d, { ohneJahr: true });
 };

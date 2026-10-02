@@ -1,17 +1,82 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-  <dict>
-    <key>NSPrivacyAccessedAPITypes</key>
-    <array>
-      <dict>
-        <key>NSPrivacyAccessedAPIType</key>
-        <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
-        <key>NSPrivacyAccessedAPITypeReasons</key>
-        <array>
-          <string>C617.1</string>
-        </array>
-      </dict>
-    </array>
-  </dict>
+<dict>
+	<!--
+	Privacy Manifest der App selbst. Firebase (Crashlytics, Messaging,
+	Installations) bringt eigene Manifeste in den Pods mit; Xcode fasst alle
+	zusammen. Hier steht nur, was der eigene Code tut:
+	  - Umami (services/analytics.ts): Seitenaufrufe, Bereichswechsel,
+	    Handlungen, Fehlerstellen. Ohne Nutzer-ID, ohne Cookie, selbst
+	    gehostet, keine Weitergabe -> kein Tracking im Sinne Apples.
+	  - Push-Token (contexts/AppContext.tsx -> /notifications/device-token):
+	    Geraete-Kennung, am Konto gespeichert, nur fuer Mitteilungen.
+	  - Required-Reason-APIs der Capacitor-Plugins ohne eigenes Manifest:
+	    @capacitor/preferences (UserDefaults), @capacitor/filesystem
+	    (Dateizeitstempel).
+	Test: src/__tests__/config/privacyManifest.test.ts
+	-->
+	<key>NSPrivacyTracking</key>
+	<false/>
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeProductInteraction</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAnalytics</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeOtherDiagnosticData</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAnalytics</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyCollectedDataType</key>
+			<string>NSPrivacyCollectedDataTypeDeviceID</string>
+			<key>NSPrivacyCollectedDataTypeLinked</key>
+			<true/>
+			<key>NSPrivacyCollectedDataTypeTracking</key>
+			<false/>
+			<key>NSPrivacyCollectedDataTypePurposes</key>
+			<array>
+				<string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>C617.1</string>
+			</array>
+		</dict>
+		<dict>
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
 </plist>

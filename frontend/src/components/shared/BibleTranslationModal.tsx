@@ -4,6 +4,7 @@ import {
   IonIcon, IonList, IonListHeader, IonLabel, IonCard, IonCardContent,
 } from '@ionic/react';
 import { ICON_BUCH, ICON_HAKEN_GEFUELLT, ICON_SCHLIESSEN } from './icons';
+import { tastaturKlick } from '../../utils/tastatur';
 
 export const BIBLE_TRANSLATIONS = [
   { code: 'LUT', name: 'Lutherbibel 2017', description: 'Die klassische deutsche Standardübersetzung, nah am Originaltext mit der Sprachkraft Martin Luthers. Weit verbreitet in evangelischen Gottesdiensten.' },
@@ -58,7 +59,7 @@ const BibleTranslationModal: React.FC<BibleTranslationModalProps> = ({
               {BIBLE_TRANSLATIONS.map((t) => {
                 const isSelected = currentTranslation === t.code;
                 return (
-                  <div
+                  <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-pressed={isSelected}
                     key={t.code}
                     className={`app-list-item app-list-item--${itemVariant} ${isSelected ? 'app-list-item--selected' : ''}`}
                     onClick={() => onSelect(t.code)}
@@ -74,6 +75,8 @@ const BibleTranslationModal: React.FC<BibleTranslationModalProps> = ({
                           className="app-corner-badge"
                           style={{ backgroundColor: accentColor, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 'var(--app-abstand-mini) var(--app-abstand-eng)' }}
                           title="Ausgewählt"
+                          role="img"
+                          aria-label="Ausgewählt"
                         >
                           <IonIcon icon={ICON_HAKEN_GEFUELLT} style={{ color: 'white', fontSize: 'var(--app-text-sekundaer)' }} />
                         </div>

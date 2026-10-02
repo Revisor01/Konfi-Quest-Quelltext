@@ -6,10 +6,14 @@ const { checkPointTypeEnabled } = require('../utils/pointTypeGuard');
 const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
 const { heuteBerlin } = require('../utils/zeitformat');
-const { decryptBuffer } = require('../utils/photoCrypto');
+const { decryptFileToStream } = require('../utils/photoCrypto');
 const { deletePhotoFile } = require('../utils/photoStorage');
 const { allIdsBelongToOrg } = require('../utils/orgOwnership');
 const { darfKonfi } = require('../utils/jahrgangsZugriff');
+const { loescheMitteilungenZuAntraegen } = require('../utils/postfachAufraeumen');
+// Wer welchen Antrag sieht: EINE Regel fuer Liste, Zaehler und die Empfaenger
+// von "Neuer Antrag eingegangen".
+const { leitungSiehtAlleAntraege, gebundeneLeitungSiehtAntragSql } = require('../utils/antragLeitungSicht');
 
 // Aktivitäten: Teamer darf ansehen und Punkte vergeben, Admin darf bearbeiten
 // Requests: NUR Admin (Datenschutz!)
@@ -140,7 +144,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
     try {
       // Org-Isolation: fremde category_ids abweisen (Cross-Org-Referenzen)
       if (!(await allIdsBelongToOrg(db, 'categories', category_ids, req.user.organization_id))) {
-        return res.status(400).json({ error: 'Mindestens eine Kategorie gehört nicht zu deiner Organisation' });
+        return res.status(400).json({ error: 'Mindestens eine Kategorie gehört nicht zu deiner Gemeinde' });
       }
 
       const actPoints = activityTargetRole === 'teamer' ? (points || 0) : points;
@@ -184,7 +188,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
     try {
       // Org-Isolation: fremde category_ids abweisen (Cross-Org-Referenzen)
       if (!(await allIdsBelongToOrg(db, 'categories', category_ids, req.user.organization_id))) {
-        return res.status(400).json({ error: 'Mindestens eine Kategorie gehört nicht zu deiner Organisation' });
+        return res.status(400).json({ error: 'Mindestens eine Kategorie gehört nicht zu deiner Gemeinde' });
       }
 
       const actPoints = activityTargetRole === 'teamer' ? (points || 0) : points;
@@ -212,7 +216,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'activities', 'update');
 
     } catch (err) {
- console.error(`Database error in PUT /api/activities/${activityId}:`, err);
+ console.error('Database error in PUT /api/activities/%s:', activityId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -258,17 +262,21 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
       try {
         await client.query('BEGIN');
         if (requestCheck.rejected > 0) {
-          const { rows: fotos } = await client.query(
-            `SELECT photo_filename FROM activity_requests
+          const { rows: abgelehnte } = await client.query(
+            `SELECT id, photo_filename FROM activity_requests
               WHERE activity_id = $1 AND organization_id = $2
-                AND status = 'rejected' AND photo_filename IS NOT NULL`,
+                AND status = 'rejected'`,
             [activityId, req.user.organization_id]
           );
-          fotosZumLoeschen = fotos.map(f => f.photo_filename);
+          fotosZumLoeschen = abgelehnte.map(f => f.photo_filename).filter(Boolean);
           await client.query(
             "DELETE FROM activity_requests WHERE activity_id = $1 AND organization_id = $2 AND status = 'rejected'",
             [activityId, req.user.organization_id]
           );
+          // Postfach: "Neuer Antrag" und "Antrag eingereicht"
+          // zu diesen Antraegen gehen mit; die Ablehnung selbst bleibt als
+          // Verlauf stehen (utils/postfachAufraeumen.js).
+          await loescheMitteilungenZuAntraegen(client, abgelehnte.map(a => a.id));
         }
         const res2 = await client.query(
           "DELETE FROM activities WHERE id = $1 AND organization_id = $2",
@@ -301,7 +309,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
       liveUpdate.sendToOrgAdmins(req.user.organization_id, 'activities', 'delete');
 
     } catch (err) {
- console.error(`Database error in DELETE /api/activities/${activityId}:`, err);
+ console.error('Database error in DELETE /api/activities/%s:', activityId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -310,16 +318,47 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
   // ACTIVITY REQUESTS MANAGEMENT
   // ====================================================================
 
+  // Die Felder EINES Antrags, wie Liste und Einzelabruf sie liefern -- ein
+  // Ort, damit GET /requests/:id genau die Form eines Listeneintrags hat
+  // An der Liste ist die Form ein Vertrag: Store-Apps 2.2.x und
+  // 2.3.0 oeffnen einen Antrag, indem sie ihn per .find() aus ihr heraussuchen.
+  const ANTRAG_AUSWAHL = `
+        SELECT ar.*, u_konfi.display_name as konfi_name, a.name as activity_name, a.points as activity_points, a.type as activity_type,
+               a.target_role as activity_target_role,
+               u_approved.display_name as approved_by_name
+        FROM activity_requests ar
+        JOIN users u_konfi ON ar.user_id = u_konfi.id
+        JOIN activities a ON ar.activity_id = a.id
+        LEFT JOIN users u_approved ON ar.approved_by = u_approved.id`;
+
+  // Die can_view-Jahrgaenge eines jahrgangsgebundenen Admins -- Eingabe fuer
+  // gebundeneLeitungSiehtAntragSql (utils/antragLeitungSicht.js).
+  const sichtbareJahrgaenge = (user) => (user.assigned_jahrgaenge || [])
+    .filter(j => j.can_view)
+    .map(j => j.id);
+
   // GET all activity requests for an organization
   // Pfad: GET /api/admin/activities/requests
+  //
+  // Optionaler Filter ?user_id=<id>: nur die
+  // Antraege dieser Person. Die Detailansicht einer Konfi lud vorher die
+  // ganze Antragsgeschichte der Gemeinde, um die Antraege EINER Person zu
+  // finden. Die Sichtregel gilt unveraendert daneben -- wer die Person nicht
+  // sieht, bekommt ein leeres Array. Ohne Parameter bleibt die Liste exakt,
+  // wie sie war (Vertrag mit den Store-Apps).
   router.get('/requests', rbacVerifier, requireAdmin, async (req, res) => {
     try {
-      const { status } = req.query;
+      const { status, user_id: userIdRoh } = req.query;
       const erlaubteStatus = ['pending', 'approved', 'rejected'];
       if (status !== undefined && !erlaubteStatus.includes(status)) {
         return res.status(400).json({
           error: `Unbekannter Status. Erlaubt: ${erlaubteStatus.join(', ')}`
         });
+      }
+      // Wie bei ?status=: ein unbrauchbarer Wert ist ein Fehler, keine
+      // stille Vollausgabe.
+      if (userIdRoh !== undefined && !(typeof userIdRoh === 'string' && /^[1-9]\d*$/.test(userIdRoh))) {
+        return res.status(400).json({ error: 'Ungültige user_id' });
       }
 
       const params = [req.user.organization_id];
@@ -327,6 +366,11 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
       if (status) {
         params.push(status);
         statusFilter = ` AND ar.status = $${params.length}`;
+      }
+      let personFilter = '';
+      if (userIdRoh !== undefined) {
+        params.push(userIdRoh);
+        personFilter = ` AND ar.user_id = $${params.length}`;
       }
 
       // Jahrgangs-Bindung als FILTER, nicht als 403: Die Liste
@@ -341,31 +385,19 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
       // Teamer:innen sieht ein Admin laut Regel alle, und sie haben keinen
       // Jahrgang, über den gefiltert werden könnte.
       let jahrgangFilter = '';
-      const vollzugriff = req.user.is_super_admin
-        || ['super_admin', 'org_admin'].includes(req.user.role_name);
-      if (!vollzugriff) {
-        const sichtbare = (req.user.assigned_jahrgaenge || [])
-          .filter(j => j.can_view)
-          .map(j => j.id);
+      if (!leitungSiehtAlleAntraege(req.user)) {
+        const sichtbare = sichtbareJahrgaenge(req.user);
         if (sichtbare.length === 0) {
           res.set('X-Kein-Jahrgang-Zugewiesen', 'true');
-          jahrgangFilter = ` AND a.target_role = 'teamer'`;
-        } else {
-          params.push(sichtbare);
-          jahrgangFilter = ` AND (a.target_role = 'teamer' OR kp.jahrgang_id = ANY($${params.length}::int[]))`;
         }
+        // Leeres Array trifft keinen Konfi-Jahrgang: ohne Zuweisung bleiben
+        // nur die Teamer-Antraege.
+        params.push(sichtbare);
+        jahrgangFilter = ` AND ${gebundeneLeitungSiehtAntragSql({ jahrgaenge: `$${params.length}::int[]` })}`;
       }
 
-      const query = `
-        SELECT ar.*, u_konfi.display_name as konfi_name, a.name as activity_name, a.points as activity_points, a.type as activity_type,
-               a.target_role as activity_target_role,
-               u_approved.display_name as approved_by_name
-        FROM activity_requests ar
-        JOIN users u_konfi ON ar.user_id = u_konfi.id
-        JOIN activities a ON ar.activity_id = a.id
-        LEFT JOIN konfi_profiles kp ON kp.user_id = ar.user_id
-        LEFT JOIN users u_approved ON ar.approved_by = u_approved.id
-        WHERE a.organization_id = $1${statusFilter}${jahrgangFilter}
+      const query = `${ANTRAG_AUSWAHL}
+        WHERE a.organization_id = $1${statusFilter}${personFilter}${jahrgangFilter}
         ORDER BY ar.created_at DESC
       `;
 
@@ -377,6 +409,52 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
+
+  // EIN Antrag.
+  // Pfad: GET /api/admin/activities/requests/:id
+  //
+  // Additiv: Der Antragsdialog der Leitung lud vorher die ganze Liste (ohne
+  // LIMIT, genehmigte Antraege werden nie geloescht) und suchte den einen
+  // Antrag per .find() heraus. Die Antwort ist genau ein Listeneintrag
+  // (ANTRAG_AUSWAHL), die Sichtregel dieselbe wie in der Liste
+  // (utils/antragLeitungSicht.js):
+  //   - fremde Gemeinde oder unbekannte Id: 404 -- ob es den Antrag
+  //     anderswo gibt, verraet die Route nicht;
+  //   - Antrag der eigenen Gemeinde, den die Liste diesem Admin nicht zeigt
+  //     (Konfi ausserhalb seiner can_view-Jahrgaenge): 403 "Kein Zugriff auf
+  //     diesen Konfi", wie PUT/DELETE/Foto an demselben Antrag.
+  router.get('/requests/:id', rbacVerifier, requireAdmin,
+    [param('id').isInt({ min: 1 }).withMessage('Ungültige ID'), handleValidationErrors],
+    async (req, res) => {
+      const requestId = req.params.id;
+      try {
+        const { rows: [antrag] } = await db.query(
+          `${ANTRAG_AUSWAHL}
+          WHERE a.organization_id = $1 AND ar.id = $2`,
+          [req.user.organization_id, requestId]
+        );
+        if (!antrag) return res.status(404).json({ error: 'Antrag nicht gefunden' });
+
+        if (!leitungSiehtAlleAntraege(req.user)) {
+          const { rows: [sichtbar] } = await db.query(
+            `SELECT 1
+               FROM activity_requests ar
+               JOIN activities a ON a.id = ar.activity_id
+              WHERE ar.id = $1
+                AND ${gebundeneLeitungSiehtAntragSql({ jahrgaenge: '$2::int[]' })}`,
+            [requestId, sichtbareJahrgaenge(req.user)]
+          );
+          if (!sichtbar) {
+            return res.status(403).json({ error: 'Kein Zugriff auf diesen Konfi' });
+          }
+        }
+
+        res.json(antrag);
+      } catch (err) {
+        console.error('Database error in GET /api/admin/activities/requests/%s:', requestId, err);
+        res.status(500).json({ error: 'Datenbankfehler' });
+      }
+    });
 
   // PUT (update) an activity request status - zurück zu pending
   // Pfad: PUT /api/activities/requests/:id/reset
@@ -417,6 +495,12 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
         }
 
         await db.query('DELETE FROM activity_requests WHERE id = $1', [requestId]);
+        // Postfach: Die Zustands-Mitteilungen zum Antrag gehen
+        // mit ("Neuer Antrag eingegangen" bei der Leitung, "Antrag
+        // eingereicht" bei der antragstellenden Person). Die Entscheidung
+        // "Antrag abgelehnt" BLEIBT -- sie ist Verlauf, und ihr Ziel, die
+        // Antragsliste, gibt es weiter (utils/postfachAufraeumen.js).
+        await loescheMitteilungenZuAntraegen(db, [requestId]);
 
         if (antrag.photo_filename) {
           await deletePhotoFile(antrag.photo_filename).catch(err =>
@@ -465,25 +549,25 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
 
         // SCHRITT 1: Alte Entscheidung rückgängig machen
         if (oldStatus === 'approved') {
-
-          // Punkte abziehen nur für Konfi-Activities (Teamer haben keine bekommen)
-          if (!isTeamerActivity) {
-            const pointField = getPointField(request.type);
-            await client.query(`UPDATE konfi_profiles SET ${pointField} = GREATEST(0, ${pointField} - $1) WHERE user_id = $2`, [request.points, request.user_id]);
-          }
-
-          // konfi_activity Eintrag löschen
-          await client.query(
-            `DELETE FROM user_activities
-             WHERE id = (
-               SELECT id FROM user_activities
-               WHERE user_id = $1 AND activity_id = $2
-               ORDER BY completed_date DESC, id DESC
-               LIMIT 1
-             )`,
+          const { rows: [zuordnung] } = await client.query(
+            `SELECT ua.id, COALESCE(ua.points, a.points) AS points
+               FROM user_activities ua
+               JOIN activities a ON a.id = ua.activity_id
+              WHERE ua.user_id = $1 AND ua.activity_id = $2
+              ORDER BY ua.completed_date DESC, ua.id DESC
+              LIMIT 1`,
             [request.user_id, request.activity_id]
           );
 
+          if (zuordnung) {
+            // Punkte abziehen nur für Konfi-Activities (Teamer haben keine bekommen)
+            if (!isTeamerActivity && zuordnung.points) {
+              const pointField = getPointField(request.type);
+              await client.query(`UPDATE konfi_profiles SET ${pointField} = GREATEST(0, ${pointField} - $1) WHERE user_id = $2`, [zuordnung.points, request.user_id]);
+            }
+
+            await client.query('DELETE FROM user_activities WHERE id = $1', [zuordnung.id]);
+          }
         }
 
         // SCHRITT 2: Status auf pending setzen, Kommentar löschen
@@ -514,7 +598,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
       }
 
     } catch (err) {
- console.error(`Database error in PUT /api/activities/requests/${requestId}/reset:`, err);
+ console.error('Database error in PUT /api/activities/requests/%s/reset:', requestId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -573,7 +657,13 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
         await client.query(updateRequestQuery, [status, admin_comment, req.user.id, requestId]);
 
         if (status === 'approved') {
-          await client.query("INSERT INTO user_activities (user_id, activity_id, admin_id, completed_date, organization_id) VALUES ($1, $2, $3, $4, $5)", [request.user_id, request.activity_id, req.user.id, request.requested_date, req.user.organization_id]);
+          // points: der Wert der Aktivität JETZT, am Beleg festgehalten
+          // (Migration 163). Ändert die Leitung die Aktivität später, bleibt
+          // dieser Wert — Historie und Rücknahme lesen ihn.
+          await client.query(
+            "INSERT INTO user_activities (user_id, activity_id, admin_id, completed_date, organization_id, points) VALUES ($1, $2, $3, $4, $5, $6)",
+            [request.user_id, request.activity_id, req.user.id, request.requested_date, req.user.organization_id, request.points]
+          );
 
           // Punkte nur für Konfi-Activities (Teamer-Activities sind nur Nachweis)
           if (!isTeamerActivity) {
@@ -606,7 +696,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
 
       // Badge-Check NACH COMMIT (verwendet db Pool)
       if (status === 'approved') {
-        newBadges = await checkAndAwardBadges(db, request.user_id);
+        newBadges = await checkAndAwardBadges(db, request.user_id, { organizationId: req.user.organization_id });
 
         // Level-Check NACH Badge-Check
         try {
@@ -692,7 +782,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
       liveUpdate.sendToUserByRole(request.user_id, 'points', 'update');
       liveUpdate.sendToUserByRole(request.user_id, 'requests', 'update');
     } catch (err) {
- console.error(`Database error in PUT /api/activities/requests/${requestId}:`, err);
+ console.error('Database error in PUT /api/activities/requests/%s:', requestId, err);
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
@@ -759,7 +849,12 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
       try {
         await client.query('BEGIN');
 
-        await client.query("INSERT INTO user_activities (user_id, activity_id, admin_id, completed_date, organization_id) VALUES ($1, $2, $3, $4, $5)", [konfiId, activityId, req.user.id, date, req.user.organization_id]);
+        // points: Wert der Aktivität zum Zeitpunkt der Vergabe, am Beleg
+        // festgehalten.
+        await client.query(
+          "INSERT INTO user_activities (user_id, activity_id, admin_id, completed_date, organization_id, points) VALUES ($1, $2, $3, $4, $5, $6)",
+          [konfiId, activityId, req.user.id, date, req.user.organization_id, activity.points]
+        );
 
         if (!isTeamerActivity && activity.points && activity.type) {
           const pointField = getPointField(activity.type);
@@ -775,7 +870,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
       }
 
       // Badge-Check NACH COMMIT (verwendet db Pool) - für Konfis UND Teamer
-      const badgeResult = await checkAndAwardBadges(db, konfiId);
+      const badgeResult = await checkAndAwardBadges(db, konfiId, { organizationId: req.user.organization_id });
 
       // Level-Check NACH Badge-Check
       try {
@@ -829,7 +924,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
 
       // Organization check
       if (request.organization_id !== req.user.organization_id) {
-        return res.status(403).json({ error: 'Keine Berechtigung für diese Organisation' });
+        return res.status(403).json({ error: 'Keine Berechtigung für diese Gemeinde' });
       }
 
       // Jahrgangs-Bindung: Ein Nachweisfoto ist das persönlichste
@@ -855,19 +950,19 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
         return res.status(404).json({ error: 'Foto-Datei nicht gefunden' });
       }
 
-      // Datei lesen und (falls verschlüsselt) entschluesseln, dann senden.
+      // Stromweise entschluesseln und senden (frueher: ganze Datei in den
+      // Arbeitsspeicher).
       // Admins sehen das Foto unabhaengig vom Status (auch verbucht/abgelehnt).
-      const fileBuffer = await fs.promises.readFile(photoPath);
-      let imageBuffer;
+      res.setHeader('Content-Type', 'image/jpeg');
       try {
-        imageBuffer = decryptBuffer(fileBuffer);
+        await decryptFileToStream(photoPath, res);
       } catch (decErr) {
         console.error('Error decrypting activity request photo:', decErr);
-        return res.status(500).json({ error: 'Foto konnte nicht entschlüsselt werden' });
+        if (!res.headersSent) {
+          return res.status(500).json({ error: 'Foto konnte nicht entschlüsselt werden' });
+        }
+        res.destroy();
       }
-
-      res.setHeader('Content-Type', 'image/jpeg');
-      res.send(imageBuffer);
     } catch (err) {
  console.error('Error serving activity request photo:', err);
       res.status(500).json({ error: 'Fehler beim Laden des Fotos' });
@@ -899,7 +994,7 @@ module.exports = (db, rbacVerifier, { requireAdmin, requireTeamer }, checkAndAwa
       }
 
       if (request.organization_id !== req.user.organization_id) {
-        return res.status(403).json({ error: 'Keine Berechtigung für diese Organisation' });
+        return res.status(403).json({ error: 'Keine Berechtigung für diese Gemeinde' });
       }
 
       // Jahrgangs-Bindung: analog zur GET-Foto-Route — das Foto

@@ -53,6 +53,7 @@ import 'swiper/css/pagination';
 import 'swiper/css/effect-creative';
 import './WrappedModal.css';
 import './share/ShareCard.css';
+import { punkteText } from '../../utils/punkteText';
 
 interface WrappedModalProps {
   onClose: () => void;
@@ -173,7 +174,7 @@ const WrappedModal: React.FC<WrappedModalProps> = ({ onClose, displayName, jahrg
     if (wrappedType === 'konfi') {
       const k = data as KonfiWrappedData;
       switch (slideKey) {
-        case 'punkte': return { ...base, slideValue: `${k.slides.punkte.total} Punkte gesammelt` };
+        case 'punkte': return { ...base, slideValue: `${punkteText(k.slides.punkte.total)} gesammelt` };
         case 'events': return { ...base, slideValue: `${k.slides.events.total_attended} Events besucht` };
         case 'badges': return { ...base, slideValue: `${k.slides.badges.total_earned} Badges verdient` };
         case 'aktivster-monat': return { ...base, slideValue: `Aktivster Monat: ${k.slides.aktivster_monat.monat_name}` };
@@ -202,11 +203,11 @@ const WrappedModal: React.FC<WrappedModalProps> = ({ onClose, displayName, jahrg
           };
           return { ...base, slideValue: highlightTexte[h?.type || ''] || 'Mein Highlight' };
         }
-        case 'endspurt': return { ...base, slideValue: `Noch ${k.slides.endspurt.fehlende_punkte} Punkte bis zum Ziel` };
+        case 'endspurt': return { ...base, slideValue: `Noch ${punkteText(k.slides.endspurt.fehlende_punkte)} bis zum Ziel` };
         case 'kategorie': return { ...base, slideValue: `Dein Bereich: ${k.slides.kategorie?.top_kategorie || '-'}` };
         case 'konfirmation': return { ...base, slideValue: `Konfirmation: ${konfirmationsTermin(k) || ''}` };
-        case 'ueber-das-ziel': return { ...base, slideValue: `${(k.slides.endspurt.aktuell_total - k.slides.endspurt.ziel_total)} Punkte über dem Ziel!` };
-        case 'abschluss': return { ...base, slideValue: `${k.slides.punkte.total} Punkte, ${k.slides.events.total_attended} Events, ${k.slides.badges.total_earned} Badges` };
+        case 'ueber-das-ziel': return { ...base, slideValue: `${punkteText(k.slides.endspurt.aktuell_total - k.slides.endspurt.ziel_total)} über dem Ziel!` };
+        case 'abschluss': return { ...base, slideValue: `${punkteText(k.slides.punkte.total)}, ${k.slides.events.total_attended} Events, ${k.slides.badges.total_earned} Badges` };
         default: return base;
       }
     } else {
@@ -219,7 +220,7 @@ const WrappedModal: React.FC<WrappedModalProps> = ({ onClose, displayName, jahrg
         case 'teamer-jahre': return { ...base, slideValue: `${t.slides.engagement.jahre_aktiv} Jahre als Teamer:in` };
         case 'teamer-team': return { ...base, slideValue: `Mit ${t.slides.team?.mitstreitende || 0} anderen im Team` };
         case 'teamer-neu-dabei': return { ...base, slideValue: 'Mein erstes Jahr im Team' };
-        case 'teamer-anfang': return { ...base, slideValue: `Erster Termin: ${t.slides.anfang?.name || ''}` };
+        case 'teamer-anfang': return { ...base, slideValue: `Erstes Event: ${t.slides.anfang?.name || ''}` };
         case 'teamer-antworten': return { ...base, slideValue: `${t.slides.chat?.antworten || 0} Mal geantwortet` };
         case 'teamer-konfi-zeit': return { ...base, slideValue: 'Selbst mal Konfi gewesen — heute im Team' };
         case 'stavanger-2026': return { ...base, slideValue: '14 unvergessliche Tage in Himmel og Hav' };
@@ -599,7 +600,12 @@ const WrappedModal: React.FC<WrappedModalProps> = ({ onClose, displayName, jahrg
   };
 
   return (
-    <div className={`wrapped-overlay${wrappedType === 'teamer' ? ' wrapped-overlay--teamer' : ''}`}>
+    // Name des Dialogs fuer Vorlesehilfen -- die Folien haben keine
+    // Kopfzeile mit ion-title (siehe utils/modalNamen.ts).
+    <div
+      className={`wrapped-overlay${wrappedType === 'teamer' ? ' wrapped-overlay--teamer' : ''}`}
+      data-dialogname={wrappedType === 'teamer' ? 'Team-Rückblick' : 'Konfi-Rückblick'}
+    >
       <div className="wrapped-header">
         {slides.length > 0 ? (
           <div className="wrapped-fortschritt">

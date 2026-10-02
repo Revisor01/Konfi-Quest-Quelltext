@@ -1,6 +1,7 @@
 package de.godsapp.konfiquest;
 
 import android.content.SharedPreferences;
+import android.os.Bundle;
 import android.view.WindowManager;
 
 import com.getcapacitor.BridgeActivity;
@@ -38,12 +39,20 @@ public class MainActivity extends BridgeActivity {
     private static final String SCHLUESSEL = "konfi_app_sperre_verzoegerung";
 
     @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        registerPlugin(AppSymbolZahlPlugin.class);
+        super.onCreate(savedInstanceState);
+        bridge.getWebView().setWebChromeClient(new DateiAuswahlChromeClient(bridge));
+    }
+
+    @Override
     public void onResume() {
         super.onResume();
         // Bei jeder Rueckkehr neu bewerten: Die Einstellung kann im Profil
         // geaendert worden sein, seit die Activity zuletzt sichtbar war.
         // onResume laeuft vor dem ersten Bild und ist damit frueh genug.
         sichtschutzAnwenden();
+        AppSymbolZahl.beimOeffnen(this);
     }
 
     /** Setzt oder entfernt FLAG_SECURE nach der aktuellen Einstellung. */

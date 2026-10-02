@@ -85,22 +85,6 @@ const EINSTELLUNG_SCHLUESSEL = 'konfi_app_sperre_verzoegerung';
 /**
  * KARENZZEIT — die heikelste Stelle der ganzen Funktion.
  *
- * DAS PROBLEM:
- * Die App wandert bei ganz normaler Bedienung in den Hintergrund, ohne dass die
- * Person sie verlässt. Im Code nachgesehen, welche Abläufe das auslösen:
- *   - Foto auswählen  (verstecktes <input type="file">, ChallengeSubmitModal,
- *     ChatRoomSections, MaterialFormModal)
- *   - Teilen-Dialog   (Share.share / navigator.share in chatTeilen.ts,
- *     shareUtils.ts, FileViewerModal, ChallengeLeitungModal, AdminInvitePage)
- *   - Karten und Links (window.open auf Maps/Store/Weblinks in EventDetailView,
- *     TeamerEventsPage, MessageBubble, StoreUpdateBanner, …)
- *   - die Face-ID-Abfrage SELBST: das Systemfenster legt die App auf iOS kurz
- *     in den Hintergrund. Ohne Gegenmaßnahme sperrt sich die App genau in dem
- *     Moment erneut, in dem man sie entsperrt — eine Schleife, aus der niemand
- *     herauskommt.
- * Bei 'sofort' würde jeder dieser Abläufe sperren und die App unbenutzbar
- * machen.
- *
  * DIE LÖSUNG — zwei Ebenen, weil eine allein nicht reicht:
  *
  *   1. AUSFLUG-MERKER (ausflugStarten/ausflugBeenden), die verlässliche Ebene.
@@ -110,18 +94,25 @@ const EINSTELLUNG_SCHLUESSEL = 'konfi_app_sperre_verzoegerung';
  *      Fälle ab, in denen jemand minutenlang in der Fotoauswahl blättert.
  *      Die Entsperr-Abfrage selbst setzt diesen Merker ebenfalls.
  *
- *   2. KARENZZEIT von 2 Sekunden als Netz darunter.
- *      Sie fängt die Abläufe ab, die niemand angemeldet hat — und das werden
- *      immer welche sein, weil jeder neue Dialog daran denken müsste. Ein
- *      Hintergrundwechsel unter 2 Sekunden ist kein Verlassen der App, sondern
- *      ein Systemfenster, das aufgeht und wieder zugeht.
- *      2 Sekunden sind bewusst knapp: lang genug für das Flackern beim Öffnen
- *      eines Systemdialogs, zu kurz, um daraus ein Schlupfloch zu machen —
- *      in zwei Sekunden legt niemand ein Handy weg und gibt es weiter.
- *      Sie gilt NUR für 'sofort'; bei 1/5/15 Minuten deckt die eingestellte
- *      Wartezeit das ohnehin ab.
+ *   2. KEINE KARENZZEIT mehr bei 'sofort'.
+ *      Hier standen 2 Sekunden als Netz unter dem Ausflug-Merker. Die haben
+ *      aber genau den Fall verschluckt, für den die Einstellung gemacht ist:
+ *      "Die App ist, wenn man sie aus dem App switcher holt, nicht gelockt,
+ *      obwohl es auf sofort steht." Wer die App aus dem Umschalter zurückholt,
+ *      ist meist unter zwei Sekunden weg — die Sperre griff also nur beim
+ *      Kaltstart (dort entscheidet mussBeimStartSperren) und sonst nie.
+ *      'Sofort' heißt jetzt sofort: JEDER echte Hintergrundwechsel sperrt.
+ *
+ *      Die Systemdialoge deckt allein der Ausflug-Merker ab (Punkt 1). Das ist
+ *      bewusst die schwächere Absicherung, aber die richtige Abwägung: Eine
+ *      Sperre, die den Umschalter durchlässt, ist keine Sperre. Kommt ein neuer
+ *      Dialog dazu, der den Merker nicht setzt, sperrt die App einmal zu oft —
+ *      ärgerlich, aber harmlos. Der umgekehrte Fehler ist ein Sicherheitsleck.
+ *      Bei 1/5/15 Minuten deckt die eingestellte Wartezeit das ohnehin ab.
+ *      Damit das nicht wieder passiert, laufen Dateiauswahl, Teilen und das
+ *      Öffnen fremder Apps durch services/systemDialoge.ts; für die
+ *      Dateiauswahl wacht der Test dateiAuswahlNurUeberHuelle darüber.
  */
-export const KARENZ_MS = 2000;
 
 /** Einstellung lesen. Voreinstellung ist 'aus' — ein Update darf niemandem eine Sperre vorsetzen. */
 export const sperreLesen = async (): Promise<SperrVerzoegerung> => {
@@ -222,7 +213,8 @@ export const mussSperren = (
   // nicht — eine verstellte Uhr darf niemanden aussperren.
   if (!Number.isFinite(abwesend) || abwesend < 0) return false;
 
-  if (verzoegerung === 'sofort') return abwesend >= KARENZ_MS;
+  // 'sofort' ohne Karenzzeit: jeder echte Hintergrundwechsel sperrt (siehe oben).
+  if (verzoegerung === 'sofort') return true;
   return abwesend >= VERZOEGERUNG_MS[verzoegerung];
 };
 
@@ -233,6 +225,53 @@ export const mussBeimStartSperren = (verzoegerung: SperrVerzoegerung): boolean =
 // --- Entsperren -------------------------------------------------------------
 
 export type EntsperrAusgang = 'ok' | 'abgebrochen' | 'fehler';
+
+/**
+ * Die gerade laufende Abfrage, oder null.
+ *
+ * Die Ursache lag in App.tsx: Der Sperrbildschirm stand in zwei
+ * Rückgabezweigen an unterschiedlicher Stelle und wurde beim Zweigwechsel neu
+ * montiert — sein Effekt beim Einblenden fragte die Biometrie deshalb zweimal.
+ * Das ist dort behoben (ein einziger Einhängepunkt).
+ *
+ * WARUM HIER TROTZDEM EINE ZWEITE EBENE: Auf Android ist eine zweite,
+ * gleichzeitige Abfrage nicht bloß doppelt, sie ist SCHÄDLICH. Der Prompt läuft
+ * in einer eigenen Activity; ein zweiter Start verdrängt den ersten, und
+ * AndroidX beendet ihn mit ERROR_CANCELED ("another pending operation prevents
+ * it"). Das Plugin bildet das auf SYSTEM_CANCEL ab, und wir zählen SYSTEM_CANCEL
+ * zu den Abbruch-Codes — die Person sieht "Nicht erkannt", ohne abgebrochen zu
+ * haben. Ein Aufrufer, der das versehentlich auslöst, darf die Sperre nicht
+ * unbedienbar machen. Deshalb liegt der Schutz an der Stelle, an der ALLE
+ * Aufrufer vorbeikommen, nicht nur in der einen Komponente.
+ *
+ * DAS WEICHT DIE SPERRE NICHT AUF: Der zweite Aufruf bekommt das Ergebnis der
+ * laufenden Abfrage — also 'ok' nur dann, wenn die Biometrie tatsächlich
+ * gelungen ist. Es entsteht kein Weg, der ohne erfolgreiche Prüfung 'ok'
+ * liefert, und es wird keine Prüfung übersprungen: Nach dem Ende ist der Merker
+ * wieder leer, jeder neue Versuch fragt das Gerät erneut.
+ *
+ * KANN DER MERKER HÄNGEN BLEIBEN? Nein. Er wird in einem `finally` geleert, das
+ * auch bei einem geworfenen Fehler läuft — und `verifyIdentity()` antwortet
+ * immer, mit Erfolg oder mit einem Fehlercode. Die eine Lage, in der er stehen
+ * bliebe, wäre ein Versprechen, das nie erfüllt wird; das gibt es auf dem Gerät
+ * nicht (der Prompt hat ein eigenes Zeitlimit und meldet ERROR_TIMEOUT).
+ */
+let laufendeAbfrage: Promise<EntsperrAusgang> | null = null;
+
+/**
+ * NUR FÜR TESTS: setzt den Merker der laufenden Abfrage zurück.
+ *
+ * Er liegt auf Modulebene und überlebt deshalb das Aufräumen zwischen zwei
+ * Testfällen. Ein Test, der eine Abfrage absichtlich offen lässt (um den
+ * Wettlauf nachzustellen), würde sonst alle folgenden blockieren — und die
+ * würden grün aussehen, weil gar nichts mehr beim Gerät ankommt.
+ *
+ * Im Betrieb wird das nicht gebraucht und auch nirgends aufgerufen: dort leert
+ * das `finally` in sperreOeffnen den Merker.
+ */
+export const _abfrageMerkerZuruecksetzenFuerTests = (): void => {
+  laufendeAbfrage = null;
+};
 
 /**
  * Fragt die Biometrie ab. Reine Ja/Nein-Prüfung, ohne jeden Bezug zu
@@ -254,31 +293,48 @@ export type EntsperrAusgang = 'ok' | 'abgebrochen' | 'fehler';
  * Es gibt hier bewusst KEINEN Wiederholungs-Automatismus: scheitert die
  * Abfrage, bleibt der Sperrbildschirm stehen und die Person entscheidet selbst,
  * ob sie es noch einmal versucht oder sich abmeldet.
+ *
+ * Läuft schon eine Abfrage, wird KEINE zweite gestartet — siehe
+ * `laufendeAbfrage`. Der Aufrufer bekommt das Ergebnis der laufenden.
  */
 export const sperreOeffnen = async (): Promise<EntsperrAusgang> => {
   if (!Capacitor.isNativePlatform()) return 'fehler';
 
-  ausflugStarten();
-  try {
-    await NativeBiometric.verifyIdentity({
-      reason: 'Konfi Quest entsperren',
-      title: 'Konfi Quest entsperren',
-      subtitle: 'Bestätige, dass du es bist',
-      negativeButtonText: 'Abbrechen',
-      useFallback: true,
-      fallbackTitle: 'Code eingeben',
-      maxAttempts: 3
-    });
-    return 'ok';
-  } catch (fehler) {
-    if (istAbbruch(fehler)) return 'abgebrochen';
-    // Nur die grobe Tatsache ins Log — kein Token, keine Kennung, kein Name.
-    console.warn('App-Sperre: Entsperren fehlgeschlagen');
-    return 'fehler';
-  } finally {
-    // Nach der Abfrage kommt die App aus dem Hintergrund zurück. Der Merker
-    // darf erst danach fallen, sonst schnappt die Sperre im selben Atemzug
-    // wieder zu. Ein Tick reicht: der appStateChange-Rückweg läuft vorher.
-    setTimeout(ausflugBeenden, 0);
-  }
+  // Kein zweiter Prompt neben einem offenen. Auf Android würde er den offenen
+  // verdrängen und beide Versuche scheitern lassen.
+  if (laufendeAbfrage) return laufendeAbfrage;
+
+  const abfrage = (async (): Promise<EntsperrAusgang> => {
+    ausflugStarten();
+    try {
+      await NativeBiometric.verifyIdentity({
+        reason: 'Konfi Quest entsperren',
+        title: 'Konfi Quest entsperren',
+        subtitle: 'Bestätige, dass du es bist',
+        negativeButtonText: 'Abbrechen',
+        useFallback: true,
+        fallbackTitle: 'Code eingeben',
+        maxAttempts: 3
+      });
+      return 'ok';
+    } catch (fehler) {
+      if (istAbbruch(fehler)) return 'abgebrochen';
+      // Nur die grobe Tatsache ins Log — kein Token, keine Kennung, kein Name.
+      console.warn('App-Sperre: Entsperren fehlgeschlagen');
+      return 'fehler';
+    } finally {
+      // Der Merker fällt SOFORT, nicht erst einen Tick später: Sonst käme ein
+      // Antippen direkt nach einem Fehlversuch noch an die alte, längst
+      // beantwortete Abfrage und der Knopf wäre scheinbar tot.
+      laufendeAbfrage = null;
+      // Nach der Abfrage kommt die App aus dem Hintergrund zurück. Der
+      // Ausflug-Merker darf erst danach fallen, sonst schnappt die Sperre im
+      // selben Atemzug wieder zu. Ein Tick reicht: der appStateChange-Rückweg
+      // läuft vorher.
+      setTimeout(ausflugBeenden, 0);
+    }
+  })();
+
+  laufendeAbfrage = abfrage;
+  return abfrage;
 };

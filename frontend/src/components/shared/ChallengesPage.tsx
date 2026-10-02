@@ -1,19 +1,16 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
   IonRefresher,
   IonRefresherContent,
-  IonButtons,
   IonButton,
   IonIcon,
   useIonModal,
   useIonAlert
 } from '@ionic/react';
 import { ICON_HINZUFUEGEN_GEFUELLT } from './icons';
+import AppKopfzeile, { AppKopfzeileGross } from './AppKopfzeile';
 import { useBadge } from '../../contexts/BadgeContext';
 import { useModalPage } from '../../contexts/ModalContext';
 import { useLiveRefresh } from '../../contexts/LiveUpdateContext';
@@ -26,7 +23,9 @@ import ChallengesManageView, { getChallengeStatus } from '../admin/views/Challen
 import ChallengeManageModal from '../admin/modals/ChallengeManageModal';
 import ChallengeLeitungModal from '../admin/modals/ChallengeLeitungModal';
 import { triggerPullHaptic } from '../../utils/haptics';
-import type { AdminChallenge } from '../../types/challenges';
+import type { AdminChallenge, ChallengeMark } from '../../types/challenges';
+import { mitBewahrtenStempeln } from '../../utils/bewahrteStempel';
+import { useApp } from '../../contexts/AppContext';
 
 // Die beiden Dateien bleiben als duenne Huellen bestehen, damit Routen und
 // Importpfade unveraendert sind.
@@ -63,8 +62,24 @@ export const gehoertInsStempelraster = (
 };
 
 const ChallengesPage: React.FC<ChallengesPageProps> = ({ cacheKey, modalPageId }) => {
-  const { refreshAllCounts } = useBadge();
+  // pendingChallengesByChallenge: offene Freigaben je Challenge fuer das
+  // orange Eck-Badge am Listeneintrag -- dieselbe Quelle wie
+  // der Reiter, statt pending_count aus der nur bei Aktion neu geladenen Liste.
+  // challengeNeueBeitraegeByChallenge: neue Beitraege seit dem letzten
+  // Oeffnen, wartende eingeschlossen -- die rote Kugel am
+  // Symbol; markChallengeAsRead setzt sie beim Oeffnen und Schliessen der
+  // Challenge zurueck. challengeUpdatesByChallenge (neue freigegebene) nur
+  // noch fuer den Rueckfall, wenn der Server das neue Feld nicht liefert.
+  const {
+    refreshAllCounts,
+    pendingChallengesByChallenge,
+    challengeUpdatesByChallenge,
+    challengeNeueBeitraegeByChallenge,
+    challengeNeueWartendByChallenge,
+    markChallengeAsRead
+  } = useBadge();
   const { pageRef, presentingElement } = useModalPage(modalPageId);
+  const { user } = useApp();
 
   const [ohneJahrgang, setOhneJahrgang] = useState(false);
 
@@ -80,10 +95,23 @@ const ChallengesPage: React.FC<ChallengesPageProps> = ({ cacheKey, modalPageId }
 
   const [presentAlert] = useIonAlert();
 
+  // Stempel aus Challenges, die es nicht mehr gibt: Loescht die
+  // Leitung einen Jahrgang, gehen seine Challenges mit -- die Stempel des
+  // Teams daraus bewahrt der Server auf. In GET /challenges/admin stehen sie
+  // nicht mehr (die Challenge ist weg), deshalb eine eigene, kleine Abfrage.
+  // Ein aelterer Server kennt die Route nicht: dann bleibt es bei den
+  // abgeleiteten Stempeln (mitBewahrtenStempeln nimmt alles Nicht-Array als
+  // leer).
+  const { data: bewahrteStempel, refreshLive: refreshBewahrteLive } = useOfflineQuery<ChallengeMark[]>(
+    `challenges:bewahrte-stempel:${user?.organization_id}:${user?.id}`,
+    async () => (await api.get('/challenges/bewahrte-stempel')).data,
+    { ttl: CACHE_TTL.REQUESTS }
+  );
+
   // Eigene Stempel aus der EINEN Liste ableiten: has_badge liefert
   // GET /challenges/admin seit der Zusammenlegung mit (11.08.) — dadurch
   // braucht es keinen zweiten Endpunkt für die Teilnehmer-Sicht.
-  const marks = useMemo(
+  const abgeleiteteMarks = useMemo(
     () => (Array.isArray(challenges) ? challenges : [])
       .filter((c) => c.has_badge && gehoertInsStempelraster(c))
       .map((c) => ({
@@ -98,6 +126,10 @@ const ChallengesPage: React.FC<ChallengesPageProps> = ({ cacheKey, modalPageId }
         description: c.description ?? null
       })),
     [challenges]
+  );
+  const marks = useMemo(
+    () => mitBewahrtenStempeln(abgeleiteteMarks, bewahrteStempel),
+    [abgeleiteteMarks, bewahrteStempel]
   );
 
   // Die NOCH NICHT erhaltenen Stempel — dieselbe Rechnung wie in der
@@ -149,7 +181,12 @@ const ChallengesPage: React.FC<ChallengesPageProps> = ({ cacheKey, modalPageId }
     onEdit: (challenge: AdminChallenge) => openEdit(challenge),
     // Für die Card-Optik des Einreichen-Modals (schiebt die Seite nach hinten).
     get presentingElement() { return pageRef.current || presentingElement; },
-    onClose: () => { dismissModerationModal(); },
+    onClose: () => {
+      dismissModerationModal();
+      // Was waehrend des Ansehens hereinkam, hat man gesehen -- wie im Chat
+      // beim Verlassen des Raums.
+      if (moderationChallenge) void gesehen(moderationChallenge);
+    },
     onChanged: () => {
       refreshChallenges();
       // Tab-Badge (offene Freigaben) direkt nachziehen.
@@ -176,6 +213,7 @@ const ChallengesPage: React.FC<ChallengesPageProps> = ({ cacheKey, modalPageId }
   };
 
   useLiveRefresh('challenges', refreshChallengesLive);
+  useLiveRefresh('challenges', refreshBewahrteLive);
 
   // Die geöffnete Beitrags-Ansicht hält ihre Challenge als eigenen State.
   // Nach einem Bearbeiten (oder Live-Refresh) käme sonst weiter der alte
@@ -206,31 +244,35 @@ const ChallengesPage: React.FC<ChallengesPageProps> = ({ cacheKey, modalPageId }
     });
   };
 
+  // Eine gestartete Challenge als gesehen melden und die Zaehler nachziehen.
+  // Entwuerfe und geplante haben keine Beitraege; dort gibt es nichts zu melden.
+  const gesehen = async (challenge: AdminChallenge) => {
+    const status = getChallengeStatus(challenge);
+    if (status !== 'active' && status !== 'ended') return;
+    await markChallengeAsRead(challenge.id);
+    refreshAllCounts();
+  };
+
   const openModeration = (challenge: AdminChallenge) => {
     setModerationChallenge(challenge);
     presentModerationModal({ presentingElement: presentingElement });
+    void gesehen(challenge);
   };
 
   const { handleDelete } = useChallengeDelete({ onDeleted: refreshChallenges });
 
   return (
     <IonPage ref={pageRef}>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonTitle>Challenges</IonTitle>
-          <IonButtons slot="end">
-            <IonButton aria-label="Neue Challenge anlegen" onClick={openCreate} title="Neue Challenge">
-              <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
-            </IonButton>
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile
+        titel="Challenges"
+        rechts={(
+          <IonButton aria-label="Neue Challenge anlegen" onClick={openCreate} title="Neue Challenge">
+            <IonIcon icon={ICON_HINZUFUEGEN_GEFUELLT} />
+          </IonButton>
+        )}
+      />
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Challenges</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Challenges" />
 
         <IonRefresher
           slot="fixed"
@@ -248,6 +290,10 @@ const ChallengesPage: React.FC<ChallengesPageProps> = ({ cacheKey, modalPageId }
             ohneJahrgang={ohneJahrgang}
             marks={marks}
             offeneStempel={offeneStempel}
+            offeneFreigaben={pendingChallengesByChallenge}
+            neuigkeiten={challengeUpdatesByChallenge}
+            neueBeitraege={challengeNeueBeitraegeByChallenge ?? undefined}
+            neueWartend={challengeNeueWartendByChallenge}
             onSelectChallenge={openModeration}
             onEditChallenge={openEdit}
             onDeleteChallenge={handleDelete}

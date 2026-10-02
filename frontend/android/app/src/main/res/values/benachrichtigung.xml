@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Akzentfarbe der Mitteilungen: faerbt das kleine Symbol
+         und den Namen der App im Kopf einer Mitteilung. Es ist die Textfarbe
+         des Rueckblicks aus den App-Tokens (hell: 5,7:1 auf Weiss). Im
+         Dunkelmodus gilt values-night. Im AndroidManifest eingetragen als
+         com.google.firebase.messaging.default_notification_color; geprueft in
+         frontend/src/__tests__/config/androidMitteilungsSymbol.test.ts. -->
+    <color name="benachrichtigung_farbe">#7C3AED</color>
+</resources>

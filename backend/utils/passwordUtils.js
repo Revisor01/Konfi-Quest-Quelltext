@@ -71,7 +71,7 @@ const validatePassword = (password) => {
   if (!/[0-9]/.test(password)) {
     return 'Passwort muss mindestens eine Zahl enthalten';
   }
-  if (!/[!@#$%^&*(),.?":{}|<>_\-+=\[\]\\\/~`]/.test(password)) {
+  if (!/[!@#$%^&*(),.?":{}|<>_\-+=[\]\\/~`]/.test(password)) {
     return 'Passwort muss mindestens ein Sonderzeichen enthalten';
   }
   return null;

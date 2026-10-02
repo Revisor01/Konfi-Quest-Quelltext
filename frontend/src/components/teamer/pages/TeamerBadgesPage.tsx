@@ -1,14 +1,8 @@
-import { ICON_ZURUECK } from '../../shared/icons';
+import AppKopfzeile, { AppKopfzeileGross } from '../../shared/AppKopfzeile';
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import {
   IonPage,
-  IonHeader,
-  IonToolbar,
-  IonTitle,
   IonContent,
-  IonButtons,
-  IonButton,
-  IonIcon,
   IonRefresher,
   IonRefresherContent
 } from '@ionic/react';
@@ -93,7 +87,7 @@ const TeamerBadgesPage: React.FC = () => {
         url: '/teamer/badges/mark-seen',
         maxRetries: 3,
         hasFileUpload: false,
-        metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Abzeichen gesehen' },
+        metadata: { type: 'fire-and-forget', clientId: safeUUID(), label: 'Badges gesehen' },
       });
       return;
     }
@@ -137,23 +131,10 @@ const TeamerBadgesPage: React.FC = () => {
 
   return (
     <IonPage>
-      <IonHeader translucent={true}>
-        <IonToolbar>
-          <IonButtons slot="start">
-            <IonButton onClick={() => window.history.back()} aria-label="Zurück">
-              <IonIcon icon={ICON_ZURUECK} slot="icon-only" />
-            </IonButton>
-          </IonButtons>
-          <IonTitle>Teamer-Badges</IonTitle>
-        </IonToolbar>
-      </IonHeader>
+      <AppKopfzeile titel="Teamer-Badges" onZurueck={() => window.history.back()} gemeindeUmschalter={false} />
 
       <IonContent className="app-gradient-background" fullscreen>
-        <IonHeader collapse="condense">
-          <IonToolbar className="app-condense-toolbar">
-            <IonTitle size="large">Teamer-Badges</IonTitle>
-          </IonToolbar>
-        </IonHeader>
+        <AppKopfzeileGross titel="Teamer-Badges" />
 
         <IonRefresher slot="fixed" onIonRefresh={async (e) => {
           await refresh();

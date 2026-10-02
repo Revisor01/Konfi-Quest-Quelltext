@@ -13,11 +13,13 @@ const { formatDatum } = require('../utils/zeitformat');
 const jwt = require('jsonwebtoken');
 const { body, param, query } = require('express-validator');
 const { handleValidationErrors } = require('../middleware/validation');
-const { encryptBuffer, decryptBuffer } = require('../utils/photoCrypto');
+const { ORG_KEIN_ZUGRIFF } = require('../middleware/rbac');
+const { encryptFileToFile, decryptFileToStream, leseKopfBytes } = require('../utils/photoCrypto');
 const { allIdsBelongToOrg } = require('../utils/orgOwnership');
 const { deleteChallengeFile } = require('../utils/photoStorage');
 const PushService = require('../services/pushService');
 const liveUpdate = require('../utils/liveUpdate');
+const { loescheChallenge, entferneChallengeDateien } = require('../utils/challengeLoeschen');
 const { pruefeMusikLink, holeLinkMetadaten, ERLAUBTE_DIENSTE_TEXT } = require('../utils/musikLinks');
 
 const MEDIA_TYPES = ['text', 'photo', 'audio', 'video', 'link'];
@@ -32,13 +34,17 @@ const AUDIENCES = ['konfis', 'konfis_und_team', 'nur_team'];
 // Rollen, die als "Team" gelten (duerfen bei audience != 'konfis' einreichen).
 const TEAM_ROLES = ['org_admin', 'admin', 'teamer'];
 
-// Darf diese Rolle bei dieser Challenge einen eigenen Beitrag einreichen?
-// Konfis nur bei 'konfis'/'konfis_und_team', Team nur bei
-// 'konfis_und_team'/'nur_team'. super_admin nie (org-fremde Rolle).
+// Erster Teil des zweiteiligen Sperrschluessels fuer "ein Beitrag je Person"
+// (allow_multiple = false, POST /konfi/:id/submissions); der zweite ist ein
+// Hash aus Challenge und Person. Zweiteilige Schluessel liegen in einem
+// anderen Raum als die einteiligen (Migrationen, Cron-Leader); neben
+// TERMIN_LOESCHEN_SPERRE (280926, utils/terminLoeschen.js) eindeutig.
+const CHALLENGE_BEITRAG_SPERRE = 280927;
+
 function maySubmit(roleName, audience) {
   const aud = audience || 'konfis_und_team';
   if (roleName === 'konfi') return aud === 'konfis' || aud === 'konfis_und_team';
-  if (TEAM_ROLES.includes(roleName)) return aud === 'konfis_und_team' || aud === 'nur_team';
+  if (TEAM_ROLES.includes(roleName)) return TEAM_MACHT_MIT_AUDIENCES.includes(aud);
   return false;
 }
 
@@ -76,16 +82,9 @@ const CONTENT_TYPES = {
 //               UND konfi_consent IN ('publish','anonymous')) )
 //
 // visibility='private' ist NIE oeffentlich. 'hidden' schlägt alles.
-//
-// SQL-Fragment für Queries, die challenges als "c" und challenge_submissions
-// als "cs" aliasieren.
-const PUBLIC_SUBMISSION_SQL = `(
-  cs.moderation_status = 'approved'
-  AND (
-    c.visibility = 'public'
-    OR (c.visibility = 'konfi_choice' AND cs.konfi_consent IN ('publish', 'anonymous'))
-  )
-)`;
+const { PUBLIC_SUBMISSION_SQL } = require('../utils/challengeSichtbarkeit');
+const { leitungSiehtChallengeSql, teamMachtMitSql, TEAM_MACHT_MIT_AUDIENCES } = require('../utils/challengeLeitungSicht');
+const { nachAntwort } = require('../utils/nachAntwort');
 
 // JS-Pendant für bereits geladene Zeilen (Datei-Auslieferung, Export).
 // Erwartet { moderation_status, konfi_consent } und { visibility }.
@@ -162,20 +161,14 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
     const viewable = viewableJahrgangIds(req);
     if (viewable === null) return true;
 
-    // 'nur_team'-Challenges laufen org-weit über die Rolle (Migration 121) —
-    // jeder Teamer der Org darf sie sehen und verwalten, auch ohne
-    // Jahrgangs-Zuordnung (die es dort per Definition nicht gibt).
-    const { rows: [teamRow] } = await db.query(
-      `SELECT 1 FROM challenges WHERE id = $1 AND audience = 'nur_team' LIMIT 1`,
-      [challengeId]
-    );
-    if (teamRow) return true;
-
-    if (viewable.length === 0) return false;
+    // Die Regel steht in utils/challengeLeitungSicht.js: 'nur_team'
+    // fuer das ganze Team, sonst nur ueber einen zugewiesenen Jahrgang.
     const { rows: [row] } = await db.query(
-      `SELECT 1 FROM challenge_jahrgang_assignments
-       WHERE challenge_id = $1 AND jahrgang_id = ANY($2::int[]) LIMIT 1`,
-      [challengeId, viewable]
+      `SELECT 1 FROM challenges c
+        WHERE c.id = $1
+          AND ${leitungSiehtChallengeSql({ rolle: '$2', jahrgaenge: '$3::int[]' })}
+        LIMIT 1`,
+      [challengeId, req.user.role_name, viewable]
     );
     return !!row;
   }
@@ -319,12 +312,14 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
     }
   }
 
-  // Datei aus dem Upload-Buffer verschlüsselt ablegen. Gibt den Hex-Dateinamen
-  // zurück (die Abruf-Route akzeptiert nur [a-f0-9]+).
-  async function storeUploadedFile(buffer) {
+  // Verschluesselt die Temporaerdatei des Uploads stromweise an ihren Platz und
+  // gibt den Hex-Dateinamen zurück (die Abruf-Route akzeptiert nur [a-f0-9]+).
+  // Nimmt einen PFAD, keinen Buffer: eine 50-MB-Einreichung laege sonst
+  // komplett im Arbeitsspeicher (512-MB-Grenze je Container).
+  async function storeUploadedFile(quellPfad) {
     const filename = crypto.randomBytes(32).toString('hex');
     await fs.promises.mkdir(challengeDir, { recursive: true });
-    await fs.promises.writeFile(path.join(challengeDir, filename), encryptBuffer(buffer));
+    await encryptFileToFile(quellPfad, path.join(challengeDir, filename));
     return filename;
   }
 
@@ -421,21 +416,9 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
           SELECT 1 FROM challenge_jahrgang_assignments cja
           WHERE cja.challenge_id = c.id AND cja.jahrgang_id = ANY($3::int[])
         )`;
-      } else if (jahrgangIds === null) {
-        // org_admin/admin: alles der Org, aber nur wo das Team mitmachen darf
-        scopeCondition = `c.audience IN ('konfis_und_team', 'nur_team')`;
-      } else if (jahrgangIds.length === 0) {
-        // Teamer ohne Jahrgänge: nur die org-weiten Team-Challenges
-        scopeCondition = `c.audience = 'nur_team'`;
       } else {
-        params.push(jahrgangIds);
-        scopeCondition = `(
-          c.audience = 'nur_team'
-          OR (c.audience = 'konfis_und_team' AND EXISTS (
-            SELECT 1 FROM challenge_jahrgang_assignments cja
-            WHERE cja.challenge_id = c.id AND cja.jahrgang_id = ANY($3::int[])
-          ))
-        )`;
+        params.push(role, jahrgangIds || []);
+        scopeCondition = teamMachtMitSql({ rolle: '$3', jahrgaenge: '$4::int[]' });
       }
 
       const { rows } = await db.query(
@@ -523,6 +506,70 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
       res.status(500).json({ error: 'Datenbankfehler' });
     }
   });
+
+  // Loescht die Leitung einen Jahrgang, gehen die Challenges mit, die nur an
+  // ihm hingen -- und mit ihnen die Beitraege, aus denen der Stempel
+  // abgeleitet wird. Die Stempel des Teams werden vorher in bewahrte_stempel
+  // abgelegt (utils/challengeLoeschen.js). Diese beiden Routen liefern sie.
+  //
+  // WARUM EIGENE ROUTEN: Die Stempel des Teams stehen in der App auf der
+  // Challenge-Seite ("Deine Stempel") und werden dort aus GET /admin
+  // abgeleitet -- einem Array von Challenges, in das eine geloeschte
+  // Challenge nicht mehr gehoert und dem sich kein Feld anhaengen laesst.
+  // Die Form jedes Eintrags ist die eines erhaltenen Stempels (`marks`):
+  // challenge_id bleibt die alte Kennung und damit eine Zahl.
+  //
+  // Nur Stempel, deren Challenge es nicht mehr gibt (challenge_id IS NULL):
+  // Lebt die Challenge noch, kommt ihr Stempel wie bisher aus den
+  // Beitraegen -- zweimal derselbe Stempel waere falsch.
+  const BEWAHRTE_STEMPEL_SQL = `
+    SELECT herkunft_challenge_id AS challenge_id, badge_icon, badge_name, title,
+           description, earned_at
+      FROM bewahrte_stempel
+     WHERE user_id = $1 AND organization_id = $2 AND challenge_id IS NULL
+     ORDER BY earned_at DESC NULLS LAST, id DESC`;
+
+  const bewahrteStempelAlsMarks = (rows) => rows.map((row) => ({
+    challenge_id: Number(row.challenge_id),
+    badge_icon: row.badge_icon,
+    badge_name: row.badge_name,
+    title: row.title,
+    earned_at: row.earned_at ? new Date(row.earned_at).toISOString() : null,
+    description: row.description || null,
+    bewahrt: true
+  }));
+
+  // GET /bewahrte-stempel — die eigenen, in der aktiven Gemeinde.
+  router.get('/bewahrte-stempel', rbacVerifier, async (req, res) => {
+    try {
+      const { rows } = await db.query(BEWAHRTE_STEMPEL_SQL, [req.user.id, req.user.organization_id]);
+      res.json(bewahrteStempelAlsMarks(rows));
+    } catch (err) {
+      console.error('Database error in GET /challenges/bewahrte-stempel:', err);
+      res.status(500).json({ error: 'Datenbankfehler' });
+    }
+  });
+
+  // GET /admin/bewahrte-stempel/:userId — die einer Person, fuer deren
+  // Detailansicht bei der Leitung. Bewahrt werden nur Stempel des Teams, und
+  // Teamer:innen sieht die Leitung ohne Jahrgangsgrenze (utils/
+  // jahrgangsZugriff.js); die Gemeinde begrenzt die Zeilen selbst -- aus
+  // einer fremden Gemeinde kommt eine leere Liste.
+  router.get('/admin/bewahrte-stempel/:userId',
+    rbacVerifier,
+    requireAdmin,
+    param('userId').isInt({ min: 1 }).withMessage('Ungültige ID'),
+    handleValidationErrors,
+    async (req, res) => {
+      try {
+        const { rows } = await db.query(BEWAHRTE_STEMPEL_SQL, [parseInt(req.params.userId, 10), req.user.organization_id]);
+        res.json(bewahrteStempelAlsMarks(rows));
+      } catch (err) {
+        console.error('Database error in GET /challenges/admin/bewahrte-stempel/:userId:', err);
+        res.status(500).json({ error: 'Datenbankfehler' });
+      }
+    }
+  );
 
   // GET /konfi/:id — Detail inkl. Galerie (oeffentliche Beitraege) und eigenen
   // Beitraegen (immer, mit Status).
@@ -619,6 +666,60 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
     }
   );
 
+  // POST /konfi/:id/mark-read — Challenge als geoeffnet/gelesen markieren.
+  //
+  // Das Gegenstueck zu POST /chat/rooms/:roomId/mark-read: Die Detailansicht
+  // ruft es beim Oeffnen, und der Neuigkeiten-Zaehler
+  // (utils/challengeNeuigkeiten.js) rechnet ab diesem Zeitpunkt -- neue
+  // Challenge, neue Galerie-Beitraege, Moderation eigener Beitraege. Ohne
+  // diese Route bliebe die rote Zahl am Eintrag stehen, egal wie oft man
+  // hineinsieht.
+  //
+  // Zugriffsregeln wie GET /konfi/:id: Entwuerfe und ungestartete Challenges
+  // gibt es fuer Teilnehmende nicht (404), 'nur_team' ist fuer Konfis
+  // unsichtbar (404, damit die Existenz nicht durchsickert), sonst
+  // participantMayAccess (403). Wer eine Challenge nicht oeffnen darf, kann
+  // sie auch nicht als gelesen markieren.
+  router.post('/konfi/:id/mark-read',
+    rbacVerifier,
+    param('id').isInt({ min: 1 }).withMessage('Ungültige ID'),
+    handleValidationErrors,
+    async (req, res) => {
+      try {
+        const role = req.user.role_name;
+        if (role !== 'konfi' && !TEAM_ROLES.includes(role)) {
+          return res.status(403).json({ error: 'Kein Zugriff auf Challenges' });
+        }
+        const challengeId = parseInt(req.params.id, 10);
+
+        const challenge = await loadChallenge(challengeId, req.user.organization_id);
+        if (!challenge || challenge.is_draft || new Date(challenge.starts_at) > new Date()) {
+          return res.status(404).json({ error: 'Challenge nicht gefunden' });
+        }
+        if (role === 'konfi' && challenge.audience === 'nur_team') {
+          return res.status(404).json({ error: 'Challenge nicht gefunden' });
+        }
+        const access = await participantMayAccess(req, challenge);
+        if (!access.allowed) {
+          return res.status(403).json({ error: 'Kein Zugriff auf diese Challenge' });
+        }
+
+        await db.query(
+          `INSERT INTO challenge_read_status (challenge_id, user_id, user_type, last_read_at)
+           VALUES ($1, $2, $3, NOW())
+           ON CONFLICT (challenge_id, user_id, user_type)
+           DO UPDATE SET last_read_at = NOW()`,
+          [challengeId, req.user.id, req.user.type]
+        );
+
+        res.json({ message: 'Challenge als gelesen markiert' });
+      } catch (err) {
+        console.error('Database error in POST /challenges/konfi/:id/mark-read:', err);
+        res.status(500).json({ error: 'Datenbankfehler' });
+      }
+    }
+  );
+
   // POST /konfi/:id/submissions — Beitrag einreichen.
   // multipart (Feld 'file') für photo/audio/video, JSON für text/link.
   router.post('/konfi/:id/submissions',
@@ -667,7 +768,9 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
           return res.status(400).json({ error: 'Diese Medienart ist für diese Challenge nicht erlaubt.' });
         }
 
-        // Mehrfach-Einreichung
+        // Mehrfach-Einreichung: frueher Abbruch, bevor Datei und Link-Titel
+        // Arbeit machen. Verbindlich ist die zweite Pruefung unter der Sperre
+        // direkt vor dem INSERT (unten).
         if (!challenge.allow_multiple) {
           const { rows: [existing] } = await db.query(
             'SELECT 1 FROM challenge_submissions WHERE challenge_id = $1 AND user_id = $2 LIMIT 1',
@@ -713,11 +816,13 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
         let filePath = null;
         let fileName = null;
         if (req.file) {
-          if (!req.file.buffer) {
+          if (!req.file.path) {
             return res.status(400).json({ error: 'Datei konnte nicht gelesen werden' });
           }
+          // Die Magic-Bytes-Pruefung braucht nur die Kopfbytes — sie greift
+          // damit weiterhin VOR dem endgueltigen Ablegen.
           const { fileTypeFromBuffer } = await import('file-type');
-          const detected = await fileTypeFromBuffer(req.file.buffer);
+          const detected = await fileTypeFromBuffer(await leseKopfBytes(req.file.path));
           const expectedPrefix = media_type === 'photo' ? 'image/'
             : media_type === 'audio' ? 'audio/'
               : 'video/';
@@ -728,7 +833,7 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
           if (!detected || (!detected.mime.startsWith(expectedPrefix) && !audioFallback)) {
             return res.status(415).json({ error: 'Dateityp konnte nicht verifiziert werden' });
           }
-          filePath = await storeUploadedFile(req.file.buffer);
+          filePath = await storeUploadedFile(req.file.path);
           fileName = req.file.originalname;
         }
 
@@ -745,7 +850,28 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
           linkMeta = await holeLinkMetadaten(link_url);
         }
 
-        const { rows: [created] } = await db.query(
+        const client = await db.getClient();
+        let created;
+        try {
+          await client.query('BEGIN');
+          if (!challenge.allow_multiple) {
+            await client.query(
+              'SELECT pg_advisory_xact_lock($1, hashtext($2))',
+              [CHALLENGE_BEITRAG_SPERRE, `${challengeId}:${req.user.id}`]
+            );
+            const { rows: [schonDa] } = await client.query(
+              'SELECT 1 FROM challenge_submissions WHERE challenge_id = $1 AND user_id = $2 LIMIT 1',
+              [challengeId, req.user.id]
+            );
+            if (schonDa) {
+              await client.query('ROLLBACK');
+              if (filePath) {
+                await fs.promises.unlink(path.join(challengeDir, filePath)).catch(() => {});
+              }
+              return res.status(409).json({ error: 'Du hast für diese Challenge bereits einen Beitrag abgegeben.' });
+            }
+          }
+          ({ rows: [created] } = await client.query(
           `INSERT INTO challenge_submissions
              (challenge_id, user_id, organization_id, media_type, text_content,
               file_path, file_name, link_url, link_title, link_author, link_album,
@@ -768,7 +894,14 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
             consent,
             moderationStatus
           ]
-        );
+        ));
+          await client.query('COMMIT');
+        } catch (err) {
+          await client.query('ROLLBACK').catch(() => {});
+          throw err;
+        } finally {
+          client.release();
+        }
 
         res.status(201).json(created);
 
@@ -780,7 +913,9 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
         // sofort approved, der Push feuert hier. Bei moderierten Challenges
         // gibt es das Abzeichen erst mit der Freigabe — der Push feuert dann
         // in PUT /admin/submissions/:id/moderate.
-        (async () => {
+        // Ueber nachAntwort statt frei laufend: gleiches Verhalten,
+        // aber Tests koennen auf den Nachlauf warten (warteAufNachwehen).
+        nachAntwort(req, async () => {
           try {
             await PushService.sendChallengeSubmissionToLeadership(
               db,
@@ -788,7 +923,8 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
               challengeId,
               challenge.title,
               req.user.display_name,
-              challenge.moderated
+              challenge.moderated,
+              req.user.id
             );
           } catch (pushErr) {
             console.error('Push für Challenge-Beitrag fehlgeschlagen:', pushErr.message);
@@ -843,7 +979,7 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
           } catch (badgeErr) {
             console.error('Abzeichen-Push für Challenge-Beitrag fehlgeschlagen:', badgeErr.message);
           }
-        })();
+        }, 'Pushes nach Challenge-Beitrag');
 
         // Live-Update nur, wenn der Beitrag sofort oeffentlich sichtbar ist.
         if (isSubmissionPublic(created, challenge)) {
@@ -932,7 +1068,7 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
           [decoded.id, requestedActiveOrg]
         );
         if (!membership) {
-          return res.status(403).json({ error: 'Kein Zugriff auf diese Organisation' });
+          return res.status(403).json(ORG_KEIN_ZUGRIFF);
         }
         requester.organization_id = membership.organization_id;
         requester.role_name = membership.role_name;
@@ -1018,15 +1154,17 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
         }
       }
 
-      const fileBuffer = await fs.promises.readFile(filePath);
-      let mediaBuffer;
+      // Stromweise entschluesseln (frueher: 50-MB-Video komplett in den
+      // Arbeitsspeicher, einmal als Ciphertext und einmal als Klartext).
       try {
-        mediaBuffer = decryptBuffer(fileBuffer);
+        await decryptFileToStream(filePath, res);
       } catch (decErr) {
         console.error('Error decrypting challenge file:', decErr);
-        return res.status(500).json({ error: 'Datei konnte nicht entschlüsselt werden' });
+        if (!res.headersSent) {
+          return res.status(500).json({ error: 'Datei konnte nicht entschlüsselt werden' });
+        }
+        res.destroy();
       }
-      res.send(mediaBuffer);
     } catch (error) {
       console.error('Error serving challenge file:', error);
       res.status(500).json({ error: 'Serverfehler' });
@@ -1099,19 +1237,9 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
             return res.json([]);
           }
           res.set('X-Kein-Jahrgang-Zugewiesen', 'true');
-          jahrgangFilter = `AND c.audience = 'nur_team'`;
-        } else {
-          params.push(viewable);
-          // 'nur_team' ist org-weit ohne Jahrgangs-Zuordnung -> für jeden Teamer
-          // sichtbar, sonst könnte er seine eigene Team-Runde nicht verwalten.
-          jahrgangFilter = `AND (
-            c.audience = 'nur_team'
-            OR EXISTS (
-              SELECT 1 FROM challenge_jahrgang_assignments cja2
-              WHERE cja2.challenge_id = c.id AND cja2.jahrgang_id = ANY($3::int[])
-            )
-          )`;
         }
+        params.push(req.user.role_name, viewable);
+        jahrgangFilter = `AND ${leitungSiehtChallengeSql({ rolle: '$3', jahrgaenge: '$4::int[]' })}`;
       }
 
       const { rows } = await db.query(
@@ -1475,18 +1603,8 @@ module.exports = (db, rbacVerifier, roleHelpers, uploadsDir, challengeUpload) =>
           });
         }
 
-        // Dateien VOR dem DB-Delete einsammeln (danach sind die Zeilen weg).
-        const { rows: files } = await db.query(
-          'SELECT file_path FROM challenge_submissions WHERE challenge_id = $1 AND file_path IS NOT NULL',
-          [challengeId]
-        );
-
-        await db.query('DELETE FROM challenges WHERE id = $1 AND organization_id = $2',
-          [challengeId, req.user.organization_id]);
-
-        for (const f of files) {
-          await deleteChallengeFile(f.file_path);
-        }
+        const { dateien } = await loescheChallenge(db, challengeId, req.user.organization_id);
+        await entferneChallengeDateien(dateien);
 
         res.json({ message: 'Challenge gelöscht' });
 

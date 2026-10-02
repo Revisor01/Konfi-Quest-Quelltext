@@ -31,6 +31,7 @@ import {
 } from './icons';
 import { useApp } from '../../contexts/AppContext';
 import api from '../../services/api';
+import { eigenesKontoLoeschHinweis } from '../../utils/kontoLoeschen';
 
 interface DeleteAccountModalProps {
   onClose: () => void;
@@ -38,7 +39,7 @@ interface DeleteAccountModalProps {
 }
 
 const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({ onClose, onDeleted }) => {
-  const { setError, isOnline, signOut } = useApp();
+  const { setError, isOnline, signOut, user } = useApp();
   const { isSubmitting, guard } = useActionGuard();
 
   const [password, setPassword] = useState('');
@@ -97,9 +98,9 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({ onClose, onDele
             <IonCardContent style={{ padding: 'var(--app-abstand-basis)' }}>
               <IonText color="danger">
                 <p style={{ margin: 0, fontSize: 'var(--app-text-basis)', lineHeight: 1.5 }}>
-                  Dein Account wird endgültig gelöscht. Dieser Vorgang kann NICHT
-                  rückgängig gemacht werden. Alle deine Daten (Punkte, Badges,
-                  Einträge) werden entfernt.
+                  {/* Was wirklich verschwindet -- derselbe Wortlaut
+                      wie in den Abfragen der Leitung (utils/kontoLoeschen.ts). */}
+                  {eigenesKontoLoeschHinweis(user?.role_name === 'konfi')}
                 </p>
               </IonText>
             </IonCardContent>
@@ -119,7 +120,7 @@ const DeleteAccountModal: React.FC<DeleteAccountModalProps> = ({ onClose, onDele
               <IonList style={{ background: 'transparent', padding: '0' }}>
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonLabel position="stacked">Dein Passwort *</IonLabel>
-                  <IonInput
+                  <IonInput aria-label="Dein Passwort" aria-required="true"
                     type={showPassword ? 'text' : 'password'}
                     value={password}
                     onIonInput={(e) => {

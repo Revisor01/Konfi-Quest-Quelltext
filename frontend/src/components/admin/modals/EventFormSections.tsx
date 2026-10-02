@@ -25,6 +25,8 @@ import {
 } from '../../shared/icons';
 import { Category, Jahrgang } from '../../../types/event';
 import { istPunkteartAktiv, PUNKTEART_NAME, type Punkteart } from '../../../utils/punktearten';
+import { tastaturKlick } from '../../../utils/tastatur';
+import { datumLang } from '../../../utils/dateUtils';
 
 // ---- Shared form data type ----
 
@@ -80,14 +82,14 @@ export const BasicInfoSection = React.memo<BasicInfoSectionProps>(({
       <div className="app-section-icon app-section-icon--events">
         <IonIcon icon={ICON_BEARBEITEN_GEFUELLT} />
       </div>
-      <IonLabel>Event Grunddaten</IonLabel>
+      <IonLabel>Event-Grunddaten</IonLabel>
     </IonListHeader>
     <IonCard className="app-card">
     <IonCardContent>
       <IonList>
         <IonItem lines="inset">
-          <IonLabel position="stacked">Event Name *</IonLabel>
-          <IonInput
+          <IonLabel position="stacked">Event-Name *</IonLabel>
+          <IonInput aria-label="Event-Name" aria-required="true"
             value={formData.name}
             onIonInput={(e) => setFormData({ ...formData, name: e.detail.value! })}
             placeholder="z.B. Konfirmandenausflug"
@@ -97,7 +99,7 @@ export const BasicInfoSection = React.memo<BasicInfoSectionProps>(({
         </IonItem>
         <IonItem lines="inset">
           <IonLabel position="stacked">Beschreibung</IonLabel>
-          <IonTextarea
+          <IonTextarea aria-label="Beschreibung"
             value={formData.description}
             onIonInput={(e) => setFormData({ ...formData, description: e.detail.value! })}
             placeholder="Beschreibung des Events..."
@@ -107,7 +109,7 @@ export const BasicInfoSection = React.memo<BasicInfoSectionProps>(({
         </IonItem>
         <IonItem lines="inset">
           <IonLabel position="stacked">Ort</IonLabel>
-          <IonInput
+          <IonInput aria-label="Ort"
             value={formData.location}
             onIonInput={(e) => setFormData({ ...formData, location: e.detail.value! })}
             placeholder="z.B. Gemeindehaus"
@@ -117,7 +119,7 @@ export const BasicInfoSection = React.memo<BasicInfoSectionProps>(({
         </IonItem>
         <IonItem lines="inset">
           <IonLabel position="stacked">Was mitbringen (optional)</IonLabel>
-          <IonTextarea
+          <IonTextarea aria-label="Was mitbringen (optional)"
             value={formData.bring_items}
             onIonInput={(e) => setFormData({ ...formData, bring_items: e.detail.value || '' })}
             placeholder="z.B. Bibel, Stift, Block"
@@ -129,7 +131,7 @@ export const BasicInfoSection = React.memo<BasicInfoSectionProps>(({
             gehoert deshalb ganz nach oben in die Grunddaten. */}
         <IonItem lines={teamerAccess === 'teamer_only' ? 'none' : 'inset'}>
           <IonLabel position="stacked">Für wen ist das Event?</IonLabel>
-          <IonSelect
+          <IonSelect aria-label="Für wen ist das Event?"
             value={teamerAccess}
             onIonChange={(e) => {
               const value = e.detail.value;
@@ -143,7 +145,7 @@ export const BasicInfoSection = React.memo<BasicInfoSectionProps>(({
             }}
             disabled={loading}
             interface="popover"
-            interfaceOptions={{ cssClass: 'app-select-popover--wide' }}
+            interfaceOptions={{ cssClass: 'app-select-popover--wide', arrow: false }}
           >
             <IonSelectOption value="normal">Nur Konfis</IonSelectOption>
             <IonSelectOption value="teamer_needed">Konfis, Team gesucht</IonSelectOption>
@@ -154,7 +156,7 @@ export const BasicInfoSection = React.memo<BasicInfoSectionProps>(({
         {teamerAccess !== 'teamer_only' && (<>
         <IonItem lines="inset">
           <IonLabel position="stacked">Pflicht-Event</IonLabel>
-          <IonToggle
+          <IonToggle aria-label="Pflicht-Event"
             slot="end"
             className="app-toggle--events"
             checked={formData.mandatory}
@@ -168,7 +170,7 @@ export const BasicInfoSection = React.memo<BasicInfoSectionProps>(({
         </IonItem>
         <IonItem lines="none">
           <IonLabel position="stacked">Konfirmation</IonLabel>
-          <IonToggle
+          <IonToggle aria-label="Konfirmation"
             slot="end"
             className="app-toggle--konfis"
             checked={formData.is_konfirmation}
@@ -212,7 +214,7 @@ export const CheckinSection = React.memo<CheckinSectionProps>(({
           <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Check-in-Fenster (Minuten)</IonLabel>
           <div className="app-range-row">
             <span className="app-range-row__min">5</span>
-            <IonRange
+            <IonRange aria-label="Check-in-Fenster (Minuten)"
               className="app-range app-range--events"
               min={5} max={60} step={5}
               pin={true} pinFormatter={(value: number) => `${value}`}
@@ -278,7 +280,7 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
           <>
             <IonItem lines="none">
               <IonLabel>Unbegrenzte Teilnehmer:innen</IonLabel>
-              <IonToggle
+              <IonToggle aria-label="Unbegrenzte Teilnehmer:innen"
                 slot="end"
                 className="app-toggle--events"
                 checked={formData.max_participants === 0}
@@ -291,9 +293,10 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
                 <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Max. Teilnehmer:innen</IonLabel>
                 <div className="app-range-row">
                   <span className="app-range-row__min">1</span>
-                  <IonRange
+                  <IonRange aria-label="Max. Teilnehmer:innen"
                     className="app-range app-range--events"
-                    min={1} max={50} step={1}
+                    min={1} max={Math.max(30, formData.max_participants)} step={1}
+                    ticks={formData.max_participants <= 30} snaps={true}
                     pin={true} pinFormatter={(value: number) => `${value}`}
                     value={formData.max_participants}
                     onIonChange={(e) => setFormData({ ...formData, max_participants: e.detail.value as number })}
@@ -310,7 +313,7 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
               <>
                 <IonItem lines="none" style={{ '--background': 'transparent', marginBottom: formData.waitlist_enabled ? 'var(--app-abstand-mittel)' : '0', paddingTop: 'var(--app-abstand-eng)' }}>
                   <IonLabel>Warteliste aktivieren</IonLabel>
-                  <IonToggle
+                  <IonToggle aria-label="Warteliste aktivieren"
                     slot="end"
                     className="app-toggle--events"
                     checked={formData.waitlist_enabled}
@@ -323,9 +326,10 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
                     <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Max. Wartelisten-Plätze</IonLabel>
                     <div className="app-range-row">
                       <span className="app-range-row__min">1</span>
-                      <IonRange
+                      <IonRange aria-label="Max. Wartelisten-Plätze"
                         className="app-range app-range--events"
                         min={1} max={10} step={1}
+                        ticks={true} snaps={true}
                         pin={true} pinFormatter={(value: number) => `${value}`}
                         value={formData.max_waitlist_size}
                         onIonChange={(e) => setFormData({ ...formData, max_waitlist_size: e.detail.value as number })}
@@ -347,9 +351,16 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
               <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Punkte</IonLabel>
               <div className="app-range-row">
                 <span className="app-range-row__min">1</span>
-                <IonRange
+                <IonRange aria-label="Punkte"
                   className="app-range app-range--events"
                   min={1} max={5} step={1}
+                  /* Rastermarken: Bei 1-5 Punkten sind die Stufen abzaehlbar,
+                     das trifft man schneller als per Ziehen. `ticks` zeigt sie,
+                     `snaps` laesst den Regler einrasten — Ionic zeichnet die
+                     Marken nur, wenn beides gesetzt ist. Bei den groesseren
+                     Reglern (Level 1-40, Abzeichen 1-26) bewusst NICHT: Dort
+                     stuenden die Marken zu dicht. */
+                  ticks={true} snaps={true}
                   pin={true} pinFormatter={(value: number) => `${value}`}
                   value={formData.points}
                   onIonChange={(e) => setFormData({ ...formData, points: e.detail.value as number })}
@@ -364,7 +375,7 @@ export const PointsParticipantsSection = React.memo<PointsParticipantsSectionPro
             </IonItem>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-eng)' }}>
               {verfuegbareArten.map((art) => (
-                <div
+                <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-pressed={formData.point_type === art}
                   key={art}
                   className={`app-list-item app-list-item--${art}${formData.point_type === art ? ' app-list-item--selected' : ''}`}
                   onClick={() => !loading && setFormData({ ...formData, point_type: art })}
@@ -434,7 +445,7 @@ export const CategoriesTargetSection = React.memo<CategoriesTargetSectionProps>(
                   {categories.map((category) => {
                     const isSelected = formData.category_ids.includes(category.id);
                     return (
-                      <div
+                      <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-pressed={isSelected}
                         key={category.id}
                         className={`app-list-item app-list-item--categories${isSelected ? ' app-list-item--selected' : ''}`}
                         onClick={() => {
@@ -468,19 +479,24 @@ export const CategoriesTargetSection = React.memo<CategoriesTargetSectionProps>(
         {teamerAccess !== 'teamer_only' && (<>
         <IonItem lines="none" style={{ '--background': 'transparent', paddingBottom: 'var(--app-abstand-eng)', paddingTop: 'var(--app-abstand-basis)' }}>
           <IonLabel style={{ fontSize: 'var(--app-text-basis)', fontWeight: 'var(--app-schrift-mittel)', color: formData.mandatory && formData.jahrgang_ids.length === 0 ? 'var(--app-color-danger)' : 'var(--app-text-secondary)' }}>
-            Jahrgänge (mehrere möglich) *{formData.mandatory && formData.jahrgang_ids.length === 0 ? ' (Pflicht bei Pflicht-Events)' : ''}
+            Jahrgänge (mehrere möglich){formData.mandatory ? ' *' : ''}{formData.mandatory && formData.jahrgang_ids.length === 0 ? ' (Pflicht bei Pflicht-Events)' : ''}
             {formData.jahrgang_ids.length > 0 && (
-              <span style={{ marginLeft: 'var(--app-abstand-eng)', fontSize: 'var(--app-text-hinweis)', color: 'var(--app-color-jahrgang)', fontWeight: 'var(--app-schrift-normal)' }}>
+              <span style={{ marginLeft: 'var(--app-abstand-eng)', fontSize: 'var(--app-text-hinweis)', color: 'var(--app-text-jahrgang)', fontWeight: 'var(--app-schrift-normal)' }}>
                 ({formData.jahrgang_ids.length} ausgewählt)
               </span>
             )}
           </IonLabel>
         </IonItem>
+        {!formData.mandatory && formData.jahrgang_ids.length === 0 && (
+          <p style={{ margin: '0 0 var(--app-abstand-eng)', paddingInline: 'var(--app-abstand-basis)', fontSize: 'var(--app-text-hinweis)', color: 'var(--app-text-secondary)' }}>
+            Ohne Auswahl gilt das Event für die ganze Gemeinde.
+          </p>
+        )}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--app-abstand-eng)' }}>
           {jahrgaenge.map((jahrgang) => {
             const isSelected = formData.jahrgang_ids.includes(jahrgang.id);
             return (
-              <div
+              <div role="button" tabIndex={0} onKeyDown={tastaturKlick} aria-pressed={isSelected}
                 key={jahrgang.id}
                 className={`app-list-item app-list-item--jahrgang${isSelected ? ' app-list-item--selected' : ''}`}
                 onClick={() => {
@@ -536,7 +552,7 @@ export const TeamerSection = React.memo<TeamerSectionProps>(({
       <IonList>
         <IonItem lines="none">
           <IonLabel>Team unbegrenzt</IonLabel>
-          <IonToggle
+          <IonToggle aria-label="Team unbegrenzt"
             slot="end"
             className="app-toggle--events"
             checked={formData.teamer_max_participants === 0}
@@ -549,9 +565,10 @@ export const TeamerSection = React.memo<TeamerSectionProps>(({
             <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Wie viele Personen werden fürs Team gesucht?</IonLabel>
             <div className="app-range-row">
               <span className="app-range-row__min">1</span>
-              <IonRange
+              <IonRange aria-label="Wie viele Personen werden fürs Team gesucht?"
                 className="app-range app-range--events"
                 min={1} max={25} step={1}
+                ticks={true} snaps={true}
                 pin={true} pinFormatter={(value: number) => `${value}`}
                 value={Math.min(formData.teamer_max_participants, 25)}
                 onIonChange={(e) => setFormData({ ...formData, teamer_max_participants: e.detail.value as number })}
@@ -566,7 +583,7 @@ export const TeamerSection = React.memo<TeamerSectionProps>(({
         {formData.teamer_max_participants !== 0 && (<>
           <IonItem lines="none" style={{ '--background': 'transparent', marginBottom: formData.teamer_waitlist_enabled ? 'var(--app-abstand-mittel)' : '0', paddingTop: 'var(--app-abstand-eng)' }}>
             <IonLabel>Warteliste aktivieren</IonLabel>
-            <IonToggle
+            <IonToggle aria-label="Warteliste aktivieren"
               slot="end"
               className="app-toggle--events"
               checked={formData.teamer_waitlist_enabled}
@@ -579,9 +596,10 @@ export const TeamerSection = React.memo<TeamerSectionProps>(({
               <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Max. Wartelisten-Plätze</IonLabel>
               <div className="app-range-row">
                 <span className="app-range-row__min">1</span>
-                <IonRange
+                <IonRange aria-label="Max. Wartelisten-Plätze"
                   className="app-range app-range--events"
                   min={1} max={10} step={1}
+                  ticks={true} snaps={true}
                   pin={true} pinFormatter={(value: number) => `${value}`}
                   value={formData.teamer_max_waitlist_size}
                   onIonChange={(e) => setFormData({ ...formData, teamer_max_waitlist_size: e.detail.value as number })}
@@ -639,7 +657,7 @@ export const SeriesSection = React.memo<SeriesSectionProps>(({
         <IonList>
           <IonItem lines="none">
             <IonLabel>Als Serie erstellen</IonLabel>
-            <IonToggle
+            <IonToggle aria-label="Als Serie erstellen"
               slot="end"
               className="app-toggle--events"
               checked={formData.is_series}
@@ -653,9 +671,10 @@ export const SeriesSection = React.memo<SeriesSectionProps>(({
                 <IonLabel position="stacked" style={{ marginBottom: 'var(--app-abstand-eng)' }}>Anzahl Events</IonLabel>
                 <div className="app-range-row">
                   <span className="app-range-row__min">2</span>
-                  <IonRange
+                  <IonRange aria-label="Anzahl Events"
                     className="app-range app-range--events"
                     min={2} max={maxCount} step={1}
+                    ticks={true} snaps={true}
                     pin={true} pinFormatter={(value: number) => `${value}`}
                     value={Math.min(formData.series_count, maxCount)}
                     onIonChange={(e) => setFormData({ ...formData, series_count: e.detail.value as number })}
@@ -666,7 +685,7 @@ export const SeriesSection = React.memo<SeriesSectionProps>(({
               </IonItem>
               <IonItem lines="none">
                 <IonLabel position="stacked">Intervall</IonLabel>
-                <IonSelect
+                <IonSelect aria-label="Intervall"
                   value={formData.series_interval}
                   onIonChange={(e) => {
                     const interval = e.detail.value;
@@ -681,7 +700,7 @@ export const SeriesSection = React.memo<SeriesSectionProps>(({
                   placeholder="Intervall wählen"
                   disabled={loading}
                   interface="popover"
-                  interfaceOptions={{ cssClass: 'app-select-popover--wide' }}
+                  interfaceOptions={{ cssClass: 'app-select-popover--wide', arrow: false }}
                 >
                   <IonSelectOption value="day">Täglich</IonSelectOption>
                   <IonSelectOption value="week">Wöchentlich</IonSelectOption>
@@ -692,7 +711,7 @@ export const SeriesSection = React.memo<SeriesSectionProps>(({
               {lastDate && (
                 <IonItem lines="none" style={{ '--background': 'transparent' }}>
                   <IonLabel color="medium">
-                    <p>Letzter Termin: {lastDate.toLocaleDateString('de-DE', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' })}</p>
+                    <p>Letzter Termin: {datumLang(lastDate)}</p>
                   </IonLabel>
                 </IonItem>
               )}

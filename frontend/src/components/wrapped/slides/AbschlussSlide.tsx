@@ -26,8 +26,8 @@ const AbschlussSlide: React.FC<AbschlussSlideProps> = ({ isActive, data, year: _
 
   const zahlen = [
     { icon: ICON_POKAL, wert: data.slides.punkte.total, label: 'Punkte' },
-    { icon: ICON_TERMIN, wert: data.slides.events.total_attended, label: 'Termine' },
-    { icon: ICON_ABZEICHEN, wert: data.slides.badges.total_earned, label: 'Abzeichen' },
+    { icon: ICON_TERMIN, wert: data.slides.events.total_attended, label: 'Events' },
+    { icon: ICON_ABZEICHEN, wert: data.slides.badges.total_earned, label: 'Badges' },
   ];
 
   return (

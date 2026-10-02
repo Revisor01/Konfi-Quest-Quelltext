@@ -67,7 +67,7 @@ const KategorieSeiteSlide: React.FC<Props> = ({ isActive, kachel, anzahl, ausTer
 
       {typeof ausTerminen === 'number' && ausTerminen > 0 && ausTerminen < anzahl && (
         <div className="kat-fussnote">
-          davon {ausTerminen} {ausTerminen === 1 ? 'Termin' : 'Termine'}
+          davon {ausTerminen} {ausTerminen === 1 ? 'Event' : 'Events'}
         </div>
       )}
     </SlideBase>
